@@ -166,7 +166,7 @@ export function ContextPanel({ ticket }: { ticket: TicketDetail }) {
             <div className="flex items-center justify-between">
               <div className="text-[11.5px] uppercase tracking-wide text-subtle font-medium">Watchers</div>
               {p.watch && (
-                <button onClick={() => watch.mutate({ remove: ticket.isWatching })} className="text-[12px] text-brand-700 dark:text-brand-300 hover:underline inline-flex items-center gap-1">
+                <button onClick={() => watch.mutate({ remove: ticket.isWatching })} className="text-[12px] text-brand-700 hover:underline inline-flex items-center gap-1">
                   {ticket.isWatching ? <><EyeOff className="h-3 w-3" /> Unwatch</> : <><Eye className="h-3 w-3" /> Watch</>}
                 </button>
               )}
@@ -203,7 +203,7 @@ export function ContextPanel({ ticket }: { ticket: TicketDetail }) {
               <li key={s.id} className="px-4 py-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <TypeBadge type={s.type} short className="px-1 py-0 text-[10px]" />
-                  <Link to={isCustomer ? `/portal/tickets/${s.id}` : `/tickets/${s.id}`} className="font-mono text-[12px] text-brand-700 dark:text-brand-300 hover:underline">{s.number}</Link>
+                  <Link to={isCustomer ? `/portal/tickets/${s.id}` : `/tickets/${s.id}`} className="font-mono text-[12px] text-brand-700 hover:underline">{s.number}</Link>
                   <TicketStatusBadge status={s.status} className="ml-auto" />
                 </div>
                 <div className="text-[12.5px] truncate" title={s.title}>{s.title}</div>

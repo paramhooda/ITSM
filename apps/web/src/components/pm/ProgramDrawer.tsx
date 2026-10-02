@@ -99,8 +99,8 @@ export function ProgramDrawer({ programId, onClose, onSchedule }: { programId: s
                       <td>{o.scheduledDate ? fmtDate(o.scheduledDate) : <span className="text-subtle">—</span>}</td>
                       <td><OccurrenceStatusBadge status={o.status} /></td>
                       <td>{o.engineerName ?? <span className="text-subtle">—</span>}</td>
-                      <td>{o.fieldVisitId ? <Link to={`/field/${o.fieldVisitId}`} className="font-mono text-[12px] text-brand-700 dark:text-brand-300 hover:underline inline-flex items-center gap-1">{o.fieldVisitNumber} <ExternalLink className="h-3 w-3" /></Link> : <span className="text-subtle">—</span>}</td>
-                      <td>{o.ticketId ? <Link to={`/tickets/${o.ticketId}`} className="font-mono text-[12px] text-brand-700 dark:text-brand-300 hover:underline inline-flex items-center gap-1"><Ticket className="h-3 w-3" />{o.ticketNumber}</Link> : <span className="text-subtle">—</span>}</td>
+                      <td>{o.fieldVisitId ? <Link to={`/field/${o.fieldVisitId}`} className="font-mono text-[12px] text-brand-700 hover:underline inline-flex items-center gap-1">{o.fieldVisitNumber} <ExternalLink className="h-3 w-3" /></Link> : <span className="text-subtle">—</span>}</td>
+                      <td>{o.ticketId ? <Link to={`/tickets/${o.ticketId}`} className="font-mono text-[12px] text-brand-700 hover:underline inline-flex items-center gap-1"><Ticket className="h-3 w-3" />{o.ticketNumber}</Link> : <span className="text-subtle">—</span>}</td>
                       <td className="text-right">{canManage && ['planned', 'scheduled', 'rescheduled', 'missed'].includes(o.status) && <Button size="sm" variant="ghost" icon={<CalendarPlus className="h-3.5 w-3.5" />} onClick={() => onSchedule(o.id)}>{o.status === 'planned' || o.status === 'missed' ? 'Schedule' : 'Move'}</Button>}</td>
                     </tr>
                   ))}

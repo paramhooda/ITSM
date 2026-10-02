@@ -33,7 +33,7 @@ export function SlaTargetsTable({ targets, calendarName, className }: { targets:
       {types.length > 1 && (
         <div className="flex items-center gap-1 mb-2">
           {types.map((t) => (
-            <button key={t} onClick={() => setType(t)} className={cn('rounded-md px-2.5 py-1 text-[12.5px] font-medium', type === t ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'text-muted hover:bg-surface-2')}>
+            <button key={t} onClick={() => setType(t)} className={cn('rounded-md px-2.5 py-1 text-[12.5px] font-medium', type === t ? 'bg-brand-600/10 text-brand-700' : 'text-muted hover:bg-surface-2')}>
               {t === 'incident' ? 'Incidents' : 'Service requests'}
             </button>
           ))}

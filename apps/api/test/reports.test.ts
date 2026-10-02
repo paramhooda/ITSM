@@ -18,7 +18,7 @@ import { executeSchedule } from '@/jobs/processors/reports';
 import { resolveDateRange } from '@/modules/reports/dates';
 
 const suffix = Math.random().toString(36).slice(2, 8);
-const ids = { adminUser: '', customerA: '', customerB: '', service: '', contract: '', entitlement: '', p1: '', p2: '', p3: '', p4: '', customerUser: '', schedule: '', mspSchedule: '' };
+const ids = { adminUser: '', customerA: '', customerB: '', service: '', contract: '', entitlement: '', p1: '', p2: '', p3: '', p4: '', customerUser: '', schedule: '', mspSchedule: '', customerC: '', amcService: '', amcTicket: '' };
 const tickets: { id: string; number: string; customerId: string }[] = [];
 let admin: Principal;
 let portalUser: Principal;
@@ -85,7 +85,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await withSystem(async (tx) => {
-    const customerIds = [ids.customerA, ids.customerB].filter(Boolean);
+    const customerIds = [ids.customerA, ids.customerB, ids.customerC].filter(Boolean);
     const runs = await tx.select({ id: schema.reportRuns.id, attachmentId: schema.reportRuns.attachmentId }).from(schema.reportRuns).where(sql`${schema.reportRuns.customerId} = ANY(ARRAY[${sql.join(customerIds.map((c) => sql`${c}::uuid`), sql`, `)}]::uuid[]) OR ${schema.reportRuns.scheduleId} IN (${sql.join([ids.schedule, ids.mspSchedule].filter(Boolean).map((s) => sql`${s}::uuid`), sql`, `)})`);
     const attIds = runs.map((r) => r.attachmentId).filter((x): x is string => !!x);
     if (attIds.length) {
@@ -97,9 +97,11 @@ afterAll(async () => {
     if (runs.length) await tx.delete(schema.reportRuns).where(inArray(schema.reportRuns.id, runs.map((r) => r.id)));
     if (ids.mspSchedule) await tx.delete(schema.reportSchedules).where(eq(schema.reportSchedules.id, ids.mspSchedule));
     if (tickets.length) await tx.delete(schema.tickets).where(inArray(schema.tickets.id, tickets.map((t) => t.id)));
+    if (ids.amcTicket) await tx.delete(schema.tickets).where(eq(schema.tickets.id, ids.amcTicket));
     if (ids.customerUser) await tx.delete(schema.users).where(eq(schema.users.id, ids.customerUser));
     if (customerIds.length) await tx.delete(schema.customers).where(inArray(schema.customers.id, customerIds));
     if (ids.service) await tx.delete(schema.services).where(eq(schema.services.id, ids.service));
+    if (ids.amcService) await tx.delete(schema.services).where(eq(schema.services.id, ids.amcService));
     await tx.delete(schema.metricRollupsDaily).where(sql`${schema.metricRollupsDaily.customerId} IS NULL AND false`);
   });
   await closeDb();
@@ -145,6 +147,35 @@ describe('dashboards', () => {
     const e = await asAdmin((ctx) => dash.engineer(ctx));
     expect(e.assigned).toBeDefined();
     expect(Array.isArray(e.knowledge)).toBe(true);
+  });
+
+  it('AMC view is the field-service ticket queue and is permission gated', async () => {
+    // an AMC-domain service and a separate customer so the ticket lands in the AMC queue without touching the other expectations
+    const { amcService, customerC } = await withSystem(async (tx) => {
+      const [c] = await tx.insert(schema.customers).values({ code: `RPC${suffix.toUpperCase()}`, name: `Report Customer C ${suffix}` }).returning();
+      const [s] = await tx.insert(schema.services).values({ key: `amcsvc_${suffix}`, name: `AMC Support ${suffix}`, domain: 'amc' }).returning();
+      return { amcService: s, customerC: c };
+    });
+    invalidatePrincipal();
+    const amcTicket = await asAdmin((ctx) => createTicket(ctx, { type: 'incident', customerId: customerC.id, serviceId: amcService.id, title: `UPS battery replacement ${suffix}`, priorityId: ids.p3 }));
+    ids.customerC = customerC.id;
+    ids.amcService = amcService.id;
+    ids.amcTicket = amcTicket.id;
+
+    const a = await asAdmin((ctx) => dash.amc(ctx));
+    expect(a.kpis.open).toBeGreaterThanOrEqual(1);
+    expect(a.kpis.unassigned).toBeGreaterThanOrEqual(1);
+    expect(a.queue.counts.all).toBe(a.queue.items.length);
+    expect(a.queue.counts.unassigned).toBe(a.queue.items.filter((t) => !t.assignee_id).length);
+    const mine = a.queue.items.find((t) => t.id === amcTicket.id);
+    expect(mine?.customer_name).toContain('Report Customer C');
+    // NOC tickets never leak into the AMC queue
+    expect(a.queue.items.some((t) => tickets.map((x) => x.id).includes(t.id))).toBe(false);
+    expect(Array.isArray(a.visits)).toBe(true);
+    expect(Array.isArray(a.maintenance)).toBe(true);
+    expect(Array.isArray(a.entitlements)).toBe(true);
+    // customer portal users do not hold dashboards:amc
+    await expect(asPortal((ctx) => dash.amc(ctx))).rejects.toThrow();
   });
 
   it('customer dashboard for a portal user returns only their own data', async () => {

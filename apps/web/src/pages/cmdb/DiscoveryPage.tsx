@@ -304,7 +304,7 @@ export default function DiscoveryPage() {
               ))}
             </div>
             <div className="text-xs text-muted">Started {runView.data.startedAt ? fmtDateTime(runView.data.startedAt) : '—'} · finished {runView.data.finishedAt ? fmtDateTime(runView.data.finishedAt) : '—'} · by {runView.data.triggeredByName ?? 'schedule'}</div>
-            {runView.data.error && <div className="rounded-md bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 p-2 text-xs">{runView.data.error}</div>}
+            {runView.data.error && <div className="rounded-md bg-red-50 text-red-700 p-2 text-xs">{runView.data.error}</div>}
             <pre className="bg-surface-2 rounded-md p-3 text-[11.5px] font-mono whitespace-pre-wrap max-h-80 overflow-auto">{runView.data.log || 'No log output yet.'}</pre>
           </div>
         )}

@@ -22,7 +22,7 @@ export function FrequencyBadge({ frequency, intervalDays }: { frequency: PmFrequ
 /** "in 12 days" / "3 days overdue" / "today" coloured by urgency. */
 export function DueIn({ days, status }: { days: number; status: PmStatus | string }) {
   if (status === 'completed' || status === 'cancelled' || status === 'missed') return <span className="text-subtle">—</span>;
-  const tone = days < 0 ? 'text-red-600 dark:text-red-400' : days <= 7 ? 'text-amber-600 dark:text-amber-400' : 'text-muted';
+  const tone = days < 0 ? 'text-red-600' : days <= 7 ? 'text-amber-600' : 'text-muted';
   const text = days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? 'today' : `in ${days}d`;
   return <span className={cn('text-[12px] font-medium whitespace-nowrap', tone)}>{text}</span>;
 }

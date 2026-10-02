@@ -65,7 +65,7 @@ export function ImportDialog({ open, onClose, title, endpoint, templatePath, tem
               <span className={result.errors.length ? 'text-red-600' : 'text-muted'}>{result.errors.length} errors</span>
             </div>
             {result.errors.length > 0 && (
-              <ul className="mt-2 max-h-40 overflow-y-auto text-xs text-red-700 dark:text-red-300 list-disc pl-4">
+              <ul className="mt-2 max-h-40 overflow-y-auto text-xs text-red-700 list-disc pl-4">
                 {result.errors.map((e, i) => (
                   <li key={i}>Row {e.row}: {e.message}</li>
                 ))}

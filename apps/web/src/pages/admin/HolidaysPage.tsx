@@ -47,7 +47,7 @@ export default function HolidaysPage() {
   }
 
   const columns: Column<HolidayCalendar>[] = [
-    { key: 'name', header: 'Calendar', render: (r) => <span className={cn('font-medium', r.id === selectedId && 'text-brand-700 dark:text-brand-300')}>{r.name}</span> },
+    { key: 'name', header: 'Calendar', render: (r) => <span className={cn('font-medium', r.id === selectedId && 'text-brand-700')}>{r.name}</span> },
     { key: 'country', header: 'Country', render: (r) => <MutedCell>{r.country ?? '—'}</MutedCell> },
   ];
 

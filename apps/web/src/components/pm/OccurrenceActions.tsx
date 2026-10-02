@@ -42,7 +42,7 @@ export function CompleteOccurrenceDialog({ open, occurrence, onClose, onDone }: 
   return (
     <Dialog open={open} onClose={onClose} title={`Complete · ${occurrence.programName}`} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button onClick={() => m.mutate()} loading={m.isPending} disabled={blocked}>Mark completed</Button></>}>
       <div className="text-[12.5px] text-muted mb-3">{occurrence.customerName} · planned {fmtDate(occurrence.plannedDate)}</div>
-      {blocked && <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/30 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-200">Field visit {occurrence.fieldVisitNumber} is linked: complete the visit instead; the occurrence follows automatically.</div>}
+      {blocked && <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800">Field visit {occurrence.fieldVisitNumber} is linked: complete the visit instead; the occurrence follows automatically.</div>}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Completed on"><Input type="date" value={completedAt} onChange={(e) => setCompletedAt(e.target.value)} /></Field>
         <div className="flex items-end pb-1"><Checkbox checked={consume} onChange={(e) => setConsume(e.target.checked)} label="Consume 1 PM visit from the entitlement" /></div>
@@ -52,7 +52,7 @@ export function CompleteOccurrenceDialog({ open, occurrence, onClose, onDone }: 
         <Field label="Checklist" className="mt-3">
           <div className="card divide-y divide-[var(--border)]">
             {results.map((c, i) => (
-              <div key={i} className={cn('flex flex-wrap items-center gap-2 px-3 py-2', c.required && !c.done && 'bg-amber-50/60 dark:bg-amber-500/5')}>
+              <div key={i} className={cn('flex flex-wrap items-center gap-2 px-3 py-2', c.required && !c.done && 'bg-amber-50/60')}>
                 <Checkbox checked={c.done} onChange={(e) => update(i, { done: e.target.checked })} label={<span className={cn(c.done && 'text-muted')}>{c.item}{c.required && <span className="text-red-500 ml-0.5">*</span>}</span>} className="min-w-[200px] flex-1" />
                 <Select className="h-7 py-0 w-24 text-[12.5px]" value={c.result ?? ''} placeholder="Result" options={RESULTS} onChange={(e) => update(i, { result: (e.target.value || null) as Result['result'] })} />
                 <Input className="h-7 py-0 text-[12.5px] w-44" placeholder="Notes" value={c.notes} onChange={(e) => update(i, { notes: e.target.value })} />

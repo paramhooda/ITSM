@@ -26,15 +26,15 @@ export function Composer({ onSubmit, canComment, canWorkNote, canTime, submittin
   }
 
   return (
-    <div className={cn('rounded-lg border', kind === 'work_note' ? 'border-amber-300/70 dark:border-amber-500/30' : 'border-default')}>
+    <div className={cn('rounded-lg border', kind === 'work_note' ? 'border-amber-300/70' : 'border-default')}>
       <div className="flex items-center gap-1 px-2 pt-2">
         {canComment && (
-          <button onClick={() => setKind('comment')} className={cn('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] font-medium', kind === 'comment' ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'text-muted hover:bg-surface-2')}>
+          <button onClick={() => setKind('comment')} className={cn('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] font-medium', kind === 'comment' ? 'bg-brand-600/10 text-brand-700' : 'text-muted hover:bg-surface-2')}>
             <MessageSquare className="h-3.5 w-3.5" /> Reply
           </button>
         )}
         {canWorkNote && (
-          <button onClick={() => setKind('work_note')} className={cn('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] font-medium', kind === 'work_note' ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300' : 'text-muted hover:bg-surface-2')}>
+          <button onClick={() => setKind('work_note')} className={cn('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12.5px] font-medium', kind === 'work_note' ? 'bg-amber-100 text-amber-800' : 'text-muted hover:bg-surface-2')}>
             <Lock className="h-3.5 w-3.5" /> Work note
           </button>
         )}
@@ -46,7 +46,7 @@ export function Composer({ onSubmit, canComment, canWorkNote, canTime, submittin
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder={placeholder ?? (kind === 'comment' ? 'Write a reply to the customer…' : 'Add an internal work note…')}
-          className={cn('min-h-[72px] border-0 bg-transparent px-1 focus:shadow-none', kind === 'work_note' && 'bg-amber-50/40 dark:bg-amber-500/5')}
+          className={cn('min-h-[72px] border-0 bg-transparent px-1 focus:shadow-none', kind === 'work_note' && 'bg-amber-50/40')}
           onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
               e.preventDefault();

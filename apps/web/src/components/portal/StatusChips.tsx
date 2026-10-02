@@ -25,7 +25,7 @@ export function StatusChips({ value, onChange, counts, className }: { value: Sta
             onClick={() => onChange(c.key)}
             className={cn(
               'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] font-medium transition-colors',
-              active ? 'bg-brand-600 border-brand-600 text-white' : attention ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300' : 'border-default bg-surface text-muted hover:text-default hover:bg-surface-2',
+              active ? 'bg-brand-600 border-brand-600 text-white' : attention ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-default bg-surface text-muted hover:text-default hover:bg-surface-2',
             )}
           >
             {c.label}

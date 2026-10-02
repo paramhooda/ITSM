@@ -87,9 +87,9 @@ export default function NotificationTemplatesPage() {
       <ConfigTable<Template>
         toolbar={
           <div className="flex flex-wrap gap-1">
-            <button onClick={() => setGroup('')} className={cn('px-2.5 py-1 rounded-md text-[12.5px]', !group ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300 font-medium' : 'text-muted hover:bg-surface-2')}>All</button>
+            <button onClick={() => setGroup('')} className={cn('px-2.5 py-1 rounded-md text-[12.5px]', !group ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2')}>All</button>
             {groups.map((g) => (
-              <button key={g} onClick={() => setGroup(g)} className={cn('px-2.5 py-1 rounded-md text-[12.5px]', group === g ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300 font-medium' : 'text-muted hover:bg-surface-2')}>
+              <button key={g} onClick={() => setGroup(g)} className={cn('px-2.5 py-1 rounded-md text-[12.5px]', group === g ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2')}>
                 {g.replace('_', ' ')}
               </button>
             ))}

@@ -32,15 +32,15 @@ export function TimelineItem({ item, isLast }: { item: TimelineEntry; isLast?: b
           <Avatar name={item.actorName} size="sm" />
           {!isLast && <div className="flex-1 w-px bg-[var(--border)] mt-1" />}
         </div>
-        <div className={cn('flex-1 min-w-0 mb-4 rounded-lg border px-3 py-2', internal ? 'border-amber-200/70 bg-amber-50/60 dark:border-amber-500/20 dark:bg-amber-500/5' : resolution ? 'border-emerald-200/70 bg-emerald-50/50 dark:border-emerald-500/20 dark:bg-emerald-500/5' : 'border-default bg-surface')}>
+        <div className={cn('flex-1 min-w-0 mb-4 rounded-lg border px-3 py-2', internal ? 'border-amber-200/70 bg-amber-50/60' : resolution ? 'border-emerald-200/70 bg-emerald-50/50' : 'border-default bg-surface')}>
           <div className="flex items-center gap-2 text-[12px] text-muted mb-1 flex-wrap">
             <span className="font-medium text-default">{item.actorName ?? 'Unknown'}</span>
             {internal && (
-              <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+              <span className="inline-flex items-center gap-1 text-amber-700">
                 <Lock className="h-3 w-3" /> Internal note
               </span>
             )}
-            {resolution && <span className="text-emerald-700 dark:text-emerald-300">Resolution</span>}
+            {resolution && <span className="text-emerald-700">Resolution</span>}
             {item.minutesSpent ? <span className="text-subtle">· {item.minutesSpent} min</span> : null}
             <span className="ml-auto text-subtle" title={fmtDateTime(item.createdAt)}>
               {relativeTime(item.createdAt)}
@@ -58,7 +58,7 @@ export function TimelineItem({ item, isLast }: { item: TimelineEntry; isLast?: b
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
-        <div className={cn('h-7 w-7 rounded-full flex items-center justify-center shrink-0', item.type === 'escalation' || (item.type === 'sla' && /breach/i.test(item.summary ?? '')) ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300' : 'bg-surface-2 text-muted')}>
+        <div className={cn('h-7 w-7 rounded-full flex items-center justify-center shrink-0', item.type === 'escalation' || (item.type === 'sla' && /breach/i.test(item.summary ?? '')) ? 'bg-red-100 text-red-700' : 'bg-surface-2 text-muted')}>
           <Icon className="h-3.5 w-3.5" />
         </div>
         {!isLast && <div className="flex-1 w-px bg-[var(--border)] mt-1" />}

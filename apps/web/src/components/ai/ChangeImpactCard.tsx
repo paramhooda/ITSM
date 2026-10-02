@@ -33,7 +33,7 @@ export function ChangeImpactCard({ ticketId, canManage }: { ticketId: string; ca
       <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-default">
         <div className="font-semibold text-[13px] inline-flex items-center gap-2"><Radar className="h-4 w-4 text-brand-600" /> Change impact</div>
         <div className="flex items-center gap-2">
-          {status.data && !status.data.enabled && <span className="text-[10.5px] text-amber-700 dark:text-amber-300 inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> rule-based</span>}
+          {status.data && !status.data.enabled && <span className="text-[10.5px] text-amber-700 inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> rule-based</span>}
           {canManage && (
             <Button size="sm" variant={result ? 'ghost' : 'secondary'} icon={<RefreshCw className="h-3.5 w-3.5" />} loading={analyse.isPending} onClick={() => analyse.mutate()}>
               {result ? 'Re-analyse' : 'Analyse'}
@@ -79,7 +79,7 @@ export function ChangeImpactCard({ ticketId, canManage }: { ticketId: string; ca
                 <ul className="space-y-0.5">
                   {result.openTickets.slice(0, 6).map((t) => (
                     <li key={t.number} className="flex items-center gap-2 text-[12px]">
-                      <Link to={t.link} className="font-mono text-brand-700 dark:text-brand-300 hover:underline">{t.number}</Link>
+                      <Link to={t.link} className="font-mono text-brand-700 hover:underline">{t.number}</Link>
                       <span className="truncate" title={t.title}>{t.title}</span>
                       <span className="ml-auto text-subtle shrink-0">{t.status}</span>
                     </li>
@@ -93,7 +93,7 @@ export function ChangeImpactCard({ ticketId, canManage }: { ticketId: string; ca
                 <ul className="space-y-0.5">
                   {result.otherChanges.map((c) => (
                     <li key={c.id} className="flex items-center gap-2 text-[12px]">
-                      <Link to={c.link} className="font-mono text-brand-700 dark:text-brand-300 hover:underline">{c.number}</Link>
+                      <Link to={c.link} className="font-mono text-brand-700 hover:underline">{c.number}</Link>
                       <span className="truncate" title={c.title}>{c.title}</span>
                       <span className="ml-auto text-subtle shrink-0">{fmtDateTime(c.scheduledStart)}</span>
                     </li>

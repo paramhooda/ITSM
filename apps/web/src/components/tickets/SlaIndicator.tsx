@@ -10,7 +10,7 @@ export function slaTone(s: { breached: boolean; pctConsumed: number; state: stri
   return 'good';
 }
 
-const TONE_TEXT = { bad: 'text-red-600 dark:text-red-400', warn: 'text-amber-600 dark:text-amber-400', good: 'text-emerald-600 dark:text-emerald-400', neutral: 'text-subtle' };
+const TONE_TEXT = { bad: 'text-red-600', warn: 'text-amber-600', good: 'text-emerald-600', neutral: 'text-subtle' };
 
 /** Compact SLA cell for lists: remaining time coloured by consumption, "Breached", paused or "—". */
 export function SlaIndicator({ sla, className }: { sla: SlaCompact | null | undefined; className?: string }) {

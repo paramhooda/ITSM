@@ -51,7 +51,7 @@ function ApprovalCard({ item }: { item: PortalApprovalItem }) {
       )}
       <div className="mt-3 flex flex-col gap-2">
         {open ? <Textarea autoFocus value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Add a comment for the requester and the service desk (optional)" className="min-h-[60px] text-[12.5px]" /> : (
-          <button className="text-[12px] text-brand-700 dark:text-brand-300 hover:underline self-start" onClick={() => setOpen(true)}>
+          <button className="text-[12px] text-brand-700 hover:underline self-start" onClick={() => setOpen(true)}>
             Add a comment
           </button>
         )}

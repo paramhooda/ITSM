@@ -143,7 +143,7 @@ export default function KnowledgeListPage() {
         <aside className="hidden lg:block w-56 shrink-0">
           <div className="card p-2 sticky top-0">
             <div className="px-2 pb-1 text-[10.5px] uppercase tracking-wider text-subtle font-semibold">Categories</div>
-            <button className={cn('w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px]', !state.categoryId ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300 font-medium' : 'text-muted hover:bg-surface-2')} onClick={() => set({ categoryId: undefined })}>
+            <button className={cn('w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px]', !state.categoryId ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2')} onClick={() => set({ categoryId: undefined })}>
               <span className="inline-flex items-center gap-2">
                 <BookOpen className="h-3.5 w-3.5" /> All articles
               </span>
@@ -152,7 +152,7 @@ export default function KnowledgeListPage() {
             {tree.map(({ cat, depth, count }) => {
               const active = state.categoryId === cat.id;
               return (
-                <button key={cat.id} className={cn('w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px]', active ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300 font-medium' : 'text-muted hover:bg-surface-2')} style={{ paddingLeft: 8 + depth * 14 }} onClick={() => set({ categoryId: active ? undefined : cat.id })} title={cat.description ?? cat.name}>
+                <button key={cat.id} className={cn('w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px]', active ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2')} style={{ paddingLeft: 8 + depth * 14 }} onClick={() => set({ categoryId: active ? undefined : cat.id })} title={cat.description ?? cat.name}>
                   <span className="inline-flex items-center gap-2 min-w-0">
                     {active ? <FolderOpen className="h-3.5 w-3.5 shrink-0" /> : <Folder className="h-3.5 w-3.5 shrink-0" />}
                     <span className="truncate">{cat.name}</span>

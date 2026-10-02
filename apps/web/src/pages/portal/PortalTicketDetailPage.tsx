@@ -19,7 +19,7 @@ import { portalApi, pk, type PortalTicket } from '@/components/portal/api';
 function ScopeCard({ ticket }: { ticket: PortalTicket }) {
   const s = ticket.scope;
   const Icon = s.status === 'in_scope' ? ShieldCheck : s.status === 'out_of_scope' ? ShieldOff : ShieldQuestion;
-  const cls = s.status === 'in_scope' ? 'text-emerald-700 dark:text-emerald-300' : s.status === 'out_of_scope' ? 'text-rose-700 dark:text-rose-300' : 'text-muted';
+  const cls = s.status === 'in_scope' ? 'text-emerald-700' : s.status === 'out_of_scope' ? 'text-rose-700' : 'text-muted';
   return (
     <Panel title="Contract">
       <div className={cn('flex items-start gap-2 text-[13px]', cls)}>
@@ -140,7 +140,7 @@ export default function PortalTicketDetailPage() {
           </div>
         </div>
         {cat === 'resolved' && (
-          <div className="mt-3 rounded-md bg-emerald-50 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 text-[12.5px] px-3 py-2">
+          <div className="mt-3 rounded-md bg-emerald-50 text-emerald-800 text-[12.5px] px-3 py-2">
             We believe this is resolved. If everything works, confirm so we can close it; otherwise reopen and tell us what is still wrong. Unconfirmed tickets close automatically after a few days.
           </div>
         )}

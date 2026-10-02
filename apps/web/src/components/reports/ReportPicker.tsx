@@ -24,7 +24,7 @@ export function ReportPicker({ definitions, value, onChange }: { definitions: Re
             <ul className="flex flex-col gap-0.5">
               {defs.map((d) => (
                 <li key={d.key}>
-                  <button onClick={() => onChange(d.key)} className={cn('w-full text-left rounded-md px-2 py-1.5 transition-colors', value === d.key ? 'bg-brand-600/10 text-brand-800 dark:text-brand-200' : 'hover:bg-surface-2')}>
+                  <button onClick={() => onChange(d.key)} className={cn('w-full text-left rounded-md px-2 py-1.5 transition-colors', value === d.key ? 'bg-brand-600/10 text-brand-800' : 'hover:bg-surface-2')}>
                     <div className="text-[13px] font-medium">{d.name}</div>
                     <div className="text-[11.5px] text-muted line-clamp-2">{d.description}</div>
                   </button>

@@ -121,7 +121,7 @@ export default function PortalNewTicketPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
         <button onClick={() => setKind('issue')} className={cn('card text-left px-4 py-3 transition-colors', kind === 'issue' ? 'border-brand-500 ring-2 ring-brand-500/20' : 'hover:border-brand-300')}>
           <div className="flex items-center gap-2 font-medium">
-            <span className="h-7 w-7 rounded-md bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300 flex items-center justify-center">
+            <span className="h-7 w-7 rounded-md bg-red-100 text-red-700 flex items-center justify-center">
               <AlertTriangle className="h-4 w-4" />
             </span>
             Report an issue
@@ -130,7 +130,7 @@ export default function PortalNewTicketPage() {
         </button>
         <button onClick={() => setKind('request')} className={cn('card text-left px-4 py-3 transition-colors', kind === 'request' ? 'border-brand-500 ring-2 ring-brand-500/20' : 'hover:border-brand-300')}>
           <div className="flex items-center gap-2 font-medium">
-            <span className="h-7 w-7 rounded-md bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 flex items-center justify-center">
+            <span className="h-7 w-7 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center">
               <ClipboardList className="h-4 w-4" />
             </span>
             Request something
@@ -228,7 +228,7 @@ export default function PortalNewTicketPage() {
               >
                 {item.description && <div className="text-[13px] text-muted mb-3">{item.description}</div>}
                 {item.requiresApproval && (
-                  <div className="mb-3 rounded-md bg-purple-50 dark:bg-purple-500/10 text-purple-800 dark:text-purple-300 text-[12.5px] px-3 py-2">This request needs approval from one of your organisation&apos;s administrators before we start work.</div>
+                  <div className="mb-3 rounded-md bg-purple-50 text-purple-800 text-[12.5px] px-3 py-2">This request needs approval from one of your organisation&apos;s administrators before we start work.</div>
                 )}
                 <div className="flex flex-col gap-3">
                   <Field label="Summary" required>

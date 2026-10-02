@@ -54,7 +54,7 @@ export function LinksPanel({ ticket, links, canEdit }: { ticket: TicketDetail; l
         {ticket.parent && (
           <li className="flex items-center gap-2 px-4 py-2 text-[13px]">
             <span className="text-muted w-28 shrink-0 text-[12px]">Parent</span>
-            <Link to={`/tickets/${ticket.parent.id}`} className="font-mono text-brand-700 dark:text-brand-300 hover:underline">{ticket.parent.number}</Link>
+            <Link to={`/tickets/${ticket.parent.id}`} className="font-mono text-brand-700 hover:underline">{ticket.parent.number}</Link>
             <span className="truncate">{ticket.parent.title}</span>
           </li>
         )}
@@ -62,7 +62,7 @@ export function LinksPanel({ ticket, links, canEdit }: { ticket: TicketDetail; l
           <li key={l.id} className="flex items-center gap-2 px-4 py-2 text-[13px] group">
             <span className="text-muted w-28 shrink-0 text-[12px]">{l.direction === 'outbound' ? LINK_TYPE_LABELS[l.linkType] ?? l.linkType : `← ${LINK_TYPE_LABELS[l.linkType] ?? l.linkType}`}</span>
             <TypeBadge type={l.ticket.type} short className="px-1 py-0 text-[10px]" />
-            <Link to={`/tickets/${l.ticket.id}`} className="font-mono text-brand-700 dark:text-brand-300 hover:underline whitespace-nowrap">{l.ticket.number}</Link>
+            <Link to={`/tickets/${l.ticket.id}`} className="font-mono text-brand-700 hover:underline whitespace-nowrap">{l.ticket.number}</Link>
             <span className="truncate flex-1">{l.ticket.title}</span>
             <TicketStatusBadge status={l.ticket.status} />
             {canEdit && (

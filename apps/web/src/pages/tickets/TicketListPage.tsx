@@ -147,7 +147,7 @@ export default function TicketListPage() {
       width: '130px',
       render: (r) => (
         <div className="flex items-center gap-1.5">
-          <Link to={`/tickets/${r.id}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12.5px] font-medium text-brand-700 dark:text-brand-300 hover:underline whitespace-nowrap">
+          <Link to={`/tickets/${r.id}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12.5px] font-medium text-brand-700 hover:underline whitespace-nowrap">
             {r.number}
           </Link>
           {tab === 'all' && <TypeBadge type={r.type} short className="px-1 py-0 text-[10px]" />}
@@ -295,7 +295,7 @@ export default function TicketListPage() {
             const on = cats.includes(c.key);
             const count = stats.data?.byStatusCategory?.[c.key] ?? 0;
             return (
-              <button key={c.key} onClick={() => toggleCat(c.key)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'border-default text-muted hover:text-default')}>
+              <button key={c.key} onClick={() => toggleCat(c.key)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>
                 {c.label} <span className="opacity-60">{count}</span>
               </button>
             );

@@ -136,7 +136,7 @@ export default function ServiceCatalogPage() {
                   <div className="flex items-center gap-3 mt-2 text-[12px] tabular-nums">
                     <span className="inline-flex items-center gap-1 text-muted"><Users className="h-3.5 w-3.5" />{s.counts.subscribedCustomers}</span>
                     <span className="inline-flex items-center gap-1 text-muted"><Ticket className="h-3.5 w-3.5" />{s.counts.openTickets} open</span>
-                    <span className={cn('inline-flex items-center gap-1', s.counts.incidents30d > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted')}><Activity className="h-3.5 w-3.5" />{s.counts.incidents30d} inc/30d</span>
+                    <span className={cn('inline-flex items-center gap-1', s.counts.incidents30d > 0 ? 'text-amber-600' : 'text-muted')}><Activity className="h-3.5 w-3.5" />{s.counts.incidents30d} inc/30d</span>
                   </div>
                 </button>
               ))}
@@ -251,7 +251,7 @@ function ServiceForm({ initial, categories, statuses, onSubmit, onCancel, submit
         <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto border border-default rounded-lg p-2">
           {(lookups?.ciTypes ?? []).map((t) => {
             const on = f.ciTypeKeys.includes(t.key);
-            return <button type="button" key={t.key} onClick={() => set('ciTypeKeys', on ? f.ciTypeKeys.filter((k) => k !== t.key) : [...f.ciTypeKeys, t.key])} className={cn('rounded-md border px-2 py-0.5 text-[12px]', on ? 'border-brand-500 bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'border-default text-muted hover:text-default')}>{t.name}</button>;
+            return <button type="button" key={t.key} onClick={() => set('ciTypeKeys', on ? f.ciTypeKeys.filter((k) => k !== t.key) : [...f.ciTypeKeys, t.key])} className={cn('rounded-md border px-2 py-0.5 text-[12px]', on ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>{t.name}</button>;
           })}
           {!(lookups?.ciTypes ?? []).length && <span className="text-xs text-muted">No CI types defined.</span>}
         </div>

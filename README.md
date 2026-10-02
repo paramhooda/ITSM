@@ -2,7 +2,7 @@
 
 Enterprise ITSM, helpdesk, asset management and CMDB platform for Managed Services Providers running mission-critical customer environments. ITIL 4 aligned, multi-customer by design, deployable on-premise with one command.
 
-**Capabilities**: customers & sites · contracts, entitlements (AMC) & scope · service catalog · SLA management with business calendars · incidents, service requests, problems, changes · NOC and SOC operating models · asset register · CMDB with relationships and network discovery · PRTG / FortiSIEM event ingestion · field service & preventive maintenance · knowledge base · customer portal · scheduled reports · role-specific dashboards · global search · full audit trail · AI assistant that respects every permission boundary.
+**Capabilities**: customers & sites · contracts, entitlements (AMC) & scope · service catalog · SLA management with business calendars · incidents, service requests, problems, changes · NOC and SOC operating models · asset register · CMDB with relationships and network discovery · PRTG / FortiSIEM event ingestion · field service & preventive maintenance · knowledge base · customer portal · scheduled reports · role-specific dashboards (management, NOC, SOC, AMC / field service, engineer, customer) · global search · full audit trail · AI assistant that respects every permission boundary.
 
 ## Quick start
 

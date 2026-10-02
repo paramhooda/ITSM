@@ -119,8 +119,8 @@ export default function AuditPage() {
                                   {changeKeys.map((k) => (
                                     <tr key={k}>
                                       <td className="border-0 py-0.5 pr-6 font-mono text-[11.5px]">{k}</td>
-                                      <td className="border-0 py-0.5 pr-6 text-red-700 dark:text-red-300">{fmtVal(r.changes[k].old)}</td>
-                                      <td className="border-0 py-0.5 text-emerald-700 dark:text-emerald-300">{fmtVal(r.changes[k].new)}</td>
+                                      <td className="border-0 py-0.5 pr-6 text-red-700">{fmtVal(r.changes[k].old)}</td>
+                                      <td className="border-0 py-0.5 text-emerald-700">{fmtVal(r.changes[k].new)}</td>
                                     </tr>
                                   ))}
                                 </tbody>

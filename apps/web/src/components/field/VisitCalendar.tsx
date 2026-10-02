@@ -5,11 +5,11 @@ import { cn } from '@/lib/utils';
 import { STATUS_LABELS, type CalendarVisit, type VisitStatus } from './types';
 
 const CHIP: Record<VisitStatus, string> = {
-  requested: 'border-slate-300 bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-200 dark:border-slate-500/30',
-  scheduled: 'border-blue-300 bg-blue-50 text-blue-800 dark:bg-blue-500/15 dark:text-blue-200 dark:border-blue-500/30',
-  in_progress: 'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200 dark:border-amber-500/30',
-  completed: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-500/30',
-  cancelled: 'border-gray-300 bg-gray-50 text-gray-500 line-through dark:bg-gray-500/10 dark:text-gray-400 dark:border-gray-500/30',
+  requested: 'border-slate-300 bg-slate-100 text-slate-700',
+  scheduled: 'border-blue-300 bg-blue-50 text-blue-800',
+  in_progress: 'border-amber-300 bg-amber-50 text-amber-800',
+  completed: 'border-emerald-300 bg-emerald-50 text-emerald-800',
+  cancelled: 'border-gray-300 bg-gray-50 text-gray-500 line-through',
 };
 
 /** Monday of the week containing `d` (local time). */
@@ -66,7 +66,7 @@ export function VisitCalendar({ weekStart, items, onWeekChange, onSelect, loadin
           {days.map((d) => {
             const key = ymd(d);
             return (
-              <div key={key} className={cn('px-2 py-2 text-center text-[12px] font-medium border-b border-l border-default bg-surface-2', key === today && 'text-brand-700 dark:text-brand-300')}>
+              <div key={key} className={cn('px-2 py-2 text-center text-[12px] font-medium border-b border-l border-default bg-surface-2', key === today && 'text-brand-700')}>
                 <div className="uppercase text-[10.5px] text-subtle">{d.toLocaleDateString(undefined, { weekday: 'short' })}</div>
                 <div>{d.getDate()}</div>
               </div>
@@ -83,9 +83,9 @@ export function VisitCalendar({ weekStart, items, onWeekChange, onSelect, loadin
                 const key = ymd(d);
                 const list = r.byDay[key] ?? [];
                 return (
-                  <div key={key} className={cn('min-h-[64px] p-1 border-b border-l border-default flex flex-col gap-1', key === today && 'bg-brand-50/40 dark:bg-brand-500/5')}>
+                  <div key={key} className={cn('min-h-[64px] p-1 border-b border-l border-default flex flex-col gap-1', key === today && 'bg-brand-50/40')}>
                     {list.map((v) => (
-                      <button key={v.id} onClick={() => onSelect(v.id)} className={cn('text-left rounded-md border px-1.5 py-1 text-[11.5px] leading-tight hover:brightness-95 dark:hover:brightness-125', CHIP[v.status])} title={`${v.number} · ${v.title}`}>
+                      <button key={v.id} onClick={() => onSelect(v.id)} className={cn('text-left rounded-md border px-1.5 py-1 text-[11.5px] leading-tight hover:brightness-95', CHIP[v.status])} title={`${v.number} · ${v.title}`}>
                         <div className="flex items-center justify-between gap-1">
                           <span className="font-mono">{v.scheduledStart ? hm(v.scheduledStart) : ''}</span>
                           <span className="font-mono opacity-70">{v.number}</span>

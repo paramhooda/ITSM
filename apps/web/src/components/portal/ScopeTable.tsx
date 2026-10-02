@@ -6,7 +6,7 @@ import type { ScopeGroup } from './api';
 function ScopeBadge({ classification }: { classification: string }) {
   const inScope = classification === 'in_scope';
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11.5px] font-medium whitespace-nowrap', inScope ? 'border-emerald-200 text-emerald-700 bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:bg-emerald-500/10' : 'border-rose-200 text-rose-700 bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:bg-rose-500/10')}>
+    <span className={cn('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11.5px] font-medium whitespace-nowrap', inScope ? 'border-emerald-200 text-emerald-700 bg-emerald-50' : 'border-rose-200 text-rose-700 bg-rose-50')}>
       {inScope ? <ShieldCheck className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
       {inScope ? 'Included' : 'Not included'}
     </span>

@@ -51,7 +51,7 @@ export default function FieldVisitListPage() {
   const clearFilters = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
 
   const columns: Column<VisitListRow>[] = [
-    { key: 'number', header: 'Visit', sortable: true, width: '110px', render: (r) => <Link to={`/field/${r.id}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12.5px] font-medium text-brand-700 dark:text-brand-300 hover:underline">{r.number}</Link> },
+    { key: 'number', header: 'Visit', sortable: true, width: '110px', render: (r) => <Link to={`/field/${r.id}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12.5px] font-medium text-brand-700 hover:underline">{r.number}</Link> },
     {
       key: 'title',
       header: 'Title',
@@ -93,7 +93,7 @@ export default function FieldVisitListPage() {
         ),
     },
     { key: 'status', header: 'Status', sortable: true, width: '130px', render: (r) => <VisitStatusBadge status={r.status} /> },
-    { key: 'ticket', header: 'Ticket', width: '110px', render: (r) => (r.ticketId ? <Link to={`/tickets/${r.ticketId}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12px] text-brand-700 dark:text-brand-300 hover:underline">{r.ticketNumber}</Link> : <span className="text-subtle">—</span>) },
+    { key: 'ticket', header: 'Ticket', width: '110px', render: (r) => (r.ticketId ? <Link to={`/tickets/${r.ticketId}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[12px] text-brand-700 hover:underline">{r.ticketNumber}</Link> : <span className="text-subtle">—</span>) },
     { key: 'ack', header: 'Ack', width: '60px', render: (r) => (r.customerAckAt ? <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-label={`Acknowledged by ${r.customerAckName}`} /> : r.status === 'completed' ? <Hourglass className="h-4 w-4 text-amber-500" aria-label="Pending acknowledgement" /> : <span className="text-subtle">—</span>) },
   ];
 
@@ -143,12 +143,12 @@ export default function FieldVisitListPage() {
               const on = statuses.includes(s);
               const count = summary.data?.byStatus?.[s] ?? 0;
               return (
-                <button key={s} onClick={() => toggleStatus(s)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'border-default text-muted hover:text-default')}>
+                <button key={s} onClick={() => toggleStatus(s)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>
                   {STATUS_LABELS[s]} <span className="opacity-60">{count}</span>
                 </button>
               );
             })}
-            {state.unacknowledged === 'true' && <span className="ml-1 rounded-full border border-amber-400 bg-amber-500/10 px-2.5 py-0.5 text-[12px] text-amber-700 dark:text-amber-300">Pending acknowledgement</span>}
+            {state.unacknowledged === 'true' && <span className="ml-1 rounded-full border border-amber-400 bg-amber-500/10 px-2.5 py-0.5 text-[12px] text-amber-700">Pending acknowledgement</span>}
           </div>
         )}
       </div>

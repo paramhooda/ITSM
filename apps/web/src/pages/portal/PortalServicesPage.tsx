@@ -55,7 +55,7 @@ function ContractCard({ c, selected, onSelect }: { c: PortalContract; selected: 
         <span>
           {fmtDate(c.startDate)} – {fmtDate(c.endDate)}
         </span>
-        <span className={{ good: 'text-emerald-600 dark:text-emerald-400', warn: 'text-amber-600 dark:text-amber-400', bad: 'text-red-600 dark:text-red-400' }[cd.tone]}>{cd.text}</span>
+        <span className={{ good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600' }[cd.tone]}>{cd.text}</span>
         {c.autoRenew && <span>Renews automatically</span>}
       </div>
       <ProgressBar pct={(elapsed / total) * 100} tone="neutral" className="mt-2" />
@@ -118,7 +118,7 @@ export default function PortalServicesPage() {
               <ul className="divide-y divide-[var(--border)]">
                 {view.data!.services.map((s) => (
                   <li key={s.id} className="px-4 py-2.5 flex items-start gap-3">
-                    <span className="h-7 w-7 rounded-md bg-brand-600/10 text-brand-700 dark:text-brand-300 flex items-center justify-center shrink-0">
+                    <span className="h-7 w-7 rounded-md bg-brand-600/10 text-brand-700 flex items-center justify-center shrink-0">
                       <Layers className="h-4 w-4" />
                     </span>
                     <div className="min-w-0 flex-1">

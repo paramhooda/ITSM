@@ -100,7 +100,7 @@ export function MonoCell({ children }: { children: ReactNode }) {
 
 export function ActiveDot({ active }: { active: boolean }) {
   return (
-    <span className={cn('inline-flex items-center gap-1.5 text-[12.5px]', active ? 'text-emerald-600 dark:text-emerald-400' : 'text-subtle')}>
+    <span className={cn('inline-flex items-center gap-1.5 text-[12.5px]', active ? 'text-emerald-600' : 'text-subtle')}>
       <span className={cn('h-1.5 w-1.5 rounded-full', active ? 'bg-emerald-500' : 'bg-slate-400')} />
       {active ? 'Active' : 'Inactive'}
     </span>

@@ -115,8 +115,8 @@ export function IntegrationsTab({ integrations, types, loading }: { integrations
               {[
                 { label: '24h', value: i.counts?.last24h ?? 0 },
                 { label: '7 days', value: i.counts?.last7d ?? 0 },
-                { label: 'open tickets', value: i.openTickets ?? 0, tone: (i.openTickets ?? 0) > 0 ? 'text-amber-600 dark:text-amber-400' : '' },
-                { label: 'errors 7d', value: i.counts?.errors7d ?? 0, tone: (i.counts?.errors7d ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : '' },
+                { label: 'open tickets', value: i.openTickets ?? 0, tone: (i.openTickets ?? 0) > 0 ? 'text-amber-600' : '' },
+                { label: 'errors 7d', value: i.counts?.errors7d ?? 0, tone: (i.counts?.errors7d ?? 0) > 0 ? 'text-red-600' : '' },
               ].map((s) => (
                 <div key={s.label} className="rounded-lg bg-surface-2/60 py-1.5">
                   <div className={`text-lg font-semibold leading-tight ${s.tone ?? ''}`}>{s.value}</div>

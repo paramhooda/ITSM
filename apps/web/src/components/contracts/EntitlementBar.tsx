@@ -8,7 +8,7 @@ import { PERIOD_LABELS, entitlementTone } from './ContractBits';
 export function EntitlementBar({ entitlement, compact = false, showContract = false, className }: { entitlement: Entitlement; compact?: boolean; showContract?: boolean; className?: string }) {
   const u = entitlement.utilization;
   const tone = entitlementTone(entitlement);
-  const toneText = { good: 'text-muted', warn: 'text-amber-600 dark:text-amber-400', bad: 'text-red-600 dark:text-red-400' }[tone];
+  const toneText = { good: 'text-muted', warn: 'text-amber-600', bad: 'text-red-600' }[tone];
   return (
     <div className={cn('min-w-0', className)}>
       <div className="flex items-center justify-between gap-2 text-[12.5px]">

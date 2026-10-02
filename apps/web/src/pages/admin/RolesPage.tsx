@@ -95,7 +95,7 @@ function RoleDrawer({ role, onClose }: { role: RoleRow; onClose: () => void }) {
           <Field label="Key"><Input value={role.key} disabled className="font-mono text-[12.5px]" /></Field>
           <Field label="Description" className="sm:col-span-2"><Textarea rows={2} value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} /></Field>
         </div>
-        {locked && <div className="rounded-lg border border-amber-300/60 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-300">The Administrator role always holds every permission; its permissions cannot be changed.</div>}
+        {locked && <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800">The Administrator role always holds every permission; its permissions cannot be changed.</div>}
         <PermissionMatrix value={perms} onChange={(v) => { setPerms(v); setDirty(true); }} readOnly={locked} userType={role.userType} />
       </div>
     </Drawer>

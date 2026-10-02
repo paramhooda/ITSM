@@ -50,7 +50,7 @@ export function ProblemClusters({ customerId, defaultDays = 30, compact = false 
                 <ul className="text-[12px] space-y-0.5">
                   {c.sampleTickets.map((t) => (
                     <li key={t.id} className="flex items-center gap-2">
-                      <Link to={t.link} className="font-mono text-brand-700 dark:text-brand-300 hover:underline shrink-0">{t.number}</Link>
+                      <Link to={t.link} className="font-mono text-brand-700 hover:underline shrink-0">{t.number}</Link>
                       <span className="truncate" title={t.title}>{t.title}</span>
                       <span className="ml-auto text-subtle shrink-0">{t.status}</span>
                     </li>

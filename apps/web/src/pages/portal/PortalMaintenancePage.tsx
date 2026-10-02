@@ -36,7 +36,7 @@ function TimelineEntry({ e, highlighted }: { e: Entry; highlighted?: boolean }) 
       </div>
       <div className="min-w-0 flex-1 border-l border-default pl-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={cn('h-5 w-5 rounded-md flex items-center justify-center', isVisit ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300')}>{isVisit ? <Wrench className="h-3 w-3" /> : <CalendarCheck className="h-3 w-3" />}</span>
+          <span className={cn('h-5 w-5 rounded-md flex items-center justify-center', isVisit ? 'bg-brand-600/10 text-brand-700' : 'bg-emerald-500/10 text-emerald-700')}>{isVisit ? <Wrench className="h-3 w-3" /> : <CalendarCheck className="h-3 w-3" />}</span>
           <span className="font-medium text-[13.5px]">{title}</span>
           <Badge color={STATUS_COLOR[status] ?? 'slate'}>{titleCase(status)}</Badge>
           {isVisit && e.visit.type && <span className="text-[12px] text-muted">{e.visit.type}</span>}
@@ -95,7 +95,7 @@ function PastVisit({ v, onAcknowledge, highlighted }: { v: PortalVisit; onAcknow
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {v.acknowledged ? (
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] text-emerald-700 dark:text-emerald-300">
+          <span className="inline-flex items-center gap-1.5 text-[12.5px] text-emerald-700">
             <CheckCircle2 className="h-4 w-4" /> Acknowledged by {v.acknowledgedBy}{v.acknowledgedAt ? ` · ${fmtDate(v.acknowledgedAt)}` : ''}
             {v.rating ? (
               <span className="inline-flex items-center ml-1">

@@ -114,7 +114,7 @@ export function CompleteVisitDialog({ open, onClose, visit, onCompleted }: { ope
           <Field label={`Checklist${missingRequired ? ` · ${missingRequired} required item${missingRequired > 1 ? 's' : ''} not done` : ''}`}>
             <div className="card divide-y divide-[var(--border)]">
               {checklist.map((c, i) => (
-                <div key={i} className={cn('flex flex-wrap items-center gap-2 px-3 py-2', c.required && !c.done && 'bg-amber-50/60 dark:bg-amber-500/5')}>
+                <div key={i} className={cn('flex flex-wrap items-center gap-2 px-3 py-2', c.required && !c.done && 'bg-amber-50/60')}>
                   <Checkbox checked={!!c.done} onChange={(e) => update(i, { done: e.target.checked, result: e.target.checked && !c.result ? 'ok' : c.result })} label={<span className={cn(c.done && 'line-through text-muted')}>{c.item}{c.required && <span className="text-red-500 ml-0.5">*</span>}</span>} className="min-w-[200px] flex-1" />
                   <Select className="h-7 py-0 w-24 text-[12.5px]" value={c.result ?? ''} placeholder="Result" options={RESULTS} onChange={(e) => update(i, { result: (e.target.value || null) as ChecklistItem['result'] })} />
                   <Input className="h-7 py-0 text-[12.5px] w-48" placeholder="Notes" value={c.notes ?? ''} onChange={(e) => update(i, { notes: e.target.value })} />

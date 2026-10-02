@@ -16,7 +16,7 @@ export function ContractStatusBadge({ status, label, color }: { status: string; 
 /** "in 12 days" / "expired 3 days ago", coloured by urgency. */
 export function ExpiryCountdown({ days, endDate, status, className }: { days: number; endDate?: string; status?: string; className?: string }) {
   if (status && ['terminated', 'renewed', 'draft'].includes(status)) return <span className={cn('text-subtle', className)}>{endDate ? fmtDate(endDate) : '—'}</span>;
-  const tone = days < 0 ? 'text-red-600 dark:text-red-400' : days <= 7 ? 'text-red-600 dark:text-red-400' : days <= 30 ? 'text-amber-600 dark:text-amber-400' : days <= 90 ? 'text-amber-600/80 dark:text-amber-300/80' : 'text-muted';
+  const tone = days < 0 ? 'text-red-600' : days <= 7 ? 'text-red-600' : days <= 30 ? 'text-amber-600' : days <= 90 ? 'text-amber-600/80' : 'text-muted';
   const text = days < 0 ? `expired ${Math.abs(days)}d ago` : days === 0 ? 'expires today' : `in ${days}d`;
   return (
     <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap', className)}>
@@ -38,8 +38,8 @@ export const entitlementTone = (e: Pick<Entitlement, 'utilization'>) => (e.utili
 
 export function DocTick({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <span className={cn('inline-flex items-center gap-1.5 text-[13px]', ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>
-      <span className={cn('h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold', ok ? 'bg-emerald-100 dark:bg-emerald-500/20' : 'bg-red-100 dark:bg-red-500/20')}>{ok ? '✓' : '✕'}</span>
+    <span className={cn('inline-flex items-center gap-1.5 text-[13px]', ok ? 'text-emerald-600' : 'text-red-600')}>
+      <span className={cn('h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold', ok ? 'bg-emerald-100' : 'bg-red-100')}>{ok ? '✓' : '✕'}</span>
       {label}
     </span>
   );

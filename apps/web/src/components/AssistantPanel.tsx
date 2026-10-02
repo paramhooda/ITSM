@@ -12,8 +12,8 @@ import { aiApi, aiQk, type AiMessage, type ToolCallRecord } from '@/components/a
 
 /** Internal links become router links; everything else opens in a new tab. */
 function MdLink({ href, children }: { href?: string; children?: ReactNode }) {
-  if (href && href.startsWith('/')) return <Link to={href} className="text-brand-700 dark:text-brand-300 hover:underline font-medium">{children}</Link>;
-  return <a href={href} target="_blank" rel="noreferrer" className="text-brand-700 dark:text-brand-300 hover:underline">{children}</a>;
+  if (href && href.startsWith('/')) return <Link to={href} className="text-brand-700 hover:underline font-medium">{children}</Link>;
+  return <a href={href} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">{children}</a>;
 }
 const mdComponents = {
   a: MdLink,
@@ -36,7 +36,7 @@ function ToolChip({ t }: { t: ToolCallRecord }) {
       title={`${t.name}${t.input && Object.keys(t.input).length ? ` ${JSON.stringify(t.input)}` : ''}${t.error ? ` — ${t.error}` : ''}`}
       className={cn(
         'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] max-w-full',
-        !t.ok ? 'border-red-300/70 text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10' : t.action ? 'border-brand-400/60 text-brand-700 dark:text-brand-300 bg-brand-600/10' : 'border-default text-muted bg-surface',
+        !t.ok ? 'border-red-300/70 text-red-700 bg-red-50' : t.action ? 'border-brand-400/60 text-brand-700 bg-brand-600/10' : 'border-default text-muted bg-surface',
       )}
     >
       <Icon className="h-3 w-3 shrink-0" />
@@ -196,12 +196,12 @@ export function AssistantPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3 text-[13px]">
         {status.isLoading && <div className="text-muted text-[12.5px]">Checking assistant status…</div>}
         {status.data && !enabled && (
-          <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200 p-3 text-[12px] space-y-1.5">
+          <div className="rounded-md border border-amber-300/60 bg-amber-50 text-amber-900 p-3 text-[12px] space-y-1.5">
             <div className="font-medium inline-flex items-center gap-1.5"><Settings2 className="h-3.5 w-3.5" /> Conversational assistance is not configured</div>
             <div>
               An administrator needs to set <code className="font-mono">AI_PROVIDER</code> to <code className="font-mono">anthropic</code> (with <code className="font-mono">ANTHROPIC_API_KEY</code>) or <code className="font-mono">openai_compatible</code> (with <code className="font-mono">OPENAI_COMPATIBLE_BASE_URL</code>) and restart the API.
             </div>
-            <div className="text-amber-800/80 dark:text-amber-200/80">Rule-based assistance (summaries, classification, duplicates, similar tickets, knowledge matches) stays available on ticket pages.</div>
+            <div className="text-amber-800/80">Rule-based assistance (summaries, classification, duplicates, similar tickets, knowledge matches) stays available on ticket pages.</div>
           </div>
         )}
         {enabled && !conversationId && !pendingUser && (
@@ -253,7 +253,7 @@ export function AssistantPanel() {
           </>
         )}
         {send.isError && (
-          <div className="rounded-md bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 p-2 text-xs flex items-start gap-2">
+          <div className="rounded-md bg-red-50 text-red-700 p-2 text-xs flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <div className="flex-1">{(send.error as Error).message}</div>
             {lastSent && <button className="underline" onClick={() => submit(lastSent)}>Retry</button>}
@@ -269,7 +269,7 @@ export function AssistantPanel() {
             type="button"
             onClick={() => setUseContext((v) => !v)}
             title={useContext ? 'The assistant knows what you are viewing. Click to send without context.' : 'Context excluded. Click to include it again.'}
-            className={cn('mb-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] max-w-full', useContext ? 'border-brand-400/60 bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'border-default text-subtle line-through')}
+            className={cn('mb-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] max-w-full', useContext ? 'border-brand-400/60 bg-brand-600/10 text-brand-700' : 'border-default text-subtle line-through')}
           >
             <ChevronDown className="h-3 w-3 -rotate-90" /> Viewing <span className="font-medium truncate">{contextLabel}</span>
           </button>

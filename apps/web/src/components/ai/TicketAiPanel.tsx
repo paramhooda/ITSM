@@ -123,7 +123,7 @@ export function TicketAiPanel({ ticket }: { ticket: TicketDetail }) {
 
   const Decision = ({ id, onAccept, acceptLabel = 'Accept', accepting }: { id: string; onAccept?: () => void; acceptLabel?: string; accepting?: boolean }) => {
     const d = decided[id];
-    if (d) return <span className={cn('text-[11.5px] inline-flex items-center gap-1', d === 'accepted' ? 'text-green-700 dark:text-green-300' : 'text-subtle')}>{d === 'accepted' ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />} {d === 'accepted' ? 'Accepted' : 'Rejected'}</span>;
+    if (d) return <span className={cn('text-[11.5px] inline-flex items-center gap-1', d === 'accepted' ? 'text-green-700' : 'text-subtle')}>{d === 'accepted' ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />} {d === 'accepted' ? 'Accepted' : 'Rejected'}</span>;
     return (
       <div className="flex items-center gap-1.5">
         <Button size="sm" icon={<Check className="h-3.5 w-3.5" />} loading={accepting} onClick={onAccept ?? (() => decide.mutate({ id, status: 'accepted' }))}>{acceptLabel}</Button>
@@ -183,7 +183,7 @@ export function TicketAiPanel({ ticket }: { ticket: TicketDetail }) {
               {rows.map((row) => (
                 <div key={row.label} className="contents">
                   <span className="text-[11.5px] uppercase tracking-wide text-subtle font-medium">{row.label}</span>
-                  <span className={cn(row.changed && row.value ? 'font-medium' : 'text-muted')}>{row.value ?? '—'}{row.changed && row.value ? <span className="ml-1 text-[10.5px] text-brand-700 dark:text-brand-300">changed</span> : null}</span>
+                  <span className={cn(row.changed && row.value ? 'font-medium' : 'text-muted')}>{row.value ?? '—'}{row.changed && row.value ? <span className="ml-1 text-[10.5px] text-brand-700">changed</span> : null}</span>
                 </div>
               ))}
             </div>
@@ -245,7 +245,7 @@ export function TicketAiPanel({ ticket }: { ticket: TicketDetail }) {
               <div key={i} className="rounded-md border border-default p-2">
                 <div className="flex items-center gap-2 text-[12px]">
                   <Badge color={sg.source === 'kb' ? 'violet' : 'slate'}>{sg.source === 'kb' ? 'Article' : 'Ticket'}</Badge>
-                  {sg.link ? <Link to={sg.link} className="font-mono text-brand-700 dark:text-brand-300 hover:underline">{sg.ref}</Link> : <span className="font-mono">{sg.ref}</span>}
+                  {sg.link ? <Link to={sg.link} className="font-mono text-brand-700 hover:underline">{sg.ref}</Link> : <span className="font-mono">{sg.ref}</span>}
                   <span className="truncate text-muted" title={sg.title}>{sg.title}</span>
                 </div>
                 <ol className="list-decimal pl-4 mt-1 text-[12px] space-y-0.5">{sg.steps.map((st, j) => <li key={j}>{st}</li>)}</ol>
@@ -294,7 +294,7 @@ export function TicketAiPanel({ ticket }: { ticket: TicketDetail }) {
             {d.items.map((it) => (
               <div key={it.id} className="rounded-md border border-default p-2">
                 <div className="flex items-center gap-2 text-[12px]">
-                  <Link to={it.link} className="font-mono text-brand-700 dark:text-brand-300 hover:underline">{it.number}</Link>
+                  <Link to={it.link} className="font-mono text-brand-700 hover:underline">{it.number}</Link>
                   <span className="truncate" title={it.title}>{it.title}</span>
                   <Badge color={it.score >= 0.6 ? 'red' : it.score >= 0.4 ? 'amber' : 'slate'} className="ml-auto shrink-0">{Math.round(it.score * 100)}%</Badge>
                 </div>
@@ -322,7 +322,7 @@ export function TicketAiPanel({ ticket }: { ticket: TicketDetail }) {
       <button className="w-full flex items-center justify-between gap-3 px-4 py-2.5 border-b border-default text-left" onClick={() => setOpen((v) => !v)}>
         <span className="font-semibold text-[13px] inline-flex items-center gap-2"><Sparkles className="h-4 w-4 text-brand-600" /> AI assistance</span>
         <span className="flex items-center gap-2">
-          {status.data && !enabled && <span className="text-[10.5px] text-amber-700 dark:text-amber-300 inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> AI not configured — rule-based</span>}
+          {status.data && !enabled && <span className="text-[10.5px] text-amber-700 inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> AI not configured — rule-based</span>}
           {open ? <ChevronDown className="h-4 w-4 text-subtle" /> : <ChevronRight className="h-4 w-4 text-subtle" />}
         </span>
       </button>
@@ -334,7 +334,7 @@ export function TicketAiPanel({ ticket }: { ticket: TicketDetail }) {
                 key={a.kind}
                 onClick={() => (results[a.kind] && active !== a.kind ? setActive(a.kind) : run.mutate(a.kind))}
                 disabled={run.isPending}
-                className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition-colors disabled:opacity-60', active === a.kind ? 'border-brand-500 bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'border-default text-muted hover:text-default hover:bg-surface-2')}
+                className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition-colors disabled:opacity-60', active === a.kind ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default hover:bg-surface-2')}
               >
                 {run.isPending && run.variables === a.kind ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <a.icon className="h-3.5 w-3.5" />}
                 {a.label}

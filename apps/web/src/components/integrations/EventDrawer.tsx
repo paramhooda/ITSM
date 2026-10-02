@@ -54,7 +54,7 @@ export function EventDrawer({ id, onClose }: { id: string | null; onClose: () =>
               <span className="text-xs text-subtle ml-auto" title={fmtDateTime(ev.receivedAt)}>received {relativeTime(ev.receivedAt)}</span>
             </div>
             <div className="text-[13.5px] font-medium break-words">{ev.message}</div>
-            {ev.processingNote && <div className={`text-xs mt-1 ${ev.processingStatus === 'error' ? 'text-red-600 dark:text-red-400' : 'text-muted'}`}>{ev.processingNote}</div>}
+            {ev.processingNote && <div className={`text-xs mt-1 ${ev.processingStatus === 'error' ? 'text-red-600' : 'text-muted'}`}>{ev.processingNote}</div>}
           </div>
 
           <div className="flex flex-wrap gap-2">

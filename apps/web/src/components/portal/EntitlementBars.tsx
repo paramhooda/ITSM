@@ -21,7 +21,7 @@ export function EntitlementBars({ entitlements, className }: { entitlements: Por
                 {e.serviceName && <span className="text-muted"> · {e.serviceName}</span>}
               </div>
               <span className="tabular-nums text-muted shrink-0">
-                <span className={cn('font-medium', u.exhausted ? 'text-red-600 dark:text-red-400' : u.overThreshold ? 'text-amber-600 dark:text-amber-400' : 'text-default')}>{fmtNumber(u.used, 2)}</span> / {fmtNumber(u.quantity, 2)} {titleCase(e.unit).toLowerCase()}
+                <span className={cn('font-medium', u.exhausted ? 'text-red-600' : u.overThreshold ? 'text-amber-600' : 'text-default')}>{fmtNumber(u.used, 2)}</span> / {fmtNumber(u.quantity, 2)} {titleCase(e.unit).toLowerCase()}
               </span>
             </div>
             <ProgressBar pct={u.pct} tone={tone} className="my-1.5 h-2" />

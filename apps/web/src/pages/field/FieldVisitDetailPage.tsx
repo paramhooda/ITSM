@@ -64,7 +64,7 @@ export default function FieldVisitDetailPage() {
         breadcrumb={<Link to="/field" className="hover:underline">Field service</Link>}
         title={
           <span className="inline-flex items-center gap-2 flex-wrap">
-            <span className="font-mono text-brand-700 dark:text-brand-300">{visit.number}</span>
+            <span className="font-mono text-brand-700">{visit.number}</span>
             <span>{visit.title}</span>
             <VisitStatusBadge status={visit.status} />
             {visit.typeLabel && <Badge color="slate">{visit.typeLabel}</Badge>}
@@ -95,7 +95,7 @@ export default function FieldVisitDetailPage() {
         }
       />
 
-      {visit.status === 'cancelled' && visit.cancelReason && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 dark:bg-red-500/10 dark:border-red-500/30 px-3 py-2 text-[13px] text-red-700 dark:text-red-300">Cancelled: {visit.cancelReason}</div>}
+      {visit.status === 'cancelled' && visit.cancelReason && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">Cancelled: {visit.cancelReason}</div>}
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-3 items-start">
         <div className="flex flex-col gap-3 min-w-0">
@@ -177,13 +177,13 @@ export default function FieldVisitDetailPage() {
               {visit.customerAckNotes && <div className="text-[12.5px] mt-1.5 whitespace-pre-wrap">{visit.customerAckNotes}</div>}
             </Panel>
           ) : visit.status === 'completed' ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/30 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-200">Awaiting customer acknowledgement.</div>
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800">Awaiting customer acknowledgement.</div>
           ) : null}
 
           <Panel title={<span className="inline-flex items-center gap-2"><Ticket className="h-4 w-4 text-subtle" />Linked ticket</span>}>
             {visit.ticket ? (
               <Link to={`/tickets/${visit.ticket.id}`} className="block hover:underline">
-                <div className="font-mono text-[12.5px] text-brand-700 dark:text-brand-300">{visit.ticket.number}</div>
+                <div className="font-mono text-[12.5px] text-brand-700">{visit.ticket.number}</div>
                 <div className="text-[13px] font-medium truncate">{visit.ticket.title}</div>
                 <div className="text-[12px] text-muted inline-flex items-center gap-1.5 mt-1">{visit.ticket.status && <Badge color={visit.ticket.statusColor ?? 'slate'} dot>{visit.ticket.status}</Badge>}<span className="capitalize">{visit.ticket.type}</span>{visit.ticket.assigneeName && <span>· {visit.ticket.assigneeName}</span>}</div>
               </Link>
@@ -207,7 +207,7 @@ export default function FieldVisitDetailPage() {
                 <ProgressBar pct={visit.entitlement.utilization.pct} className="mt-1.5" />
                 <div className="flex items-center justify-between text-[11px] text-subtle mt-1"><span>{fmtDate(visit.entitlement.utilization.periodStart)} – {fmtDate(visit.entitlement.utilization.periodEnd)}</span><span>{visit.entitlement.utilization.exhausted ? 'Exhausted' : `${fmtNumber(visit.entitlement.utilization.remaining, 1)} left`}</span></div>
                 {visit.consumption && <div className="text-[11.5px] text-muted mt-1.5">This visit consumed {visit.consumption.quantity} on {fmtDate(visit.consumption.consumedAt)}.</div>}
-                <Link to={`/contracts/${visit.entitlement.contractId}?tab=entitlements`} className="text-[12px] text-brand-700 dark:text-brand-300 hover:underline mt-1 inline-block">Open contract</Link>
+                <Link to={`/contracts/${visit.entitlement.contractId}?tab=entitlements`} className="text-[12px] text-brand-700 hover:underline mt-1 inline-block">Open contract</Link>
               </div>
             ) : (
               <div className="text-[12.5px] text-subtle">No entitlement linked: the visit is not metered against the contract.</div>
@@ -256,12 +256,12 @@ function NotesCard({ visit, canNote, onChanged }: { visit: VisitDetail; canNote:
       <ul className="divide-y divide-[var(--border)]">
         {visit.notes.length === 0 && <li className="px-4 py-3 text-[12.5px] text-subtle">No notes yet.</li>}
         {visit.notes.map((n) => (
-          <li key={n.id} className={cn('px-4 py-2.5', n.isInternal && 'bg-amber-50/50 dark:bg-amber-500/5')}>
+          <li key={n.id} className={cn('px-4 py-2.5', n.isInternal && 'bg-amber-50/50')}>
             <div className="flex items-center gap-2 text-[12px] text-muted">
               <Avatar name={n.authorName} size="xs" />
               <span className="font-medium text-default">{n.authorName ?? 'Unknown'}</span>
               <span title={fmtDateTime(n.createdAt)}>{relativeTime(n.createdAt)}</span>
-              {n.isInternal ? <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300"><Lock className="h-3 w-3" />Internal</span> : <span className="inline-flex items-center gap-1"><Globe className="h-3 w-3" />Customer visible</span>}
+              {n.isInternal ? <span className="inline-flex items-center gap-1 text-amber-700"><Lock className="h-3 w-3" />Internal</span> : <span className="inline-flex items-center gap-1"><Globe className="h-3 w-3" />Customer visible</span>}
             </div>
             <div className="text-[13px] mt-1 whitespace-pre-wrap">{n.body}</div>
           </li>

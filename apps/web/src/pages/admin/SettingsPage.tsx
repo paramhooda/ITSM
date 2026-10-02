@@ -66,7 +66,7 @@ export default function SettingsPage() {
           </>
         }
       />
-      {!canWrite && <div className="mb-3 text-[12.5px] text-amber-700 dark:text-amber-300">Read-only: saving settings requires the admin:system permission.</div>}
+      {!canWrite && <div className="mb-3 text-[12.5px] text-amber-700">Read-only: saving settings requires the admin:system permission.</div>}
       <div className="flex flex-col gap-4">
         {groups.map(([group, items]) => (
           <Card key={group} title={GROUP_LABELS[group] ?? titleCase(group)} padded={false}>

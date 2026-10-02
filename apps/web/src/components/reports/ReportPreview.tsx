@@ -20,7 +20,7 @@ function Table({ columns, rows }: { columns: ReportColumn[]; rows: Record<string
         </tbody>
       </table>
       {rows.length > limit && (
-        <button className="w-full text-[12.5px] text-brand-700 dark:text-brand-300 hover:underline py-2" onClick={() => setLimit(limit + PAGE * 5)}>
+        <button className="w-full text-[12.5px] text-brand-700 hover:underline py-2" onClick={() => setLimit(limit + PAGE * 5)}>
           Show more ({rows.length - limit} remaining)
         </button>
       )}

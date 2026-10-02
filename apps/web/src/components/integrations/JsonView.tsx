@@ -9,9 +9,9 @@ function Node({ name, value, depth, defaultOpen }: { name?: string; value: unkno
   const [open, setOpen] = useState(defaultOpen);
   const isObj = value !== null && typeof value === 'object';
   const entries = isObj ? (Array.isArray(value) ? value.map((v, i) => [String(i), v] as const) : Object.entries(value as Record<string, unknown>)) : [];
-  const label = name !== undefined && <span className="text-purple-700 dark:text-purple-300">{name}</span>;
+  const label = name !== undefined && <span className="text-purple-700">{name}</span>;
   if (!isObj) {
-    const cls = typeof value === 'string' ? 'text-emerald-700 dark:text-emerald-300' : typeof value === 'number' ? 'text-blue-700 dark:text-blue-300' : 'text-amber-700 dark:text-amber-300';
+    const cls = typeof value === 'string' ? 'text-emerald-700' : typeof value === 'number' ? 'text-blue-700' : 'text-amber-700';
     const text = typeof value === 'string' ? JSON.stringify(value) : String(value);
     return (
       <div className="whitespace-pre-wrap break-all" style={{ paddingLeft: depth * 14 }}>

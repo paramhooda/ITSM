@@ -6,7 +6,7 @@ import { fmtDateTime, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { slaPhrase, type PortalTicketRow } from './api';
 
-const TONE = { good: 'text-emerald-600 dark:text-emerald-400', warn: 'text-amber-600 dark:text-amber-400', bad: 'text-red-600 dark:text-red-400', neutral: 'text-subtle' };
+const TONE = { good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600', neutral: 'text-subtle' };
 
 /** "Due <relative>" for open tickets, "Resolved"/"Closed" otherwise. */
 export function TicketSla({ row, className }: { row: Pick<PortalTicketRow, 'sla' | 'status'>; className?: string }) {
@@ -23,7 +23,7 @@ export function TicketSla({ row, className }: { row: Pick<PortalTicketRow, 'sla'
 /** Mobile-friendly card for one ticket in the portal list. */
 export function TicketCard({ row }: { row: PortalTicketRow }) {
   return (
-    <Link to={`/portal/tickets/${row.id}`} className={cn('card block px-4 py-3 hover:border-brand-400 transition-colors', row.awaitingCustomer && 'border-amber-300/70 dark:border-amber-500/30')}>
+    <Link to={`/portal/tickets/${row.id}`} className={cn('card block px-4 py-3 hover:border-brand-400 transition-colors', row.awaitingCustomer && 'border-amber-300/70')}>
       <div className="flex items-center gap-2 text-[12px] text-muted">
         <span className="font-mono text-default">{row.number}</span>
         <TypeBadge type={row.type} short className="px-1 py-0 text-[10px]" />
@@ -37,7 +37,7 @@ export function TicketCard({ row }: { row: PortalTicketRow }) {
         <PriorityBadge priority={row.priority} compact />
         <TicketSla row={row} />
         {row.awaitingCustomer && (
-          <span className="inline-flex items-center gap-1 text-[11.5px] text-amber-700 dark:text-amber-300">
+          <span className="inline-flex items-center gap-1 text-[11.5px] text-amber-700">
             <MessageSquareWarning className="h-3.5 w-3.5" /> Needs your reply
           </span>
         )}

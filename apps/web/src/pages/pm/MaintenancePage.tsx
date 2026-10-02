@@ -93,7 +93,7 @@ export default function MaintenancePage() {
     { key: 'scheduledDate', header: 'Scheduled', width: '120px', render: (o) => (o.scheduledDate ? fmtDate(o.scheduledDate) : <span className="text-subtle">—</span>) },
     { key: 'status', header: 'Status', sortable: true, width: '170px', render: (o) => <OccurrenceStatusBadge status={o.status} overdue={o.overdue} /> },
     { key: 'engineer', header: 'Engineer', width: '150px', render: (o) => <span className="text-[13px]">{o.engineerName ?? <span className="text-subtle">{o.teamName ?? 'Unassigned'}</span>}</span> },
-    { key: 'visit', header: 'Visit / ticket', width: '150px', render: (o) => <div className="flex flex-col text-[12px] font-mono">{o.fieldVisitId && <Link to={`/field/${o.fieldVisitId}`} onClick={(e) => e.stopPropagation()} className="text-brand-700 dark:text-brand-300 hover:underline">{o.fieldVisitNumber}</Link>}{o.ticketId && <Link to={`/tickets/${o.ticketId}`} onClick={(e) => e.stopPropagation()} className="text-brand-700 dark:text-brand-300 hover:underline">{o.ticketNumber}</Link>}{!o.fieldVisitId && !o.ticketId && <span className="text-subtle">—</span>}</div> },
+    { key: 'visit', header: 'Visit / ticket', width: '150px', render: (o) => <div className="flex flex-col text-[12px] font-mono">{o.fieldVisitId && <Link to={`/field/${o.fieldVisitId}`} onClick={(e) => e.stopPropagation()} className="text-brand-700 hover:underline">{o.fieldVisitNumber}</Link>}{o.ticketId && <Link to={`/tickets/${o.ticketId}`} onClick={(e) => e.stopPropagation()} className="text-brand-700 hover:underline">{o.ticketNumber}</Link>}{!o.fieldVisitId && !o.ticketId && <span className="text-subtle">—</span>}</div> },
     { key: 'actions', header: '', width: '48px', render: (o) => <div onClick={(e) => e.stopPropagation()}><Menu trigger={<Button variant="ghost" size="icon" aria-label="Actions"><MoreHorizontal className="h-4 w-4" /></Button>} items={rowActions(o)} /></div> },
   ];
 
@@ -110,8 +110,8 @@ export default function MaintenancePage() {
   const progColumns: Column<ProgramRow>[] = [
     { key: 'name', header: 'Program', sortable: true, render: (p) => <div className="min-w-[200px]"><div className="font-medium text-[13.5px] truncate">{p.name}</div><div className="text-[11.5px] text-muted truncate">{p.customerName}{p.siteName ? ` · ${p.siteName}` : ''}{p.serviceName ? ` · ${p.serviceName}` : ''}</div></div> },
     { key: 'frequency', header: 'Frequency', sortable: true, width: '130px', render: (p) => <FrequencyBadge frequency={p.frequency} intervalDays={p.intervalDays} /> },
-    { key: 'nextDue', header: 'Next due', width: '120px', render: (p) => (p.nextDue ? <span className={cn(p.overdue > 0 && 'text-red-600 dark:text-red-400 font-medium')}>{fmtDate(p.nextDue)}</span> : <span className="text-subtle">—</span>) },
-    { key: 'open', header: 'Open', width: '90px', render: (p) => <span>{p.open}{p.overdue > 0 && <span className="text-red-600 dark:text-red-400 text-[11.5px]"> · {p.overdue} late</span>}</span> },
+    { key: 'nextDue', header: 'Next due', width: '120px', render: (p) => (p.nextDue ? <span className={cn(p.overdue > 0 && 'text-red-600 font-medium')}>{fmtDate(p.nextDue)}</span> : <span className="text-subtle">—</span>) },
+    { key: 'open', header: 'Open', width: '90px', render: (p) => <span>{p.open}{p.overdue > 0 && <span className="text-red-600 text-[11.5px]"> · {p.overdue} late</span>}</span> },
     { key: 'last12', header: 'Last 12 months', width: '140px', render: (p) => <span className="text-[12.5px]"><span className="text-emerald-600">{p.completed12m} done</span> · <span className={p.missed12m ? 'text-red-600' : 'text-muted'}>{p.missed12m} missed</span></span> },
     { key: 'owner', header: 'Owner', width: '160px', render: (p) => <span className="text-[13px]">{p.engineerName ?? p.teamName ?? <span className="text-subtle">—</span>}</span> },
     { key: 'entitlement', header: 'Entitlement', width: '150px', render: (p) => <span className="text-[12.5px]">{p.entitlementName ?? <span className="text-subtle">not metered</span>}</span> },
@@ -173,7 +173,7 @@ export default function MaintenancePage() {
               {PM_STATUSES.map((st: PmStatus) => {
                 const on = statuses.includes(st);
                 return (
-                  <button key={st} onClick={() => toggleStatus(st)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'border-default text-muted hover:text-default')}>
+                  <button key={st} onClick={() => toggleStatus(st)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>
                     {PM_STATUS_LABELS[st]} <span className="opacity-60">{s?.counts[st] ?? 0}</span>
                   </button>
                 );
@@ -250,7 +250,7 @@ function OccurrenceList({ title, tone, items, empty, onSchedule }: { title: stri
         <ul className="divide-y divide-[var(--border)] max-h-[360px] overflow-auto">
           {items.map((o) => (
             <li key={o.id} className="flex items-center gap-3 px-4 py-2 text-[13px]">
-              <span className={cn('w-24 shrink-0 tabular-nums', tone === 'bad' && 'text-red-600 dark:text-red-400 font-medium')}>{fmtDate(o.effectiveDate)}</span>
+              <span className={cn('w-24 shrink-0 tabular-nums', tone === 'bad' && 'text-red-600 font-medium')}>{fmtDate(o.effectiveDate)}</span>
               <div className="min-w-0 flex-1"><div className="truncate font-medium">{o.programName}</div><div className="text-[11.5px] text-muted truncate">{o.customerName}{o.siteName ? ` · ${o.siteName}` : ''}{o.engineerName ? ` · ${o.engineerName}` : ''}</div></div>
               <OccurrenceStatusBadge status={o.status} />
               {onSchedule && <Button size="sm" variant="ghost" icon={<CalendarPlus className="h-3.5 w-3.5" />} onClick={() => onSchedule(o)}>{o.status === 'planned' || o.status === 'missed' ? 'Schedule' : 'Move'}</Button>}
@@ -270,7 +270,7 @@ function MonthCalendar({ month, items, loading, onMonthChange, onSelect }: { mon
   const byDay = new Map<string, OccurrenceRow[]>();
   for (const o of items) (byDay.get(o.effectiveDate) ?? byDay.set(o.effectiveDate, []).get(o.effectiveDate)!).push(o);
   const today = ymd(new Date());
-  const chip: Record<string, string> = { planned: 'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-200', scheduled: 'bg-blue-50 text-blue-800 dark:bg-blue-500/15 dark:text-blue-200', rescheduled: 'bg-indigo-50 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-200', completed: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200', missed: 'bg-red-50 text-red-800 dark:bg-red-500/15 dark:text-red-200', cancelled: 'bg-gray-50 text-gray-500 line-through dark:bg-gray-500/10' };
+  const chip: Record<string, string> = { planned: 'bg-slate-100 text-slate-700', scheduled: 'bg-blue-50 text-blue-800', rescheduled: 'bg-indigo-50 text-indigo-800', completed: 'bg-emerald-50 text-emerald-800', missed: 'bg-red-50 text-red-800', cancelled: 'bg-gray-50 text-gray-500 line-through' };
   return (
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-default">
@@ -289,10 +289,10 @@ function MonthCalendar({ month, items, loading, onMonthChange, onSelect }: { mon
           const list = byDay.get(key) ?? [];
           const inMonth = d.getMonth() === month.getMonth();
           return (
-            <div key={key} className={cn('min-h-[88px] border-b border-r border-default p-1 flex flex-col gap-1', !inMonth && 'bg-surface-2/40', key === today && 'bg-brand-50/40 dark:bg-brand-500/5')}>
-              <div className={cn('text-[11px] text-right', inMonth ? 'text-muted' : 'text-subtle', key === today && 'font-semibold text-brand-700 dark:text-brand-300')}>{d.getDate()}</div>
+            <div key={key} className={cn('min-h-[88px] border-b border-r border-default p-1 flex flex-col gap-1', !inMonth && 'bg-surface-2/40', key === today && 'bg-brand-50/40')}>
+              <div className={cn('text-[11px] text-right', inMonth ? 'text-muted' : 'text-subtle', key === today && 'font-semibold text-brand-700')}>{d.getDate()}</div>
               {list.slice(0, 4).map((o) => (
-                <button key={o.id} onClick={() => onSelect(o)} className={cn('text-left rounded px-1.5 py-0.5 text-[11px] leading-tight truncate hover:brightness-95 dark:hover:brightness-125', chip[o.status] ?? chip.planned)} title={`${o.programName} · ${o.customerName ?? ''} · ${PM_STATUS_LABELS[o.status]}`}>
+                <button key={o.id} onClick={() => onSelect(o)} className={cn('text-left rounded px-1.5 py-0.5 text-[11px] leading-tight truncate hover:brightness-95', chip[o.status] ?? chip.planned)} title={`${o.programName} · ${o.customerName ?? ''} · ${PM_STATUS_LABELS[o.status]}`}>
                   <span className="font-medium">{o.programName}</span> <span className="opacity-70">{o.customerName}</span>
                 </button>
               ))}

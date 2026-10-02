@@ -13,14 +13,14 @@ export function ServiceTeamCard({ me, className }: { me: PortalMe | undefined; c
       ) : (
         <div className="flex flex-col gap-4">
           <div className="flex items-start gap-3">
-            <div className="h-9 w-9 rounded-full bg-brand-600/10 text-brand-700 dark:text-brand-300 flex items-center justify-center shrink-0">
+            <div className="h-9 w-9 rounded-full bg-brand-600/10 text-brand-700 flex items-center justify-center shrink-0">
               <Headset className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <div className="text-[13px] font-medium">{desk?.name ?? 'Service desk'}</div>
               <div className="text-[12px] text-muted">Raise and track requests here, or reach the desk by e-mail.</div>
               {desk?.email && (
-                <a href={`mailto:${desk.email}`} className="mt-1 inline-flex items-center gap-1 text-[12.5px] text-brand-700 dark:text-brand-300 hover:underline">
+                <a href={`mailto:${desk.email}`} className="mt-1 inline-flex items-center gap-1 text-[12.5px] text-brand-700 hover:underline">
                   <Mail className="h-3.5 w-3.5" /> {desk.email}
                 </a>
               )}
@@ -36,12 +36,12 @@ export function ServiceTeamCard({ me, className }: { me: PortalMe | undefined; c
               <div className="text-[13px] font-medium">{am?.name ?? 'Account manager'}</div>
               <div className="text-[12px] text-muted">{am ? am.title || 'Your account manager for escalations and contract matters' : 'Not assigned yet'}</div>
               {am?.email && (
-                <a href={`mailto:${am.email}`} className="mt-1 inline-flex items-center gap-1 text-[12.5px] text-brand-700 dark:text-brand-300 hover:underline">
+                <a href={`mailto:${am.email}`} className="mt-1 inline-flex items-center gap-1 text-[12.5px] text-brand-700 hover:underline">
                   <Mail className="h-3.5 w-3.5" /> {am.email}
                 </a>
               )}
               {am?.phone && (
-                <a href={`tel:${am.phone}`} className="ml-3 inline-flex items-center gap-1 text-[12.5px] text-brand-700 dark:text-brand-300 hover:underline">
+                <a href={`tel:${am.phone}`} className="ml-3 inline-flex items-center gap-1 text-[12.5px] text-brand-700 hover:underline">
                   <Phone className="h-3.5 w-3.5" /> {am.phone}
                 </a>
               )}

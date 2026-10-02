@@ -101,7 +101,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
                   key={item.to}
                   to={item.to}
                   end={!item.prefix}
-                  className={({ isActive }) => cn('block rounded-md px-2 py-1 text-[13px] my-0.5 transition-colors', isActive || (item.prefix && location.pathname.startsWith(item.to + '/')) ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300 font-medium' : 'text-muted hover:bg-surface-2 hover:text-default')}
+                  className={({ isActive }) => cn('block rounded-md px-2 py-1 text-[13px] my-0.5 transition-colors', isActive || (item.prefix && location.pathname.startsWith(item.to + '/')) ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2 hover:text-default')}
                 >
                   {item.label}
                 </NavLink>

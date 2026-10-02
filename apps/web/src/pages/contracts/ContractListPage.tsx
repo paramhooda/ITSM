@@ -90,8 +90,8 @@ export default function ContractListPage() {
           const opt = byKey('contract_status', s);
           const active = statuses.includes(s);
           return (
-            <button key={s} onClick={() => toggleStatus(s)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] transition-colors', active ? 'border-brand-500 bg-brand-600/10 text-brand-700 dark:text-brand-300' : 'border-default text-muted hover:text-default')}>
-              <Badge color={opt?.color ?? STATUS_COLORS[s]} className="px-0 py-0 bg-transparent dark:bg-transparent">{opt?.label ?? s}</Badge>
+            <button key={s} onClick={() => toggleStatus(s)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] transition-colors', active ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>
+              <Badge color={opt?.color ?? STATUS_COLORS[s]} className="px-0 py-0 bg-transparent">{opt?.label ?? s}</Badge>
             </button>
           );
         })}

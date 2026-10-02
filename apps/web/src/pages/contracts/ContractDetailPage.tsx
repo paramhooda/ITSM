@@ -161,7 +161,7 @@ function OverviewTab({ c, canManage, onSaveMatrix, saving, goTo }: { c: Contract
             <DocTick ok={c.documents.purchaseOrder} label="Purchase order" />
             <DocTick ok={c.documents.sow} label="Statement of work" />
           </div>
-          {!c.documents.signedAgreement && ['active', 'expiring'].includes(c.status) && <div className="text-xs text-amber-600 dark:text-amber-400 mt-2">Active contract without a signed agreement on file.</div>}
+          {!c.documents.signedAgreement && ['active', 'expiring'].includes(c.status) && <div className="text-xs text-amber-600 mt-2">Active contract without a signed agreement on file.</div>}
         </Card>
       </div>
       <Card title="Escalation matrix" className="xl:col-span-3">

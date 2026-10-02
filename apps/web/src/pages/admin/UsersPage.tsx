@@ -7,7 +7,7 @@ import { Button, Badge, Avatar, Card, Dialog, Drawer, Field, Input, Select, Sear
 import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
 import { useListState } from '@/hooks/useListState';
 import { useAuthStore } from '@/stores/auth';
-import { fmtDateTime, titleCase } from '@/lib/format';
+import { fmtDateTime, relativeTime, titleCase } from '@/lib/format';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MutedCell } from '@/components/admin/ConfigTable';
 import { FormDialog, type FieldSpec } from '@/components/admin/FormDialog';
@@ -90,7 +90,7 @@ export default function UsersPage() {
     { key: 'roles', header: 'Roles', render: (r) => <MutedCell>{r.roles.length ? [...new Set(r.roles.map((x) => x.name))].join(', ') : '—'}</MutedCell> },
     { key: 'teams', header: 'Teams', render: (r) => <MutedCell>{r.teams.length ? r.teams.map((t) => t.name).join(', ') : '—'}</MutedCell> },
     { key: 'status', header: 'Status', render: (r) => <Badge color={STATUS_COLOR[r.status] ?? 'slate'} dot>{titleCase(r.status)}</Badge> },
-    { key: 'lastLoginAt', header: 'Last sign-in', render: (r) => <MutedCell>{r.lastLoginAt ? fmtDateTime(r.lastLoginAt) : 'Never'}</MutedCell> },
+    { key: 'lastLoginAt', header: 'Last sign-in', render: (r) => <MutedCell><span className="whitespace-nowrap" title={r.lastLoginAt ? fmtDateTime(r.lastLoginAt) : undefined}>{r.lastLoginAt ? relativeTime(r.lastLoginAt) : 'Never'}</span></MutedCell> },
   ];
 
   return (

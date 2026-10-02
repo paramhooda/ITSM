@@ -91,7 +91,7 @@ export function EventsTab({ integrations }: { integrations: Integration[] }) {
             </button>
           ))}
           <span className="mx-2 text-subtle">|</span>
-          <button type="button" onClick={() => set({ unresolvedOnly: state.unresolvedOnly ? undefined : 'true' })} className={cn('inline-flex items-center gap-1 rounded-md px-2 py-0.5 border transition-colors', state.unresolvedOnly ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300 border-transparent' : 'border-default text-muted hover:bg-surface-2')}>
+          <button type="button" onClick={() => set({ unresolvedOnly: state.unresolvedOnly ? undefined : 'true' })} className={cn('inline-flex items-center gap-1 rounded-md px-2 py-0.5 border transition-colors', state.unresolvedOnly ? 'bg-amber-100 text-amber-800 border-transparent' : 'border-default text-muted hover:bg-surface-2')}>
             <AlertTriangle className="h-3 w-3" /> Needs customer
           </button>
           {(state.q || state.host || state.integrationId || state.integrationType || state.customerId || state.processingStatus || state.severity || state.unresolvedOnly) && (
