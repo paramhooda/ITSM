@@ -106,3 +106,10 @@ export const countSql = sql<number>`count(*)::int`;
 
 /** `id in (...)` list for raw SQL fragments (drizzle expands plain JS arrays into comma-separated params). */
 export const uuidList = (ids: string[]) => sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
+
+/** Runs async thunks one after another on the same transaction client (pg does not allow concurrent queries on one client). */
+export async function sequential<T extends unknown[]>(thunks: [...{ [K in keyof T]: () => Promise<T[K]> }]): Promise<T> {
+  const out: unknown[] = [];
+  for (const t of thunks) out.push(await t());
+  return out as T;
+}

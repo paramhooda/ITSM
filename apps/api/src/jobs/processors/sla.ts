@@ -1,4 +1,4 @@
-import { eq, and, lt, isNull, sql } from 'drizzle-orm';
+import { eq, and, lt, isNull } from 'drizzle-orm';
 import { registerProcessor, registerSchedule } from '../workers';
 import { withSystem, schema } from '@/db/client';
 import { logger } from '@/core/logger';
@@ -81,4 +81,3 @@ registerProcessor({ queue: 'sla', jobName: 'sla-tick', concurrency: 1, processor
 registerSchedule({ queue: 'sla', jobName: 'auto-close-resolved', pattern: '20 1 * * *' });
 registerProcessor({ queue: 'sla', jobName: 'auto-close-resolved', concurrency: 1, processor: async () => autoCloseResolved() });
 
-export const slaQueueHealth = async () => withSystem(async (tx) => (await tx.execute(sql`SELECT count(*)::int AS n FROM ticket_slas WHERE state = 'running' AND due_at < now()`)).rows[0]);

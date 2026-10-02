@@ -1,4 +1,4 @@
-import { eq, and, lt, inArray, sql } from 'drizzle-orm';
+import { eq, and, lt, inArray } from 'drizzle-orm';
 import { withSystem, schema } from '@/db/client';
 import { logger } from '@/core/logger';
 import { systemCtx, optionByKey, reloadTicket } from '@/modules/tickets/common';
@@ -50,4 +50,3 @@ export async function autoCloseResolved(now = new Date()) {
   return { closed };
 }
 
-export const resolvedBacklog = async () => withSystem(async (tx) => (await tx.execute(sql`SELECT count(*)::int AS n FROM tickets t JOIN config_options s ON s.id = t.status_id WHERE s.status_category = 'resolved'`)).rows[0]);

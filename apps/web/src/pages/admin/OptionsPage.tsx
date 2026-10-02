@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Ban, Star } from 'lucide-react';
 import { OPTION_TYPES, TICKET_TYPES, DOMAINS, STATUS_CATEGORIES } from '@itsm/shared';
 import { get, post, patch, del } from '@/api/client';
@@ -28,6 +29,7 @@ const known = new Set(OPTION_GROUPS.flatMap((g) => g.types.map((t) => t[0])));
 for (const t of OPTION_TYPES) if (!known.has(t)) OPTION_GROUPS[OPTION_GROUPS.length - 1].types.push([t, titleCase(t)]);
 
 export const optionTypeLabel = (type: string) => OPTION_GROUPS.flatMap((g) => g.types).find((t) => t[0] === type)?.[1] ?? titleCase(type);
+const singular = (label: string) => (label.endsWith('ies') ? label.slice(0, -3) + 'y' : label.endsWith('ses') ? label.slice(0, -2) : label.endsWith('s') ? label.slice(0, -1) : label).toLowerCase();
 
 const LEVEL_TYPES = ['ticket_priority', 'ticket_impact', 'ticket_urgency', 'change_risk', 'security_severity'];
 const APPLIES_TYPES = ['ticket_status', 'ticket_priority', 'ticket_category', 'ticket_subcategory', 'ticket_source', 'resolution_code', 'closure_code'];
@@ -47,7 +49,7 @@ export default function OptionsPage() {
 
   const create = useAdminMutation((body: OptionValues) => post('/config/options', body), { invalidate, lookups: true, success: 'Option added' });
   const update = useAdminMutation(({ id, ...body }: OptionValues & { id: string }) => patch(`/config/options/${id}`, body), { invalidate, lookups: true, success: 'Option updated' });
-  const remove = useAdminMutation((id: string) => del<{ deleted?: boolean; deactivated?: boolean }>(`/config/options/${id}`), { invalidate, lookups: true, onSuccess: (r) => (r.deactivated ? undefined : undefined) });
+  const remove = useAdminMutation((id: string) => del<{ deleted?: boolean; deactivated?: boolean }>(`/config/options/${id}`), { invalidate, lookups: true, onSuccess: (r) => toast.success(r.deactivated ? 'Entry deactivated' : 'Entry deleted') });
   const reorder = useAdminMutation((ids: string[]) => post('/config/options/reorder', { ids }), { invalidate, lookups: true });
 
   const parentOptions = (lookups.options('ticket_category', { includeInactive: true }) ?? []).map((o) => ({ value: o.id, label: o.label }));
@@ -157,7 +159,7 @@ export default function OptionsPage() {
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, onClick: (r) => { if (confirm(`Delete "${r.label}"? Records referencing it keep working but lose the label.`)) remove.mutate(r.id); } },
         ]}
       />
-      <FormDialog<OptionValues> open={editor.open} onClose={editor.close} title={editor.row ? `Edit ${optionTypeLabel(type).replace(/s$/, '').toLowerCase()}` : `New ${optionTypeLabel(type).replace(/s$/, '').toLowerCase()}`} fields={fields} initial={initial} onSubmit={submit} />
+      <FormDialog<OptionValues> open={editor.open} onClose={editor.close} title={editor.row ? `Edit ${singular(optionTypeLabel(type))}` : `New ${singular(optionTypeLabel(type))}`} fields={fields} initial={initial} onSubmit={submit} />
     </div>
   );
 }

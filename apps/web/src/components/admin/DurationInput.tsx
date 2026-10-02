@@ -35,7 +35,7 @@ export function formatDuration(minutes: number | null | undefined): string {
 }
 
 /** Text input for durations in minutes; accepts 4h / 2d / 30m / 1d 4h / plain minutes. */
-export function DurationInput({ value, onChange, placeholder = 'e.g. 4h', className, disabled, size = 'md', title }: { value: number | null; onChange: (minutes: number | null) => void; placeholder?: string; className?: string; disabled?: boolean; size?: 'sm' | 'md'; title?: string }) {
+export function DurationInput({ value, onChange, placeholder = 'e.g. 4h', className, disabled, size = 'md', title, width }: { value: number | null; onChange: (minutes: number | null) => void; placeholder?: string; className?: string; disabled?: boolean; size?: 'sm' | 'md'; title?: string; width?: number }) {
   const [text, setText] = useState(formatDuration(value));
   const [invalid, setInvalid] = useState(false);
   useEffect(() => {
@@ -67,6 +67,7 @@ export function DurationInput({ value, onChange, placeholder = 'e.g. 4h', classN
           commit();
         }
       }}
+      style={width ? { width, flex: 'none' } : undefined}
       className={cn('input', size === 'sm' && 'py-1 px-2 text-[12.5px] h-7', invalid && 'border-red-500 focus:border-red-500', className)}
     />
   );

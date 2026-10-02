@@ -182,7 +182,7 @@ export default function SlaPolicyEditorPage() {
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="xl:col-span-2 flex flex-col gap-4">
+        <div className="xl:col-span-2">
           <Card title="Policy">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
               <Field label="Name" required>
@@ -203,7 +203,9 @@ export default function SlaPolicyEditorPage() {
               </div>
             </div>
           </Card>
-
+        </div>
+        <PreviewPanel policyId={isNew ? null : id!} dirty={dirty} />
+        <div className="xl:col-span-3 flex flex-col gap-4">
           <Card title={`Targets · ${targetCount} defined`} padded={false}>
             <Tabs tabs={TICKET_TYPES.map((t) => ({ key: t, label: titleCase(t), count: Object.entries(cells).filter(([k, v]) => k.startsWith(`${t}|`) && v.minutes).length }))} value={tab} onChange={setTab} className="px-3" />
             <div className="overflow-auto">
@@ -226,8 +228,8 @@ export default function SlaPolicyEditorPage() {
                         return (
                           <td key={m} className="align-top">
                             <div className="flex items-center gap-1.5">
-                              <DurationInput size="sm" className="w-20" value={v?.minutes ?? null} onChange={(min) => setCell(key, { minutes: min })} placeholder="—" />
-                              <input type="number" min={1} max={100} title="Warn at % of target" className="input h-7 w-14 py-1 px-1.5 text-[12px] text-center disabled:opacity-40" disabled={!v?.minutes} value={v?.warnPct ?? 75} onChange={(e) => setCell(key, { warnPct: Math.min(100, Math.max(1, Number(e.target.value) || 75)) })} />
+                              <DurationInput size="sm" width={68} value={v?.minutes ?? null} onChange={(min) => setCell(key, { minutes: min })} placeholder="—" />
+                              <input type="number" min={1} max={100} title="Warn at % of target" style={{ width: 52, flex: 'none' }} className="input h-7 py-1 px-1 text-[12px] text-center disabled:opacity-40" disabled={!v?.minutes} value={v?.warnPct ?? 75} onChange={(e) => setCell(key, { warnPct: Math.min(100, Math.max(1, Number(e.target.value) || 75)) })} />
                               <label className="inline-flex items-center gap-1 text-[11px] text-muted cursor-pointer select-none" title="Measure on calendar time (24x7) regardless of business hours">
                                 <input type="checkbox" className="h-3.5 w-3.5 accent-brand-600 disabled:opacity-40" disabled={!v?.minutes} checked={!!v?.calendarTime} onChange={(e) => setCell(key, { calendarTime: e.target.checked })} />
                                 24x7
@@ -248,10 +250,6 @@ export default function SlaPolicyEditorPage() {
             <div className="text-[12.5px] text-muted mb-2">SLA clocks pause while a ticket is in any status marked "pauses SLA" in the option list, plus these policy-specific statuses.</div>
             <MultiSelect value={pauseStatusIds} onChange={(v) => { setPauseStatusIds(v); setDirty(true); }} options={statuses.map((s) => ({ value: s.id, label: s.label, hint: s.pausesSla ? 'pauses by default' : titleCase(s.statusCategory ?? '') }))} maxHeight="max-h-40" />
           </Card>
-        </div>
-
-        <div className="flex flex-col gap-4">
-          <PreviewPanel policyId={isNew ? null : id!} dirty={dirty} />
         </div>
       </div>
     </div>
@@ -292,20 +290,24 @@ function PreviewPanel({ policyId, dirty }: { policyId: string | null; dirty: boo
               {q.data.metrics.length === 0 ? (
                 <div className="text-[12.5px] text-muted">No targets apply to this combination.</div>
               ) : (
-                <table className="w-full text-[12.5px]">
-                  <tbody>
-                    {q.data.metrics.map((m) => (
-                      <tr key={m.metric} className="border-t border-default">
-                        <td className="py-1.5 pr-2 font-medium">{METRIC_LABEL[m.metric as Metric] ?? m.metric}</td>
-                        <td className="py-1.5 pr-2 text-muted whitespace-nowrap">{formatDuration(m.minutes)} · {m.calendar === '24x7' ? '24x7' : 'business hrs'}</td>
-                        <td className="py-1.5 text-right whitespace-nowrap">
-                          <div>{fmtDateTime(m.dueAt)}</div>
-                          <div className="text-[11px] text-subtle">warn {fmtDateTime(m.warnAt)}</div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="text-[12.5px]">
+                  {q.data.metrics.map((m) => (
+                    <div key={m.metric} className="border-t border-default py-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{METRIC_LABEL[m.metric as Metric] ?? m.metric}</span>
+                        <span className="text-muted">{formatDuration(m.minutes)} · {m.calendar === '24x7' ? '24x7' : 'business hrs'}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-[12px]">
+                        <span className="text-subtle">due</span>
+                        <span>{fmtDateTime(m.dueAt)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-subtle">
+                        <span>warn at {m.warnPct}%</span>
+                        <span>{fmtDateTime(m.warnAt)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}

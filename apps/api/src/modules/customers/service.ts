@@ -6,7 +6,7 @@ import { NotFoundError, ValidationError, ConflictError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { orderBy, searchFts } from '@/core/query';
 import { invalidatePrincipal } from '@/core/principal';
-import { contractStatusOptions, statusDisplay, daysToExpiry, optionLabels, userNames, todayStr, addDays } from '@/modules/contracts/common';
+import { contractStatusOptions, statusDisplay, daysToExpiry, optionLabels, userNames, todayStr, addDays, sequential } from '@/modules/contracts/common';
 import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 import { customerEntitlements } from '@/modules/contracts/entitlements';
 import type { CustomerCreate, CustomerPatch, CustomerListQuery } from './schemas';
@@ -140,11 +140,11 @@ export async function customerCounts(tx: Tx, id: string) {
 export async function getCustomer(ctx: Ctx, id: string) {
   ctx.require('customers:read', id);
   const row = await loadCustomer(ctx, id);
-  const [labels, managers, counts, teams] = await Promise.all([
-    optionLabels(ctx.tx, [row.industryId, row.typeId, row.statusId]),
-    userNames(ctx.tx, [row.accountManagerId]),
-    customerCounts(ctx.tx, id),
-    getCustomerTeams(ctx, id),
+  const [labels, managers, counts, teams] = await sequential([
+    () => optionLabels(ctx.tx, [row.industryId, row.typeId, row.statusId]),
+    () => userNames(ctx.tx, [row.accountManagerId]),
+    () => customerCounts(ctx.tx, id),
+    () => getCustomerTeams(ctx, id),
   ]);
   const commercialAllowed = ctx.can('contracts:commercial', id);
   return {
@@ -244,42 +244,42 @@ export async function customerOverview(ctx: Ctx, id: string) {
   const today = todayStr(now);
   const in30 = addDays(today, 30);
 
-  const [byCategory, byPriority, recentTickets, contracts, entitlements, sla, activity, visits, pm, counts, statusMap] = await Promise.all([
-    ctx.tx
+  const [byCategory, byPriority, recentTickets, contracts, entitlements, sla, activity, visits, pm, counts, statusMap] = await sequential([
+    () => ctx.tx
       .select({ category: o.statusCategory, count: sql<number>`count(*)::int` })
       .from(t)
       .innerJoin(o, eq(o.id, t.statusId))
       .where(eq(t.customerId, id))
       .groupBy(o.statusCategory),
-    ctx.tx.execute(sql`
+    () => ctx.tx.execute(sql`
       select p.id, p.label, p.color, p.level, count(*)::int as count
       from tickets t join config_options s on s.id = t.status_id left join config_options p on p.id = t.priority_id
       where t.customer_id = ${id}::uuid and s.status_category in ('new','open','pending')
       group by p.id, p.label, p.color, p.level order by p.level nulls last, p.label`),
-    ctx.tx.execute(sql`
+    () => ctx.tx.execute(sql`
       select t.id, t.number, t.type, t.title, t.created_at as "createdAt", t.updated_at as "updatedAt", s.label as "statusLabel", s.color as "statusColor", s.status_category as "statusCategory", p.label as "priorityLabel", p.color as "priorityColor"
       from tickets t join config_options s on s.id = t.status_id left join config_options p on p.id = t.priority_id
       where t.customer_id = ${id}::uuid order by t.created_at desc limit 10`),
-    ctx.tx
+    () => ctx.tx
       .select({ id: schema.contracts.id, number: schema.contracts.number, name: schema.contracts.name, status: schema.contracts.status, startDate: schema.contracts.startDate, endDate: schema.contracts.endDate, renewalDate: schema.contracts.renewalDate, typeId: schema.contracts.typeId })
       .from(schema.contracts)
       .where(eq(schema.contracts.customerId, id))
       .orderBy(asc(schema.contracts.endDate)),
-    customerEntitlements(ctx, id),
-    ctx.tx
+    () => customerEntitlements(ctx, id),
+    () => ctx.tx
       .select({
         met: sql<number>`count(*) filter (where ${schema.ticketSlas.state} = 'met')::int`,
         breached: sql<number>`count(*) filter (where ${schema.ticketSlas.state} = 'breached')::int`,
       })
       .from(schema.ticketSlas)
       .where(and(eq(schema.ticketSlas.customerId, id), sql`${schema.ticketSlas.completedAt} >= now() - interval '30 days'`)),
-    ctx.tx
+    () => ctx.tx
       .select({ id: schema.auditLog.id, occurredAt: schema.auditLog.occurredAt, userName: schema.auditLog.userName, entityType: schema.auditLog.entityType, entityId: schema.auditLog.entityId, entityLabel: schema.auditLog.entityLabel, action: schema.auditLog.action })
       .from(schema.auditLog)
       .where(eq(schema.auditLog.customerId, id))
       .orderBy(desc(schema.auditLog.occurredAt))
       .limit(10),
-    ctx.tx
+    () => ctx.tx
       .select({ id: schema.fieldVisits.id, number: schema.fieldVisits.number, title: schema.fieldVisits.title, status: schema.fieldVisits.status, scheduledStart: schema.fieldVisits.scheduledStart, scheduledEnd: schema.fieldVisits.scheduledEnd, engineerName: schema.users.name, siteName: schema.sites.name })
       .from(schema.fieldVisits)
       .leftJoin(schema.users, eq(schema.users.id, schema.fieldVisits.engineerId))
@@ -287,7 +287,7 @@ export async function customerOverview(ctx: Ctx, id: string) {
       .where(and(eq(schema.fieldVisits.customerId, id), inArray(schema.fieldVisits.status, ['requested', 'scheduled', 'in_progress']), sql`${schema.fieldVisits.scheduledStart} >= now() - interval '1 day'`, sql`${schema.fieldVisits.scheduledStart} <= now() + interval '30 days'`))
       .orderBy(asc(schema.fieldVisits.scheduledStart))
       .limit(10),
-    ctx.tx
+    () => ctx.tx
       .select({ id: schema.pmOccurrences.id, programId: schema.pmOccurrences.programId, programName: schema.pmPrograms.name, plannedDate: schema.pmOccurrences.plannedDate, scheduledDate: schema.pmOccurrences.scheduledDate, status: schema.pmOccurrences.status, siteName: schema.sites.name })
       .from(schema.pmOccurrences)
       .innerJoin(schema.pmPrograms, eq(schema.pmPrograms.id, schema.pmOccurrences.programId))
@@ -295,8 +295,8 @@ export async function customerOverview(ctx: Ctx, id: string) {
       .where(and(eq(schema.pmOccurrences.customerId, id), inArray(schema.pmOccurrences.status, ['planned', 'scheduled']), sql`${schema.pmOccurrences.plannedDate} >= ${today}::date`, sql`${schema.pmOccurrences.plannedDate} <= ${in30}::date`))
       .orderBy(asc(schema.pmOccurrences.plannedDate))
       .limit(10),
-    customerCounts(ctx.tx, id),
-    contractStatusOptions(ctx.tx),
+    () => customerCounts(ctx.tx, id),
+    () => contractStatusOptions(ctx.tx),
   ]);
   const typeLabels = await optionLabels(ctx.tx, contracts.map((k) => k.typeId));
   const met = sla[0]?.met ?? 0;

@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { TICKET_TYPES } from '@itsm/shared';
 import { h } from '@/core/context';
 import { slaSummary } from '@/modules/sla/engine';
 import * as svc from './service';
@@ -157,7 +156,4 @@ export default async function routes(app: FastifyInstance) {
   }));
   r.patch('/saved-views/:id', { preHandler: app.auth(), schema: { tags: ['saved-views'], params: idParam, body: S.savedViewSchema.partial() } }, h((ctx, req) => views.updateView(ctx, (req.params as { id: string }).id, req.body as Partial<S.SavedViewInput>)));
   r.delete('/saved-views/:id', { preHandler: app.auth(), schema: { tags: ['saved-views'], params: idParam } }, h((ctx, req) => views.deleteView(ctx, (req.params as { id: string }).id)));
-
-  // ---- type metadata (for pickers)
-  r.get('/tickets/meta/types', { preHandler: app.auth(), schema: { tags } }, h(async () => ({ items: TICKET_TYPES.map((t) => ({ key: t })) })));
 }

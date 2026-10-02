@@ -190,12 +190,18 @@ export function FormDialog<V extends Values>({ open, onClose, title, description
         e.preventDefault();
         void submit();
       }}
+      onClickCapture={(e) => {
+        // UI-kit buttons (Tabs, Button) have no explicit type; stop them from implicitly submitting the form.
+        const b = (e.target as HTMLElement).closest('button');
+        if (b && b.form === e.currentTarget && !b.hasAttribute('type')) e.preventDefault();
+      }}
       className="flex flex-col gap-4"
     >
+      {/* First submit button in tree order = the default button for Enter-to-submit. */}
+      <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
       {description && <div className="text-[13px] text-muted -mt-1">{description}</div>}
       <FormFields fields={fields} values={values} setValues={setValues} errors={errors} columns={columns} />
       {typeof children === 'function' ? children(values, setValues) : children}
-      <button type="submit" className="hidden" />
     </form>
   );
   const footer = (

@@ -4,7 +4,7 @@ import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { NotFoundError, ValidationError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
-import { loadContract, todayStr, optionLabels } from './common';
+import { loadContract, todayStr, optionLabels, sequential } from './common';
 import { COVERING_STATUSES } from './schemas';
 import type { ScopeItemInput } from './schemas';
 
@@ -35,9 +35,9 @@ async function coveringContracts(tx: Tx, customerId: string, at: Date): Promise<
     .orderBy(asc(schema.contracts.startDate));
   if (!contracts.length) return [];
   const ids = contracts.map((c) => c.id);
-  const [services, sites] = await Promise.all([
-    tx.select().from(schema.contractServices).where(inArray(schema.contractServices.contractId, ids)),
-    tx.select().from(schema.contractSites).where(inArray(schema.contractSites.contractId, ids)),
+  const [services, sites] = await sequential([
+    () => tx.select().from(schema.contractServices).where(inArray(schema.contractServices.contractId, ids)),
+    () => tx.select().from(schema.contractSites).where(inArray(schema.contractSites.contractId, ids)),
   ]);
   return contracts.map((contract) => ({
     contract,
@@ -177,10 +177,10 @@ async function decorate(tx: Tx, items: ScopeItemRow[]) {
   const serviceIds = [...new Set(items.map((i) => i.serviceId).filter((x): x is string => !!x))];
   const siteIds = [...new Set(items.map((i) => i.siteId).filter((x): x is string => !!x))];
   const ciKeys = [...new Set(items.map((i) => i.ciTypeKey).filter((x): x is string => !!x))];
-  const [services, sites, ciTypes] = await Promise.all([
-    serviceIds.length ? tx.select({ id: schema.services.id, name: schema.services.name }).from(schema.services).where(inArray(schema.services.id, serviceIds)) : [],
-    siteIds.length ? tx.select({ id: schema.sites.id, name: schema.sites.name }).from(schema.sites).where(inArray(schema.sites.id, siteIds)) : [],
-    ciKeys.length ? tx.select({ key: schema.ciTypes.key, name: schema.ciTypes.name }).from(schema.ciTypes).where(inArray(schema.ciTypes.key, ciKeys)) : [],
+  const [services, sites, ciTypes] = await sequential([
+    async () => (serviceIds.length ? await tx.select({ id: schema.services.id, name: schema.services.name }).from(schema.services).where(inArray(schema.services.id, serviceIds)) : []),
+    async () => (siteIds.length ? await tx.select({ id: schema.sites.id, name: schema.sites.name }).from(schema.sites).where(inArray(schema.sites.id, siteIds)) : []),
+    async () => (ciKeys.length ? await tx.select({ key: schema.ciTypes.key, name: schema.ciTypes.name }).from(schema.ciTypes).where(inArray(schema.ciTypes.key, ciKeys)) : []),
   ]);
   const svc = new Map(services.map((s) => [s.id, s.name]));
   const site = new Map(sites.map((s) => [s.id, s.name]));

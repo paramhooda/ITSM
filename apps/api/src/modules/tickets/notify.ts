@@ -1,4 +1,4 @@
-import { eq, and, inArray, or, isNull, sql } from 'drizzle-orm';
+import { eq, and, inArray, or, isNull } from 'drizzle-orm';
 import type { NotificationEvent } from '@itsm/shared';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
@@ -239,4 +239,3 @@ export async function escalationRecipients(tx: Tx, ticket: TicketRow, opts: { as
   return [...msp, ...portal];
 }
 
-export const nowSql = sql`now()`;

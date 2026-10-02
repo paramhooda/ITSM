@@ -6,7 +6,7 @@ import { NotFoundError, ValidationError, ConflictError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { orderBy, searchLike } from '@/core/query';
 import { getSetting } from '@/modules/config/service';
-import { loadContract, todayStr, addDays, daysToExpiry, contractStatusOptions, statusDisplay, optionLabels, userNames, type ContractRow } from './common';
+import { loadContract, todayStr, addDays, daysToExpiry, contractStatusOptions, statusDisplay, optionLabels, userNames, type ContractRow, sequential } from './common';
 import { COVERING_STATUSES, commercialFields, type ContractCreate, type ContractPatch, type ContractListQuery, type ContractServiceInput, type RenewInput, type EntitlementInput, type ScopeItemInput } from './schemas';
 import { utilizationBatch, decorateEntitlements } from './entitlements';
 import { listScopeItems } from './scope';
@@ -186,12 +186,13 @@ export async function listContracts(ctx: Ctx, q: ContractListQuery) {
     .offset((q.page - 1) * q.pageSize);
 
   const ids = rows.map((r) => r.contract.id);
-  const [serviceRows, ents, statusMap] = await Promise.all([
-    ids.length
-      ? ctx.tx.select({ contractId: schema.contractServices.contractId, id: schema.services.id, name: schema.services.name }).from(schema.contractServices).innerJoin(schema.services, eq(schema.services.id, schema.contractServices.serviceId)).where(inArray(schema.contractServices.contractId, ids)).orderBy(asc(schema.services.name))
-      : [],
-    ids.length ? ctx.tx.select().from(schema.contractEntitlements).where(and(inArray(schema.contractEntitlements.contractId, ids), eq(schema.contractEntitlements.isActive, true))) : [],
-    contractStatusOptions(ctx.tx),
+  const [serviceRows, ents, statusMap] = await sequential([
+    async () =>
+      ids.length
+        ? await ctx.tx.select({ contractId: schema.contractServices.contractId, id: schema.services.id, name: schema.services.name }).from(schema.contractServices).innerJoin(schema.services, eq(schema.services.id, schema.contractServices.serviceId)).where(inArray(schema.contractServices.contractId, ids)).orderBy(asc(schema.services.name))
+        : [],
+    async () => (ids.length ? await ctx.tx.select().from(schema.contractEntitlements).where(and(inArray(schema.contractEntitlements.contractId, ids), eq(schema.contractEntitlements.isActive, true))) : []),
+    () => contractStatusOptions(ctx.tx),
   ]);
   const owners = await userNames(ctx.tx, rows.map((r) => r.contract.ownerUserId));
   const util = await utilizationBatch(ctx.tx, ents, new Map(rows.map((r) => [r.contract.id, r.contract])));
@@ -234,30 +235,30 @@ export async function getContract(ctx: Ctx, id: string) {
   const allowed = ctx.can('contracts:commercial', contract.customerId);
   const [customer] = await ctx.tx.select({ id: schema.customers.id, code: schema.customers.code, name: schema.customers.name, accountManagerId: schema.customers.accountManagerId }).from(schema.customers).where(eq(schema.customers.id, contract.customerId)).limit(1);
 
-  const [serviceRows, siteRows, entRows, scope, children, parent, docs, statusMap, labels, policies, calendars, holidayCals, ticketCounts] = await Promise.all([
-    ctx.tx
+  const [serviceRows, siteRows, entRows, scope, children, parent, docs, statusMap, labels, policies, calendars, holidayCals, ticketCounts] = await sequential([
+    () => ctx.tx
       .select({ cs: schema.contractServices, serviceName: schema.services.name, serviceKey: schema.services.key, serviceDomain: schema.services.domain, serviceDefaultSlaPolicyId: schema.services.defaultSlaPolicyId, serviceDefaultTeamId: schema.services.defaultTeamId })
       .from(schema.contractServices)
       .innerJoin(schema.services, eq(schema.services.id, schema.contractServices.serviceId))
       .where(eq(schema.contractServices.contractId, id))
       .orderBy(asc(schema.services.name)),
-    ctx.tx
+    () => ctx.tx
       .select({ id: schema.sites.id, code: schema.sites.code, name: schema.sites.name, isPrimary: schema.sites.isPrimary, isActive: schema.sites.isActive, address: schema.sites.address })
       .from(schema.contractSites)
       .innerJoin(schema.sites, eq(schema.sites.id, schema.contractSites.siteId))
       .where(eq(schema.contractSites.contractId, id))
       .orderBy(asc(schema.sites.name)),
-    ctx.tx.select().from(schema.contractEntitlements).where(eq(schema.contractEntitlements.contractId, id)).orderBy(asc(schema.contractEntitlements.createdAt)),
-    listScopeItems(ctx, id),
-    ctx.tx.select({ id: c.id, number: c.number, name: c.name, status: c.status, startDate: c.startDate, endDate: c.endDate }).from(c).where(eq(c.parentContractId, id)).orderBy(asc(c.startDate)),
-    contract.parentContractId ? ctx.tx.select({ id: c.id, number: c.number, name: c.name, status: c.status, startDate: c.startDate, endDate: c.endDate }).from(c).where(eq(c.id, contract.parentContractId)).limit(1) : Promise.resolve([]),
-    ctx.tx.select({ id: schema.attachments.id, docType: schema.attachments.docType, filename: schema.attachments.filename, title: schema.attachments.title, createdAt: schema.attachments.createdAt }).from(schema.attachments).where(and(eq(schema.attachments.entityType, 'contract'), eq(schema.attachments.entityId, id))),
-    contractStatusOptions(ctx.tx),
-    optionLabels(ctx.tx, [contract.typeId]),
-    ctx.tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name }).from(schema.slaPolicies),
-    ctx.tx.select({ id: schema.businessCalendars.id, name: schema.businessCalendars.name, timezone: schema.businessCalendars.timezone, is24x7: schema.businessCalendars.is24x7 }).from(schema.businessCalendars),
-    ctx.tx.select({ id: schema.holidayCalendars.id, name: schema.holidayCalendars.name }).from(schema.holidayCalendars),
-    ctx.tx
+    () => ctx.tx.select().from(schema.contractEntitlements).where(eq(schema.contractEntitlements.contractId, id)).orderBy(asc(schema.contractEntitlements.createdAt)),
+    () => listScopeItems(ctx, id),
+    () => ctx.tx.select({ id: c.id, number: c.number, name: c.name, status: c.status, startDate: c.startDate, endDate: c.endDate }).from(c).where(eq(c.parentContractId, id)).orderBy(asc(c.startDate)),
+    async () => (contract.parentContractId ? await ctx.tx.select({ id: c.id, number: c.number, name: c.name, status: c.status, startDate: c.startDate, endDate: c.endDate }).from(c).where(eq(c.id, contract.parentContractId)).limit(1) : []),
+    () => ctx.tx.select({ id: schema.attachments.id, docType: schema.attachments.docType, filename: schema.attachments.filename, title: schema.attachments.title, createdAt: schema.attachments.createdAt }).from(schema.attachments).where(and(eq(schema.attachments.entityType, 'contract'), eq(schema.attachments.entityId, id))),
+    () => contractStatusOptions(ctx.tx),
+    () => optionLabels(ctx.tx, [contract.typeId]),
+    () => ctx.tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name }).from(schema.slaPolicies),
+    () => ctx.tx.select({ id: schema.businessCalendars.id, name: schema.businessCalendars.name, timezone: schema.businessCalendars.timezone, is24x7: schema.businessCalendars.is24x7 }).from(schema.businessCalendars),
+    () => ctx.tx.select({ id: schema.holidayCalendars.id, name: schema.holidayCalendars.name }).from(schema.holidayCalendars),
+    () => ctx.tx
       .select({ open: sql<number>`count(*) filter (where ${schema.configOptions.statusCategory} in ('new','open','pending'))::int`, total: sql<number>`count(*)::int` })
       .from(schema.tickets)
       .innerJoin(schema.configOptions, eq(schema.configOptions.id, schema.tickets.statusId))
@@ -462,11 +463,11 @@ export async function renewContract(ctx: Ctx, id: string, input: RenewInput) {
     .values({ ...copy, number, name: input.name ?? old.name, startDate: input.startDate, endDate: input.endDate, status: 'draft', parentContractId: old.id, customFields: { ...(old.customFields ?? {}), renewedFrom: old.number } })
     .returning();
 
-  const [services, sites, scope, ents] = await Promise.all([
-    ctx.tx.select().from(schema.contractServices).where(eq(schema.contractServices.contractId, old.id)),
-    ctx.tx.select().from(schema.contractSites).where(eq(schema.contractSites.contractId, old.id)),
-    ctx.tx.select().from(schema.scopeItems).where(eq(schema.scopeItems.contractId, old.id)),
-    ctx.tx.select().from(schema.contractEntitlements).where(and(eq(schema.contractEntitlements.contractId, old.id), eq(schema.contractEntitlements.isActive, true))),
+  const [services, sites, scope, ents] = await sequential([
+    () => ctx.tx.select().from(schema.contractServices).where(eq(schema.contractServices.contractId, old.id)),
+    () => ctx.tx.select().from(schema.contractSites).where(eq(schema.contractSites.contractId, old.id)),
+    () => ctx.tx.select().from(schema.scopeItems).where(eq(schema.scopeItems.contractId, old.id)),
+    () => ctx.tx.select().from(schema.contractEntitlements).where(and(eq(schema.contractEntitlements.contractId, old.id), eq(schema.contractEntitlements.isActive, true))),
   ]);
   if (services.length) await ctx.tx.insert(schema.contractServices).values(services.map(({ contractId: _x, ...s }) => ({ ...s, contractId: next.id })));
   if (sites.length) await ctx.tx.insert(schema.contractSites).values(sites.map(({ contractId: _x, ...s }) => ({ ...s, contractId: next.id })));

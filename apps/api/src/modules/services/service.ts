@@ -6,7 +6,7 @@ import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { NotFoundError, ConflictError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
-import { optionLabels, userNames, contractStatusOptions, statusDisplay, uuidList } from '@/modules/contracts/common';
+import { optionLabels, userNames, contractStatusOptions, statusDisplay, uuidList, sequential } from '@/modules/contracts/common';
 import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 
 const s = schema.services;
@@ -72,13 +72,13 @@ async function counts(tx: Tx, ids: string[]) {
 
 async function decorate(tx: Tx, rows: (typeof s.$inferSelect)[]) {
   if (!rows.length) return [];
-  const [labels, owners, teams, policies, cnt, ciTypes] = await Promise.all([
-    optionLabels(tx, rows.flatMap((r) => [r.categoryId, r.statusId, r.defaultTicketCategoryId])),
-    userNames(tx, rows.map((r) => r.ownerUserId)),
-    tx.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams),
-    tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name }).from(schema.slaPolicies),
-    counts(tx, rows.map((r) => r.id)),
-    tx.select({ key: schema.ciTypes.key, name: schema.ciTypes.name }).from(schema.ciTypes),
+  const [labels, owners, teams, policies, cnt, ciTypes] = await sequential([
+    () => optionLabels(tx, rows.flatMap((r) => [r.categoryId, r.statusId, r.defaultTicketCategoryId])),
+    () => userNames(tx, rows.map((r) => r.ownerUserId)),
+    () => tx.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams),
+    () => tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name }).from(schema.slaPolicies),
+    () => counts(tx, rows.map((r) => r.id)),
+    () => tx.select({ key: schema.ciTypes.key, name: schema.ciTypes.name }).from(schema.ciTypes),
   ]);
   const team = new Map(teams.map((t) => [t.id, t.name]));
   const policy = new Map(policies.map((p) => [p.id, p.name]));
