@@ -58,11 +58,11 @@ export function TicketMiniTable({ rows, columns = ['customer', 'priority', 'stat
                 <div className="truncate text-[12.5px]" title={t.title}>{t.title}</div>
               </td>
               {has('customer') && !isCustomer && <td className="text-muted whitespace-nowrap max-w-[160px] truncate"><Link to={`/customers/${t.customer_id}`} className="hover:underline">{t.customer_name ?? '—'}</Link></td>}
-              {has('priority') && <td>{t.priority ? <Badge color={t.priority_color}>{t.priority.split(' - ')[0]}</Badge> : '—'}</td>}
-              {has('severity') && <td>{t.severity ? <Badge color={t.severity_color}>{t.severity}</Badge> : '—'}</td>}
+              {has('priority') && <td>{t.priority ? <Badge color={t.priority_color ?? undefined}>{t.priority.split(' - ')[0]}</Badge> : '—'}</td>}
+              {has('severity') && <td>{t.severity ? <Badge color={t.severity_color ?? undefined}>{t.severity}</Badge> : '—'}</td>}
               {has('category') && <td className="text-muted whitespace-nowrap">{t.category ?? '—'}</td>}
               {has('ci') && <td className="text-muted whitespace-nowrap max-w-[140px] truncate">{t.ci_id && !isCustomer ? <Link to={`/cmdb/${t.ci_id}`} className="hover:underline">{t.ci_name}</Link> : t.ci_name ?? '—'}</td>}
-              {has('status') && <td>{t.status ? <Badge color={t.status_color}>{t.status}</Badge> : '—'}</td>}
+              {has('status') && <td>{t.status ? <Badge color={t.status_color ?? undefined}>{t.status}</Badge> : '—'}</td>}
               {has('sla') && <td className="whitespace-nowrap"><SlaCell sla={t.sla} /></td>}
               {has('due') && <td className="whitespace-nowrap text-muted">{t.due_at ? relativeTime(t.due_at) : '—'}</td>}
               {has('assignee') && <td className="text-muted whitespace-nowrap">{t.assignee ?? <span className="text-amber-600 dark:text-amber-400">Unassigned</span>}</td>}

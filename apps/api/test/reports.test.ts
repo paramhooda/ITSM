@@ -161,7 +161,7 @@ describe('dashboards', () => {
     // trends for a portal user are pinned to their customer
     const t = await asPortal((ctx) => dash.trends(ctx, { customerId: ids.customerB, from: today, to: today }));
     expect(t.customerId).toBe(ids.customerA);
-    expect(t.series[0]!.opened).toBe(4);
+    expect((t.series[0] as { opened: number }).opened).toBe(4);
   });
 });
 

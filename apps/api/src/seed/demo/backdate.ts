@@ -137,7 +137,7 @@ async function batchTimestamp(tx: Tx, table: string, column: string, pairs: [str
   for (let i = 0; i < pairs.length; i += 400) {
     const chunk = pairs.slice(i, i + 400);
     const values = sql.join(chunk.map(([id, d]) => sql`(${id}::uuid, ${d.toISOString()}::timestamptz)`), sql`, `);
-    await tx.execute(sql`UPDATE ${sql.raw(table)} AS t SET ${sql.raw(column)} = v.t FROM (VALUES ${values}) AS v(id, t) WHERE t.id = v.id`);
+    await tx.execute(sql`UPDATE ${sql.raw(table)} AS tgt SET ${sql.raw(column)} = v.ts FROM (VALUES ${values}) AS v(id, ts) WHERE tgt.id = v.id`);
   }
 }
 
@@ -183,7 +183,7 @@ export async function backdateRuns(tx: Tx, runs: TicketRun[], now: Date) {
     if (r.state === 'breached' && r.breachedAt) {
       await tx.insert(schema.ticketSlaEvents).values({ ticketSlaId: r.id, customerId: r.customerId, eventType: 'breached', details: { dueAt: r.dueAt, source: 'processor' }, occurredAt: r.breachedAt });
     }
-    if (r.warnedAt) await tx.insert(schema.ticketSlaEvents).values({ ticketSlaId: r.id, customerId: r.customerId, eventType: 'warning', details: { pct: r.target ? Math.round(((r.target * 0.75) / r.target) * 100) : 75, dueAt: r.dueAt }, occurredAt: r.warnedAt });
+    if (r.warnedAt) await tx.insert(schema.ticketSlaEvents).values({ ticketSlaId: r.id, customerId: r.customerId, eventType: 'warning', details: { pct: 75, dueAt: r.dueAt }, occurredAt: r.warnedAt });
   }
 
   // --- tickets
