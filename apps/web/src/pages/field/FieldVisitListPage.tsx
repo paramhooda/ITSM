@@ -26,6 +26,7 @@ export default function FieldVisitListPage() {
   const engineers = useEngineers();
   const customers = useCustomersLookup();
   const can = useAuthStore((s) => s.can);
+  const me = useAuthStore((s) => s.user);
   const [createOpen, setCreateOpen] = useState(false);
   const view = state.view === 'calendar' ? 'calendar' : 'list';
 
@@ -173,7 +174,7 @@ export default function FieldVisitListPage() {
           {list.isError && <div className="px-3 py-2 text-[12.5px] text-red-600">{(list.error as Error).message}</div>}
         </div>
       ) : (
-        <VisitCalendar weekStart={weekStart} items={(calendar.data?.items ?? []).filter((v) => state.mine !== 'true' || v.engineerId === useAuthStore.getState().user?.id || v.additionalEngineerIds.includes(useAuthStore.getState().user?.id ?? ''))} loading={calendar.isFetching} onWeekChange={(d) => set({ week: ymd(d) }, false)} onSelect={(id) => navigate(`/field/${id}`)} />
+        <VisitCalendar weekStart={weekStart} items={(calendar.data?.items ?? []).filter((v) => state.mine !== 'true' || v.engineerId === me?.id || v.additionalEngineerIds.includes(me?.id ?? ''))} loading={calendar.isFetching} onWeekChange={(d) => set({ week: ymd(d) }, false)} onSelect={(id) => navigate(`/field/${id}`)} />
       )}
 
       <VisitForm

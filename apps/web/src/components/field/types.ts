@@ -21,6 +21,7 @@ export interface VisitListRow {
   ticketNumber: string | null;
   contractId?: string | null;
   contractNumber?: string | null;
+  contractName?: string | null;
   serviceId?: string | null;
   serviceName?: string | null;
   typeId: string | null;

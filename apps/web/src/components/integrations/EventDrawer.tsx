@@ -41,7 +41,7 @@ export function EventDrawer({ id, onClose }: { id: string | null; onClose: () =>
   const canCreate = !!ev && !ev.ticketId && ev.processingStatus !== 'received' && can('tickets:create');
 
   return (
-    <Drawer open={!!id} onClose={onClose} title={ev ? <span className="flex items-center gap-2">{typeLabel(ev.integrationType)} event <ProcessingBadge status={ev.processingStatus} /></span> : 'Event'} width="max-w-2xl">
+    <Drawer open={!!id} onClose={onClose} title={ev ? <span className="flex items-center gap-2">{typeLabel(ev.integrationType)} event <ProcessingBadge status={ev.processingStatus} title={ev.processingNote ?? undefined} /></span> : 'Event'} width="max-w-2xl">
       {q.isLoading && <LoadingBlock />}
       {q.error && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
       {ev && (
@@ -74,7 +74,7 @@ export function EventDrawer({ id, onClose }: { id: string | null; onClose: () =>
               { label: 'External id', value: <span className="font-mono text-xs">{ev.externalId}</span> },
               { label: 'Occurred', value: ev.normalized?.occurredAt ? fmtDateTime(ev.normalized.occurredAt) : '—' },
               { label: 'Configuration item', value: ev.matchedCiId ? <Link className="text-brand-600 hover:underline inline-flex items-center gap-1" to={`/cmdb/${ev.matchedCiId}`}>{ev.ciName ?? 'CI'} <ExternalLink className="h-3 w-3" /></Link> : <span className="text-muted">not matched</span> },
-              { label: 'Ticket', value: ev.ticket ? <Link className="text-brand-600 hover:underline inline-flex items-center gap-1" to={`/tickets/${ev.ticket.id}`}>{ev.ticket.number} <Badge color={ev.ticket.statusColor}>{ev.ticket.statusLabel}</Badge></Link> : <span className="text-muted">none</span> },
+              { label: 'Ticket', value: ev.ticket ? <Link className="text-brand-600 hover:underline inline-flex items-center gap-1" to={`/tickets/${ev.ticket.id}`}>{ev.ticket.number} <Badge color={ev.ticket.statusColor ?? undefined}>{ev.ticket.statusLabel}</Badge></Link> : <span className="text-muted">none</span> },
               { label: 'Processed', value: ev.processedAt ? fmtDateTime(ev.processedAt) : <span className="text-muted">pending</span> },
               { label: 'Tags', value: ev.normalized?.tags?.length ? <span className="flex flex-wrap gap-1">{ev.normalized.tags.map((t) => <Badge key={t} color="slate">{t}</Badge>)}</span> : '—' },
               ...(ev.normalized?.group || ev.normalized?.probe ? [{ label: 'Group / probe', value: [ev.normalized?.group, ev.normalized?.probe].filter(Boolean).join(' / ') }] : []),

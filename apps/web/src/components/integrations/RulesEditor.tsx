@@ -18,7 +18,7 @@ export function RulesEditor({ value, onChange, multiCustomer, integrationType }:
   const lookups = useLookups();
   const customers = useCustomersLookup();
   const set = <K extends keyof Rules>(k: K, v: Rules[K]) => onChange({ ...value, [k]: v });
-  const categories = lookups.options('ticket_category', { domain: value.domain, ticketType: 'incident' }).filter((c) => c.domain === value.domain || c.domain === 'general');
+  const categories = lookups.options('ticket_category', { domain: value.domain, ticketType: 'incident' });
   const subcategories = lookups.options('ticket_subcategory');
   const selectedCategory = categories.find((c) => c.key === value.defaultCategoryKey);
   const priorities = lookups.options('ticket_priority');

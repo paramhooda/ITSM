@@ -3,9 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CalendarClock, Play, CheckCircle2, Ban, RefreshCw, PenLine, FileText, ExternalLink, Pencil, Lock, Globe, ClipboardList, Package, MessageSquare, Clock, Ticket, Wrench, Paperclip, History } from 'lucide-react';
-import { PageHeader, Button, Card, KeyValue, Badge, LoadingBlock, ErrorBlock, Dialog, Field, Input, Textarea, Select, Toggle, Avatar, ProgressBar, EmptyState, Checkbox } from '@/components/ui';
-import { useAuthStore } from '@/stores/auth';
+import { PageHeader, Button, KeyValue, Badge, LoadingBlock, ErrorBlock, Dialog, Field, Input, Textarea, Select, Toggle, Avatar, ProgressBar, EmptyState, Checkbox } from '@/components/ui';
 import { useUiStore } from '@/stores/ui';
+import { Panel } from '@/components/tickets/Panel';
 import { useEngineers, useLookups } from '@/hooks/useLookups';
 import { errorMessage } from '@/components/cmdb/hooks';
 import { fmtDate, fmtDateTime, fmtDuration, fmtNumber, relativeTime, titleCase } from '@/lib/format';
@@ -32,7 +32,6 @@ export default function FieldVisitDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const user = useAuthStore((s) => s.user);
   const setAssistantContext = useUiStore((s) => s.setAssistantContext);
   const { data: visit, isLoading, error, refetch } = useQuery({ queryKey: fieldKeys.detail(id), queryFn: () => fieldApi.get(id), enabled: !!id });
   const [dialog, setDialog] = useState<DialogKind>(null);
@@ -100,7 +99,7 @@ export default function FieldVisitDetailPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-3 items-start">
         <div className="flex flex-col gap-3 min-w-0">
-          <Card title="Details">
+          <Panel title="Details">
             <KeyValue
               columns={3}
               items={[
@@ -119,15 +118,15 @@ export default function FieldVisitDetailPage() {
                 { label: 'Purpose', value: visit.purpose ? <span className="whitespace-pre-wrap">{visit.purpose}</span> : '—', span: 3 },
               ]}
             />
-          </Card>
+          </Panel>
 
           {(visit.workSummary || visit.findings || visit.recommendations) && (
-            <Card title={<span className="inline-flex items-center gap-2"><Wrench className="h-4 w-4 text-subtle" />Work performed</span>}>
+            <Panel title={<span className="inline-flex items-center gap-2"><Wrench className="h-4 w-4 text-subtle" />Work performed</span>}>
               <KeyValue columns={1} items={[{ label: 'Summary', value: <span className="whitespace-pre-wrap">{visit.workSummary ?? '—'}</span> }, { label: 'Findings', value: <span className="whitespace-pre-wrap">{visit.findings ?? '—'}</span> }, { label: 'Recommendations', value: <span className="whitespace-pre-wrap">{visit.recommendations ?? '—'}</span> }]} />
-            </Card>
+            </Panel>
           )}
 
-          <Card title={<span className="inline-flex items-center gap-2"><ClipboardList className="h-4 w-4 text-subtle" />Checklist <span className="text-subtle font-normal">{visit.checklist.filter((c) => c.done).length}/{visit.checklist.length}</span></span>} padded={false}>
+          <Panel title={<span className="inline-flex items-center gap-2"><ClipboardList className="h-4 w-4 text-subtle" />Checklist <span className="text-subtle font-normal">{visit.checklist.filter((c) => c.done).length}/{visit.checklist.length}</span></span>} padded={false}>
             {visit.checklist.length === 0 ? (
               <EmptyState title="No checklist" description="Add checklist items when editing the visit." />
             ) : (
@@ -142,15 +141,15 @@ export default function FieldVisitDetailPage() {
                 ))}
               </ul>
             )}
-          </Card>
+          </Panel>
 
-          <Card title={<span className="inline-flex items-center gap-2"><Package className="h-4 w-4 text-subtle" />Parts used <span className="text-subtle font-normal">{visit.parts.length}</span></span>} padded={false}>
+          <Panel title={<span className="inline-flex items-center gap-2"><Package className="h-4 w-4 text-subtle" />Parts used <span className="text-subtle font-normal">{visit.parts.length}</span></span>} padded={false}>
             <PartsTable visitId={visit.id} customerId={visit.customerId} parts={visit.parts} canEdit={!!p.canParts} />
-          </Card>
+          </Panel>
 
           <NotesCard visit={visit} canNote={p.canNote} onChanged={invalidate} />
 
-          <Card title={<span className="inline-flex items-center gap-2"><Clock className="h-4 w-4 text-subtle" />Time</span>}>
+          <Panel title={<span className="inline-flex items-center gap-2"><Clock className="h-4 w-4 text-subtle" />Time</span>}>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[13px]">
               <div><div className="text-[11.5px] uppercase tracking-wide text-subtle font-medium">Work</div><div className="text-lg font-semibold">{fmtDuration(visit.workMinutes)}</div></div>
               <div><div className="text-[11.5px] uppercase tracking-wide text-subtle font-medium">Travel</div><div className="text-lg font-semibold">{fmtDuration(visit.travelMinutes)}</div></div>
@@ -167,21 +166,21 @@ export default function FieldVisitDetailPage() {
                 </tbody>
               </table>
             )}
-          </Card>
+          </Panel>
         </div>
 
         <aside className="xl:sticky xl:top-4 flex flex-col gap-3 min-w-0">
           {visit.customerAckAt ? (
-            <Card title={<span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4 text-subtle" />Customer acknowledgement</span>}>
+            <Panel title={<span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4 text-subtle" />Customer acknowledgement</span>}>
               <div className="text-[13px]"><strong>{visit.customerAckName}</strong>{visit.customerAckTitle ? `, ${visit.customerAckTitle}` : ''}</div>
               <div className="text-[12px] text-muted">{fmtDateTime(visit.customerAckAt)} · <Rating value={visit.customerRating} /></div>
               {visit.customerAckNotes && <div className="text-[12.5px] mt-1.5 whitespace-pre-wrap">{visit.customerAckNotes}</div>}
-            </Card>
+            </Panel>
           ) : visit.status === 'completed' ? (
             <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/30 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-200">Awaiting customer acknowledgement.</div>
           ) : null}
 
-          <Card title={<span className="inline-flex items-center gap-2"><Ticket className="h-4 w-4 text-subtle" />Linked ticket</span>}>
+          <Panel title={<span className="inline-flex items-center gap-2"><Ticket className="h-4 w-4 text-subtle" />Linked ticket</span>}>
             {visit.ticket ? (
               <Link to={`/tickets/${visit.ticket.id}`} className="block hover:underline">
                 <div className="font-mono text-[12.5px] text-brand-700 dark:text-brand-300">{visit.ticket.number}</div>
@@ -191,17 +190,17 @@ export default function FieldVisitDetailPage() {
             ) : (
               <div className="text-[12.5px] text-subtle">No ticket linked.</div>
             )}
-          </Card>
+          </Panel>
 
           {visit.pmOccurrence && (
-            <Card title={<span className="inline-flex items-center gap-2"><Wrench className="h-4 w-4 text-subtle" />Preventive maintenance</span>}>
+            <Panel title={<span className="inline-flex items-center gap-2"><Wrench className="h-4 w-4 text-subtle" />Preventive maintenance</span>}>
               <Link to={`/maintenance?tab=programs&program=${visit.pmOccurrence.programId}`} className="text-[13px] font-medium hover:underline">{visit.pmOccurrence.programName}</Link>
               <div className="text-[12px] text-muted mt-0.5">Planned {fmtDate(visit.pmOccurrence.plannedDate)}{visit.pmOccurrence.scheduledDate ? ` · scheduled ${fmtDate(visit.pmOccurrence.scheduledDate)}` : ''} · {titleCase(visit.pmOccurrence.frequency)}</div>
               <div className="mt-1"><Badge color={visit.pmOccurrence.status === 'completed' ? 'green' : visit.pmOccurrence.status === 'missed' ? 'red' : 'blue'} dot>{titleCase(visit.pmOccurrence.status)}</Badge></div>
-            </Card>
+            </Panel>
           )}
 
-          <Card title="Entitlement">
+          <Panel title="Entitlement">
             {visit.entitlement ? (
               <div>
                 <div className="flex items-center justify-between text-[12.5px]"><span className="font-medium">{visit.entitlement.name}</span><span className="tabular-nums text-muted">{fmtNumber(visit.entitlement.utilization.used, 1)} / {fmtNumber(visit.entitlement.utilization.quantity, 0)} {visit.entitlement.unit}</span></div>
@@ -213,19 +212,19 @@ export default function FieldVisitDetailPage() {
             ) : (
               <div className="text-[12.5px] text-subtle">No entitlement linked: the visit is not metered against the contract.</div>
             )}
-          </Card>
+          </Panel>
 
-          <Card title={<span className="inline-flex items-center gap-2"><Paperclip className="h-4 w-4 text-subtle" />Attachments <span className="text-subtle font-normal">{visit.attachmentCount}</span></span>}>
+          <Panel title={<span className="inline-flex items-center gap-2"><Paperclip className="h-4 w-4 text-subtle" />Attachments <span className="text-subtle font-normal">{visit.attachmentCount}</span></span>}>
             <Suspense fallback={<LoadingBlock />}>
               <AttachmentList entityType="field_visit" entityId={visit.id} customerId={visit.customerId} canUpload={canExec} canDelete={p.canManage} showVisibility compact docTypes={DOC_TYPES} />
             </Suspense>
-          </Card>
+          </Panel>
 
-          <Card title={<span className="inline-flex items-center gap-2"><History className="h-4 w-4 text-subtle" />History</span>}>
+          <Panel title={<span className="inline-flex items-center gap-2"><History className="h-4 w-4 text-subtle" />History</span>}>
             <Suspense fallback={<LoadingBlock />}>
               <AuditTrail entityType="field_visit" entityId={visit.id} compact limit={30} />
             </Suspense>
-          </Card>
+          </Panel>
         </aside>
       </div>
 
@@ -235,7 +234,6 @@ export default function FieldVisitDetailPage() {
       <AcknowledgeDialog open={dialog === 'acknowledge'} visit={visit} onClose={() => setDialog(null)} onDone={onDone('Acknowledgement recorded')} />
       <CompleteVisitDialog open={dialog === 'complete'} visit={visit} onClose={() => setDialog(null)} onCompleted={() => { setDialog(null); invalidate(); }} />
       <VisitForm open={dialog === 'edit'} visit={visit} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); invalidate(); }} />
-      {user && visit.status === 'requested' && !p.canSchedule && p.canExecute && <div className="hidden" />}
     </div>
   );
 }
@@ -254,7 +252,7 @@ function NotesCard({ visit, canNote, onChanged }: { visit: VisitDetail; canNote:
     onError: (e) => toast.error(errorMessage(e)),
   });
   return (
-    <Card title={<span className="inline-flex items-center gap-2"><MessageSquare className="h-4 w-4 text-subtle" />Notes <span className="text-subtle font-normal">{visit.notes.length}</span></span>} padded={false}>
+    <Panel title={<span className="inline-flex items-center gap-2"><MessageSquare className="h-4 w-4 text-subtle" />Notes <span className="text-subtle font-normal">{visit.notes.length}</span></span>} padded={false}>
       <ul className="divide-y divide-[var(--border)]">
         {visit.notes.length === 0 && <li className="px-4 py-3 text-[12.5px] text-subtle">No notes yet.</li>}
         {visit.notes.map((n) => (
@@ -278,7 +276,7 @@ function NotesCard({ visit, canNote, onChanged }: { visit: VisitDetail; canNote:
           </div>
         </div>
       )}
-    </Card>
+    </Panel>
   );
 }
 

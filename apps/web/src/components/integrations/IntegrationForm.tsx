@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Copy, Check } from 'lucide-react';
@@ -46,7 +46,7 @@ const toForm = (i: Integration | null | undefined, types: IntegrationType[]): Fo
 /** Very small markdown renderer for adapter docs (headings, lists, code, inline code, tables, bold). */
 function Markdown({ text }: { text: string }) {
   const lines = text.split('\n');
-  const out: JSX.Element[] = [];
+  const out: ReactElement[] = [];
   let i = 0;
   let key = 0;
   const inline = (s: string) => {
@@ -208,6 +208,5 @@ export function IntegrationForm({ open, onClose, integration, types }: Props) {
   );
 }
 
-export function useIntegrationTypes() {
-  return { queryKey: ['integrations', 'types'] as const, queryFn: () => get<{ items: IntegrationType[] }>('/integrations/types'), staleTime: 300_000 };
-}
+/** Query options for the adapter catalogue (types, docs, sample payloads). */
+export const integrationTypesQuery = () => ({ queryKey: ['integrations', 'types'] as const, queryFn: () => get<{ items: IntegrationType[] }>('/integrations/types'), staleTime: 300_000 });
