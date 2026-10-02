@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense, type ReactNode } from 'react';
+import { useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth';
 import { LoadingBlock } from '@/components/ui';
@@ -19,9 +19,11 @@ function Guard({ perm, children }: { perm?: Permission[]; children: ReactNode })
 export default function App() {
   const { user, ready, setSession, setReady } = useAuthStore();
   const location = useLocation();
+  const bootstrapped = useRef(false);
 
   useEffect(() => {
-    if (ready) return;
+    if (ready || bootstrapped.current) return;
+    bootstrapped.current = true;
     (async () => {
       try {
         const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });

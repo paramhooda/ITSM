@@ -84,6 +84,7 @@ a {
 @utility text-subtle { color: var(--text-subtle); }
 @utility border-default { border-color: var(--border); }
 
+@layer components {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -202,6 +203,7 @@ select.input {
 .prose-sm th, .prose-sm td {
   border: 1px solid var(--border);
   padding: 4px 8px;
+}
 }
 
 @keyframes fade-in {
