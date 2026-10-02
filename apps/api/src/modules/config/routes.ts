@@ -31,6 +31,9 @@ export default async function routes(app: FastifyInstance) {
 
   r.get('/config/lookups', { preHandler: app.auth(), schema: { tags: ['config'] } }, h((ctx) => svc.lookups(ctx)));
 
+  /** Admin overview: what needs attention now (failures, expiring access, configuration gaps). */
+  r.get('/admin/attention', { preHandler: app.auth('admin:config', 'admin:system'), schema: { tags: ['config'] } }, h((ctx) => svc.attention(ctx)));
+
   r.get('/config/options', { preHandler: app.auth('admin:config'), schema: { tags: ['config'], querystring: z.object({ type: z.string().optional(), includeInactive: z.coerce.boolean().optional() }) } }, h((ctx, req) => {
     const q = req.query as { type?: string; includeInactive?: boolean };
     return svc.listOptions(ctx, q.type, q.includeInactive ?? true);

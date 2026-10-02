@@ -126,7 +126,7 @@ export default function OptionsPage() {
       <SectionHeader
         title="Option lists"
         description="Pick-lists used across tickets, customers, contracts, services, assets and more. System entries can be renamed or deactivated but not removed."
-        actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>Add entry</Button>}
+        actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New entry</Button>}
       />
       <ConfigTable<ConfigOption>
         toolbar={
@@ -157,7 +157,7 @@ export default function OptionsPage() {
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Deactivate', icon: <Ban className="h-4 w-4" />, hidden: (r) => !r.isSystem || !r.isActive, onClick: (r) => update.mutate({ id: r.id, isActive: false }) },
           { label: 'Activate', icon: <Star className="h-4 w-4" />, hidden: (r) => r.isActive, onClick: (r) => update.mutate({ id: r.id, isActive: true }) },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, onClick: (r) => { if (confirm(`Delete "${r.label}"? Records referencing it keep working but lose the label.`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, confirm: (r) => ({ title: `Delete "${r.label}"?`, description: 'Records referencing it keep working but lose the label.', confirmLabel: 'Delete entry' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<OptionValues> open={editor.open} onClose={editor.close} title={editor.row ? `Edit ${singular(optionTypeLabel(type))}` : `New ${singular(optionTypeLabel(type))}`} fields={fields} initial={initial} onSubmit={submit} />

@@ -58,7 +58,7 @@ export default function RelationshipTypesPage() {
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Deactivate', icon: <Ban className="h-4 w-4" />, hidden: (r) => !r.isActive, onClick: (r) => update.mutate({ id: r.id, isActive: false }) },
           { label: 'Activate', icon: <Ban className="h-4 w-4" />, hidden: (r) => r.isActive, onClick: (r) => update.mutate({ id: r.id, isActive: true }) },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, onClick: (r) => { if (confirm(`Delete relationship type "${r.name}"?`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, confirm: (r) => ({ title: `Delete relationship type "${r.name}"?`, description: 'Fails if CI relationships of this type exist.', confirmLabel: 'Delete type' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values> open={editor.open} onClose={editor.close} title={editor.row ? 'Edit relationship type' : 'New relationship type'} fields={fields} initial={editor.row ? { ...editor.row } : { key: '', name: '', inverseName: '', description: '', isActive: true }} onSubmit={submit} />

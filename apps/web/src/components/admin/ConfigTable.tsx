@@ -1,6 +1,6 @@
-import { type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { MoreHorizontal } from 'lucide-react';
-import { DataTable, ErrorBlock, EmptyState, type Column } from '@/components/ui';
+import { DataTable, ErrorBlock, EmptyState, ConfirmDialog, type Column } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
 import { cn } from '@/lib/utils';
 
@@ -13,6 +13,20 @@ export interface RowAction<T> {
   disabled?: (row: T) => boolean;
   /** Show as an inline icon button instead of inside the overflow menu. */
   inline?: boolean;
+  /**
+   * Ask before running: the action opens a ConfirmDialog and `onClick` runs only
+   * once the user confirms. Every destructive config action goes through this so
+   * delete/revoke confirmations look the same on every admin page.
+   */
+  confirm?: (row: T) => ConfirmSpec;
+}
+
+export interface ConfirmSpec {
+  title?: ReactNode;
+  description?: ReactNode;
+  confirmLabel?: string;
+  /** Defaults to the action's `danger` flag. */
+  danger?: boolean;
 }
 
 export interface ConfigTableProps<T> {
@@ -38,6 +52,11 @@ export interface ConfigTableProps<T> {
  * and an overflow menu per row. Wraps the UI kit DataTable in a card.
  */
 export function ConfigTable<T extends { id?: string }>({ columns, rows, loading, error, retry, actions, onRowClick, toolbar, footer, empty, emptyTitle, emptyDescription, rowKey, dense = true, className }: ConfigTableProps<T>) {
+  const [pending, setPending] = useState<{ action: RowAction<T>; row: T; spec: ConfirmSpec } | null>(null);
+  const run = (a: RowAction<T>, row: T) => {
+    if (a.confirm) setPending({ action: a, row, spec: a.confirm(row) });
+    else a.onClick(row);
+  };
   const cols: Column<T>[] = [...columns];
   if (actions?.length) {
     cols.push({
@@ -55,7 +74,7 @@ export function ConfigTable<T extends { id?: string }>({ columns, rows, loading,
                 key={a.label}
                 title={a.label}
                 disabled={a.disabled?.(row)}
-                onClick={() => a.onClick(row)}
+                onClick={() => run(a, row)}
                 className={cn('h-7 w-7 inline-flex items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-default disabled:opacity-40 disabled:cursor-not-allowed', a.danger && 'hover:text-red-600')}
               >
                 {a.icon}
@@ -68,7 +87,7 @@ export function ConfigTable<T extends { id?: string }>({ columns, rows, loading,
                     <MoreHorizontal className="h-4 w-4" />
                   </button>
                 }
-                items={menu.map<MenuItem>((a) => ({ label: a.label, icon: a.icon, danger: a.danger, disabled: a.disabled?.(row), onClick: () => a.onClick(row) }))}
+                items={menu.map<MenuItem>((a) => ({ label: a.label, icon: a.icon, danger: a.danger, disabled: a.disabled?.(row), onClick: () => run(a, row) }))}
               />
             )}
           </div>
@@ -85,6 +104,19 @@ export function ConfigTable<T extends { id?: string }>({ columns, rows, loading,
         <DataTable<T> columns={cols} rows={rows} loading={loading} onRowClick={onRowClick} rowKey={rowKey} dense={dense} empty={empty ?? <EmptyState title={emptyTitle ?? 'Nothing configured yet'} description={emptyDescription} />} />
       )}
       {footer}
+      <ConfirmDialog
+        open={!!pending}
+        onClose={() => setPending(null)}
+        onConfirm={() => {
+          if (!pending) return;
+          pending.action.onClick(pending.row);
+          setPending(null);
+        }}
+        title={pending?.spec.title ?? `${pending?.action.label}?`}
+        description={pending?.spec.description}
+        confirmLabel={pending?.spec.confirmLabel ?? pending?.action.label}
+        danger={pending?.spec.danger ?? pending?.action.danger}
+      />
     </div>
   );
 }

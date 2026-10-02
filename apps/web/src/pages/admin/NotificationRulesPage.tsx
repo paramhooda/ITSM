@@ -100,7 +100,7 @@ export default function NotificationRulesPage() {
         onRowClick={editor.edit}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, onClick: (r) => { if (confirm(`Delete rule "${r.name}"?`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete rule "${r.name}"?`, description: 'Notifications already queued are still sent.', confirmLabel: 'Delete rule' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values> open={editor.open} onClose={editor.close} title={editor.row ? 'Edit notification rule' : 'New notification rule'} fields={fields} initial={initial} onSubmit={submit} variant="drawer" width="max-w-2xl" />

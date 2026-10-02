@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { UsersRound, Users, Ticket, AlertTriangle, Star, Mail, Phone, Settings2 } from 'lucide-react';
 import { get } from '@/api/client';
@@ -45,6 +45,7 @@ interface Directory {
 
 /** Who works where: every team with its people and live workload; people can sit in several teams. */
 export default function TeamsPage() {
+  const navigate = useNavigate();
   const can = useAuthStore((s) => s.can);
   const me = useAuthStore((s) => s.user);
   const { byKey } = useLookups();
@@ -67,7 +68,7 @@ export default function TeamsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="Teams" subtitle="Who works in which team, who leads it, and how much open work each team carries." actions={can('admin:users') ? <Button variant="outline" icon={<Settings2 className="h-4 w-4" />} onClick={() => (window.location.href = '/admin/teams')}>Manage teams</Button> : undefined} />
+      <PageHeader title="Teams" subtitle="Who works in which team, who leads it, and how much open work each team carries." actions={can('admin:users') ? <Button variant="outline" icon={<Settings2 className="h-4 w-4" />} onClick={() => navigate('/admin/teams')}>Manage in Administration</Button> : undefined} />
       {dir.isError && <ErrorBlock error={dir.error} retry={() => dir.refetch()} />}
       {dir.isLoading && <LoadingBlock />}
       {dir.data && (
@@ -81,9 +82,9 @@ export default function TeamsPage() {
             summary={`${fmtNumber(dir.data.totals.teams)} teams · ${fmtNumber(dir.data.totals.people)} people`}
             kpis={[
               { label: 'Teams', value: fmtNumber(dir.data.totals.teams), hint: `${fmtNumber(dir.data.totals.people)} people · ${fmtNumber(dir.data.totals.multiTeam)} in more than one team`, icon: <UsersRound className="h-4 w-4" /> },
-              { label: 'Open work in teams', value: fmtNumber(dir.data.totals.open), hint: 'tickets assigned to a team', icon: <Ticket className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets') },
-              { label: 'Waiting for an owner', value: fmtNumber(dir.data.totals.unassigned), tone: dir.data.totals.unassigned > 0 ? 'warn' : 'good', hint: 'in a team queue, nobody assigned', icon: <Users className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets?assignee=unassigned') },
-              { label: 'Breached in teams', value: fmtNumber(dir.data.totals.breached), tone: dir.data.totals.breached > 0 ? 'bad' : 'good', hint: 'open tickets past an SLA target', icon: <AlertTriangle className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets?slaState=breached') },
+              { label: 'Open work in teams', value: fmtNumber(dir.data.totals.open), hint: 'tickets assigned to a team', icon: <Ticket className="h-4 w-4" />, onClick: () => navigate('/tickets') },
+              { label: 'Waiting for an owner', value: fmtNumber(dir.data.totals.unassigned), tone: dir.data.totals.unassigned > 0 ? 'warn' : 'good', hint: 'in a team queue, nobody assigned', icon: <Users className="h-4 w-4" />, onClick: () => navigate('/tickets?assignee=unassigned') },
+              { label: 'Breached in teams', value: fmtNumber(dir.data.totals.breached), tone: dir.data.totals.breached > 0 ? 'bad' : 'good', hint: 'open tickets past an SLA target', icon: <AlertTriangle className="h-4 w-4" />, onClick: () => navigate('/tickets?slaState=breached') },
             ]}
             panels={
               <>

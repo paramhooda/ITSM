@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, KeyRound, FlaskConical, Power, BookOpen } from 'lucide-react';
+import { Pencil, Trash2, KeyRound, FlaskConical, Power, BookOpen } from 'lucide-react';
 import { del, post, patch } from '@/api/client';
 import { Button, Badge, EmptyState, ConfirmDialog, Dialog, Textarea, KeyValue, Drawer } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth';
@@ -69,11 +69,14 @@ function TestDialog({ integration, onClose }: { integration: Integration | null;
   );
 }
 
-export function IntegrationsTab({ integrations, types, loading }: { integrations: Integration[]; types: IntegrationType[]; loading: boolean }) {
+export function IntegrationsTab({ integrations, types, loading, newRequest = 0 }: { integrations: Integration[]; types: IntegrationType[]; loading: boolean; /** Incremented by the page header's "New integration" button. */ newRequest?: number }) {
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
   const canManage = can('integrations:manage');
   const [form, setForm] = useState<{ open: boolean; integration?: Integration | null }>({ open: false });
+  useEffect(() => {
+    if (newRequest > 0 && canManage) setForm({ open: true, integration: null });
+  }, [newRequest, canManage]);
   const [reveal, setReveal] = useState<{ reveal: ApiKeyReveal; name: string; webhookUrl: string } | null>(null);
   const [testing, setTesting] = useState<Integration | null>(null);
   const [docs, setDocs] = useState<Integration | null>(null);
@@ -86,10 +89,7 @@ export function IntegrationsTab({ integrations, types, loading }: { integrations
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[13px] text-muted">{integrations.length} {integrations.length === 1 ? 'integration' : 'integrations'} · events arrive on each integration's webhook URL, authenticated with its own API key.</div>
-        {canManage && <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setForm({ open: true, integration: null })}>New integration</Button>}
-      </div>
+      <div className="text-[13px] text-muted">{integrations.length} {integrations.length === 1 ? 'integration' : 'integrations'} · events arrive on each integration's webhook URL, authenticated with its own API key.</div>
       {!loading && integrations.length === 0 && (
         <div className="card">
           <EmptyState title="No integrations yet" description="Create a PRTG, FortiSIEM or generic webhook integration. You get a webhook URL, an API key and configuration instructions for the external system." action={canManage ? <Button size="sm" onClick={() => setForm({ open: true, integration: null })}>New integration</Button> : undefined} />

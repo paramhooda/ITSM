@@ -76,7 +76,7 @@ export default function CustomFieldsPage() {
 
   return (
     <div>
-      <SectionHeader title="Custom fields" description="Extend core records with additional fields. Values are stored on each record and shown in forms and detail views." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>Add field</Button>} />
+      <SectionHeader title="Custom fields" description="Extend core records with additional fields. Values are stored on each record and shown in forms and detail views." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New field</Button>} />
       <Tabs tabs={ENTITIES.map((e) => ({ key: e, label: titleCase(e), count: all.filter((f) => f.entity === e).length }))} value={entity} onChange={setEntity} className="mb-3" />
       <ConfigTable<CustomField>
         columns={columns}
@@ -90,7 +90,7 @@ export default function CustomFieldsPage() {
           { label: 'Move up', icon: <ChevronUp className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, -1), disabled: (r) => rows[0]?.id === r.id },
           { label: 'Move down', icon: <ChevronDown className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, 1), disabled: (r) => rows[rows.length - 1]?.id === r.id },
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, onClick: (r) => { if (confirm(`Delete field "${r.label}"? Existing values stay on records but are no longer shown.`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete field "${r.label}"?`, description: 'Existing values stay on records but are no longer shown.', confirmLabel: 'Delete field' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values> open={editor.open} onClose={editor.close} title={editor.row ? 'Edit custom field' : `New ${titleCase(entity).toLowerCase()} field`} fields={fields} initial={initial} onSubmit={submit} />

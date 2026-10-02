@@ -70,7 +70,7 @@ export default function CalendarsPage() {
         onRowClick={editor.edit}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, disabled: (r) => r.isDefault, onClick: (r) => { if (confirm(`Delete calendar "${r.name}"? SLA policies using it fall back to the platform default.`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, disabled: (r) => r.isDefault, confirm: (r) => ({ title: `Delete calendar "${r.name}"?`, description: 'SLA policies using it fall back to the platform default.', confirmLabel: 'Delete calendar' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values> open={editor.open} onClose={editor.close} title={editor.row ? 'Edit calendar' : 'New calendar'} fields={fields} initial={initial} onSubmit={submit} variant="drawer" width="max-w-2xl" />

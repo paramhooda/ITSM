@@ -110,7 +110,7 @@ export default function TeamsPage() {
         onRowClick={editor.edit}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, onClick: (r) => { if (confirm(`Delete team "${r.name}"? Tickets assigned to it become unassigned.`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete team "${r.name}"?`, description: 'Tickets assigned to it become unassigned.', confirmLabel: 'Delete team' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values> open={editor.open} onClose={editor.close} title={editor.row ? `Edit ${editor.row.name}` : 'New team'} fields={fields} initial={initial} onSubmit={submit} variant="drawer" width="max-w-2xl" />

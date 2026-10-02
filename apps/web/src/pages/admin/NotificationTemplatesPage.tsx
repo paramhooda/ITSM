@@ -103,7 +103,7 @@ export default function NotificationTemplatesPage() {
         onRowClick={editor.edit}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, onClick: (r) => { if (confirm(`Delete template "${r.name}"?`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, confirm: (r) => ({ title: `Delete template "${r.name}"?`, description: 'Notification rules using it stop sending until they are pointed at another template.', confirmLabel: 'Delete template' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values> open={editor.open} onClose={editor.close} title={editor.row ? 'Edit template' : 'New template'} fields={fields} initial={initial} onSubmit={submit} variant="drawer" width="max-w-3xl" />

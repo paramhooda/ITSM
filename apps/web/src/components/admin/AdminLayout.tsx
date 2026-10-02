@@ -29,12 +29,13 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       { to: '/admin/options', label: 'Option lists', perm: CONFIG, prefix: true },
       { to: '/admin/priority-matrix', label: 'Priority matrix', perm: CONFIG },
       { to: '/admin/custom-fields', label: 'Custom fields', perm: CONFIG },
+      { to: '/admin/services', label: 'Service catalog', perm: ['services:manage'] },
     ],
   },
   {
     label: 'SLA & time',
     items: [
-      { to: '/sla', label: 'SLA policies', perm: CONFIG, prefix: true },
+      { to: '/admin/sla', label: 'SLA policies', perm: CONFIG, prefix: true },
       { to: '/admin/calendars', label: 'Business calendars', perm: CONFIG },
       { to: '/admin/holidays', label: 'Holiday calendars', perm: CONFIG },
     ],

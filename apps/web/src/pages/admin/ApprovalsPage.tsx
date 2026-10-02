@@ -95,7 +95,7 @@ export default function ApprovalsPage() {
         onRowClick={editor.edit}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, onClick: (r) => { if (confirm(`Delete workflow "${r.name}"? Catalog items using it will no longer require approval.`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete workflow "${r.name}"?`, description: 'Catalog items using it will no longer require approval.', confirmLabel: 'Delete workflow' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values> open={editor.open} onClose={editor.close} title={editor.row ? 'Edit approval workflow' : 'New approval workflow'} fields={fields} initial={editor.row ? { ...editor.row } : { name: '', description: '', steps: [{ name: 'Customer approval', approverType: 'customer_admin', required: 'any' }], isActive: true }} onSubmit={submit} variant="drawer" width="max-w-2xl" />

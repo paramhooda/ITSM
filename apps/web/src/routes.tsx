@@ -31,7 +31,8 @@ export const routes: AppRoute[] = [
   { path: '/services', component: page(() => import('@/pages/services/ServiceCatalogPage')), perm: ['services:read'] },
   { path: '/teams', component: page(() => import('@/pages/teams/TeamsPage')), perm: ['tickets:read', 'admin:users'] },
   { path: '/sla', component: page(() => import('@/pages/sla/ServiceLevelsPage')), perm: ['contracts:read', 'admin:config'] },
-  { path: '/sla/:id', component: page(() => import('@/pages/sla/SlaPolicyPage')), perm: ['contracts:read', 'admin:config'] },
+  /** Policies are edited under Administration; keep /sla/new and /sla/:id links working. */
+  { path: '/sla/:id', component: page(() => import('@/pages/sla/SlaPolicyRedirect')), perm: ['contracts:read', 'admin:config'] },
   // Assets & CMDB
   { path: '/assets', component: page(() => import('@/pages/assets/AssetListPage')), perm: ['assets:read'] },
   { path: '/assets/:id', component: page(() => import('@/pages/assets/AssetDetailPage')), perm: ['assets:read'] },

@@ -1,3 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
+import { get } from '@/api/client';
+
+/** SLA policy types + query hooks shared by the Service levels browse page and the admin editor. */
+
 export interface SlaTarget {
   id?: string;
   ticketType: string;
@@ -86,3 +91,9 @@ export function usageSummary(u: SlaPolicyUsage) {
 }
 
 export const METRIC_LABEL: Record<string, string> = { acknowledgement: 'Acknowledge', response: 'Respond', restoration: 'Restore', resolution: 'Resolve' };
+
+export const useSlaPolicies = () => useQuery({ queryKey: ['sla', 'policies'], queryFn: () => get<{ items: SlaPolicy[] }>('/sla/policies') });
+export const useSlaPolicy = (id: string | null) => useQuery({ queryKey: ['sla', 'policy', id], queryFn: () => get<SlaPolicy>(`/sla/policies/${id}`), enabled: !!id });
+
+/** Where a policy is edited: the admin list opens its drawer from these query params. */
+export const slaAdminPath = (id?: string | null, tab?: string) => (id ? `/admin/sla?edit=${id}${tab ? `&tab=${tab}` : ''}` : '/admin/sla?new=1');

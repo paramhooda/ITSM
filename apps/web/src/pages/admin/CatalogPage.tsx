@@ -9,7 +9,7 @@ import { ConfigTable, ActiveDot, MutedCell, MonoCell } from '@/components/admin/
 import { FormDialog, FormFields, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { FormSchemaBuilder, type FormFieldDef } from '@/components/admin/FormSchemaBuilder';
 import { useAdminMutation, slugify } from '@/components/admin/api';
-import { useSlaPolicies } from '@/pages/sla/ServiceLevelsPage';
+import { useSlaPolicies } from '@/components/sla/api';
 import { useConfigKind } from '@/components/admin/api';
 
 interface CatalogItem {
@@ -118,7 +118,7 @@ export default function CatalogPage() {
           { label: 'Clone', icon: <Copy className="h-4 w-4" />, inline: true, onClick: (r) => clone.mutate(r.id) },
           { label: 'Deactivate', icon: <EyeOff className="h-4 w-4" />, hidden: (r) => !r.isActive, onClick: (r) => update.mutate({ id: r.id, isActive: false }) },
           { label: 'Activate', icon: <Eye className="h-4 w-4" />, hidden: (r) => r.isActive, onClick: (r) => update.mutate({ id: r.id, isActive: true }) },
-          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, onClick: (r) => { if (r.ticketCount > 0) { alert(`${r.ticketCount} ticket(s) were raised from this item; deactivate it instead.`); return; } if (confirm(`Delete "${r.name}"?`)) remove.mutate(r.id); } },
+          { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, disabled: (r) => r.ticketCount > 0, confirm: (r) => ({ title: `Delete "${r.name}"?`, description: 'Items that tickets were raised from cannot be deleted; deactivate those instead.', confirmLabel: 'Delete item' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values>

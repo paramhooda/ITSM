@@ -45,7 +45,7 @@ export default function CiClassesPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="CI classes" subtitle="The classes a configuration item can belong to, what each one records, and how items relate" actions={can('admin:config') ? <Button size="sm" variant="outline" icon={<Settings2 className="h-4 w-4" />} onClick={() => navigate('/admin/ci-types')}>Manage classes</Button> : undefined} />
+      <PageHeader title="CI classes" subtitle="The classes a configuration item can belong to, what each one records, and how items relate" actions={can('admin:config') ? <Button size="sm" variant="outline" icon={<Settings2 className="h-4 w-4" />} onClick={() => navigate('/admin/ci-types')}>Manage in Administration</Button> : undefined} />
       <CmdbNav />
       {types.isError && <ErrorBlock error={types.error} retry={() => types.refetch()} />}
       {types.isLoading && <LoadingBlock />}

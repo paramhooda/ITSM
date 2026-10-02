@@ -87,7 +87,7 @@ export default function ApiKeysPage() {
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
-        actions={[{ label: 'Revoke', icon: <Ban className="h-4 w-4" />, inline: true, danger: true, hidden: (r) => !!r.revokedAt, onClick: (r) => { if (confirm(`Revoke "${r.name}"? Integrations using it stop working immediately.`)) revoke.mutate(r.id); } }]}
+        actions={[{ label: 'Revoke', icon: <Ban className="h-4 w-4" />, inline: true, danger: true, hidden: (r) => !!r.revokedAt, confirm: (r) => ({ title: `Revoke "${r.name}"?`, description: 'Integrations using it stop working immediately.', confirmLabel: 'Revoke key' }), onClick: (r) => revoke.mutate(r.id) }]}
       />
       <FormDialog<Values> open={createOpen} onClose={() => setCreateOpen(false)} title="New API key" fields={fields} initial={{ name: '', permissions: [], customerId: null, expiresAt: null }} onSubmit={(v) => create.mutateAsync({ name: v.name, permissions: v.permissions, customerId: v.customerId || null, expiresAt: v.expiresAt ? new Date(`${v.expiresAt}T23:59:59`).toISOString() : null })} submitLabel="Create key" />
       <Dialog open={!!created} onClose={() => setCreated(null)} title={`API key: ${created?.name ?? ''}`} width="max-w-lg" footer={<Button onClick={() => setCreated(null)}>Done</Button>}>

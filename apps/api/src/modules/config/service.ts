@@ -1,8 +1,8 @@
-import { eq, and, asc, sql, inArray } from 'drizzle-orm';
+import { eq, and, or, asc, sql, inArray, lt, lte, gte, isNull, isNotNull } from 'drizzle-orm';
 import { OPTION_TYPES, OPTION_PARENT_TYPES, IMPACT_DIRECTIONS, type OptionType } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { schema } from '@/db/client';
-import { NotFoundError, ValidationError } from '@/core/errors';
+import { NotFoundError, ValidationError, ForbiddenError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { encryptSecret, isEncrypted } from '@/lib/crypto';
 
@@ -212,4 +212,64 @@ export async function optionsByIds(ctx: Ctx, ids: (string | null | undefined)[])
   if (!clean.length) return new Map<string, typeof schema.configOptions.$inferSelect>();
   const rows = await ctx.tx.select().from(schema.configOptions).where(inArray(schema.configOptions.id, clean));
   return new Map(rows.map((r) => [r.id, r]));
+}
+
+// ---------------------------------------------------------------- admin attention
+
+export interface AttentionItem {
+  key: string;
+  label: string;
+  count: number;
+  tone: 'bad' | 'warn' | 'info';
+  /** Where to act on it in the web app. */
+  to: string;
+}
+
+/**
+ * What an administrator should look at now: delivery failures, silent
+ * integrations, expiring access, findings to review and configuration gaps.
+ * Only items with a count above zero are returned.
+ */
+export async function attention(ctx: Ctx): Promise<{ items: AttentionItem[] }> {
+  if (!ctx.can('admin:config') && !ctx.can('admin:system')) throw new ForbiddenError('Missing permission: admin:config or admin:system');
+  const now = Date.now();
+  const dayAgo = new Date(now - 24 * 3_600_000);
+  const in14Days = new Date(now + 14 * 86_400_000);
+  const n = sql<number>`count(*)::int`;
+  const count = async (q: PromiseLike<{ n: number }[]>) => Number((await q)[0]?.n ?? 0);
+  const [outboxFailed, integrationsSilent, keysExpiring, findingsPending, policiesUnused, usersInvited, usersLocked, assignmentOff, escalationOff] = await Promise.all([
+    count(ctx.tx.select({ n }).from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.status, 'failed'), gte(schema.notificationOutbox.createdAt, dayAgo)))),
+    count(ctx.tx.select({ n }).from(schema.integrations).where(and(eq(schema.integrations.isActive, true), or(lt(schema.integrations.lastEventAt, dayAgo), and(isNull(schema.integrations.lastEventAt), lt(schema.integrations.createdAt, dayAgo)))))),
+    count(ctx.tx.select({ n }).from(schema.apiKeys).where(and(isNull(schema.apiKeys.revokedAt), isNotNull(schema.apiKeys.expiresAt), lte(schema.apiKeys.expiresAt, in14Days)))),
+    count(ctx.tx.select({ n }).from(schema.discoveryFindings).where(eq(schema.discoveryFindings.status, 'pending'))),
+    count(
+      ctx.tx
+        .select({ n })
+        .from(schema.slaPolicies)
+        .where(
+          and(
+            eq(schema.slaPolicies.isActive, true),
+            eq(schema.slaPolicies.isDefault, false),
+            sql`not exists (select 1 from ${schema.contracts} where ${schema.contracts.slaPolicyId} = ${schema.slaPolicies.id})`,
+            sql`not exists (select 1 from ${schema.contractServices} where ${schema.contractServices.slaPolicyId} = ${schema.slaPolicies.id})`,
+          ),
+        ),
+    ),
+    count(ctx.tx.select({ n }).from(schema.users).where(eq(schema.users.status, 'invited'))),
+    count(ctx.tx.select({ n }).from(schema.users).where(eq(schema.users.status, 'locked'))),
+    count(ctx.tx.select({ n }).from(schema.assignmentRules).where(eq(schema.assignmentRules.isActive, false))),
+    count(ctx.tx.select({ n }).from(schema.escalationRules).where(eq(schema.escalationRules.isActive, false))),
+  ]);
+  const all: AttentionItem[] = [
+    { key: 'outbox_failed', label: 'Notification deliveries failed in the last 24 hours', count: outboxFailed, tone: 'bad', to: '/admin/outbox' },
+    { key: 'integrations_silent', label: 'Active integrations with no events in the last 24 hours', count: integrationsSilent, tone: 'warn', to: '/admin/integrations?tab=integrations' },
+    { key: 'api_keys_expiring', label: 'API keys expired or expiring within 14 days', count: keysExpiring, tone: 'warn', to: '/admin/api-keys' },
+    { key: 'discovery_findings_pending', label: 'Discovery findings waiting for review', count: findingsPending, tone: 'info', to: '/cmdb/discovery/findings?status=pending' },
+    { key: 'sla_policies_unused', label: 'SLA policies with no contracts assigned', count: policiesUnused, tone: 'info', to: '/admin/sla' },
+    { key: 'users_invited', label: 'Invited users who have not signed in yet', count: usersInvited, tone: 'info', to: '/admin/users?status=invited' },
+    { key: 'users_locked', label: 'Locked user accounts', count: usersLocked, tone: 'warn', to: '/admin/users?status=locked' },
+    { key: 'assignment_rules_disabled', label: 'Assignment rules disabled', count: assignmentOff, tone: 'info', to: '/admin/assignment-rules' },
+    { key: 'escalation_rules_disabled', label: 'Escalation rules disabled', count: escalationOff, tone: 'info', to: '/admin/escalation-rules' },
+  ];
+  return { items: all.filter((i) => i.count > 0) };
 }

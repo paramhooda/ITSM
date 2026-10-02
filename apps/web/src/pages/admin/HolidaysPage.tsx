@@ -65,7 +65,7 @@ export default function HolidaysPage() {
             onRowClick={(r) => setSelectedId(r.id)}
             actions={[
               { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
-              { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, onClick: (r) => { if (confirm(`Delete "${r.name}" and all its holidays?`)) { remove.mutate(r.id); if (selectedId === r.id) setSelectedId(null); } } },
+              { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete "${r.name}"?`, description: 'All its holidays are removed. Business calendars and SLA policies linked to it fall back to no holidays.', confirmLabel: 'Delete calendar' }), onClick: (r) => { remove.mutate(r.id); if (selectedId === r.id) setSelectedId(null); } },
             ]}
           />
         </div>

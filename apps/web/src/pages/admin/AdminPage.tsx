@@ -11,10 +11,12 @@ const OverviewPage = page(() => import('./OverviewPage'));
 const OptionsPage = page(() => import('./OptionsPage'));
 const PriorityMatrixPage = page(() => import('./PriorityMatrixPage'));
 const CustomFieldsPage = page(() => import('./CustomFieldsPage'));
-/** SLA policies moved to the first-class Service Levels area; keep old links working. */
+const SlaPoliciesPage = page(() => import('./SlaPoliciesPage'));
+const ServicesPage = page(() => import('./ServicesPage'));
+/** Old `/admin/sla/:id` links open the policy in the list's editor drawer. */
 function SlaRedirect() {
   const { id } = useParams();
-  return <Navigate to={id ? `/sla/` : '/sla'} replace />;
+  return <Navigate to={id ? `/admin/sla?edit=${id}` : '/admin/sla'} replace />;
 }
 const CalendarsPage = page(() => import('./CalendarsPage'));
 const HolidaysPage = page(() => import('./HolidaysPage'));
@@ -54,7 +56,8 @@ export default function AdminPage() {
           <Route path="options/:type?" element={<Guarded perm={CONFIG}><OptionsPage /></Guarded>} />
           <Route path="priority-matrix" element={<Guarded perm={CONFIG}><PriorityMatrixPage /></Guarded>} />
           <Route path="custom-fields" element={<Guarded perm={CONFIG}><CustomFieldsPage /></Guarded>} />
-          <Route path="sla" element={<Navigate to="/sla" replace />} />
+          <Route path="services" element={<Guarded perm={['services:manage']}><ServicesPage /></Guarded>} />
+          <Route path="sla" element={<Guarded perm={CONFIG}><SlaPoliciesPage /></Guarded>} />
           <Route path="sla/:id" element={<SlaRedirect />} />
           <Route path="calendars" element={<Guarded perm={CONFIG}><CalendarsPage /></Guarded>} />
           <Route path="holidays" element={<Guarded perm={CONFIG}><HolidaysPage /></Guarded>} />

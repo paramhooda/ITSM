@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Save, Copy, Trash2, Star, Plus, Unlink, Search, FileSignature, CalendarClock, Gauge, BarChart3 } from 'lucide-react';
+import { Save, Copy, Trash2, Star, Plus, Unlink, Search, FileSignature, BarChart3 } from 'lucide-react';
 import { SLA_METRICS, TICKET_TYPES } from '@itsm/shared';
 import { get, post, patch, put, del } from '@/api/client';
-import { Button, Badge, Card, Input, Textarea, Select, Toggle, LoadingBlock, ErrorBlock, Dialog, ConfirmDialog, EmptyState, Checkbox, ProgressBar } from '@/components/ui';
-import type { MenuItem } from '@/components/Menu';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, RailCard, RailRows, type FormSection } from '@/components/record';
+import { Button, Badge, Card, Input, Textarea, Select, Toggle, Field, Drawer, Tabs, LoadingBlock, ErrorBlock, Dialog, ConfirmDialog, EmptyState, Checkbox, ProgressBar } from '@/components/ui';
 import { useLookups } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
 import { fmtDate, fmtDateTime, fmtNumber, fmtPct, titleCase } from '@/lib/format';
@@ -17,10 +15,11 @@ import { errorMessage, useConfigKind } from '@/components/admin/api';
 import { ContractStatusBadge } from '@/components/contracts/ContractBits';
 import { Segmented, Stat } from '@/components/dashboards/Panel';
 import { cn } from '@/lib/utils';
-import { usageSummary, METRIC_LABEL, type SlaPolicy, type SlaTarget, type PolicyContract, type Compliance } from './types';
+import { usageSummary, METRIC_LABEL, useSlaPolicy, type SlaPolicy, type SlaTarget, type PolicyContract, type Compliance } from './api';
 
 type TicketType = (typeof TICKET_TYPES)[number];
 type Metric = (typeof SLA_METRICS)[number];
+export type PolicyDrawerTab = 'policy' | 'contracts' | 'compliance' | 'preview';
 
 interface CellValue {
   minutes: number | null;
@@ -30,23 +29,36 @@ interface CellValue {
 
 const cellKey = (t: string, p: string | null, m: string) => `${t}|${p ?? 'any'}|${m}`;
 
-interface Preview {
-  calendar: { name: string; timezone: string; is24x7: boolean; holidays: number };
-  start: string;
-  metrics: { metric: string; minutes: number; warnPct: number; calendar: string; appliesTo: string; dueAt: string; warnAt: string; elapsedHours: number }[];
+export interface PolicyDrawerProps {
+  open: boolean;
+  /** `null` creates a new policy. */
+  policyId: string | null;
+  initialTab?: string | null;
+  onClose: () => void;
+  /** Called after create / clone with the id to keep editing. */
+  onSaved: (id: string) => void;
 }
 
-/** One SLA policy: an editable record with its targets, the contracts mapped to it and its compliance. */
-export default function SlaPolicyPage() {
-  const { id } = useParams();
-  const isNew = !id || id === 'new';
-  const navigate = useNavigate();
+/**
+ * The SLA policy editor used for both "New policy" and editing: basics, the
+ * targets grid (ticket type x priority x metric), pause statuses, and for saved
+ * policies the mapped contracts, compliance and a due-date preview.
+ */
+export function PolicyDrawer({ open, policyId, initialTab, onClose, onSaved }: PolicyDrawerProps) {
+  if (!open) return null;
+  // Keyed so switching policy (or create -> edit after save) starts from fresh form state.
+  return <PolicyDrawerInner key={policyId ?? 'new'} policyId={policyId} initialTab={initialTab} onClose={onClose} onSaved={onSaved} />;
+}
+
+function PolicyDrawerInner({ policyId, initialTab, onClose, onSaved }: Omit<PolicyDrawerProps, 'open'>) {
+  const isNew = !policyId;
   const qc = useQueryClient();
   const lookups = useLookups();
   const can = useAuthStore((s) => s.can);
   const canEdit = can('admin:config');
-  const policyQ = useQuery({ queryKey: ['sla', 'policy', id], queryFn: () => get<SlaPolicy>(`/sla/policies/${id}`), enabled: !isNew });
+  const policyQ = useSlaPolicy(policyId);
   const holidayCals = useConfigKind<{ id: string; name: string }>('holiday-calendars');
+  const [tab, setTab] = useState<PolicyDrawerTab>((['policy', 'contracts', 'compliance', 'preview'] as string[]).includes(initialTab ?? '') ? (initialTab as PolicyDrawerTab) : 'policy');
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -81,12 +93,16 @@ export default function SlaPolicyPage() {
   const calendars = lookups.lookups?.calendars ?? [];
   const rowsFor = (t: TicketType) => [...priorities.filter((p) => !p.appliesTo.length || p.appliesTo.includes(t)).map((p) => ({ id: p.id as string | null, label: p.label, color: p.color })), { id: null, label: 'Any priority', color: null }];
   const targetCount = useMemo(() => Object.values(cells).filter((c) => c.minutes && c.minutes > 0).length, [cells]);
-
+  const ro = !canEdit;
+  const mark = <T,>(set: (v: T) => void) => (v: T) => {
+    if (ro) return;
+    set(v);
+    setDirty(true);
+  };
   const setCell = (key: string, patchValue: Partial<CellValue>) => {
     setCells((c) => ({ ...c, [key]: { ...(c[key] ?? { minutes: null, warnPct: 75, calendarTime: false }), ...patchValue } }));
     setDirty(true);
   };
-
   const toTargets = (): SlaTarget[] =>
     Object.entries(cells)
       .filter(([, v]) => v.minutes && v.minutes > 0)
@@ -94,6 +110,10 @@ export default function SlaPolicyPage() {
         const [tt, p, metric] = k.split('|');
         return { ticketType: tt!, priorityId: p === 'any' ? null : p!, metric: metric!, minutes: v.minutes!, warnPct: v.warnPct, calendarTime: v.calendarTime };
       });
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ['sla'] });
+    void qc.invalidateQueries({ queryKey: ['lookups'] });
+  };
 
   async function save() {
     if (!name.trim()) {
@@ -103,11 +123,12 @@ export default function SlaPolicyPage() {
     setSaving(true);
     try {
       const base = { name: name.trim(), description: description.trim() || null, calendarId, holidayCalendarId, isDefault, isActive };
-      let policyId = id!;
       if (isNew) {
         const created = await post<SlaPolicy>('/sla/policies', { ...base, targets: toTargets() });
-        policyId = created.id;
-        if (pauseStatusIds.length) await put(`/sla/policies/${policyId}/pause-statuses`, { statusIds: pauseStatusIds });
+        if (pauseStatusIds.length) await put(`/sla/policies/${created.id}/pause-statuses`, { statusIds: pauseStatusIds });
+        toast.success('SLA policy created');
+        invalidate();
+        onSaved(created.id);
       } else {
         const current = policyQ.data!;
         const patchBody: Record<string, unknown> = { ...base };
@@ -115,12 +136,10 @@ export default function SlaPolicyPage() {
         await patch(`/sla/policies/${policyId}`, patchBody);
         await put(`/sla/policies/${policyId}/targets`, { targets: toTargets() });
         await put(`/sla/policies/${policyId}/pause-statuses`, { statusIds: pauseStatusIds });
+        toast.success('SLA policy saved');
+        invalidate();
+        setDirty(false);
       }
-      toast.success('SLA policy saved');
-      void qc.invalidateQueries({ queryKey: ['sla'] });
-      void qc.invalidateQueries({ queryKey: ['lookups'] });
-      setDirty(false);
-      if (isNew) navigate(`/sla/${policyId}`, { replace: true });
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -130,10 +149,10 @@ export default function SlaPolicyPage() {
 
   async function clone() {
     try {
-      const copy = await post<SlaPolicy>(`/sla/policies/${id}/clone`, {});
-      void qc.invalidateQueries({ queryKey: ['sla'] });
+      const copy = await post<SlaPolicy>(`/sla/policies/${policyId}/clone`, {});
+      invalidate();
       toast.success('Policy cloned');
-      navigate(`/sla/${copy.id}`);
+      onSaved(copy.id);
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -142,201 +161,156 @@ export default function SlaPolicyPage() {
   async function remove() {
     setDeleting(true);
     try {
-      await del(`/sla/policies/${id}`);
-      void qc.invalidateQueries({ queryKey: ['sla'] });
-      void qc.invalidateQueries({ queryKey: ['lookups'] });
+      await del(`/sla/policies/${policyId}`);
+      invalidate();
       toast.success('Policy deleted');
-      navigate('/sla');
+      setConfirmDelete(false);
+      onClose();
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
       setDeleting(false);
-      setConfirmDelete(false);
     }
   }
 
-  if (!isNew && policyQ.isLoading) return <LoadingBlock />;
-  if (!isNew && policyQ.error) return <ErrorBlock error={policyQ.error} retry={() => policyQ.refetch()} />;
   const p = policyQ.data;
   const selectedCal = calendars.find((c) => c.id === calendarId);
-  const ro = !canEdit;
-  const mark = <T,>(set: (v: T) => void) => (v: T) => {
-    if (ro) return;
-    set(v);
-    setDirty(true);
-  };
 
-  // ---- header: Save (+ Clone) up front, Delete in the overflow menu
-  const primary = canEdit ? (
-    <>
-      <Button size="sm" icon={<Save className="h-3.5 w-3.5" />} onClick={save} loading={saving} disabled={!isNew && !dirty}>Save</Button>
-      {!isNew && <Button size="sm" variant="outline" icon={<Copy className="h-3.5 w-3.5" />} onClick={clone}>Clone</Button>}
-    </>
-  ) : undefined;
-  const menu: MenuItem[] = canEdit && !isNew ? [{ label: p?.isDefault ? 'Delete (default policy)' : 'Delete policy', icon: <Trash2 className="h-4 w-4" />, onClick: () => setConfirmDelete(true), danger: true, disabled: !!p?.isDefault }] : [];
+  const policyForm = (
+    <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+        <Field label="Name" required><Input value={name} disabled={ro} autoFocus={isNew} onChange={(e) => mark(setName)(e.target.value)} placeholder="e.g. Gold support" /></Field>
+        <Field label="Active">
+          <div className="h-8.5 flex items-center"><Toggle checked={isActive} onChange={mark(setIsActive)} label={<span className="text-[12.5px] text-muted">{isActive ? 'Applied to new tickets' : 'Not applied to new tickets'}</span>} /></div>
+        </Field>
+        <Field label="Description" className="sm:col-span-2"><Textarea rows={2} value={description} disabled={ro} onChange={(e) => mark(setDescription)(e.target.value)} className="min-h-[56px]" /></Field>
+        <Field label="Business calendar" hint={selectedCal ? `${selectedCal.timezone}${selectedCal.is24x7 ? ' · 24x7' : ''}` : 'Platform default calendar when empty'}>
+          <Select value={calendarId ?? ''} disabled={ro} placeholder="Platform default" options={calendars.map((c) => ({ value: c.id, label: c.name }))} onChange={(e) => mark(setCalendarId)(e.target.value || null)} />
+        </Field>
+        <Field label="Holiday calendar" hint="Overrides the calendar's own holiday list">
+          <Select value={holidayCalendarId ?? ''} disabled={ro} placeholder="Use calendar holidays" options={(holidayCals.data ?? []).map((c) => ({ value: c.id, label: c.name }))} onChange={(e) => mark(setHolidayCalendarId)(e.target.value || null)} />
+        </Field>
+        <Field label="Default policy" hint="Used when neither the contract, service nor catalog item sets one" className="sm:col-span-2">
+          <div className="h-8.5 flex items-center"><Toggle checked={isDefault} onChange={mark(setIsDefault)} label={<span className="text-[12.5px] text-muted">{isDefault ? 'Fallback for everything' : 'Not the fallback'}</span>} /></div>
+        </Field>
+      </div>
 
-  // ---- the policy record, edited in place
-  const policySection: FormSection = {
-    key: 'policy',
-    title: 'Policy',
-    fields: [
-      { label: 'Name', edit: <Input value={name} disabled={ro} onChange={(e) => mark(setName)(e.target.value)} className="h-8 py-0 text-[13px] max-w-[420px]" placeholder="e.g. Gold support" /> },
-      { label: 'Active', edit: <Toggle checked={isActive} onChange={mark(setIsActive)} label={<span className="text-[12.5px] text-muted">{isActive ? 'Applied to new tickets' : 'Not applied to new tickets'}</span>} /> },
-      { label: 'Description', edit: <Textarea rows={2} value={description} disabled={ro} onChange={(e) => mark(setDescription)(e.target.value)} className="min-h-[56px] text-[13px]" />, span: 2 },
-      {
-        label: 'Business calendar',
-        hint: 'Platform default calendar when empty',
-        edit: (
-          <div className="flex items-center gap-2 flex-wrap">
-            <Select value={calendarId ?? ''} disabled={ro} placeholder="Platform default" options={calendars.map((c) => ({ value: c.id, label: c.name }))} onChange={(e) => mark(setCalendarId)(e.target.value || null)} className="h-8 py-0 text-[12.5px] max-w-[260px]" />
-            {selectedCal && <span className="text-[12px] text-subtle">{selectedCal.timezone}{selectedCal.is24x7 ? ' · 24x7' : ''}</span>}
+      <div>
+        <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div>
+            <div className="text-[13px] font-semibold">Targets <span className="text-muted font-normal">· {targetCount} defined</span></div>
+            <div className="text-[12px] text-muted">Durations like 30m, 4h or 2d · warn % · 24x7 clock · a priority row beats "Any priority"</div>
           </div>
-        ),
-      },
-      { label: 'Holiday calendar', hint: "Overrides the calendar's own holiday list", edit: <Select value={holidayCalendarId ?? ''} disabled={ro} placeholder="Use calendar holidays" options={(holidayCals.data ?? []).map((c) => ({ value: c.id, label: c.name }))} onChange={(e) => mark(setHolidayCalendarId)(e.target.value || null)} className="h-8 py-0 text-[12.5px] max-w-[260px]" /> },
-      { label: 'Default policy', hint: 'Used when neither the contract, service nor catalog item sets one', edit: <Toggle checked={isDefault} onChange={mark(setIsDefault)} label={<span className="text-[12.5px] text-muted">{isDefault ? 'Fallback for everything' : 'Not the fallback'}</span>} /> },
-    ],
-  };
+          <Segmented size="sm" options={TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t), count: Object.entries(cells).filter(([k, v]) => k.startsWith(`${t}|`) && v.minutes).length }))} value={ticketType} onChange={setTicketType} />
+        </div>
+        <div className="card overflow-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th className="w-36">Priority</th>
+                {SLA_METRICS.map((m) => (
+                  <th key={m}>{METRIC_LABEL[m]}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rowsFor(ticketType).map((row) => (
+                <tr key={row.id ?? 'any'}>
+                  <td className="align-top pt-3">{row.id ? <Badge color={row.color ?? undefined}>{row.label}</Badge> : <span className="text-muted text-[12.5px]">{row.label}</span>}</td>
+                  {SLA_METRICS.map((m) => {
+                    const key = cellKey(ticketType, row.id, m);
+                    const v = cells[key];
+                    return (
+                      <td key={m} className="align-top">
+                        <div className="flex items-center gap-1.5">
+                          <DurationInput size="sm" width={72} value={v?.minutes ?? null} disabled={ro} onChange={(min) => setCell(key, { minutes: min })} placeholder="—" />
+                          <input type="number" min={1} max={100} title="Warn at % of target" style={{ width: 54, flex: 'none' }} className="input h-8 py-0 px-1 text-[12px] text-center disabled:opacity-40" disabled={ro || !v?.minutes} value={v?.warnPct ?? 75} onChange={(e) => setCell(key, { warnPct: Math.min(100, Math.max(1, Number(e.target.value) || 75)) })} />
+                          <label className="inline-flex items-center gap-1 text-[11px] text-muted cursor-pointer select-none" title="Measure on calendar time (24x7) regardless of business hours">
+                            <input type="checkbox" className="h-3.5 w-3.5 accent-navy-800 disabled:opacity-40" disabled={ro || !v?.minutes} checked={!!v?.calendarTime} onChange={(e) => setCell(key, { calendarTime: e.target.checked })} />
+                            24x7
+                          </label>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-  const targetsContent = (
-    <RecordForm
-      sections={[
-        {
-          key: 'targets',
-          title: <span>Targets <span className="text-muted font-normal">· {targetCount} defined</span></span>,
-          description: 'Durations like 30m, 4h or 2d · warn % · 24x7 clock · a priority row beats "Any priority"',
-          actions: <Segmented size="sm" options={TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t), count: Object.entries(cells).filter(([k, v]) => k.startsWith(`${t}|`) && v.minutes).length }))} value={ticketType} onChange={setTicketType} />,
-          fields: [],
-          children: (
-            <div className="-mx-5 -my-1.5 overflow-auto">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th className="w-40">Priority</th>
-                    {SLA_METRICS.map((m) => (
-                      <th key={m}>{METRIC_LABEL[m]}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rowsFor(ticketType).map((row) => (
-                    <tr key={row.id ?? 'any'}>
-                      <td className="align-top pt-3">{row.id ? <Badge color={row.color ?? undefined}>{row.label}</Badge> : <span className="text-muted text-[12.5px]">{row.label}</span>}</td>
-                      {SLA_METRICS.map((m) => {
-                        const key = cellKey(ticketType, row.id, m);
-                        const v = cells[key];
-                        return (
-                          <td key={m} className="align-top">
-                            <div className="flex items-center gap-1.5">
-                              <DurationInput size="sm" width={72} value={v?.minutes ?? null} disabled={ro} onChange={(min) => setCell(key, { minutes: min })} placeholder="—" />
-                              <input type="number" min={1} max={100} title="Warn at % of target" style={{ width: 54, flex: 'none' }} className="input h-8 py-0 px-1 text-[12px] text-center disabled:opacity-40" disabled={ro || !v?.minutes} value={v?.warnPct ?? 75} onChange={(e) => setCell(key, { warnPct: Math.min(100, Math.max(1, Number(e.target.value) || 75)) })} />
-                              <label className="inline-flex items-center gap-1 text-[11px] text-muted cursor-pointer select-none" title="Measure on calendar time (24x7) regardless of business hours">
-                                <input type="checkbox" className="h-3.5 w-3.5 accent-navy-800 disabled:opacity-40" disabled={ro || !v?.minutes} checked={!!v?.calendarTime} onChange={(e) => setCell(key, { calendarTime: e.target.checked })} />
-                                24x7
-                              </label>
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ),
-        },
-        {
-          key: 'pause',
-          title: 'Pause statuses',
-          columns: 1,
-          fields: [
-            {
-              label: 'Also pause in',
-              hint: 'In addition to statuses that pause SLA by default',
-              edit: <MultiSelect value={pauseStatusIds} disabled={ro} onChange={(v) => { setPauseStatusIds(v); setDirty(true); }} options={statuses.map((s) => ({ value: s.id, label: s.label, hint: s.pausesSla ? 'pauses by default' : titleCase(s.statusCategory ?? '') }))} maxHeight="max-h-40" />,
-            },
-          ],
-        },
-      ]}
-    />
+      <Field label="Pause statuses" hint="SLA clocks also pause while a ticket is in these statuses, in addition to statuses that pause SLA by default">
+        <MultiSelect value={pauseStatusIds} disabled={ro} onChange={(v) => { setPauseStatusIds(v); setDirty(true); }} options={statuses.map((s) => ({ value: s.id, label: s.label, hint: s.pausesSla ? 'pauses by default' : titleCase(s.statusCategory ?? '') }))} maxHeight="max-h-40" />
+      </Field>
+    </div>
   );
 
-  const ribbon = p
-    ? [
-        { label: 'Targets', value: String(targetCount), hint: 'Cells with a duration' },
-        { label: 'Contracts', value: String(p.usage.contracts + p.usage.contractServices), hint: `${p.usage.contracts} at contract level · ${p.usage.contractServices} per service` },
-        { label: 'Services', value: String(p.usage.services) },
-        { label: 'Catalog items', value: String(p.usage.catalogItems) },
-        { label: 'Tickets', value: String(p.usage.tickets) },
-      ]
-    : [];
+  const body = !isNew && policyQ.isLoading ? (
+    <LoadingBlock />
+  ) : !isNew && policyQ.error ? (
+    <ErrorBlock error={policyQ.error} retry={() => policyQ.refetch()} />
+  ) : (
+    <div className="flex flex-col gap-4">
+      {!isNew && p && (
+        <Tabs<PolicyDrawerTab>
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: 'policy', label: 'Policy', count: targetCount },
+            { key: 'contracts', label: 'Contracts', count: p.usage.contracts + p.usage.contractServices },
+            { key: 'compliance', label: 'Compliance' },
+            { key: 'preview', label: 'Preview' },
+          ]}
+        />
+      )}
+      {(isNew || tab === 'policy') && policyForm}
+      {!isNew && p && tab === 'contracts' && <ContractsTab policy={p} />}
+      {!isNew && tab === 'compliance' && <ComplianceTab policyId={policyId!} />}
+      {!isNew && tab === 'preview' && <PreviewPanel policyId={policyId!} dirty={dirty} />}
+    </div>
+  );
 
   return (
     <>
-      <RecordLayout
-        header={
-          <RecordHeader
-            crumbs={[{ label: 'Service levels', to: '/sla' }, { label: isNew ? 'New policy' : name || p?.name || '' }]}
-            title={isNew ? 'New SLA policy' : name || p?.name || ''}
-            onTitleChange={canEdit && !isNew ? mark(setName) : undefined}
-            badges={
-              <>
-                {p?.isDefault && <Badge color="amber" className="gap-1"><Star className="h-3 w-3" /> Default</Badge>}
-                {p && !p.isActive && <Badge color="gray">Inactive</Badge>}
-              </>
-            }
-            controls={
-              <>
-                {dirty && <Badge color="amber" dot>Unsaved changes</Badge>}
-                {p && <span className="text-[12.5px] text-muted">Used by {usageSummary(p.usage)}</span>}
-              </>
-            }
-            primary={primary}
-            menu={menu}
-            updatedAt={p?.updatedAt ?? null}
-          >
-            {ribbon.length > 0 && <RecordRibbon items={ribbon} columns={5} />}
-          </RecordHeader>
+      <Drawer
+        open
+        onClose={onClose}
+        width="max-w-4xl"
+        title={
+          isNew ? (
+            'New SLA policy'
+          ) : (
+            <span className="inline-flex items-center gap-2 min-w-0">
+              <span className="truncate">{p?.name ?? 'SLA policy'}</span>
+              {p?.isDefault && <Badge color="amber"><Star className="h-3 w-3" /> default</Badge>}
+              {p && !p.isActive && <Badge color="gray">inactive</Badge>}
+            </span>
+          )
         }
-        main={
+        footer={
           <>
-            <RecordForm sections={[policySection]} />
-            {isNew ? (
-              targetsContent
-            ) : (
-              <RelatedTabs
-                tabs={[
-                  { key: 'targets', label: 'Targets', count: targetCount, content: targetsContent },
-                  { key: 'contracts', label: 'Contracts', count: (p?.usage.contracts ?? 0) + (p?.usage.contractServices ?? 0), content: <ContractsTab policy={p!} /> },
-                  { key: 'compliance', label: 'Compliance', content: <ComplianceTab policyId={id!} /> },
-                ]}
-              />
+            <span className="mr-auto flex items-center gap-2 text-[12px] text-subtle min-w-0">
+              {p && <span className="truncate">Used by {usageSummary(p.usage)}</span>}
+              {dirty && <Badge color="amber" dot>Unsaved changes</Badge>}
+            </span>
+            {canEdit && !isNew && <Button variant="outline" icon={<Copy className="h-4 w-4" />} onClick={clone}>Clone</Button>}
+            {canEdit && !isNew && (
+              <Button variant="ghost" className="text-red-600" icon={<Trash2 className="h-4 w-4" />} disabled={!!p?.isDefault} title={p?.isDefault ? 'The default policy cannot be deleted' : undefined} onClick={() => setConfirmDelete(true)}>
+                Delete
+              </Button>
+            )}
+            <Button variant="ghost" onClick={onClose}>{isNew ? 'Cancel' : 'Close'}</Button>
+            {canEdit && (
+              <Button icon={<Save className="h-4 w-4" />} onClick={save} loading={saving} disabled={!isNew && !dirty}>
+                {isNew ? 'Create policy' : 'Save'}
+              </Button>
             )}
           </>
         }
-        aside={
-          isNew ? undefined : (
-            <>
-              <PreviewPanel policyId={id!} dirty={dirty} />
-              <RailCard title={<><Gauge className="h-3.5 w-3.5 text-subtle" /> In use</>}>
-                <RailRows
-                  rows={[
-                    { label: 'Calendar', value: p?.calendarName ? `${p.calendarName}${p.calendarIs24x7 ? ' · 24x7' : ''}` : 'Platform default' },
-                    { label: 'Holidays', value: p?.holidayCalendarName, hidden: !p?.holidayCalendarName },
-                    { label: 'Pauses in', value: p?.pauseStatuses.length ? p.pauseStatuses.map((s) => s.label).join(', ') : null },
-                    { label: 'Contracts', value: String(p?.usage.contracts ?? 0) },
-                    { label: 'Contract services', value: String(p?.usage.contractServices ?? 0) },
-                    { label: 'Services', value: String(p?.usage.services ?? 0) },
-                    { label: 'Catalog items', value: String(p?.usage.catalogItems ?? 0) },
-                    { label: 'Tickets', value: String(p?.usage.tickets ?? 0) },
-                  ]}
-                />
-              </RailCard>
-            </>
-          )
-        }
-      />
-
+      >
+        {body}
+      </Drawer>
       <ConfirmDialog open={confirmDelete} onClose={() => setConfirmDelete(false)} onConfirm={() => void remove()} title={`Delete "${name || p?.name}"?`} description={p ? `Used by ${usageSummary(p.usage)}. Contracts on this policy fall back to their service or the platform default.` : undefined} confirmLabel="Delete policy" danger loading={deleting} />
     </>
   );
@@ -384,7 +358,7 @@ function ContractsTab({ policy }: { policy: SlaPolicy }) {
   }
 
   const Row = ({ c }: { c: PolicyContract }) => (
-    <tr key={`${c.level}-${c.contractId}`}>
+    <tr>
       <td><Link to={`/contracts/${c.contractId}`} className="font-mono text-[12.5px] font-medium text-default hover:underline">{c.number}</Link></td>
       <td>
         <div className="font-medium text-default">{c.name}</div>
@@ -430,12 +404,13 @@ function ContractsTab({ policy }: { policy: SlaPolicy }) {
           </div>
         </Card>
       )}
-      <AssignDialog open={assigning} onClose={() => setAssigning(false)} policy={policy} already={new Set(contractLevel.map((c) => c.contractId))} onDone={invalidate} />
+      <AssignContractsDialog open={assigning} onClose={() => setAssigning(false)} policy={policy} already={new Set(contractLevel.map((c) => c.contractId))} onDone={invalidate} />
     </div>
   );
 }
 
-function AssignDialog({ open, onClose, policy, already, onDone }: { open: boolean; onClose: () => void; policy: SlaPolicy; already: Set<string>; onDone: () => void }) {
+/** Pick contracts to map onto a policy (contract level). */
+export function AssignContractsDialog({ open, onClose, policy, already, onDone }: { open: boolean; onClose: () => void; policy: SlaPolicy; already: Set<string>; onDone: () => void }) {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
@@ -526,9 +501,15 @@ function ComplianceTab({ policyId }: { policyId: string }) {
   );
 }
 
-// ---------------------------------------------------------------- preview (rail)
+// ---------------------------------------------------------------- preview
 
-function PreviewPanel({ policyId, dirty }: { policyId: string | null; dirty: boolean }) {
+interface Preview {
+  calendar: { name: string; timezone: string; is24x7: boolean; holidays: number };
+  start: string;
+  metrics: { metric: string; minutes: number; warnPct: number; calendar: string; appliesTo: string; dueAt: string; warnAt: string; elapsedHours: number }[];
+}
+
+function PreviewPanel({ policyId, dirty }: { policyId: string; dirty: boolean }) {
   const lookups = useLookups();
   const [ticketType, setTicketType] = useState<TicketType>('incident');
   const [priorityId, setPriorityId] = useState<string>('');
@@ -538,52 +519,43 @@ function PreviewPanel({ policyId, dirty }: { policyId: string | null; dirty: boo
   const q = useQuery({
     queryKey: ['sla', 'preview', policyId, ticketType, priorityId, startIso],
     queryFn: () => get<Preview>('/sla/preview', { policyId, ticketType, priorityId: priorityId || undefined, start: startIso }),
-    enabled: !!policyId && !!startIso,
+    enabled: !!startIso,
   });
   return (
-    <RailCard title={<><CalendarClock className="h-3.5 w-3.5 text-subtle" /> Preview due dates</>} action={dirty ? <span className="text-[11.5px] text-amber-600">as last saved</span> : undefined}>
-      {!policyId ? (
-        <div className="text-[12.5px] text-subtle">Save the policy to preview due dates.</div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <div className="grid grid-cols-2 gap-2">
-            <Select value={ticketType} options={TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t) }))} onChange={(e) => setTicketType(e.target.value as TicketType)} className="h-8 py-0 text-[12.5px]" />
-            <Select value={priorityId} placeholder="Any priority" options={priorities.map((p) => ({ value: p.id, label: p.label }))} onChange={(e) => setPriorityId(e.target.value)} className="h-8 py-0 text-[12.5px]" />
-          </div>
-          <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} className="h-8 py-0 text-[12.5px]" />
-          {q.isLoading && <LoadingBlock label="Calculating…" />}
-          {q.error && <div className="text-[12.5px] text-red-600">{errorMessage(q.error)}</div>}
-          {q.data && (
-            <div>
-              <div className="text-[11.5px] text-subtle mb-1">
-                {q.data.calendar.name} · {q.data.calendar.timezone}{q.data.calendar.holidays ? ` · ${q.data.calendar.holidays} holidays` : ''}
-              </div>
-              {q.data.metrics.length === 0 ? (
-                <div className="text-[12.5px] text-subtle">No targets for this combination.</div>
-              ) : (
-                <div className="text-[12.5px]">
-                  {q.data.metrics.map((m) => (
-                    <div key={m.metric} className="border-t border-default/60 py-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{METRIC_LABEL[m.metric as Metric] ?? m.metric}</span>
-                        <span className="text-muted">{formatDuration(m.minutes)} · {m.calendar === '24x7' ? '24x7' : 'business hrs'}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 text-[12px]">
-                        <span className="text-subtle">due</span>
-                        <span className="tnum">{fmtDateTime(m.dueAt)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 text-[11px] text-subtle">
-                        <span>warn at {m.warnPct}%</span>
-                        <span className="tnum">{fmtDateTime(m.warnAt)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+    <Card title="Preview due dates" actions={dirty ? <span className="text-[11.5px] text-amber-600">as last saved</span> : undefined}>
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <Select value={ticketType} options={TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t) }))} onChange={(e) => setTicketType(e.target.value as TicketType)} />
+          <Select value={priorityId} placeholder="Any priority" options={priorities.map((p) => ({ value: p.id, label: p.label }))} onChange={(e) => setPriorityId(e.target.value)} />
+          <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
         </div>
-      )}
-    </RailCard>
+        {q.isLoading && <LoadingBlock label="Calculating…" />}
+        {q.error && <div className="text-[12.5px] text-red-600">{errorMessage(q.error)}</div>}
+        {q.data && (
+          <div>
+            <div className="text-[12px] text-subtle mb-1">
+              {q.data.calendar.name} · {q.data.calendar.timezone}{q.data.calendar.holidays ? ` · ${q.data.calendar.holidays} holidays` : ''}
+            </div>
+            {q.data.metrics.length === 0 ? (
+              <div className="text-[12.5px] text-subtle">No targets for this combination.</div>
+            ) : (
+              <table className="table">
+                <thead><tr><th>Metric</th><th>Target</th><th>Due</th><th>Warn at</th></tr></thead>
+                <tbody>
+                  {q.data.metrics.map((m) => (
+                    <tr key={m.metric}>
+                      <td className="font-medium">{METRIC_LABEL[m.metric as Metric] ?? m.metric}</td>
+                      <td className="text-muted">{formatDuration(m.minutes)} · {m.calendar === '24x7' ? '24x7' : 'business hrs'}</td>
+                      <td className="tnum">{fmtDateTime(m.dueAt)}</td>
+                      <td className="tnum text-muted">{m.warnPct}% · {fmtDateTime(m.warnAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
