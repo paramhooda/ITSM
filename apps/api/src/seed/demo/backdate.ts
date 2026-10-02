@@ -28,6 +28,8 @@ export interface Timeline {
   reopenedAt: Date | null;
   /** Final resolution (null when open). */
   resolvedAt: Date | null;
+  /** Service restored (workaround) - at or before the resolution. */
+  restoredAt: Date | null;
   closedAt: Date | null;
   cancelledAt: Date | null;
   lastActivityAt: Date;
@@ -93,6 +95,9 @@ export function rewriteSla(row: SlaRow, tl: Timeline, now: Date): SlaRewrite {
       break;
     case 'response':
       satisfied = tl.firstResponseAt ?? firstDone;
+      break;
+    case 'restoration':
+      satisfied = tl.restoredAt ?? tl.resolvedAt;
       break;
     default:
       satisfied = tl.resolvedAt;
@@ -177,7 +182,7 @@ export async function backdateRuns(tx: Tx, runs: TicketRun[], now: Date) {
   for (const r of rewrites) {
     if (r.completedAt && (r.state === 'met' || r.state === 'breached')) {
       await tx.execute(sql`UPDATE ticket_sla_events SET details = details || jsonb_build_object('state', ${r.state}::text, 'elapsedMinutes', ${r.elapsed}::int) WHERE ticket_sla_id = ${r.id}::uuid AND event_type = 'completed'`);
-      await tx.execute(sql`UPDATE ticket_activities SET summary = ${`${metricLabel(r.metric)} SLA ${r.state === 'met' ? 'met' : 'breached'} (${formatMinutes(r.elapsed ?? 0)} of ${formatMinutes(r.target)})`}, data = data || jsonb_build_object('state', ${r.state}::text, 'elapsedMinutes', ${r.elapsed}::int) WHERE ticket_id = ${r.ticketId}::uuid AND activity_type = 'sla' AND data->>'slaId' = ${r.id}`);
+      await tx.execute(sql`UPDATE ticket_activities SET summary = ${`${metricLabel(r.metric)} SLA ${r.state === 'met' ? 'met' : 'breached'} (${formatMinutes(r.elapsed ?? 0)} of ${formatMinutes(r.target)})`}, data = data || jsonb_build_object('state', ${r.state}::text, 'elapsedMinutes', ${r.elapsed}::int), created_at = ${r.completedAt.toISOString()}::timestamptz WHERE ticket_id = ${r.ticketId}::uuid AND activity_type = 'sla' AND data->>'slaId' = ${r.id}`);
     }
     await tx.execute(sql`UPDATE ticket_sla_events SET details = details || jsonb_build_object('dueAt', ${r.dueAt.toISOString()}::text) WHERE ticket_sla_id = ${r.id}::uuid AND event_type IN ('started', 'recalculated', 'reopened', 'resumed')`);
     if (r.state === 'breached' && r.breachedAt) {
@@ -204,7 +209,7 @@ export async function backdateRuns(tx: Tx, runs: TicketRun[], now: Date) {
         lastActivityAt: tl.lastActivityAt,
         firstResponseAt: firstResponse,
         acknowledgedAt: acknowledged,
-        restoredAt: tl.resolvedAt,
+        restoredAt: tl.restoredAt ?? tl.resolvedAt,
         resolvedAt: tl.resolvedAt,
         closedAt: tl.closedAt ?? tl.cancelledAt,
         dueAt: dueByTicket.get(run.ticketId) ?? null,

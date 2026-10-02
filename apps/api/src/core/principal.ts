@@ -1,6 +1,6 @@
 import { eq, inArray, and, isNull } from 'drizzle-orm';
 import type { Permission } from '@itsm/shared';
-import { db, schema } from '@/db/client';
+import { db, schema, withSystem } from '@/db/client';
 
 export interface Principal {
   id: string;
@@ -85,15 +85,19 @@ export async function loadPrincipal(userId: string): Promise<Principal | null> {
   } else if (globalPermissions.has('tenant:all')) {
     customerScope = 'all';
   } else {
-    const grants = await db.select({ customerId: schema.userCustomerAccess.customerId }).from(schema.userCustomerAccess).where(eq(schema.userCustomerAccess.userId, userId));
+    // Grant tables carry customer_id and are under row-level security; resolving a
+    // principal has no tenant context yet, so read them with the system context.
+    const { grants, viaTeams } = await withSystem(async (tx) => ({
+      grants: await tx.select({ customerId: schema.userCustomerAccess.customerId }).from(schema.userCustomerAccess).where(eq(schema.userCustomerAccess.userId, userId)),
+      viaTeams: teamRows.length
+        ? await tx
+            .select({ customerId: schema.customerTeams.customerId })
+            .from(schema.customerTeams)
+            .where(inArray(schema.customerTeams.teamId, teamRows.map((t) => t.id)))
+        : [],
+    }));
     grants.forEach((g) => explicitCustomers.add(g.customerId));
-    if (teamRows.length) {
-      const viaTeams = await db
-        .select({ customerId: schema.customerTeams.customerId })
-        .from(schema.customerTeams)
-        .where(inArray(schema.customerTeams.teamId, teamRows.map((t) => t.id)));
-      viaTeams.forEach((g) => explicitCustomers.add(g.customerId));
-    }
+    viaTeams.forEach((g) => explicitCustomers.add(g.customerId));
     customerScope = [...explicitCustomers];
   }
 

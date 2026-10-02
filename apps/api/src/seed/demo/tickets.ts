@@ -15,7 +15,7 @@ import { ctxFor, integrationPrincipal, principalOf, user, type DemoCi, type Demo
 import { findEntitlement } from './contracts';
 import { backdateRuns, rewriteSla, type Phase, type TicketRun, type Timeline } from './backdate';
 import { INCIDENT_TEMPLATES, REQUEST_TEMPLATES, PROBLEM_TEMPLATES, CHANGE_TEMPLATES, type IncidentTemplate, type RequestTemplate, type ProblemTemplate, type ChangeTemplate, type Vars } from './ticket-templates';
-import { addDays, addMinutes, atIst, DAY, HOUR, istWeekday, MINUTE, randomTimeOfDay, type Rng } from './rng';
+import { addDays, addMinutes, atIst, DAY, HOUR, isoDate, istWeekday, MINUTE, randomTimeOfDay, type Rng } from './rng';
 
 type Actor = { kind: 'msp'; key: string } | { kind: 'portal'; userId: string; name: string } | { kind: 'integration'; name: string };
 
@@ -151,11 +151,11 @@ function buildPlans(state: DemoState): Plan[] {
       return { creator: { kind: 'msp', key: rng.pick(['rohan', 'meera']) }, contactId: contact.id, userId: contact.userId, name: contact.name };
     };
     const slaFlags = (priorityKey: string) => {
-      let resp = 0.9;
-      let res = 0.93;
+      let resp = 0.92;
+      let res = 0.95;
       if (cust.key === 'apex') {
-        resp -= 0.17;
-        res -= 0.15;
+        resp -= 0.25;
+        res -= 0.22;
       }
       if (priorityKey === 'p1') {
         resp -= 0.12;
@@ -165,13 +165,16 @@ function buildPlans(state: DemoState): Plan[] {
     };
 
     // ------------------------------------------------------------ incidents
+    const covered = new Set(cust.contracts.filter((c) => ['active', 'expiring'].includes(c.status) && c.startDate <= isoDate(now) && c.endDate >= isoDate(now)).flatMap((c) => c.serviceKeys));
     const weighted = INCIDENT_TEMPLATES.map((t): [IncidentTemplate, number] => {
       let w = t.weight;
-      if (t.domain === 'soc') w *= cust.domains.soc ? 1.6 : 0.06;
+      if (t.domain === 'soc') w *= cust.domains.soc ? 3 : 0.06;
       if (t.domain === 'amc') w *= cust.domains.amc ? 1 : 0.08;
       if (t.categoryKey === 'cloud') w *= cust.domains.cloud ? 2 : 0;
-      if (t.domain === 'service_desk') w *= cust.domains.eus ? 2.2 : 0.3;
+      if (t.domain === 'service_desk') w *= cust.domains.eus ? 2.2 : 0.12;
       if (t.key === 'store_switch_replace') w *= cust.key === 'apex' ? 3 : 0.3;
+      // Work mostly lands on services the customer actually buys; a few out-of-scope requests remain realistic.
+      if (t.serviceKey && !covered.has(t.serviceKey)) w *= 0.04;
       return [t, w];
     }).filter(([, w]) => w > 0);
     for (let i = 0; i < incidents; i++) {
@@ -184,7 +187,7 @@ function buildPlans(state: DemoState): Plan[] {
       let urgency = t.urgency;
       if (rng.chance(0.2)) urgency = LEVELS[Math.max(0, Math.min(2, LEVELS.indexOf(t.urgency) + (rng.chance(0.5) ? 1 : -1)))] as typeof urgency;
       const priorityKey = PRIORITY_OF[`${t.impact}:${urgency}`]!;
-      const open = rng.chance(0.12);
+      const open = rng.chance(0.1);
       const anyHour = sourceKey === 'monitoring' || sourceKey === 'siem' || priorityKey === 'p1';
       const createdAt = sampleCreatedAt(rng, now, open, anyHour, worksWeekends);
       let teamKey = t.categoryKey === 'cloud' ? 'cloud' : TEAM_OF_DOMAIN[t.domain]!;
@@ -199,14 +202,14 @@ function buildPlans(state: DemoState): Plan[] {
         impactKey: t.impact, urgencyKey: urgency, priorityKey, sourceKey, creator,
         requesterContactId: req.contactId, requesterUserId: req.userId, teamKey, assigneeKey, managerKey: MANAGER_OF_TEAM[teamKey]!,
         assignedAtCreation: creator.kind === 'msp' && !!assigneeKey && rng.chance(0.65),
-        createdAt, outcome, ...slaFlags(priorityKey), workNotes: rng.weighted([[0, 0.2], [1, 0.4], [2, 0.3], [3, 0.1]]), reopen: !open && rng.chance(0.035), customerComment: creator.kind === 'portal' && rng.chance(0.45),
+        createdAt, outcome, ...slaFlags(priorityKey), workNotes: rng.weighted([[0, 0.2], [1, 0.4], [2, 0.3], [3, 0.1]]), reopen: !open && rng.chance(0.06), customerComment: creator.kind === 'portal' && rng.chance(0.45),
         approvalDecision: null, changeStage: null, problemStage: null, title: t.title(vars),
       });
     }
 
     // ------------------------------------------------------------ requests
     for (let i = 0; i < requests; i++) {
-      const t = rng.weighted(REQUEST_TEMPLATES.map((r): [RequestTemplate, number] => [r, r.key === 'maintenance_window' && !cust.domains.amc ? 0.2 : r.weight]));
+      const t = rng.weighted(REQUEST_TEMPLATES.map((r): [RequestTemplate, number] => [r, (r.key === 'maintenance_window' && !cust.domains.amc ? 0.2 : r.weight) * (r.serviceKey && !covered.has(r.serviceKey) ? 0.12 : 1)]));
       const site = pickSite(rng, cust, null);
       const ci = pickCi(rng, cust, site, t.catalogKey === 'config_change' ? ['firewall', 'network_switch'] : t.catalogKey === 'certificate_renewal' ? ['application'] : []);
       const sourceKey = rng.weighted(t.sources.map(([k, w]): [string, number] => [k, w]));
@@ -237,7 +240,7 @@ function buildPlans(state: DemoState): Plan[] {
       const site = pickSite(rng, cust, null);
       const ci = pickCi(rng, cust, site, t.ciTypes);
       const effectiveSite = ci?.siteKey ? cust.sites.find((s) => s.key === ci.siteKey)! : site;
-      const open = rng.chance(0.4);
+      const open = rng.chance(0.3);
       const createdAt = sampleCreatedAt(rng, now, false, false, false);
       const assigneeKey = assigneeFor(rng, 'noc', t.categoryKey, cust);
       const vars = varsFor(rng, cust, effectiveSite, ci, cust.contacts.find((c) => c.isPrimary)!.name);
@@ -256,7 +259,7 @@ function buildPlans(state: DemoState): Plan[] {
       const site = pickSite(rng, cust, null);
       const ci = pickCi(rng, cust, site, t.ciTypes);
       const effectiveSite = ci?.siteKey ? cust.sites.find((s) => s.key === ci.siteKey)! : site;
-      const open = rng.chance(0.35);
+      const open = rng.chance(0.3);
       const createdAt = sampleCreatedAt(rng, now, open, false, false);
       const assigneeKey = assigneeFor(rng, t.categoryKey === 'hardware' ? 'field' : 'noc', t.categoryKey, cust);
       const stage: Plan['changeStage'] = open ? rng.weighted([['draft', 0.15], ['awaiting', 0.35], ['scheduled', 0.35], ['implementing', 0.15]]) : rng.weighted([['implemented', 0.82], ['failed', 0.08], ['rejected', 0.1]]);
@@ -278,6 +281,7 @@ function buildPlans(state: DemoState): Plan[] {
 interface Targets {
   response: { minutes: number; cal: CalendarDef } | null;
   resolution: { minutes: number; cal: CalendarDef } | null;
+  restoration: { minutes: number; cal: CalendarDef } | null;
 }
 
 function targetsOf(rows: (typeof schema.ticketSlas.$inferSelect)[]): Targets {
@@ -285,7 +289,7 @@ function targetsOf(rows: (typeof schema.ticketSlas.$inferSelect)[]): Targets {
     const r = rows.find((x) => x.metric === metric);
     return r ? { minutes: r.targetMinutes, cal: calendarOf(r) } : null;
   };
-  return { response: pick('response') ?? pick('acknowledgement'), resolution: pick('resolution') ?? pick('restoration') };
+  return { response: pick('response') ?? pick('acknowledgement'), resolution: pick('resolution') ?? pick('restoration'), restoration: pick('restoration') };
 }
 
 const work = (from: Date, minutes: number, cal: CalendarDef | undefined) => addWorkingMinutes(from, Math.max(1, Math.round(minutes)), cal ?? CALENDAR_24X7);
@@ -364,6 +368,14 @@ function planIncidentTimes(plan: Plan, rows: (typeof schema.ticketSlas.$inferSel
     }
   }
   if (!resolvedAt && !assigned) outcome = 'new';
+  // Service restoration precedes the resolution (workaround first, then the fix) when a restoration clock exists.
+  let restoredAt: Date | null = null;
+  if (resolvedAt && tg.restoration) {
+    const f = rng.chance(plan.resolutionMet ? 0.95 : 0.6) ? rng.float(0.2, 0.9) : rng.float(1.05, 1.6);
+    restoredAt = work(T0, tg.restoration.minutes * f + pausedMinutes, tg.restoration.cal);
+    if (restoredAt.getTime() < afterResponse.getTime()) restoredAt = addMinutes(afterResponse, rng.int(5, 40));
+    if (restoredAt.getTime() > resolvedAt.getTime()) restoredAt = resolvedAt;
+  }
   let closedAt: Date | null = null;
   let closedBySystem = false;
   if (resolvedAt) {
@@ -404,7 +416,7 @@ function planIncidentTimes(plan: Plan, rows: (typeof schema.ticketSlas.$inferSel
   const pauses: [Date, Date | null][] = pauseStart ? [[pauseStart, pauseEnd]] : [];
   const lastActivityAt = new Date(Math.max(...[T0, ackAt, firstResponseAt, pauseStart, pauseEnd, resolvedAt, closedAt, reopenAt, resolved2At, closed2At, customerCommentAt, ...workNoteTimes].filter((d): d is Date => !!d).map((d) => d.getTime())));
   return {
-    tl: { createdAt: T0, acknowledgedAt: ackAt, firstResponseAt, pauses, firstResolvedAt: reopenAt ? resolvedAt : null, reopenedAt: reopenAt, resolvedAt: finalResolved, closedAt: finalClosed, cancelledAt: null, lastActivityAt },
+    tl: { createdAt: T0, acknowledgedAt: ackAt, firstResponseAt, pauses, firstResolvedAt: reopenAt ? resolvedAt : null, reopenedAt: reopenAt, resolvedAt: finalResolved, restoredAt: reopenAt ? finalResolved : restoredAt, closedAt: finalClosed, cancelledAt: null, lastActivityAt },
     assignAt, progressAt, workNoteTimes, customerCommentAt, pauseStart, pauseEnd, resolvedAt, closedAt, closedBySystem, reopenAt, resolved2At, closed2At, outcome,
   };
 }
@@ -638,7 +650,7 @@ async function runRequest(state: DemoState, tx: Tx, plan: Plan): Promise<TicketR
       if (plan.approvalDecision === 'rejected') cancelledAt = decidedAt;
     }
   }
-  const tl: Timeline = { createdAt: T0, acknowledgedAt: null, firstResponseAt: null, pauses, firstResolvedAt: null, reopenedAt: null, resolvedAt: null, closedAt: null, cancelledAt, lastActivityAt: decidedAt ?? T0 };
+  const tl: Timeline = { createdAt: T0, acknowledgedAt: null, firstResponseAt: null, pauses, firstResolvedAt: null, reopenedAt: null, resolvedAt: null, restoredAt: null, closedAt: null, cancelledAt, lastActivityAt: decidedAt ?? T0 };
   if (cancelledAt || plan.approvalDecision === 'pending' || !plan.assigneeKey) return r.result(ticket, tl);
   // Work the request
   const start = decidedAt ?? T0;
@@ -716,7 +728,7 @@ async function runProblem(state: DemoState, tx: Tx, plan: Plan): Promise<TicketR
   await changeStatus(r.ctx(assignee), ticket.id, { statusId: refs.option('ticket_status', 'under_investigation') });
   r.mark(addMinutes(investigatingAt, 5));
   await addComment(r.ctx(assignee), ticket.id, { kind: 'comment', body: `Problem record opened to investigate the recurring incidents on ${plan.vars.host}. Investigation plan: correlate incident timelines, review logs and vendor advisories, and identify a workaround while the root cause is confirmed.` });
-  const tl: Timeline = { createdAt: T0, acknowledgedAt: T0, firstResponseAt: addMinutes(investigatingAt, 5), pauses: [], firstResolvedAt: null, reopenedAt: null, resolvedAt: null, closedAt: null, cancelledAt: null, lastActivityAt: investigatingAt };
+  const tl: Timeline = { createdAt: T0, acknowledgedAt: T0, firstResponseAt: addMinutes(investigatingAt, 5), pauses: [], firstResolvedAt: null, reopenedAt: null, resolvedAt: null, restoredAt: null, closedAt: null, cancelledAt: null, lastActivityAt: investigatingAt };
   const order: Plan['problemStage'][] = ['investigating', 'rca', 'known_error', 'resolved'];
   const reach = order.indexOf(stage);
   let cursor = investigatingAt;
@@ -789,15 +801,15 @@ async function runChange(state: DemoState, tx: Tx, plan: Plan): Promise<TicketRu
   input.watcherIds = [user(state, 'ananya').id];
   const ticket = await r.create(input);
   const assignee = plan.assigneeKey!;
-  const tl: Timeline = { createdAt: T0, acknowledgedAt: T0, firstResponseAt: null, pauses: [], firstResolvedAt: null, reopenedAt: null, resolvedAt: null, closedAt: null, cancelledAt: null, lastActivityAt: T0 };
+  const tl: Timeline = { createdAt: T0, acknowledgedAt: T0, firstResponseAt: null, pauses: [], firstResolvedAt: null, reopenedAt: null, resolvedAt: null, restoredAt: null, closedAt: null, cancelledAt: null, lastActivityAt: T0 };
   const times: Date[] = [T0];
   if (stage === 'draft') return r.result(ticket, tl);
   const reqAt = addMinutes(T0, rng.int(10, 240));
   times.push(reqAt);
   r.mark(reqAt);
-  await requestApproval(r.ctx(assignee), ticket.id);
+  await requestApproval(r.ctx('rajesh'), ticket.id);
   r.approvalsRequestedAt = reqAt;
-  r.actorAudit(assignee, 'approval.request', reqAt);
+  r.actorAudit('rajesh', 'approval.request', reqAt);
   if (stage === 'awaiting') {
     tl.pauses.push([reqAt, null]);
     tl.lastActivityAt = reqAt;
@@ -835,7 +847,7 @@ async function runChange(state: DemoState, tx: Tx, plan: Plan): Promise<TicketRu
   r.mark(implAt);
   await changeStatus(r.ctx(assignee), ticket.id, { statusId: refs.option('ticket_status', 'implementing') });
   r.mark(addMinutes(implAt, 1));
-  await updateChangeDetails(r.ctx(assignee), ticket.id, { actualStart: implAt });
+  await updateChangeDetails(r.ctx('rajesh'), ticket.id, { actualStart: implAt });
   if (stage === 'implementing') {
     tl.lastActivityAt = implAt;
     return r.result(ticket, tl);
@@ -847,11 +859,11 @@ async function runChange(state: DemoState, tx: Tx, plan: Plan): Promise<TicketRu
   if (stage === 'failed') {
     await changeStatus(r.ctx(assignee), ticket.id, { statusId: refs.option('ticket_status', 'failed'), resolutionNotes: 'Post-implementation validation failed; backout plan executed and service restored to the previous state. Re-planning with the vendor.', comment: 'Change backed out; service verified on the previous configuration.' });
     r.mark(addMinutes(endAt, 2));
-    await updateChangeDetails(r.ctx(assignee), ticket.id, { actualEnd: endAt, implementationNotes: 'Validation failed (see notes); backout executed successfully.', pirNotes: 'Backout successful. Root cause of the failure: vendor firmware incompatibility not listed in the release notes.', pirOutcome: 'backed_out' });
+    await updateChangeDetails(r.ctx('rajesh'), ticket.id, { actualEnd: endAt, implementationNotes: 'Validation failed (see notes); backout executed successfully.', pirNotes: 'Backout successful. Root cause of the failure: vendor firmware incompatibility not listed in the release notes.', pirOutcome: 'backed_out' });
   } else {
     await resolveTicket(r.ctx(assignee), ticket.id, { resolutionCodeId: refs.option('resolution_code', 'config_change'), resolutionNotes: t.implementationNotes(plan.vars) });
     r.mark(addMinutes(endAt, 2));
-    await updateChangeDetails(r.ctx(assignee), ticket.id, { actualEnd: endAt, implementationNotes: t.implementationNotes(plan.vars) });
+    await updateChangeDetails(r.ctx('rajesh'), ticket.id, { actualEnd: endAt, implementationNotes: t.implementationNotes(plan.vars) });
     const pirAt = addDays(endAt, 2);
     if (pirAt.getTime() < now.getTime()) {
       r.mark(pirAt);

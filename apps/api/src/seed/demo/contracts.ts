@@ -70,7 +70,7 @@ const AMC_SCOPE = (siteKeys: string[]): ScopeSeed[] => [
   { header: 'activities', name: 'Breakdown support with on-site visit', serviceKey: 'amc_support', category: 'infrastructure' },
   { header: 'activities', name: 'Preventive maintenance visits per schedule', serviceKey: 'preventive_maintenance', category: 'infrastructure' },
   { header: 'activities', name: 'Part replacement (OEM or equivalent)', serviceKey: 'amc_support', category: 'infrastructure', description: 'Up to the hardware replacement entitlement; additional parts billable.' },
-  { header: 'activities', name: 'Application development or customization', classification: 'out_of_scope', category: 'applications' },
+  { header: 'activities', name: 'Application development or customization', classification: 'out_of_scope', ticketCategoryKey: 'software', category: 'applications' },
 ];
 
 const MANAGED_SCOPE: ScopeSeed[] = [
@@ -78,9 +78,11 @@ const MANAGED_SCOPE: ScopeSeed[] = [
   { header: 'services', name: 'LAN/WAN and firewall administration', serviceKey: 'network_management', category: 'network' },
   { header: 'services', name: 'Server OS administration and patching', serviceKey: 'server_management', category: 'infrastructure' },
   { header: 'services', name: 'Backup job monitoring and restores', serviceKey: 'backup_management', category: 'backup' },
+  { header: 'services', name: 'Storage capacity and health management', serviceKey: 'storage_management', category: 'infrastructure' },
+  { header: 'services', name: 'Hypervisor cluster and VM administration', serviceKey: 'virtualization_management', category: 'infrastructure' },
   { header: 'device_types', name: 'Hypervisors and virtual machines', ciTypeKey: 'virtual_machine', category: 'infrastructure' },
   { header: 'activities', name: 'Third-party ISP escalation', classification: 'out_of_scope', ticketCategoryKey: 'connectivity', category: 'network', description: 'ISP circuits are managed by the customer; we assist with diagnostics only.' },
-  { header: 'activities', name: 'Application development', classification: 'out_of_scope', category: 'applications' },
+  { header: 'activities', name: 'Application development', classification: 'out_of_scope', ticketCategoryKey: 'software', category: 'applications' },
   { header: 'users', name: 'End-user laptops', classification: 'out_of_scope', ciTypeKey: 'endpoint', category: 'end_user' },
 ];
 
@@ -90,20 +92,23 @@ const SOC_SCOPE: ScopeSeed[] = [
   { header: 'device_types', name: 'Servers (EDR + log sources)', ciTypeKey: 'server', category: 'security' },
   { header: 'activities', name: 'Incident response: containment and remediation guidance', serviceKey: 'security_monitoring', category: 'security' },
   { header: 'activities', name: 'Monthly threat and compliance report', serviceKey: 'security_monitoring', category: 'security' },
-  { header: 'activities', name: 'Forensic investigation beyond 8 hours', classification: 'out_of_scope', category: 'security', description: 'Billable at professional services rates.' },
-  { header: 'activities', name: 'Penetration testing', classification: 'out_of_scope', category: 'security' },
+  { header: 'activities', name: 'Forensic investigation beyond 8 hours', classification: 'out_of_scope', ticketCategoryKey: 'other', category: 'security', description: 'Billable at professional services rates.' },
+  { header: 'activities', name: 'Penetration testing', classification: 'out_of_scope', ticketCategoryKey: 'other', category: 'security', description: 'Vulnerability advisories are in scope; active testing is a separate engagement.' },
 ];
 
 const CLOUD_SCOPE: ScopeSeed[] = [
   { header: 'services', name: 'Cloud operations support', serviceKey: 'cloud_support', category: 'cloud' },
+  { header: 'services', name: 'Cloud backup and monitoring', serviceKey: 'backup_management', category: 'backup' },
+  { header: 'services', name: 'Cloud resource monitoring', serviceKey: 'noc_monitoring', category: 'cloud' },
   { header: 'device_types', name: 'Cloud accounts and subscriptions', ciTypeKey: 'cloud_account', category: 'cloud' },
   { header: 'device_types', name: 'Compute, storage and database resources', ciTypeKey: 'cloud_resource', category: 'cloud' },
   { header: 'activities', name: 'Cost optimisation review (quarterly)', serviceKey: 'cloud_support', category: 'cloud' },
-  { header: 'activities', name: 'Application code deployment', classification: 'out_of_scope', category: 'applications' },
+  { header: 'activities', name: 'Application code deployment', classification: 'out_of_scope', ticketCategoryKey: 'software', category: 'applications' },
 ];
 
 const NETWORK_SCOPE: ScopeSeed[] = [
   { header: 'services', name: 'Network device administration', serviceKey: 'network_management', category: 'network' },
+  { header: 'services', name: 'Network monitoring and alert handling', serviceKey: 'noc_monitoring', category: 'network' },
   { header: 'device_types', name: 'Switches, routers and wireless', ciTypeKey: 'network_switch', category: 'network' },
   { header: 'device_types', name: 'Firewalls', ciTypeKey: 'firewall', category: 'network' },
   { header: 'activities', name: 'Third-party ISP escalation', classification: 'out_of_scope', ticketCategoryKey: 'connectivity', category: 'network' },
@@ -115,7 +120,7 @@ const EUS_SCOPE: ScopeSeed[] = [
   { header: 'users', name: 'Head office and store staff (up to 450 users)', category: 'end_user' },
   { header: 'device_types', name: 'Laptops, desktops and printers', ciTypeKey: 'endpoint', category: 'end_user' },
   { header: 'applications', name: 'Microsoft 365, POS client, ERP client', category: 'applications' },
-  { header: 'activities', name: 'Hardware repair (sent to OEM)', classification: 'out_of_scope', category: 'end_user' },
+  { header: 'activities', name: 'Hardware repair (sent to OEM)', classification: 'out_of_scope', ticketCategoryKey: 'hardware', category: 'end_user' },
 ];
 
 const STD_ENTS = (hours = 200, eng = 100): EntSeed[] => [
