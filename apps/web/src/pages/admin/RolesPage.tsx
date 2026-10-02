@@ -8,6 +8,8 @@ import { FormDialog, type FieldSpec } from '@/components/admin/FormDialog';
 import { PermissionMatrix } from '@/components/admin/PermissionMatrix';
 import { useRoles, type RoleRow } from '@/components/admin/RoleAssignmentsEditor';
 import { useAdminMutation } from '@/components/admin/api';
+import { CheckboxGroup } from '@/components/admin/inputs';
+import { NAV_AREAS, ALL_NAV_AREAS } from '@itsm/shared';
 
 type Values = Record<string, unknown>;
 
@@ -64,13 +66,15 @@ function RoleDrawer({ role, onClose }: { role: RoleRow; onClose: () => void }) {
   const [name, setName] = useState(role.name);
   const [description, setDescription] = useState(role.description ?? '');
   const [perms, setPerms] = useState<string[]>(role.permissions);
+  const [areas, setAreas] = useState<string[] | null>(role.navAreas ?? null);
   const [dirty, setDirty] = useState(false);
   useEffect(() => {
     setName(role.name);
     setDescription(role.description ?? '');
     setPerms(role.permissions);
+    setAreas(role.navAreas ?? null);
     setDirty(false);
-  }, [role.id, role.name, role.description, role.permissions]);
+  }, [role.id, role.name, role.description, role.permissions, role.navAreas]);
   const locked = role.key === 'admin';
   const save = useAdminMutation((body: Values) => patch(`/iam/roles/${role.id}`, body), { invalidate: [['iam', 'roles']], success: 'Role saved', onSuccess: () => setDirty(false) });
   return (
@@ -83,7 +87,7 @@ function RoleDrawer({ role, onClose }: { role: RoleRow; onClose: () => void }) {
         <>
           <span className="mr-auto text-[12px] text-subtle">{perms.length} permission(s) · {role.userCount} user(s)</span>
           <Button variant="ghost" onClick={onClose}>Close</Button>
-          <Button icon={<Save className="h-4 w-4" />} disabled={!dirty} loading={save.isPending} onClick={() => save.mutate({ name, description, ...(locked ? {} : { permissions: perms }) })}>
+          <Button icon={<Save className="h-4 w-4" />} disabled={!dirty} loading={save.isPending} onClick={() => save.mutate({ name, description, navAreas: areas, ...(locked ? {} : { permissions: perms }) })}>
             Save
           </Button>
         </>
@@ -95,6 +99,18 @@ function RoleDrawer({ role, onClose }: { role: RoleRow; onClose: () => void }) {
           <Field label="Key"><Input value={role.key} disabled className="font-mono text-[12.5px]" /></Field>
           <Field label="Description" className="sm:col-span-2"><Textarea rows={2} value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} /></Field>
         </div>
+        {role.userType === 'msp' && (
+          <div className="rounded-lg border border-default p-3">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div>
+                <div className="text-[13px] font-medium">Navigation areas</div>
+                <div className="text-[12px] text-muted">What holders of this role see in the sidebar. Permissions still guard every page; this keeps the workspace focused on their area.</div>
+              </div>
+              <label className="inline-flex items-center gap-2 text-[12.5px] cursor-pointer select-none shrink-0"><input type="checkbox" className="h-4 w-4 rounded accent-brand-600" checked={areas === null} onChange={(e) => { setAreas(e.target.checked ? null : [...ALL_NAV_AREAS]); setDirty(true); }} /> Everything permissions allow</label>
+            </div>
+            {areas !== null && <CheckboxGroup columns={3} value={areas} onChange={(v) => { setAreas(v); setDirty(true); }} options={ALL_NAV_AREAS.map((a) => ({ value: a, label: NAV_AREAS[a] }))} />}
+          </div>
+        )}
         {locked && <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800">The Administrator role always holds every permission; its permissions cannot be changed.</div>}
         <PermissionMatrix value={perms} onChange={(v) => { setPerms(v); setDirty(true); }} readOnly={locked} userType={role.userType} />
       </div>

@@ -13,6 +13,8 @@ export interface Principal {
   customerScope: 'all' | string[];
   roles: { id: string; key: string; name: string; customerId: string | null }[];
   teams: { id: string; key: string; name: string }[];
+  /** Navigation areas from the user's roles; null when no role configures them (show everything the permissions allow). */
+  areas?: string[] | null;
   timezone: string;
   preferences: Record<string, unknown>;
 }

@@ -37,6 +37,9 @@ const schema = z.object({
   AI_MODEL: z.string().default('claude-sonnet-5-5'),
   OPENAI_COMPATIBLE_BASE_URL: z.string().optional(),
   OPENAI_COMPATIBLE_API_KEY: z.string().optional(),
+  /** Common aliases so a plain OpenAI setup works with the usual variable names. */
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_BASE_URL: z.string().optional(),
   WEB_DIST_PATH: z.string().optional(),
   RATE_LIMIT_MAX: z.coerce.number().default(1500),
 });

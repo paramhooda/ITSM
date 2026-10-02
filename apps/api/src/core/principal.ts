@@ -19,6 +19,8 @@ export interface Principal {
   customerScope: 'all' | string[];
   roles: { id: string; key: string; name: string; customerId: string | null }[];
   teams: { id: string; key: string; name: string }[];
+  /** Navigation areas (union over roles); null when no role configures them. */
+  areas?: string[] | null;
   /** For API-key principals. */
   apiKeyId?: string;
   isSystem?: boolean;
@@ -41,6 +43,7 @@ export async function loadPrincipal(userId: string): Promise<Principal | null> {
       roleId: schema.roles.id,
       roleKey: schema.roles.key,
       roleName: schema.roles.name,
+      navAreas: schema.roles.navAreas,
       customerId: schema.userRoles.customerId,
     })
     .from(schema.userRoles)
@@ -116,6 +119,7 @@ export async function loadPrincipal(userId: string): Promise<Principal | null> {
     customerScope,
     roles: assignments.map((a) => ({ id: a.roleId, key: a.roleKey, name: a.roleName, customerId: a.customerId })),
     teams: teamRows,
+    areas: assignments.some((a) => a.navAreas) ? [...new Set(assignments.flatMap((a) => a.navAreas ?? []))] : null,
   };
   cache.set(userId, { at: Date.now(), p: principal });
   return principal;
@@ -142,6 +146,7 @@ export async function loadApiKeyPrincipal(rawKey: string, sha256: (s: string) =>
     customerScope: row.customerId ? [row.customerId] : perms.has('tenant:all') ? 'all' : [],
     roles: [],
     teams: [],
+    areas: null,
     apiKeyId: row.id,
   };
 }
@@ -160,6 +165,7 @@ export function toPublicPrincipal(p: Principal) {
     customerScope: p.customerScope,
     roles: p.roles,
     teams: p.teams,
+    areas: p.areas ?? null,
     timezone: p.timezone,
     preferences: p.preferences,
   };

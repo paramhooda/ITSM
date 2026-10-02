@@ -1,3 +1,4 @@
+import { aiConfig } from '@/lib/ai';
 import { buildApp } from '@/core/app';
 import { config } from '@/config';
 import { logger } from '@/core/logger';
@@ -20,6 +21,8 @@ async function main() {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   await app.listen({ port: config.PORT, host: config.HOST });
   logger.info(`API listening on http://${config.HOST}:${config.PORT} (${config.NODE_ENV})`);
+  const ai = aiConfig();
+  logger.info({ provider: ai.provider, model: ai.model || null, baseUrl: ai.baseUrl, hasKey: ai.hasKey, notes: ai.notes }, ai.provider === 'none' ? 'AI assistant disabled (set AI_PROVIDER and a key to enable it)' : 'AI assistant enabled');
 }
 
 main().catch((err) => {

@@ -1,3 +1,4 @@
+import { ALL_NAV_AREAS, type NavArea } from './constants.js';
 /**
  * Permission catalog.
  *
@@ -121,6 +122,24 @@ export const PERMISSION_MODULES: Record<string, Permission[]> = {
 };
 
 /** System roles shipped by default. Administrators can add more. */
+/** Navigation areas each system role works in (see NAV_AREAS). Administrators see everything. */
+export const SYSTEM_ROLE_AREAS: Record<string, NavArea[]> = {
+  admin: ALL_NAV_AREAS,
+  itsm_admin: ['tickets', 'customers', 'contracts', 'catalog', 'teams', 'knowledge', 'reports'],
+  service_manager: ['tickets', 'customers', 'contracts', 'catalog', 'teams', 'assets', 'cmdb', 'field', 'maintenance', 'knowledge', 'reports'],
+  account_manager: ['tickets', 'customers', 'contracts', 'catalog', 'teams', 'reports'],
+  engineer: ['tickets', 'teams', 'assets', 'field', 'maintenance', 'knowledge'],
+  service_desk: ['tickets', 'customers', 'teams', 'field', 'knowledge'],
+  noc_engineer: ['tickets', 'teams', 'cmdb', 'discovery', 'monitoring', 'knowledge'],
+  noc_manager: ['tickets', 'customers', 'teams', 'assets', 'cmdb', 'discovery', 'monitoring', 'field', 'maintenance', 'knowledge', 'reports'],
+  soc_analyst: ['tickets', 'teams', 'cmdb', 'monitoring', 'knowledge'],
+  soc_manager: ['tickets', 'customers', 'teams', 'cmdb', 'monitoring', 'knowledge', 'reports'],
+  cmdb_admin: ['tickets', 'teams', 'assets', 'cmdb', 'discovery', 'monitoring', 'knowledge'],
+  contract_admin: ['customers', 'contracts', 'catalog', 'teams', 'reports'],
+  management: ['tickets', 'customers', 'contracts', 'catalog', 'teams', 'reports'],
+  auditor: ['tickets', 'customers', 'contracts', 'teams', 'reports'],
+};
+
 export const SYSTEM_ROLES: Record<string, { name: string; description: string; userType: 'msp' | 'customer'; permissions: Permission[] }> = {
   admin: {
     name: 'Administrator',

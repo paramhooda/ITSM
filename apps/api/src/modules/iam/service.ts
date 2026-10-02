@@ -1,5 +1,5 @@
 import { eq, and, inArray, sql, ilike, or, desc, asc, isNull, getTableColumns } from 'drizzle-orm';
-import { ALL_PERMISSIONS, PERMISSION_MODULES, PERMISSIONS, type Permission } from '@itsm/shared';
+import { ALL_PERMISSIONS, ALL_NAV_AREAS, PERMISSION_MODULES, PERMISSIONS, type Permission } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { schema } from '@/db/client';
@@ -257,6 +257,13 @@ export async function setUserCustomerAccess(ctx: Ctx, userId: string, customerId
 
 // ---------------------------------------------------------------- roles
 
+/** Navigation areas must come from the shared catalogue; null means "everything the permissions allow". */
+function validateAreas(areas: string[] | null | undefined) {
+  if (!areas) return;
+  const bad = areas.filter((a) => !(ALL_NAV_AREAS as string[]).includes(a));
+  if (bad.length) throw new ValidationError(`Unknown navigation areas: ${bad.join(', ')}`);
+}
+
 export async function listRoles(ctx: Ctx) {
   const roles = await ctx.tx.select().from(schema.roles).orderBy(asc(schema.roles.userType), asc(schema.roles.name));
   const perms = await ctx.tx.select().from(schema.rolePermissions);
@@ -264,19 +271,22 @@ export async function listRoles(ctx: Ctx) {
   return roles.map((r) => ({ ...r, permissions: perms.filter((p) => p.roleId === r.id).map((p) => p.permission), userCount: counts.find((c) => c.roleId === r.id)?.count ?? 0 }));
 }
 
-export async function createRole(ctx: Ctx, input: { key: string; name: string; description?: string; userType: 'msp' | 'customer'; permissions: string[] }) {
+export async function createRole(ctx: Ctx, input: { key: string; name: string; description?: string; userType: 'msp' | 'customer'; permissions: string[]; navAreas?: string[] | null }) {
   validatePermissions(input.permissions, input.userType);
-  const [role] = await ctx.tx.insert(schema.roles).values({ key: input.key, name: input.name, description: input.description, userType: input.userType }).returning();
+  validateAreas(input.navAreas);
+  const [role] = await ctx.tx.insert(schema.roles).values({ key: input.key, name: input.name, description: input.description, userType: input.userType, navAreas: input.navAreas ?? null }).returning();
   if (input.permissions.length) await ctx.tx.insert(schema.rolePermissions).values(input.permissions.map((permission) => ({ roleId: role.id, permission })));
   await ctx.audit({ entityType: 'role', entityId: role.id, entityLabel: role.name, action: 'create', metadata: { permissions: input.permissions } });
   return { ...role, permissions: input.permissions };
 }
 
-export async function updateRole(ctx: Ctx, id: string, patch: { name?: string; description?: string; permissions?: string[] }) {
+export async function updateRole(ctx: Ctx, id: string, patch: { name?: string; description?: string; permissions?: string[]; navAreas?: string[] | null }) {
   const [role] = await ctx.tx.select().from(schema.roles).where(eq(schema.roles.id, id)).limit(1);
   if (!role) throw new NotFoundError('Role');
   if (role.key === 'admin' && patch.permissions) throw new ValidationError('The Administrator role permissions cannot be modified');
-  if (patch.name || patch.description !== undefined) await ctx.tx.update(schema.roles).set({ name: patch.name ?? role.name, description: patch.description ?? role.description, updatedAt: new Date() }).where(eq(schema.roles.id, id));
+  if (patch.navAreas !== undefined) validateAreas(patch.navAreas);
+  if (patch.name || patch.description !== undefined || patch.navAreas !== undefined) await ctx.tx.update(schema.roles).set({ name: patch.name ?? role.name, description: patch.description ?? role.description, ...(patch.navAreas !== undefined ? { navAreas: patch.navAreas } : {}), updatedAt: new Date() }).where(eq(schema.roles.id, id));
+  if (patch.navAreas !== undefined) invalidatePrincipal();
   let oldPerms: string[] | undefined;
   if (patch.permissions) {
     validatePermissions(patch.permissions, role.userType);
@@ -385,4 +395,93 @@ export async function engineerDirectory(ctx: Ctx, q?: string) {
   const users = await ctx.tx.select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, title: schema.users.title }).from(schema.users).where(and(...conds)).orderBy(asc(schema.users.name)).limit(500);
   const members = await ctx.tx.select({ userId: schema.teamMembers.userId, teamId: schema.teamMembers.teamId }).from(schema.teamMembers);
   return users.map((u) => ({ ...u, teamIds: members.filter((m) => m.userId === u.id).map((m) => m.teamId) }));
+}
+
+// ---------------------------------------------------------------- team directory
+
+/**
+ * Teams with their people and live workload, for the Teams page every staff
+ * member can open. A person can belong to several teams; each appears under
+ * each of them. Ticket counts respect the viewer's customer scope (RLS).
+ */
+export async function teamDirectory(ctx: Ctx) {
+  const teams = await ctx.tx
+    .select({ ...getTableColumns(schema.teams), managerName: schema.users.name, managerEmail: schema.users.email })
+    .from(schema.teams)
+    .leftJoin(schema.users, eq(schema.users.id, schema.teams.managerUserId))
+    .where(eq(schema.teams.isActive, true))
+    .orderBy(asc(schema.teams.name));
+  const members = await ctx.tx
+    .select({ teamId: schema.teamMembers.teamId, userId: schema.users.id, name: schema.users.name, email: schema.users.email, title: schema.users.title, phone: schema.users.phone, isLead: schema.teamMembers.isLead, status: schema.users.status, lastLoginAt: schema.users.lastLoginAt })
+    .from(schema.teamMembers)
+    .innerJoin(schema.users, eq(schema.users.id, schema.teamMembers.userId))
+    .where(eq(schema.users.userType, 'msp'))
+    .orderBy(desc(schema.teamMembers.isLead), asc(schema.users.name));
+  const userIds = [...new Set(members.map((m) => m.userId))];
+  const roleRows = userIds.length
+    ? await ctx.tx
+        .select({ userId: schema.userRoles.userId, roleName: schema.roles.name, roleKey: schema.roles.key })
+        .from(schema.userRoles)
+        .innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId))
+        .where(inArray(schema.userRoles.userId, userIds))
+    : [];
+  const rolesByUser = new Map<string, { key: string; name: string }[]>();
+  for (const r of roleRows) {
+    const list = rolesByUser.get(r.userId) ?? [];
+    if (!list.some((x) => x.key === r.roleKey)) list.push({ key: r.roleKey, name: r.roleName });
+    rolesByUser.set(r.userId, list);
+  }
+  const teamLoad = (await ctx.tx.execute(sql`
+    SELECT t.assigned_team_id AS team_id,
+      count(*)::int AS open,
+      count(*) FILTER (WHERE t.assignee_id IS NULL)::int AS unassigned,
+      count(*) FILTER (WHERE EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = t.id AND s.state = 'breached'))::int AS breached,
+      count(*) FILTER (WHERE t.created_at >= current_date)::int AS opened_today
+    FROM tickets t JOIN config_options st ON st.id = t.status_id
+    WHERE t.assigned_team_id IS NOT NULL AND st.status_category IN ('new', 'open', 'pending')
+    GROUP BY t.assigned_team_id`)).rows as { team_id: string; open: number; unassigned: number; breached: number; opened_today: number }[];
+  const userLoad = userIds.length
+    ? ((await ctx.tx.execute(sql`
+        SELECT t.assignee_id AS user_id, count(*)::int AS open,
+          count(*) FILTER (WHERE EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = t.id AND s.state = 'breached'))::int AS breached
+        FROM tickets t JOIN config_options st ON st.id = t.status_id
+        WHERE t.assignee_id IS NOT NULL AND st.status_category IN ('new', 'open', 'pending')
+        GROUP BY t.assignee_id`)).rows as { user_id: string; open: number; breached: number }[])
+    : [];
+  const loadByUser = new Map(userLoad.map((u) => [u.user_id, u]));
+  const loadByTeam = new Map(teamLoad.map((t) => [t.team_id, t]));
+  const teamsOfUser = new Map<string, string[]>();
+  for (const m of members) teamsOfUser.set(m.userId, [...(teamsOfUser.get(m.userId) ?? []), m.teamId]);
+  const out = teams.map((t) => {
+    const load = loadByTeam.get(t.id);
+    return {
+      id: t.id,
+      key: t.key,
+      name: t.name,
+      description: t.description,
+      teamType: t.teamType,
+      email: t.email,
+      manager: t.managerUserId ? { id: t.managerUserId, name: t.managerName, email: t.managerEmail } : null,
+      members: members
+        .filter((m) => m.teamId === t.id)
+        .map((m) => ({
+          id: m.userId,
+          name: m.name,
+          email: m.email,
+          title: m.title,
+          phone: m.phone,
+          status: m.status,
+          isLead: m.isLead,
+          lastLoginAt: m.lastLoginAt,
+          roles: rolesByUser.get(m.userId) ?? [],
+          otherTeamIds: (teamsOfUser.get(m.userId) ?? []).filter((id) => id !== t.id),
+          openTickets: Number(loadByUser.get(m.userId)?.open ?? 0),
+          breached: Number(loadByUser.get(m.userId)?.breached ?? 0),
+        })),
+      load: { open: Number(load?.open ?? 0), unassigned: Number(load?.unassigned ?? 0), breached: Number(load?.breached ?? 0), openedToday: Number(load?.opened_today ?? 0) },
+    };
+  });
+  const people = userIds.length;
+  const multiTeam = [...teamsOfUser.values()].filter((ids) => ids.length > 1).length;
+  return { teams: out, totals: { teams: out.length, people, multiTeam, open: teamLoad.reduce((s, t) => s + Number(t.open), 0), unassigned: teamLoad.reduce((s, t) => s + Number(t.unassigned), 0), breached: teamLoad.reduce((s, t) => s + Number(t.breached), 0) } };
 }

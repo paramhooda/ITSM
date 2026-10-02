@@ -210,6 +210,7 @@ export function integrationPrincipal(name: string, apiKeyId: string, customerId:
     customerScope: customerId ? [customerId] : 'all',
     roles: [],
     teams: [],
+    areas: null,
     apiKeyId,
   };
 }

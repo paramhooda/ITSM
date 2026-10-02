@@ -15,7 +15,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<Variant, string> = {
-  primary: 'bg-navy-800 text-white hover:bg-navy-700 shadow-[0_1px_2px_rgba(9,9,11,0.2),inset_0_1px_0_rgba(255,255,255,0.08)]',
+  primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-[0_1px_2px_rgba(37,99,235,0.3),inset_0_1px_0_rgba(255,255,255,0.12)]',
   secondary: 'bg-white text-default border border-default hover:bg-surface-2 hover:border-strong shadow-[0_1px_2px_rgba(9,9,11,0.04)]',
   outline: 'bg-white text-default border border-default hover:bg-surface-2 hover:border-strong shadow-[0_1px_2px_rgba(9,9,11,0.04)]',
   ghost: 'bg-transparent text-muted hover:bg-surface-2 hover:text-default',
@@ -69,7 +69,7 @@ export function Checkbox({ label, className, ...props }: InputHTMLAttributes<HTM
   const id = useId();
   return (
     <label htmlFor={props.id ?? id} className={cn('inline-flex items-center gap-2 text-[13px] cursor-pointer select-none', className)}>
-      <input id={props.id ?? id} type="checkbox" className="h-4 w-4 rounded border-strong accent-navy-800" {...props} />
+      <input id={props.id ?? id} type="checkbox" className="h-4 w-4 rounded border-strong accent-brand-600" {...props} />
       {label}
     </label>
   );
@@ -421,7 +421,7 @@ export function ProgressBar({ pct, tone, className }: { pct: number; tone?: 'aut
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode }) {
   return (
     <label className="inline-flex items-center gap-2 cursor-pointer select-none text-[13px]">
-      <span role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className={cn('relative inline-flex h-5 w-9 items-center rounded-full transition-colors', checked ? 'bg-navy-800' : 'bg-surface-3 border border-strong')}>
+      <span role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className={cn('relative inline-flex h-5 w-9 items-center rounded-full transition-colors', checked ? 'bg-brand-600' : 'bg-surface-3 border border-strong')}>
         <span className={cn('inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform', checked ? 'translate-x-4' : 'translate-x-0.5')} />
       </span>
       {label}

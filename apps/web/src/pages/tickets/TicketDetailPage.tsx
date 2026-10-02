@@ -8,7 +8,7 @@ import { Menu } from '@/components/Menu';
 import { useUiStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useLookups } from '@/hooks/useLookups';
-import { fmtDateTime, relativeTime } from '@/lib/format';
+import { fmtDateTime, fmtDuration, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Panel } from '@/components/tickets/Panel';
 import { ticketsApi, qk } from '@/components/tickets/api';
@@ -225,6 +225,7 @@ export default function TicketDetailPage() {
             )}
           </div>
         </div>
+        <TicketGlance ticket={ticket} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-3 items-start">
@@ -308,3 +309,37 @@ export default function TicketDetailPage() {
 }
 
 export type { TicketDetail };
+
+// ---------------------------------------------------------------- at a glance
+
+const minutesBetween = (a: string, b: string | Date) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60_000));
+
+/** Compact numbers strip under the ticket title: how old, how fast we responded, where the clocks stand. */
+function TicketGlance({ ticket }: { ticket: TicketDetail }) {
+  const ended = ticket.resolvedAt ?? ticket.closedAt ?? null;
+  const age = minutesBetween(ticket.createdAt, ended ?? new Date());
+  const firstResponse = ticket.firstResponseAt ? minutesBetween(ticket.createdAt, ticket.firstResponseAt) : null;
+  const running = ticket.slas.filter((s) => s.state === 'running' || s.state === 'paused');
+  const breached = ticket.slas.filter((s) => s.state === 'breached').length;
+  const met = ticket.slas.filter((s) => s.state === 'met').length;
+  const next = running.length ? running.reduce((a, b) => (a.remainingMinutes < b.remainingMinutes ? a : b)) : null;
+  const items: { label: string; value: string; tone?: 'good' | 'warn' | 'bad' }[] = [
+    { label: ended ? 'Time to resolve' : 'Age', value: fmtDuration(age) },
+    { label: 'First response', value: firstResponse === null ? (ended ? '—' : 'pending') : fmtDuration(firstResponse), tone: firstResponse === null && !ended ? 'warn' : undefined },
+    next
+      ? { label: `Next target · ${next.label.toLowerCase()}`, value: next.state === 'paused' ? 'paused' : next.remainingMinutes < 0 ? `${fmtDuration(-next.remainingMinutes)} over` : `${fmtDuration(next.remainingMinutes)} left`, tone: next.remainingMinutes < 0 ? 'bad' : next.remainingMinutes < next.targetMinutes * (1 - next.warnPct / 100) ? 'warn' : 'good' }
+      : { label: 'SLA targets', value: ticket.slas.length ? `${met} met · ${breached} breached` : 'none', tone: breached > 0 ? 'bad' : met > 0 ? 'good' : undefined },
+    { label: 'Due', value: ticket.dueAt ? relativeTime(ticket.dueAt) : '—', tone: ticket.dueAt && new Date(ticket.dueAt) < new Date() && !ended ? 'bad' : undefined },
+    { label: 'Reopened', value: ticket.reopenCount ? `${ticket.reopenCount}×` : 'never', tone: ticket.reopenCount > 1 ? 'warn' : undefined },
+  ];
+  return (
+    <div className="mt-3 pt-3 border-t border-default grid grid-cols-2 sm:grid-cols-5 gap-x-6 gap-y-2">
+      {items.map((it) => (
+        <div key={it.label} className="min-w-0">
+          <div className="text-[11.5px] text-muted truncate">{it.label}</div>
+          <div className={cn('text-[15px] font-semibold tracking-[-0.01em] tnum', it.tone === 'bad' ? 'text-red-600' : it.tone === 'warn' ? 'text-amber-600' : it.tone === 'good' ? 'text-emerald-600' : 'text-default')}>{it.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}

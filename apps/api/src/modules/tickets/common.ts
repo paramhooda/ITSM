@@ -28,6 +28,7 @@ export const SYSTEM_PRINCIPAL: Principal = {
   customerScope: 'all',
   roles: [],
   teams: [],
+  areas: null,
   apiKeyId: 'system',
   isSystem: true,
 };

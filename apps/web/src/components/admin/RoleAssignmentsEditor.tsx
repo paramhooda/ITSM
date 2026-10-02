@@ -13,6 +13,7 @@ export interface RoleRow {
   permissions: string[];
   userCount: number;
   description?: string | null;
+  navAreas?: string[] | null;
 }
 
 export interface RoleAssignment {

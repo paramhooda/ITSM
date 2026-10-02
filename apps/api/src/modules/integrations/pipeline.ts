@@ -55,6 +55,7 @@ export function integrationPrincipal(integ: Pick<IntegrationRow, 'id' | 'name' |
     customerScope: integ.customerId ? [integ.customerId] : 'all',
     roles: [],
     teams: [],
+    areas: null,
     apiKeyId: integ.apiKeyId ?? `integration:${integ.id}`,
   };
 }

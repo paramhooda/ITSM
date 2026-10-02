@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Badge, ErrorBlock, Select } from '@/components/ui';
+import { Inbox, ShieldCheck, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { get } from '@/api/client';
 import { useCustomersLookup } from '@/hooks/useLookups';
 import { fmtDuration, fmtNumber, fmtPct } from '@/lib/format';
@@ -57,6 +58,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
           {
             label: 'Open tickets',
             value: fmtNumber(k.openNow),
+            icon: <Inbox className="h-4 w-4" />,
             hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedToday)} resolved`,
             spark: recent.map((s) => s.opened),
             sparkLabel: `Tickets opened per day, last ${sparkDays} days`,
@@ -65,6 +67,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
           {
             label: `SLA compliance · ${days}d`,
             value: fmtPct(compliance, 1),
+            icon: <ShieldCheck className="h-4 w-4" />,
             delta: d.trends.slaCompliancePct,
             tone: complianceTone,
             hint: `${fmtNumber(k.resolutionMet)} met · ${fmtNumber(k.resolutionBreached)} breached`,
@@ -74,6 +77,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
           {
             label: 'Breached SLAs · open now',
             value: fmtNumber(k.breachedOpen),
+            icon: <AlertTriangle className="h-4 w-4" />,
             tone: (k.breachedOpen ?? 0) > 0 ? 'bad' : 'good',
             delta: d.trends.breaches,
             lowerIsBetter: true,
@@ -85,6 +89,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
           {
             label: `Resolved · ${days}d`,
             value: fmtNumber(k.ticketsResolved),
+            icon: <CheckCircle2 className="h-4 w-4" />,
             delta: d.trends.resolved,
             hint: `${fmtDuration(k.mttrMinutes)} mean time to resolve`,
             spark: recent.map((s) => s.resolved),

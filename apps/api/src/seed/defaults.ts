@@ -1,5 +1,5 @@
 import { eq, and, sql } from 'drizzle-orm';
-import { ALL_PERMISSIONS, SYSTEM_ROLES, OPTION_PARENT_TYPES, type OptionType } from '@itsm/shared';
+import { ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_AREAS, OPTION_PARENT_TYPES, type OptionType } from '@itsm/shared';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { OPTION_SEEDS, PRIORITY_MATRIX, TEAM_SEEDS, CI_TYPE_SEEDS, RELATIONSHIP_TYPE_SEEDS, KB_CATEGORY_SEEDS } from './options';
@@ -27,10 +27,12 @@ export async function seedDefaults(tx: Tx) {
 
 async function seedRoles(tx: Tx) {
   for (const [key, def] of Object.entries(SYSTEM_ROLES)) {
-    const [existing] = await tx.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, key)).limit(1);
+    const [existing] = await tx.select({ id: schema.roles.id, navAreas: schema.roles.navAreas }).from(schema.roles).where(eq(schema.roles.key, key)).limit(1);
     let roleId = existing?.id;
+    // Navigation areas introduced by an upgrade: apply the defaults once, never overwrite an administrator's choice.
+    if (roleId && existing?.navAreas === null && SYSTEM_ROLE_AREAS[key]) await tx.update(schema.roles).set({ navAreas: SYSTEM_ROLE_AREAS[key] }).where(eq(schema.roles.id, roleId));
     if (!roleId) {
-      const [row] = await tx.insert(schema.roles).values({ key, name: def.name, description: def.description, userType: def.userType, isSystem: true }).returning({ id: schema.roles.id });
+      const [row] = await tx.insert(schema.roles).values({ key, name: def.name, description: def.description, userType: def.userType, isSystem: true, navAreas: SYSTEM_ROLE_AREAS[key] ?? null }).returning({ id: schema.roles.id });
       roleId = row.id;
       await tx.insert(schema.rolePermissions).values(def.permissions.map((permission) => ({ roleId: roleId!, permission }))).onConflictDoNothing();
     } else if (key === 'admin') {

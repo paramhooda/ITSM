@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Bookmark, Trash2, Share2, X, AlertTriangle, Flame, ChevronDown, Filter } from 'lucide-react';
+import { Plus, Bookmark, Trash2, Share2, X, AlertTriangle, Flame, ChevronDown, Filter, Inbox, Timer, UserX, UserCheck } from 'lucide-react';
+import { KpiGrid } from '@/components/dashboards/KpiGrid';
 import { PageHeader, Button, Select, SearchInput, DataTable, Pagination, Dialog, Input, Checkbox, Avatar, Kbd, type Column } from '@/components/ui';
 import { Menu } from '@/components/Menu';
 import { useListState } from '@/hooks/useListState';
@@ -246,6 +247,17 @@ export default function TicketListPage() {
           </>
         }
       />
+
+      {stats.data && (
+        <KpiGrid
+          items={[
+            { label: 'Open tickets', value: openTotal, icon: <Inbox className="h-4 w-4" />, hint: `${stats.data.createdToday} opened today · ${stats.data.resolvedToday} resolved`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: undefined, assignee: undefined }) },
+            { label: 'SLA breached', value: stats.data.breached, tone: stats.data.breached > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: `${stats.data.atRisk} at risk · ${stats.data.overdue} overdue`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: 'breached' }) },
+            { label: 'Unassigned', value: stats.data.unassigned, tone: stats.data.unassigned > 0 ? 'warn' : 'good', icon: <UserX className="h-4 w-4" />, hint: `${stats.data.major} major open`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: 'unassigned' }) },
+            { label: 'Assigned to me', value: stats.data.mine, icon: <UserCheck className="h-4 w-4" />, hint: `${stats.data.dueToday} due today · ${stats.data.pendingApprovals} awaiting approval`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: 'me' }) },
+          ]}
+        />
+      )}
 
       {/* type tabs */}
       <div className="flex items-center gap-1 border-b border-default overflow-x-auto">

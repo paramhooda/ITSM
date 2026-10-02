@@ -7,7 +7,7 @@ import { useUiStore } from '@/stores/ui';
 import { api, get } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { Avatar, Kbd } from '@/components/ui';
-import { MSP_NAV, type NavItem } from './nav';
+import { MSP_NAV, visibleNav, type NavItem } from './nav';
 import { GlobalSearch } from '@/components/GlobalSearch';
 import { AssistantPanel } from '@/components/AssistantPanel';
 import { Menu } from '@/components/Menu';
@@ -22,8 +22,9 @@ export function BrandLogo({ className }: { className?: string }) {
 
 export function SidebarNav({ items }: { items: NavItem[] }) {
   const can = useAuthStore((s) => s.can);
+  const areas = useAuthStore((s) => s.user?.areas);
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
-  const visible = items.filter((i) => !i.perm || can(...i.perm));
+  const visible = visibleNav(items, can, areas);
   return (
     <nav className="flex-1 overflow-y-auto px-3 py-3">
       {visible.map((item) => (
@@ -169,7 +170,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 export function MobileNav({ items }: { items: NavItem[] }) {
   const can = useAuthStore((s) => s.can);
-  const visible = items.filter((i) => !i.perm || can(...i.perm)).slice(0, 5);
+  const areas = useAuthStore((s) => s.user?.areas);
+  const visible = visibleNav(items, can, areas).slice(0, 5);
   return (
     <nav className="md:hidden flex border-t border-default bg-surface shrink-0">
       {visible.map((item) => (

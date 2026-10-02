@@ -63,7 +63,7 @@ See `SECURITY.md`. Rotate `JWT_SECRET` to invalidate all access tokens (users re
 
 The assistant uses the provider set by `AI_PROVIDER` (`anthropic`, `openai_compatible` or `none`), the model in `AI_MODEL` and, for OpenAI-compatible endpoints, `OPENAI_COMPATIBLE_BASE_URL` plus `OPENAI_COMPATIBLE_API_KEY`. Environment variables are read when the container starts, so run `docker compose up -d` after changing `.env`.
 
-For OpenAI itself the working combination is:
+Setting only `OPENAI_API_KEY=sk-...` is enough: the provider, `https://api.openai.com/v1` and `gpt-4o-mini` are inferred and the choice is logged at startup as `AI assistant enabled` (with notes explaining any inferred value). The explicit combination is:
 
 ```
 AI_PROVIDER=openai_compatible
@@ -95,3 +95,9 @@ Common causes:
 | "could not be reached" | Container cannot resolve or reach the host (proxy, firewall, Ollama not published) | Test with `docker compose exec app wget -qO- <base url>/models` and fix networking |
 | Assistant says it is not configured | `AI_PROVIDER` is `none` or the matching key / URL is empty | Set the variables and restart |
 | Browser shows `POST /api/ai/chat` → 400 `Request validation failed` | Versions before this release rejected a new conversation from the panel (`conversationId: null`); nothing reached the provider | Upgrade (`docker compose build && docker compose up -d`) |
+
+## Who sees what
+
+Permissions decide what a user may do; **navigation areas** decide what their sidebar shows. Each role carries a list of areas (Tickets, Customers, Contracts & scope, Service catalog, Teams, Assets, CMDB, Discovery, Monitoring & SIEM, Field service, Preventive maintenance, Knowledge, Reports). The sidebar shows an item only when the user holds a permission for it **and** one of their roles lists its area; roles with no areas configured show everything their permissions allow. Administrators always see everything.
+
+System roles ship with sensible areas (a NOC engineer sees tickets, CMDB, discovery, monitoring and knowledge; a field engineer sees tickets, assets, field service, maintenance and knowledge; account managers see customers, contracts, the catalog and reports). Adjust them under **Administration → Roles → Navigation areas**; the change applies at the next page load.

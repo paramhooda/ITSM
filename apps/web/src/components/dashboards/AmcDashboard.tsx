@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorBlock, Badge } from '@/components/ui';
+import { Wrench, UserX, Timer, CalendarCheck } from 'lucide-react';
 import { get } from '@/api/client';
 import { fmtDate, fmtDateTime, fmtNumber } from '@/lib/format';
 import { KpiGrid } from './KpiGrid';
@@ -53,10 +54,10 @@ export function AmcDashboard() {
       </div>
       <KpiGrid
         items={[
-          { label: 'Open AMC tickets', value: fmtNumber(k.open), hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedThisWeek)} resolved this week`, onClick: () => (window.location.href = '/tickets?domain=amc&open=true') },
-          { label: 'Unassigned', value: fmtNumber(k.unassigned), tone: k.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an engineer', onClick: () => setFilter('unassigned') },
-          { label: 'SLA at risk', value: fmtNumber(k.atRisk + k.breached), tone: k.breached > 0 ? 'bad' : k.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(k.breached)} breached · ${fmtNumber(k.dueToday)} due today`, onClick: () => setFilter('breached') },
-          { label: 'Site visits this week', value: fmtNumber(k.visitsThisWeek), hint: 'scheduled or in progress', onClick: () => (window.location.href = '/field') },
+          { label: 'Open AMC tickets', icon: <Wrench className="h-4 w-4" />, value: fmtNumber(k.open), hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedThisWeek)} resolved this week`, onClick: () => (window.location.href = '/tickets?domain=amc&open=true') },
+          { label: 'Unassigned', icon: <UserX className="h-4 w-4" />, value: fmtNumber(k.unassigned), tone: k.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an engineer', onClick: () => setFilter('unassigned') },
+          { label: 'SLA at risk', icon: <Timer className="h-4 w-4" />, value: fmtNumber(k.atRisk + k.breached), tone: k.breached > 0 ? 'bad' : k.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(k.breached)} breached · ${fmtNumber(k.dueToday)} due today`, onClick: () => setFilter('breached') },
+          { label: 'Site visits this week', icon: <CalendarCheck className="h-4 w-4" />, value: fmtNumber(k.visitsThisWeek), hint: 'scheduled or in progress', onClick: () => (window.location.href = '/field') },
         ]}
       />
       <Panel

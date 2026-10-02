@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Ban, Layers, History } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Ban, Layers, History, Ticket, Gauge, CalendarClock, Banknote } from 'lucide-react';
+import { KpiGrid } from '@/components/dashboards/KpiGrid';
 import { toast } from 'sonner';
 import { PageHeader, Button, Badge, Tabs, Card, Dialog, Drawer, ConfirmDialog, LoadingBlock, ErrorBlock, EmptyState, DataTable, Checkbox, KeyValue, Field, Input, type Column } from '@/components/ui';
 import { get, post, patch, put, del, ApiError } from '@/api/client';
@@ -90,6 +91,7 @@ export default function ContractDetailPage() {
           </>
         )}
       />
+      <ContractStats c={c} />
       <Tabs tabs={TABS.map((t) => ({ ...t, count: t.key === 'services' ? c.services.length : t.key === 'entitlements' ? c.entitlements.filter((e) => e.isActive).length : t.key === 'scope' ? c.scopeItems.length : t.key === 'documents' ? c.documents.count : undefined }))} value={tab} onChange={setTab} className="mb-4" />
 
       {tab === 'overview' && <OverviewTab c={c} canManage={canManage} onSaveMatrix={(m) => update.mutate({ escalationMatrix: m } as Partial<ContractPayload>)} saving={update.isPending} goTo={setTab} />}
@@ -493,5 +495,27 @@ function TerminateForm({ onSubmit, onCancel, submitting }: { onSubmit: (reason: 
       <Field label="Reason"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Customer churned, replaced by…" autoFocus /></Field>
       <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button><Button type="submit" variant="danger" loading={submitting}>Terminate</Button></div>
     </form>
+  );
+}
+
+// ---------------------------------------------------------------- stats strip
+
+/** The numbers a manager wants before reading the tabs: work, service levels, consumption, time left and value. */
+function ContractStats({ c }: { c: ContractDetail }) {
+  const active = c.entitlements.filter((e) => e.isActive);
+  const hot = active.filter((e) => e.utilization.overThreshold || e.utilization.exhausted);
+  const exhausted = active.filter((e) => e.utilization.exhausted).length;
+  const expiryTone = c.status === 'expired' || c.status === 'terminated' ? 'bad' : c.daysToExpiry <= 30 ? 'bad' : c.daysToExpiry <= 90 ? 'warn' : 'default';
+  const items = [
+    { label: 'Open tickets', value: fmtNumber(c.tickets.open), hint: `${fmtNumber(c.tickets.total)} raised under this contract`, icon: <Ticket className="h-4 w-4" />, onClick: () => (window.location.href = `/tickets?contractId=${c.id}&open=true`) },
+    { label: 'Covered services', value: fmtNumber(c.services.length), hint: c.slaPolicyName ? `SLA: ${c.slaPolicyName}` : 'Platform default SLA', icon: <Layers className="h-4 w-4" /> },
+    { label: 'Entitlements near limit', value: fmtNumber(hot.length), tone: exhausted > 0 ? 'bad' : hot.length > 0 ? 'warn' : 'good', hint: `${fmtNumber(active.length)} active · ${fmtNumber(exhausted)} exhausted`, icon: <Gauge className="h-4 w-4" /> },
+    { label: c.status === 'expired' ? 'Expired' : 'Days to expiry', value: c.status === 'expired' ? `${fmtNumber(Math.abs(c.daysToExpiry))}d ago` : fmtNumber(Math.max(0, c.daysToExpiry)), tone: expiryTone, hint: `${fmtDate(c.startDate)} → ${fmtDate(c.endDate)}${c.autoRenew ? ' · auto-renews' : ''}`, icon: <CalendarClock className="h-4 w-4" /> },
+  ] as const;
+  const commercial = c.canViewCommercial && c.value != null ? { label: 'Contract value', value: fmtMoney(c.value, c.currency ?? 'INR'), hint: c.typeLabel ?? 'Annual', icon: <Banknote className="h-4 w-4" /> } : null;
+  return (
+    <div className="mb-5">
+      <KpiGrid items={commercial ? [...items, commercial] : [...items]} columns={commercial ? 5 : 4} />
+    </div>
   );
 }

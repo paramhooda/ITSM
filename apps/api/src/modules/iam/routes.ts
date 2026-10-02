@@ -88,11 +88,11 @@ export default async function routes(app: FastifyInstance) {
   r.get('/iam/roles', { preHandler: app.auth('admin:users', 'portal:manage_users', 'tickets:assign'), schema: { tags: ['iam'] } }, h((ctx) => svc.listRoles(ctx)));
   r.post('/iam/roles', {
     preHandler: app.auth('admin:users'),
-    schema: { tags: ['iam'], body: z.object({ key: z.string().regex(/^[a-z0-9_]+$/).max(64), name: z.string().min(1).max(120), description: z.string().max(500).optional(), userType: z.enum(['msp', 'customer']), permissions: z.array(z.string()) }) },
+    schema: { tags: ['iam'], body: z.object({ key: z.string().regex(/^[a-z0-9_]+$/).max(64), name: z.string().min(1).max(120), description: z.string().max(500).optional(), userType: z.enum(['msp', 'customer']), permissions: z.array(z.string()), navAreas: z.array(z.string().max(40)).max(40).nullable().optional() }) },
   }, h((ctx, req) => svc.createRole(ctx, req.body as never)));
   r.patch('/iam/roles/:id', {
     preHandler: app.auth('admin:users'),
-    schema: { tags: ['iam'], params: idParam, body: z.object({ name: z.string().min(1).max(120).optional(), description: z.string().max(500).optional(), permissions: z.array(z.string()).optional() }) },
+    schema: { tags: ['iam'], params: idParam, body: z.object({ name: z.string().min(1).max(120).optional(), description: z.string().max(500).optional(), permissions: z.array(z.string()).optional(), navAreas: z.array(z.string().max(40)).max(40).nullable().optional() }) },
   }, h((ctx, req) => svc.updateRole(ctx, (req.params as { id: string }).id, req.body as never)));
   r.delete('/iam/roles/:id', { preHandler: app.auth('admin:users'), schema: { tags: ['iam'], params: idParam } }, h(async (ctx, req) => {
     await svc.deleteRole(ctx, (req.params as { id: string }).id);
@@ -101,6 +101,7 @@ export default async function routes(app: FastifyInstance) {
 
   // ---- teams
   r.get('/iam/teams', { preHandler: app.auth(), schema: { tags: ['iam'] } }, h((ctx) => svc.listTeams(ctx)));
+  r.get('/iam/teams/directory', { preHandler: app.auth('tickets:read', 'admin:users'), schema: { tags: ['iam'] } }, h((ctx) => svc.teamDirectory(ctx)));
   r.post('/iam/teams', {
     preHandler: app.auth('admin:users'),
     schema: { tags: ['iam'], body: z.object({ key: z.string().regex(/^[a-z0-9_]+$/).max(64), name: z.string().min(1).max(120), description: z.string().max(500).optional(), teamType: z.string().max(64).optional(), email: z.string().email().optional(), managerUserId: z.string().uuid().nullable().optional() }) },

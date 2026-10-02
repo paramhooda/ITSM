@@ -22,6 +22,8 @@ export interface KpiItem {
 
 const TONE_TEXT: Record<Tone, string> = { default: 'text-default', good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600', accent: 'text-brand-600' };
 const TONE_HEX: Record<Tone, string> = { default: '#2563eb', good: '#16a34a', warn: '#f59e0b', bad: '#dc2626', accent: '#2563eb' };
+/** Tinted square behind a tile icon: the one touch of colour on neutral tiles. */
+const TONE_CHIP: Record<Tone, string> = { default: 'bg-brand-50 text-brand-600', good: 'bg-emerald-50 text-emerald-600', warn: 'bg-amber-50 text-amber-600', bad: 'bg-red-50 text-red-600', accent: 'bg-brand-50 text-brand-600' };
 
 export function DeltaBadge({ delta, lowerIsBetter, compact }: { delta?: Delta | null; lowerIsBetter?: boolean; compact?: boolean }) {
   if (!delta || delta.deltaPct === null) return <span className="text-subtle inline-flex items-center gap-1 text-[12px]"><Minus className="h-3 w-3" />{!compact && 'no prior data'}</span>;
@@ -87,7 +89,7 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-[13px] text-muted font-medium truncate">{label}</span>
-        {icon && <span className="text-subtle shrink-0">{icon}</span>}
+        {icon && <span className={cn('inline-flex h-7 w-7 items-center justify-center rounded-lg shrink-0 border border-current/10', TONE_CHIP[tone])}>{icon}</span>}
       </div>
       <div className="flex items-center justify-between gap-4">
         <div className={cn('text-[30px] leading-none font-semibold tracking-[-0.03em] tnum min-w-0 truncate', TONE_TEXT[tone])}>{value}</div>
@@ -102,8 +104,8 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
 }
 
 /** Hero row of at most four KPIs; the number is the chart, the sparkline is the context. */
-export function KpiGrid({ items, columns = 4 }: { items: KpiItem[]; columns?: 2 | 3 | 4 }) {
-  const cols = { 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 xl:grid-cols-4' }[columns];
+export function KpiGrid({ items, columns = 4 }: { items: KpiItem[]; columns?: 2 | 3 | 4 | 5 }) {
+  const cols = { 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 xl:grid-cols-4', 5: 'sm:grid-cols-2 xl:grid-cols-5' }[columns];
   return (
     <div className={cn('grid grid-cols-1 gap-4', cols)}>
       {items.map((k, i) => (

@@ -36,6 +36,8 @@ export const roles = pgTable('roles', {
   description: text('description'),
   userType: userTypeEnum('user_type').notNull().default('msp'),
   isSystem: boolean('is_system').notNull().default(false),
+  /** Navigation areas shown to holders of this role; null = everything their permissions allow. */
+  navAreas: text('nav_areas').array(),
   ...timestamps,
 });
 

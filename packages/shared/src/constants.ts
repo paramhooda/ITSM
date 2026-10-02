@@ -93,3 +93,26 @@ export const NOTIFICATION_EVENTS = [
   'report.delivered', 'user.password_reset', 'user.welcome',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
+
+/**
+ * Navigation areas of the MSP workspace. A role lists the areas its holders
+ * work in; the sidebar shows only those (administrators see everything).
+ * Permissions still guard every route and API call.
+ */
+export const NAV_AREAS = {
+  tickets: 'Tickets',
+  customers: 'Customers',
+  contracts: 'Contracts & scope',
+  catalog: 'Service catalog',
+  teams: 'Teams',
+  assets: 'Assets',
+  cmdb: 'CMDB',
+  discovery: 'Discovery',
+  monitoring: 'Monitoring & SIEM',
+  field: 'Field service',
+  maintenance: 'Preventive maintenance',
+  knowledge: 'Knowledge',
+  reports: 'Reports',
+} as const;
+export type NavArea = keyof typeof NAV_AREAS;
+export const ALL_NAV_AREAS = Object.keys(NAV_AREAS) as NavArea[];

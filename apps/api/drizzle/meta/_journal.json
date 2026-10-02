@@ -15,6 +15,13 @@
       "when": 1790954430241,
       "tag": "0001_service_subcategory",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790957459714,
+      "tag": "0002_role_nav_areas",
+      "breakpoints": true
     }
   ]
 }

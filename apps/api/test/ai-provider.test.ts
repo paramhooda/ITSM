@@ -123,3 +123,44 @@ describe('OpenAICompatibleProvider', () => {
     expect(res.toolCalls).toEqual([{ id: 'call_1', name: 'search', input: { q: 'vpn' } }]);
   });
 });
+
+describe('resolveAiConfig', () => {
+  const base = { AI_PROVIDER: 'none' as const, AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: undefined, OPENAI_COMPATIBLE_BASE_URL: undefined, OPENAI_COMPATIBLE_API_KEY: undefined, OPENAI_API_KEY: undefined, OPENAI_BASE_URL: undefined };
+
+  it('stays disabled without any key', async () => {
+    const { resolveAiConfig } = await import('../src/lib/ai/index');
+    expect(resolveAiConfig(base).provider).toBe('none');
+  });
+
+  it('infers OpenAI from OPENAI_API_KEY alone, with the OpenAI endpoint and a GPT model', async () => {
+    const { resolveAiConfig } = await import('../src/lib/ai/index');
+    const c = resolveAiConfig({ ...base, OPENAI_API_KEY: 'sk-test' });
+    expect(c).toMatchObject({ provider: 'openai_compatible', model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1', hasKey: true });
+    expect(c.notes.join(' ')).toMatch(/AI_PROVIDER not set/);
+  });
+
+  it('keeps an explicit OpenAI model and normalises the base URL', async () => {
+    const { resolveAiConfig } = await import('../src/lib/ai/index');
+    const c = resolveAiConfig({ ...base, AI_PROVIDER: 'openai_compatible', AI_MODEL: 'gpt-4o', OPENAI_COMPATIBLE_BASE_URL: 'https://api.openai.com/', OPENAI_COMPATIBLE_API_KEY: 'sk-x' });
+    expect(c).toMatchObject({ provider: 'openai_compatible', model: 'gpt-4o', baseUrl: 'https://api.openai.com/v1' });
+  });
+
+  it('never sends a Claude model id to api.openai.com but keeps custom models for local servers', async () => {
+    const { resolveAiConfig } = await import('../src/lib/ai/index');
+    expect(resolveAiConfig({ ...base, AI_PROVIDER: 'openai_compatible', AI_MODEL: 'claude-3-opus', OPENAI_COMPATIBLE_API_KEY: 'sk-x' }).model).toBe('gpt-4o-mini');
+    expect(resolveAiConfig({ ...base, AI_PROVIDER: 'openai_compatible', AI_MODEL: 'llama3.1', OPENAI_COMPATIBLE_BASE_URL: 'http://ollama:11434/v1' }).model).toBe('llama3.1');
+  });
+
+  it('infers Anthropic from ANTHROPIC_API_KEY and rejects a GPT model for it', async () => {
+    const { resolveAiConfig } = await import('../src/lib/ai/index');
+    expect(resolveAiConfig({ ...base, ANTHROPIC_API_KEY: 'ak' })).toMatchObject({ provider: 'anthropic', model: 'claude-sonnet-5-5' });
+    expect(resolveAiConfig({ ...base, AI_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'ak', AI_MODEL: 'gpt-4o' }).model).toBe('claude-sonnet-5-5');
+  });
+
+  it('reports a misconfiguration instead of enabling a broken provider', async () => {
+    const { resolveAiConfig } = await import('../src/lib/ai/index');
+    const c = resolveAiConfig({ ...base, AI_PROVIDER: 'anthropic' });
+    expect(c.provider).toBe('none');
+    expect(c.notes[0]).toMatch(/ANTHROPIC_API_KEY is empty/);
+  });
+});

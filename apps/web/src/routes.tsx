@@ -29,6 +29,7 @@ export const routes: AppRoute[] = [
   { path: '/contracts', component: page(() => import('@/pages/contracts/ContractListPage')), perm: ['contracts:read'] },
   { path: '/contracts/:id', component: page(() => import('@/pages/contracts/ContractDetailPage')), perm: ['contracts:read'] },
   { path: '/services', component: page(() => import('@/pages/services/ServiceCatalogPage')), perm: ['services:read'] },
+  { path: '/teams', component: page(() => import('@/pages/teams/TeamsPage')), perm: ['tickets:read', 'admin:users'] },
   { path: '/sla', component: page(() => import('@/pages/sla/ServiceLevelsPage')), perm: ['contracts:read', 'admin:config'] },
   { path: '/sla/:id', component: page(() => import('@/pages/sla/SlaPolicyPage')), perm: ['contracts:read', 'admin:config'] },
   // Assets & CMDB
