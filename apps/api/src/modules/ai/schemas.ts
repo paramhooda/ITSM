@@ -15,7 +15,7 @@ export const chatContextSchema = z
 export type ChatContext = z.infer<typeof chatContextSchema>;
 
 export const chatBodySchema = z.object({
-  conversationId: uuid.optional(),
+  conversationId: uuid.nullable().optional(),
   message: z.string().trim().min(1).max(8000),
   context: chatContextSchema.nullable().optional(),
 });

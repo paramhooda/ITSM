@@ -20,6 +20,7 @@ export default async function routes(app: FastifyInstance) {
 
   // ---- status + conversations
   r.get('/ai/status', { preHandler: app.auth(), schema: { tags } }, h((ctx) => svc.status(ctx)));
+  r.post('/ai/test', { preHandler: app.auth('admin:system', 'admin:config'), schema: { tags } }, h((ctx) => svc.test(ctx)));
   r.get('/ai/conversations', { preHandler: use, schema: { tags } }, h((ctx) => svc.listConversations(ctx, 20)));
   r.get('/ai/conversations/:id', { preHandler: use, schema: { tags, params: idParam } }, h((ctx, req) => svc.getConversation(ctx, id(req))));
   r.delete('/ai/conversations/:id', { preHandler: use, schema: { tags, params: idParam } }, h((ctx, req) => svc.deleteConversation(ctx, id(req))));

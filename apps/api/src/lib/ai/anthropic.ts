@@ -1,8 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { AiProvider, ChatOptions, ChatResponse, ToolCall } from './provider';
+import { logger } from '@/core/logger';
+import { AiUpstreamError, type AiProvider, type ChatOptions, type ChatResponse, type ToolCall } from './provider';
 
 export class AnthropicProvider implements AiProvider {
   readonly name = 'anthropic';
+  readonly baseUrl = 'https://api.anthropic.com';
   private client: Anthropic;
   constructor(apiKey: string, readonly model: string) {
     this.client = new Anthropic({ apiKey });
@@ -24,14 +26,22 @@ export class AnthropicProvider implements AiProvider {
         else messages.push({ role: 'user', content: [block] });
       }
     }
-    const res = await this.client.messages.create({
-      model: this.model,
-      max_tokens: opts.maxTokens ?? 2048,
-      temperature: opts.temperature ?? 0.2,
-      system: opts.system,
-      messages,
-      tools: opts.tools?.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool['input_schema'] })),
-    });
+    let res: Anthropic.Message;
+    try {
+      res = await this.client.messages.create({
+        model: this.model,
+        max_tokens: opts.maxTokens ?? 2048,
+        temperature: opts.temperature ?? 0.2,
+        system: opts.system,
+        messages,
+        tools: opts.tools?.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool['input_schema'] })),
+      });
+    } catch (err) {
+      const status = err instanceof Anthropic.APIError ? err.status ?? null : null;
+      const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+      logger.warn({ provider: this.name, model: this.model, upstreamStatus: status, upstreamMessage: message }, 'AI endpoint error');
+      throw new AiUpstreamError(this.name, status, message, this.model);
+    }
     let text = '';
     const toolCalls: ToolCall[] = [];
     for (const block of res.content) {

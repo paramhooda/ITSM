@@ -58,3 +58,40 @@ See `SECURITY.md`. Rotate `JWT_SECRET` to invalidate all access tokens (users re
 ## Capacity planning (reference)
 
 1,000 customers · 1,000 tickets/day · 10 comments/ticket · 3 SLA rows/ticket ≈ 5 M tickets, 50 M comments, 15 M SLA rows over 5 years, ~80 GB including indexes. A single PostgreSQL primary with 8 vCPU / 32 GB RAM and NVMe storage is adequate; scale reads with a replica if reporting load grows.
+
+## AI assistant troubleshooting
+
+The assistant uses the provider set by `AI_PROVIDER` (`anthropic`, `openai_compatible` or `none`), the model in `AI_MODEL` and, for OpenAI-compatible endpoints, `OPENAI_COMPATIBLE_BASE_URL` plus `OPENAI_COMPATIBLE_API_KEY`. Environment variables are read when the container starts, so run `docker compose up -d` after changing `.env`.
+
+For OpenAI itself the working combination is:
+
+```
+AI_PROVIDER=openai_compatible
+OPENAI_COMPATIBLE_BASE_URL=https://api.openai.com/v1
+OPENAI_COMPATIBLE_API_KEY=sk-...
+AI_MODEL=gpt-4o-mini
+```
+
+Check the configuration from the product first: **Administration → Settings → Assistant connection → Test connection** sends a one-line prompt and shows the latency, or the exact status and message the provider returned. The same information is logged by the API as `AI endpoint error` with the provider, model and endpoint (never the key).
+
+From the Docker host:
+
+```bash
+docker compose exec app env | grep -E '^(AI_|OPENAI_)'          # what the container actually sees
+docker compose logs app --tail 200 | grep -i "AI endpoint"       # upstream status and message
+curl https://api.openai.com/v1/chat/completions \                # the same call outside the platform
+  -H "authorization: Bearer $OPENAI_COMPATIBLE_API_KEY" -H 'content-type: application/json' \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}],"max_tokens":16}'
+```
+
+Common causes:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| HTTP 400 `Unsupported parameter: max_tokens` | Newer OpenAI models only accept `max_completion_tokens` | Handled automatically (the app retries in the modern shape); upgrade if you see it in the logs |
+| HTTP 404 `model_not_found` / `The model ... does not exist` | `AI_MODEL` is not a model of that provider (default is a Claude id) | Set `AI_MODEL` to a model the endpoint serves |
+| HTTP 401 `Incorrect API key` | Wrong or truncated key, or the key is in the wrong variable | Put the key in `OPENAI_COMPATIBLE_API_KEY` (or `ANTHROPIC_API_KEY` for Anthropic) |
+| HTTP 404 on the endpoint itself | Base URL missing `/v1` or pointing at a UI page | Use the API base; `/chat/completions` is appended by the app and stripped if pasted |
+| "could not be reached" | Container cannot resolve or reach the host (proxy, firewall, Ollama not published) | Test with `docker compose exec app wget -qO- <base url>/models` and fix networking |
+| Assistant says it is not configured | `AI_PROVIDER` is `none` or the matching key / URL is empty | Set the variables and restart |
+| Browser shows `POST /api/ai/chat` → 400 `Request validation failed` | Versions before this release rejected a new conversation from the panel (`conversationId: null`); nothing reached the provider | Upgrade (`docker compose build && docker compose up -d`) |

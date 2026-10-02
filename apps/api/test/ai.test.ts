@@ -5,7 +5,7 @@ import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { AppError } from '../src/core/errors';
 import { createTicket, resolveTicket } from '../src/modules/tickets/service';
-import type { AiProvider, ChatOptions, ChatResponse } from '../src/lib/ai';
+import { AiUpstreamError, type AiProvider, type ChatOptions, type ChatResponse } from '../src/lib/ai';
 import { availableTools, toolAvailable, toolByName, toolJsonSchema, ALL_TOOLS, ACTION_TOOLS } from '../src/modules/ai/tools';
 import * as ai from '../src/modules/ai/service';
 import * as sug from '../src/modules/ai/suggestions';
@@ -284,6 +284,60 @@ describe('AI-assisted ITSM fallbacks (provider disabled)', () => {
     expect(caught).toBeInstanceOf(AppError);
     expect((caught as AppError).statusCode).toBe(503);
     expect((caught as AppError).code).toBe('ai_disabled');
+  });
+});
+
+describe('chat request schema', () => {
+  it('accepts a null conversationId for a new conversation (the panel sends null)', async () => {
+    const { chatBodySchema } = await import('../src/modules/ai/schemas');
+    expect(chatBodySchema.safeParse({ conversationId: null, message: 'hello' }).success).toBe(true);
+    expect(chatBodySchema.safeParse({ message: 'hello', context: null }).success).toBe(true);
+    expect(chatBodySchema.safeParse({ conversationId: 'not-a-uuid', message: 'hello' }).success).toBe(false);
+  });
+});
+
+describe('connection test', () => {
+  const stub = (impl: () => Promise<ChatResponse>): AiProvider => ({ name: 'fake', model: 'fake-1', baseUrl: 'https://fake.example/v1', chat: impl });
+
+  it('reports the assistant as not configured without a provider', async () => {
+    ai.setProviderForTests(null);
+    const r = await asAdmin((ctx) => ai.test(ctx));
+    expect(r.ok).toBe(false);
+    expect(r.error?.status).toBe(503);
+    expect(r.error?.code).toBe('ai_disabled');
+    const s = await asAdmin((ctx) => ai.status(ctx));
+    expect(s.configured).toEqual({ provider: 'none', model: null, baseUrl: null });
+  });
+
+  it('returns the reply, latency and endpoint when the provider answers', async () => {
+    ai.setProviderForTests(stub(async () => ({ text: ' OK ', toolCalls: [], stopReason: 'end', usage: { inputTokens: 3, outputTokens: 1 } })));
+    try {
+      const r = await asAdmin((ctx) => ai.test(ctx));
+      expect(r.ok).toBe(true);
+      expect(r.reply).toBe('OK');
+      expect(r.provider).toBe('fake');
+      expect(r.baseUrl).toBe('https://fake.example/v1');
+      expect(typeof r.latencyMs).toBe('number');
+      const s = await asAdmin((ctx) => ai.status(ctx));
+      expect(s.configured?.baseUrl).toBe('https://fake.example/v1');
+    } finally {
+      ai.setProviderForTests(null);
+    }
+  });
+
+  it('returns the upstream status and message instead of throwing', async () => {
+    ai.setProviderForTests(stub(async () => { throw new AiUpstreamError('openai_compatible', 400, 'Unsupported parameter: max_tokens', 'gpt-x'); }));
+    try {
+      const r = await asAdmin((ctx) => ai.test(ctx));
+      expect(r.ok).toBe(false);
+      expect(r.error).toEqual({ status: 400, code: 'ai_upstream', message: 'Unsupported parameter: max_tokens' });
+    } finally {
+      ai.setProviderForTests(null);
+    }
+  });
+
+  it('is limited to administrators', async () => {
+    await expect(asCustomer((ctx) => ai.test(ctx))).rejects.toMatchObject({ statusCode: 403 });
   });
 });
 

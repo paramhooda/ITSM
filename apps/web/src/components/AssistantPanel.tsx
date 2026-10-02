@@ -9,6 +9,7 @@ import { Button } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { relativeTime } from '@/lib/format';
 import { aiApi, aiQk, type AiMessage, type ToolCallRecord } from '@/components/ai/api';
+import { ApiError } from '@/api/client';
 
 /** Internal links become router links; everything else opens in a new tab. */
 function MdLink({ href, children }: { href?: string; children?: ReactNode }) {
@@ -56,6 +57,7 @@ function proposesAction(m: AiMessage | undefined) {
 export function AssistantPanel() {
   const { setAssistantOpen, assistantContext } = useUiStore();
   const user = useAuthStore((s) => s.user);
+  const can = useAuthStore((s) => s.can);
   const qc = useQueryClient();
   const [input, setInput] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -74,7 +76,7 @@ export function AssistantPanel() {
   const contextLabel = assistantContext?.label ? String(assistantContext.label) : null;
 
   const send = useMutation({
-    mutationFn: (text: string) => aiApi.chat({ conversationId, message: text, context: useContext && assistantContext ? assistantContext : undefined }),
+    mutationFn: (text: string) => aiApi.chat({ conversationId: conversationId ?? undefined, message: text, context: useContext && assistantContext ? assistantContext : undefined }),
     onSuccess: (res, text) => {
       setConversationId(res.conversationId);
       qc.setQueryData(aiQk.conversation(res.conversationId), (old: { id: string; title: string | null; messages: AiMessage[] } | undefined) => {
@@ -255,7 +257,15 @@ export function AssistantPanel() {
         {send.isError && (
           <div className="rounded-md bg-red-50 text-red-700 p-2 text-xs flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <div className="flex-1">{(send.error as Error).message}</div>
+            <div className="flex-1">
+              <div>{(send.error as Error).message}</div>
+              {send.error instanceof ApiError && (send.error.code === 'ai_upstream' || send.error.code === 'ai_disabled') && (
+                <div className="mt-1 text-red-600/80">
+                  {send.error.code === 'ai_upstream' ? 'The provider, model or endpoint needs attention.' : 'The assistant is not configured on this server.'}
+                  {(can('admin:system') || can('admin:config')) && <> Check <Link to="/admin/settings" className="underline">Administration → Settings</Link> and use Test connection.</>}
+                </div>
+              )}
+            </div>
             {lastSent && <button className="underline" onClick={() => submit(lastSent)}>Retry</button>}
           </div>
         )}

@@ -9,6 +9,19 @@ export interface AiStatus {
   canAct: boolean;
   tools: { name: string; action: boolean }[];
   suggestions: string[];
+  /** What the server is configured with (no credentials). */
+  configured?: { provider: string; model: string | null; baseUrl: string | null };
+}
+
+export interface AiTestResult {
+  ok: boolean;
+  provider: string;
+  model: string | null;
+  baseUrl: string | null;
+  latencyMs: number;
+  reply?: string;
+  usage?: { inputTokens: number; outputTokens: number };
+  error?: { status: number; code: string; message: string };
 }
 
 export interface ToolCallRecord {
@@ -134,6 +147,7 @@ export const aiQk = {
 
 export const aiApi = {
   status: () => get<AiStatus>('/ai/status'),
+  test: () => post<AiTestResult>('/ai/test'),
   conversations: () => get<{ items: Conversation[] }>('/ai/conversations'),
   conversation: (id: string) => get<{ id: string; title: string | null; messages: AiMessage[] }>(`/ai/conversations/${id}`),
   deleteConversation: (id: string) => del(`/ai/conversations/${id}`),

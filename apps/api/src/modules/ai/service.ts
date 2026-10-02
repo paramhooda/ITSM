@@ -1,8 +1,8 @@
 import { eq, and, desc, asc, sql } from 'drizzle-orm';
 import { schema } from '@/db/client';
 import { buildCtx, type Ctx } from '@/core/context';
-import { AppError, NotFoundError } from '@/core/errors';
-import { aiProvider, aiEnabled, type AiProvider, type ChatMessage, type ToolCall } from '@/lib/ai';
+import { AppError, NotFoundError, ForbiddenError } from '@/core/errors';
+import { aiProvider, aiEnabled, AiUpstreamError, type AiProvider, type ChatMessage, type ToolCall } from '@/lib/ai';
 import { getSetting } from '@/modules/config/service';
 import { loadTicket } from '@/modules/tickets/common';
 import { listTickets } from '@/modules/tickets/list';
@@ -91,11 +91,45 @@ export async function status(ctx: Ctx) {
     enabled: enabled() && ctx.can('ai:use'),
     provider: p.name,
     model: p.model || null,
+    configured: { provider: p.name, model: p.model || null, baseUrl: p.baseUrl ?? null },
     features: Array.isArray(features) ? features : [],
     canAct: ctx.can('ai:act'),
     tools: tools.map((t) => ({ name: t.name, action: t.action })),
     suggestions: ctx.can('ai:use') ? await examplePrompts(ctx) : [],
   };
+}
+
+/**
+ * Sends a one-line prompt through the configured provider so administrators can
+ * verify credentials, model and endpoint from the product. Never throws for
+ * upstream problems: the failure is returned so the screen can show it.
+ */
+export interface AiTestResult {
+  ok: boolean;
+  provider: string;
+  model: string | null;
+  baseUrl: string | null;
+  latencyMs: number;
+  reply?: string;
+  usage?: { inputTokens: number; outputTokens: number };
+  error?: { status: number; code: string; message: string };
+}
+
+export async function test(ctx: Ctx): Promise<AiTestResult> {
+  if (!ctx.can('admin:system') && !ctx.can('admin:config')) throw new ForbiddenError();
+  const p = provider();
+  const base = { provider: p.name, model: p.model || null, baseUrl: p.baseUrl ?? null };
+  if (!enabled()) return { ok: false, ...base, latencyMs: 0, error: { status: 503, code: 'ai_disabled', message: 'The AI assistant is not configured: set AI_PROVIDER and the provider credentials, then restart the app.' } };
+  const started = Date.now();
+  try {
+    const res = await p.chat({ system: 'You are a connectivity check. Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }], maxTokens: 16 });
+    return { ok: true, ...base, latencyMs: Date.now() - started, reply: res.text.trim().slice(0, 200), usage: res.usage };
+  } catch (err) {
+    const latencyMs = Date.now() - started;
+    if (err instanceof AiUpstreamError) return { ok: false, ...base, latencyMs, error: { status: err.upstreamStatus ?? 502, code: err.code, message: err.upstreamMessage } };
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, ...base, latencyMs, error: { status: 500, code: 'error', message: message.slice(0, 500) } };
+  }
 }
 
 // ---------------------------------------------------------------- conversations
@@ -232,7 +266,7 @@ export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number): 
 // ---------------------------------------------------------------- chat
 
 export interface ChatInput {
-  conversationId?: string;
+  conversationId?: string | null;
   message: string;
   context?: ChatContext | null;
 }
