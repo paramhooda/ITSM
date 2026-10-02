@@ -12,7 +12,7 @@ import { config } from '@/config';
 import { entitlementUtilization } from '@/modules/contracts/entitlements';
 import * as field from '@/modules/field/service';
 import * as pm from '@/modules/pm/service';
-import { markMissed } from '@/jobs/processors/pm';
+import { markMissed, sendDueNotifications, generateAllOccurrences } from '@/jobs/processors/pm';
 
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 let admin: Principal;
@@ -205,6 +205,28 @@ describe('preventive maintenance', () => {
     const audit = await withSystem((tx) => tx.execute(sql`SELECT action, source FROM audit_log WHERE entity_type = 'pm_occurrence' AND entity_id = ${jan!.id}::uuid AND action = 'missed'`));
     expect(audit.rows).toHaveLength(1);
     expect((audit.rows[0] as { source: string }).source).toBe('system');
+  });
+
+  it('sendDueNotifications queues pm.due once for an unscheduled occurrence inside the lead window', async () => {
+    const p = await asAdmin((ctx) => pm.createProgram(ctx, { name: `Monthly PM ${suffix}`, customerId: ids.customer, siteId: ids.site, serviceId: ids.service, frequency: 'monthly', startDate: d(5), leadDays: 14, graceDays: 7, assignedTeamId: ids.team || null }));
+    const [occ] = await withSystem((tx) => tx.select().from(schema.pmOccurrences).where(and(eq(schema.pmOccurrences.programId, p.id), eq(schema.pmOccurrences.plannedDate, d(5)))));
+    expect(occ).toBeTruthy();
+    const first = await sendDueNotifications(new Date());
+    expect(first.sent).toBeGreaterThan(0);
+    const notices = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.event, 'pm.due'), eq(schema.notificationOutbox.entityId, occ!.id))));
+    expect(notices.length).toBeGreaterThan(0);
+    // dedupe: the milestone row exists, nothing is sent again
+    const milestone = await withSystem((tx) => tx.select().from(schema.contractNotifications).where(and(eq(schema.contractNotifications.contractId, ids.contract), eq(schema.contractNotifications.milestone, `pm:${occ!.id}:due`))));
+    expect(milestone).toHaveLength(1);
+    await sendDueNotifications(new Date());
+    const again = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.event, 'pm.due'), eq(schema.notificationOutbox.entityId, occ!.id))));
+    expect(again.length).toBe(notices.length);
+    // rolling horizon generation is idempotent too
+    const gen = await generateAllOccurrences(new Date());
+    expect(gen.programs).toBeGreaterThan(0);
+    const count = await withSystem((tx) => tx.select({ n: sql<number>`count(*)::int` }).from(schema.pmOccurrences).where(eq(schema.pmOccurrences.programId, p.id)));
+    await withSystem((tx) => tx.delete(schema.pmPrograms).where(eq(schema.pmPrograms.id, p.id)));
+    expect(count[0]!.n).toBe(12); // monthly from today+5 inside the 12-month horizon (today+12 months is exclusive of the 13th step)
   });
 
   it('summary reports the counts and the completed-on-time percentage', async () => {
