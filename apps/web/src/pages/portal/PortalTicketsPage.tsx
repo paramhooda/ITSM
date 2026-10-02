@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Ticket } from 'lucide-react';
-import { PageHeader, Button, SearchInput, Select, Toggle, DataTable, Pagination, EmptyState, ErrorBlock, type Column } from '@/components/ui';
+import { PageHeader, Button, SearchInput, Select, Toggle, DataTable, Pagination, EmptyState, ErrorBlock, FilterChip, type Column } from '@/components/ui';
 import { useListState } from '@/hooks/useListState';
 import { fmtDateTime, relativeTime } from '@/lib/format';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
@@ -20,7 +20,7 @@ export default function PortalTicketsPage() {
   const navigate = useNavigate();
   const { state, set, page, setPage } = useListState({ status: 'open' });
   const status = (state.status as StatusChip) || 'open';
-  const params = useMemo(() => ({ status, type: state.type || undefined, q: state.q || undefined, siteId: state.siteId || undefined, mine: state.mine === 'true' ? 'true' : undefined, page, pageSize: 25 }), [status, state.type, state.q, state.siteId, state.mine, page]);
+  const params = useMemo(() => ({ status, type: state.type || undefined, q: state.q || undefined, siteId: state.siteId || undefined, priority: state.priority || undefined, mine: state.mine === 'true' ? 'true' : undefined, page, pageSize: 25 }), [status, state.type, state.q, state.siteId, state.priority, state.mine, page]);
   const list = useQuery({ queryKey: pk.tickets(params), queryFn: () => portalApi.tickets(params), placeholderData: (prev) => prev, refetchInterval: 60_000 });
   const me = useQuery({ queryKey: pk.me, queryFn: portalApi.me, staleTime: 5 * 60_000 });
 
@@ -70,6 +70,11 @@ export default function PortalTicketsPage() {
         <Select value={state.type ?? ''} onChange={(e) => set({ type: e.target.value })} placeholder="Issues and requests" options={TYPE_OPTIONS} className="w-auto" />
         {(me.data?.sites.length ?? 0) > 1 && <Select value={state.siteId ?? ''} onChange={(e) => set({ siteId: e.target.value })} placeholder="All sites" options={(me.data?.sites ?? []).map((s) => ({ value: s.id, label: s.name }))} className="w-auto" />}
         <Toggle checked={state.mine === 'true'} onChange={(v) => set({ mine: v ? 'true' : undefined })} label="Raised by me" />
+        {state.priority && (
+          <FilterChip active onClick={() => set({ priority: undefined })}>
+            Priority {state.priority.toUpperCase()} ×
+          </FilterChip>
+        )}
       </div>
 
       {list.isError ? (

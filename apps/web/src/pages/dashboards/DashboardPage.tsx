@@ -13,12 +13,14 @@ import { Segmented } from '@/components/dashboards/Panel';
 type Tab = 'management' | 'noc' | 'soc' | 'amc' | 'engineer';
 const STORAGE_KEY = 'dashboard.tab';
 const META: Record<Tab, { label: string; title: string; subtitle: string }> = {
-  management: { label: 'Management', title: 'Management overview', subtitle: 'Service delivery, SLA performance and commercial signals across customers' },
+  management: { label: 'Management', title: 'Management overview', subtitle: 'Service delivery, SLA performance and contract health across customers' },
   noc: { label: 'NOC', title: 'Network operations', subtitle: 'Infrastructure incidents, SLA clocks and engineer load' },
   soc: { label: 'SOC', title: 'Security operations', subtitle: 'Security incidents, severity and SIEM activity' },
   amc: { label: 'AMC', title: 'AMC & field service', subtitle: 'AMC ticket queue, site visits and preventive maintenance' },
   engineer: { label: 'My work', title: 'My work', subtitle: 'Your queue, deadlines and schedule for today' },
 };
+/** Which allowed view opens when nothing was chosen: broadest first, "My work" before AMC. AMC is only ever picked explicitly. */
+const DEFAULT_ORDER: Tab[] = ['management', 'noc', 'soc', 'engineer', 'amc'];
 
 function greeting(name: string) {
   const h = new Date().getHours();
@@ -40,6 +42,7 @@ export default function DashboardPage() {
     list.push('engineer');
     return list;
   }, [can]);
+  const fallback = useMemo(() => DEFAULT_ORDER.find((t) => tabs.includes(t)) ?? 'engineer', [tabs]);
   const [tab, setTab] = useState<Tab>(() => {
     let saved: string | null = null;
     try {
@@ -48,7 +51,7 @@ export default function DashboardPage() {
       /* ignore */
     }
     const wanted = (state.view as Tab | undefined) ?? (saved as Tab | null);
-    return (wanted && tabs.includes(wanted) ? wanted : tabs[0] ?? 'engineer') as Tab;
+    return (wanted && tabs.includes(wanted) ? wanted : fallback) as Tab;
   });
   useEffect(() => {
     const v = state.view as Tab | undefined;
@@ -56,8 +59,8 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.view]);
   useEffect(() => {
-    if (!tabs.includes(tab)) setTab(tabs[0] ?? 'engineer');
-  }, [tabs, tab]);
+    if (!tabs.includes(tab)) setTab(fallback);
+  }, [tabs, tab, fallback]);
   const pick = (t: Tab) => {
     setTab(t);
     try {

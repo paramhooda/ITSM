@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CalendarClock, FileText, Download, Phone, Mail, Layers } from 'lucide-react';
-import { PageHeader, Card, Badge, Tabs, Select, KeyValue, LoadingBlock, ErrorBlock, EmptyState, StatTile, ProgressBar } from '@/components/ui';
+import { PageHeader, Card, Badge, Tabs, Select, KeyValue, LoadingBlock, ErrorBlock, EmptyState, ProgressBar } from '@/components/ui';
 import { download, ApiError } from '@/api/client';
 import { fmtDate, fmtDateTime, fmtDuration, fmtBytes, fmtPct, titleCase } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ import { ServiceTeamCard } from '@/components/portal/ServiceTeamCard';
 import { ScopeTable } from '@/components/portal/ScopeTable';
 import { SlaTargetsTable } from '@/components/portal/SlaTargetsTable';
 import { EntitlementBars } from '@/components/portal/EntitlementBars';
+import { SlaGauge } from '@/components/dashboards/SlaGauge';
 import { portalApi, pk, type PortalContract } from '@/components/portal/api';
 import { CONTRACT_STATUS_COLORS } from '@/lib/statusColors';
 
@@ -175,40 +176,45 @@ export default function PortalServicesPage() {
                         <LoadingBlock />
                       ) : sla.data ? (
                         <div className="flex flex-col gap-3">
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            <StatTile label="Targets met" value={sla.data.totals.compliancePct === null ? '—' : fmtPct(sla.data.totals.compliancePct)} tone={sla.data.totals.compliancePct === null ? 'default' : sla.data.totals.compliancePct >= 95 ? 'good' : sla.data.totals.compliancePct >= 85 ? 'warn' : 'bad'} hint={`${sla.data.totals.completed} completed`} />
-                            <StatTile label="Met" value={sla.data.totals.met} tone="good" />
-                            <StatTile label="Missed" value={sla.data.totals.breached} tone={sla.data.totals.breached ? 'bad' : 'default'} />
-                            <StatTile label="In progress" value={sla.data.totals.running} hint={sla.data.totals.overdueRunning ? `${sla.data.totals.overdueRunning} overdue` : undefined} />
-                          </div>
-                          {sla.data.byPriority.length > 0 && (
-                            <div className="overflow-auto">
-                              <table className="table">
-                                <thead>
-                                  <tr>
-                                    <th>Priority</th>
-                                    <th>Met</th>
-                                    <th>Missed</th>
-                                    <th>In progress</th>
-                                    <th>Targets met</th>
-                                    <th className="hidden sm:table-cell">Avg. time</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {sla.data.byPriority.map((g) => (
-                                    <tr key={g.key}>
-                                      <td>{g.label}</td>
-                                      <td className="tabular-nums">{g.met}</td>
-                                      <td className="tabular-nums">{g.breached}</td>
-                                      <td className="tabular-nums">{g.running}</td>
-                                      <td className="tabular-nums">{g.compliancePct === null ? '—' : fmtPct(g.compliancePct)}</td>
-                                      <td className="tabular-nums hidden sm:table-cell">{g.avgElapsedMinutes === null ? '—' : fmtDuration(g.avgElapsedMinutes)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                          <div className="grid grid-cols-1 md:grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-4 items-start">
+                            <div className="flex flex-col gap-3">
+                              <SlaGauge pct={sla.data.totals.compliancePct} met={sla.data.totals.met} breached={sla.data.totals.breached} label={`Targets met · ${days} days`} breachedLabel="missed" />
+                              <div className="text-[12px] text-muted tabular-nums">
+                                {sla.data.totals.completed} completed · {sla.data.totals.running} in progress
+                                {sla.data.totals.overdueRunning ? <span className="text-red-600"> · {sla.data.totals.overdueRunning} overdue</span> : null}
+                              </div>
                             </div>
-                          )}
+                            {sla.data.byPriority.length > 0 ? (
+                              <div className="overflow-auto">
+                                <table className="table">
+                                  <thead>
+                                    <tr>
+                                      <th>Priority</th>
+                                      <th>Met</th>
+                                      <th>Missed</th>
+                                      <th>In progress</th>
+                                      <th>Targets met</th>
+                                      <th className="hidden sm:table-cell">Avg. time</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {sla.data.byPriority.map((g) => (
+                                      <tr key={g.key}>
+                                        <td>{g.label}</td>
+                                        <td className="tabular-nums">{g.met}</td>
+                                        <td className="tabular-nums">{g.breached}</td>
+                                        <td className="tabular-nums">{g.running}</td>
+                                        <td className="tabular-nums">{g.compliancePct === null ? '—' : fmtPct(g.compliancePct)}</td>
+                                        <td className="tabular-nums hidden sm:table-cell">{g.avgElapsedMinutes === null ? '—' : fmtDuration(g.avgElapsedMinutes)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="text-[12.5px] text-muted self-center">No targets were completed in this period yet.</div>
+                            )}
+                          </div>
                           {sla.data.byMetric.length > 0 && (
                             <div className="text-[12px] text-muted flex flex-wrap gap-x-4 gap-y-1">
                               {sla.data.byMetric.map((g) => (

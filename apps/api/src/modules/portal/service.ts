@@ -34,6 +34,7 @@ import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiLis
  */
 
 const PORTAL_PERMISSIONS: Permission[] = ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_CATEGORIES = ['new', 'open', 'pending'];
 const AWAITING_STATUS_KEY = 'pending_customer';
 const CLOSE_CONFIRM_CODE = 'resolved_confirmed';
@@ -157,6 +158,11 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     if (awaiting) statusId = awaiting.id;
     else statusCategory = 'pending';
   }
+  let priorityId: string | undefined;
+  if (q.priority) {
+    const prio = UUID_RE.test(q.priority) ? { id: q.priority } : await optionByKey(ctx.tx, 'ticket_priority', q.priority.toLowerCase());
+    priorityId = prio?.id ?? '00000000-0000-0000-0000-000000000000';
+  }
   const res = await listTickets(ctx, {
     page: q.page,
     pageSize: q.pageSize,
@@ -166,6 +172,7 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     type: q.type,
     statusCategory,
     statusId,
+    priorityId,
     siteId: q.siteId,
     q: q.q,
     requesterUserId: q.mine ? ctx.user.id : undefined,

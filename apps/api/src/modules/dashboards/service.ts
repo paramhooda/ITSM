@@ -6,7 +6,7 @@ import { slaCompliance } from '@/modules/sla/policies';
 import { entitlementSummary, customerEntitlements } from '@/modules/contracts/entitlements';
 import { expiringContracts } from '@/modules/contracts/service';
 import { parseDay } from '@/modules/reports/dates';
-import { q, one, num, pct, isCustomerUser, openCond, custCond, socCond, BREACHED, AT_RISK, AGE_BUCKET, TICKET_LIST_COLS, TICKET_LIST_JOINS, EMPTY, dailySeries, sumOf, weightedOf, delta, toDay, addDays, daysBetween, METRIC_KEYS, type MetricKey } from './common';
+import { q, one, num, pct, isCustomerUser, openCond, custCond, socCond, BREACHED, AT_RISK, AGE_BUCKET, TICKET_LIST_COLS, TICKET_LIST_JOINS, EMPTY, dailySeries, ticketFlowSeries, sumOf, weightedOf, delta, toDay, addDays, daysBetween, METRIC_KEYS, type MetricKey } from './common';
 
 type Row = Record<string, unknown>;
 
@@ -224,11 +224,14 @@ export async function soc(ctx: Ctx) {
     SELECT count(*)::int AS resolved, round((avg(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 60))::numeric)::int AS mttr, round((avg(EXTRACT(EPOCH FROM (t.first_response_at - t.created_at)) / 60))::numeric)::int AS response,
       (SELECT count(*)::int FROM tickets t2 WHERE t2.domain = 'soc' AND t2.created_at >= now() - interval '30 days') AS opened_30d
     FROM tickets t WHERE ${base} AND t.resolved_at >= now() - interval '30 days'`);
-  const sparkTo = toDay(new Date());
-  const spark = await dailySeries(ctx, addDays(sparkTo, -13), sparkTo, null);
+  const today = toDay(new Date());
+  const from30 = addDays(today, -29);
+  // Security-domain ticket flow for the last 30 days: the trend chart reads it in full, the KPI sparklines its tail.
+  const series = await ticketFlowSeries(ctx, from30, today, sql`AND ${base}`);
   return {
     generatedAt: new Date(),
-    series: spark.map((d) => ({ day: d.day, opened: num(d.opened), incidents: num(d.incidentsOpened), security: num(d.securityOpened), resolved: num(d.resolved), breaches: num(d.slaBreached) })),
+    period: { days: 30, from: from30, to: today },
+    series,
     totals: { open: num(totals.open), breached: num(totals.breached), atRisk: num(totals.at_risk), escalated: num(totals.escalated), unassigned: num(totals.unassigned), openedToday: num(totals.opened_today), criticalHigh: num(totals.critical_high) },
     bySeverity,
     byCategory,
@@ -248,11 +251,11 @@ export async function engineer(ctx: Ctx) {
   const me = ctx.user.id;
   const teamIds = ctx.user.teams.map((t) => t.id);
   const soc = socCond(ctx);
-  const mine = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`SELECT ${TICKET_LIST_COLS}, t.due_at FROM tickets t ${TICKET_LIST_JOINS} WHERE t.assignee_id = ${me}::uuid AND ${openCond()} ${soc} ORDER BY pr.level NULLS LAST, t.created_at LIMIT 100`));
-  const byPriority = new Map<string, { label: string; color: string | null; level: number; count: number }>();
+  const mine = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`SELECT ${TICKET_LIST_COLS}, t.due_at, t.priority_id FROM tickets t ${TICKET_LIST_JOINS} WHERE t.assignee_id = ${me}::uuid AND ${openCond()} ${soc} ORDER BY pr.level NULLS LAST, t.created_at LIMIT 100`));
+  const byPriority = new Map<string, { id: string | null; label: string; color: string | null; level: number; count: number }>();
   for (const t of mine) {
     const k = String(t.priority ?? 'No priority');
-    const v = byPriority.get(k) ?? { label: k, color: (t.priority_color as string | null) ?? null, level: num(t.priority_level) || 99, count: 0 };
+    const v = byPriority.get(k) ?? { id: (t.priority_id as string | null) ?? null, label: k, color: (t.priority_color as string | null) ?? null, level: num(t.priority_level) || 99, count: 0 };
     v.count++;
     byPriority.set(k, v);
   }
@@ -288,8 +291,14 @@ export async function engineer(ctx: Ctx) {
   const watched = await q<Row>(ctx, sql`
     SELECT ${TICKET_LIST_COLS} FROM ticket_watchers w JOIN tickets t ON t.id = w.ticket_id ${TICKET_LIST_JOINS}
     WHERE w.user_id = ${me}::uuid AND t.last_activity_at >= now() - interval '24 hours' ${soc} ORDER BY t.last_activity_at DESC LIMIT 10`);
+  const today = toDay(new Date());
+  const from14 = addDays(today, -13);
+  const flow = await ticketFlowSeries(ctx, from14, today, sql`AND t.assignee_id = ${me}::uuid ${soc}`);
   return {
     generatedAt: new Date(),
+    period: { days: 14, from: from14, to: today },
+    /** Tickets assigned to me resolved per day, last 14 days. */
+    series: flow.map((d) => ({ day: d.day, resolved: d.resolved })),
     assigned: { total: mine.length, byPriority: [...byPriority.values()].sort((a, b) => a.level - b.level), breached: mine.filter((t) => t.sla?.breached).length, items: mine.slice(0, 25), dueSoon },
     teamQueues,
     today: { dueTickets: todayRows, visits, pmOccurrences: pmToday, tasks },
@@ -317,7 +326,7 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null } = 
   const cust = sql`t.customer_id = ${customerId}::uuid`;
   const [info] = await q<Row>(ctx, sql`SELECT c.id, c.name, c.code, c.timezone, c.account_manager_id, am.name AS account_manager_name, am.email AS account_manager_email, am.phone AS account_manager_phone FROM customers c LEFT JOIN users am ON am.id = c.account_manager_id WHERE c.id = ${customerId}::uuid`);
   const open = await q<Row>(ctx, sql`SELECT st.status_category AS category, count(*)::int AS count FROM tickets t JOIN config_options st ON st.id = t.status_id WHERE ${cust} AND ${openCond()} GROUP BY 1`);
-  const byPriority = await q<Row>(ctx, sql`SELECT coalesce(pr.label, 'No priority') AS label, pr.color, coalesce(pr.level, 99) AS level, count(*)::int AS count FROM tickets t LEFT JOIN config_options pr ON pr.id = t.priority_id WHERE ${cust} AND ${openCond()} GROUP BY 1, 2, 3 ORDER BY 3`);
+  const byPriority = await q<Row>(ctx, sql`SELECT pr.id, pr.key, coalesce(pr.label, 'No priority') AS label, pr.color, coalesce(pr.level, 99) AS level, count(*)::int AS count FROM tickets t LEFT JOIN config_options pr ON pr.id = t.priority_id WHERE ${cust} AND ${openCond()} GROUP BY 1, 2, 3, 4, 5 ORDER BY 5`);
   const byType = await q<Row>(ctx, sql`SELECT t.type, count(*)::int AS count FROM tickets t WHERE ${cust} AND ${openCond()} GROUP BY 1`);
   const counts = await one<Row>(ctx, sql`
     SELECT count(*) FILTER (WHERE ${openCond()})::int AS open, count(*) FILTER (WHERE ${openCond()} AND st.key = 'pending_customer')::int AS awaiting_reply, count(*) FILTER (WHERE ${openCond()} AND st.key = 'awaiting_approval')::int AS awaiting_approval,
@@ -327,6 +336,9 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null } = 
   const d30 = new Date(now.getTime() - 30 * 86_400_000).toISOString();
   const d90 = new Date(now.getTime() - 90 * 86_400_000).toISOString();
   const [sla30, sla90] = [await slaCompliance(ctx, { customerId, from: d30, groupBy: 'priority' }), await slaCompliance(ctx, { customerId, from: d90, groupBy: 'priority' })];
+  const today = toDay(now);
+  const from30 = addDays(today, -29);
+  const series = await dailySeries(ctx, from30, today, customerId);
   const contracts = await q<Row>(ctx, sql`
     SELECT c.id, c.number, c.name, c.status, c.start_date, c.end_date, (c.end_date - current_date)::int AS days_to_expiry, c.auto_renew, ty.label AS type,
       (SELECT string_agg(s.name, ', ' ORDER BY s.name) FROM contract_services cs JOIN services s ON s.id = cs.service_id WHERE cs.contract_id = c.id) AS services
@@ -349,6 +361,9 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null } = 
   return {
     generatedAt: now,
     customer: info ? { id: info.id, name: info.name, code: info.code, timezone: info.timezone } : { id: customerId, name: '', code: '', timezone: 'UTC' },
+    period: { days: 30, from: from30, to: today },
+    /** Tickets opened and resolved per day for this customer, last 30 days. */
+    series: series.map((d) => ({ day: d.day, opened: num(d.opened), resolved: num(d.resolved) })),
     tickets: {
       open: openTotal,
       byStatusCategory: Object.fromEntries(open.map((r) => [String(r.category), num(r.count)])),
@@ -432,8 +447,25 @@ export async function amc(ctx: Ctx) {
     WHERE o.status IN ('planned', 'scheduled', 'rescheduled') AND coalesce(o.scheduled_date, o.planned_date) <= current_date + 14 ORDER BY coalesce(o.scheduled_date, o.planned_date) LIMIT 10`);
   const ents = ctx.can('contracts:read') ? await entitlementSummary(ctx, undefined, 500) : { total: 0, overThreshold: 0, exhausted: 0, items: [] };
   const entitlements = ents.items.filter((i) => (i.unit === 'visits' || i.unit === 'hours') && (i.utilization.pct >= 80 || i.utilization.exhausted)).slice(0, 6);
+  const today = toDay(new Date());
+  const from30 = addDays(today, -29);
+  const days = await dailySeries(ctx, from30, today, null);
+  // Pipeline health: visits and PM occurrences due in the last 30 and next 30 days, by status (fixed lifecycle order).
+  const visitRows = await q<Row>(ctx, sql`SELECT v.status, count(*)::int AS count FROM field_visits v WHERE coalesce(v.scheduled_start, v.created_at) >= current_date - 30 AND coalesce(v.scheduled_start, v.created_at) < current_date + 31 GROUP BY 1`);
+  const pmRows = await q<Row>(ctx, sql`SELECT o.status, count(*)::int AS count FROM pm_occurrences o WHERE coalesce(o.scheduled_date, o.planned_date) BETWEEN current_date - 30 AND current_date + 30 GROUP BY 1`);
+  const byStatus = (rows: Row[], order: string[]) => order.map((status) => ({ status, count: num(rows.find((r) => r.status === status)?.count) }));
+  // Resolution SLA on AMC tickets opened in the period (same clocks management() sums per customer).
+  const sla = await one<Row>(ctx, sql`
+    SELECT count(*) FILTER (WHERE s.state = 'met')::int AS met, count(*) FILTER (WHERE s.state = 'breached')::int AS breached
+    FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.metric = 'resolution' AND ${base} AND t.created_at >= ${from30}::date`);
   return {
     generatedAt: new Date(),
+    period: { days: 30, from: from30, to: today },
+    /** Site visits and PM occurrences completed per day, last 30 days. */
+    series: days.map((d) => ({ day: d.day, visitsCompleted: num(d.visitsCompleted), pmCompleted: num(d.pmCompleted) })),
+    visitsByStatus: byStatus(visitRows, ['requested', 'scheduled', 'in_progress', 'completed', 'cancelled']),
+    pmByStatus: byStatus(pmRows, ['planned', 'scheduled', 'rescheduled', 'completed', 'missed', 'cancelled']),
+    sla30d: { met: num(sla.met), breached: num(sla.breached), compliancePct: pct(num(sla.met), num(sla.met) + num(sla.breached)) },
     kpis: {
       open: num(totals.open),
       unassigned: num(totals.unassigned),

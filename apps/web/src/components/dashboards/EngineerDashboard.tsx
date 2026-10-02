@@ -3,14 +3,20 @@ import { useQuery } from '@tanstack/react-query';
 import { ErrorBlock, Badge } from '@/components/ui';
 import { get } from '@/api/client';
 import { fmtDuration, fmtNumber, fmtDateTime, relativeTime, fmtDate } from '@/lib/format';
+import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
 import { KpiGrid } from './KpiGrid';
+import { TrendChart } from './TrendChart';
+import { BreakdownBar } from './BreakdownBar';
 import { TicketMiniTable } from './TicketMiniTable';
-import { Panel, KpiSkeleton, RowList, type RowItem } from './Panel';
+import { Panel, KpiSkeleton, Skeleton, RowList, type RowItem } from './Panel';
 import type { TicketRow } from './types';
 
 interface Engineer {
   generatedAt: string;
-  assigned: { total: number; byPriority: { label: string; color: string | null; level: number; count: number }[]; breached: number; items: TicketRow[]; dueSoon: TicketRow[] };
+  period: { days: number; from: string; to: string };
+  /** Tickets assigned to me resolved per day, last 14 days. */
+  series: { day: string; resolved: number }[];
+  assigned: { total: number; byPriority: { id: string | null; label: string; color: string | null; level: number; count: number }[]; breached: number; items: TicketRow[]; dueSoon: TicketRow[] };
   teamQueues: { id: string; name: string; unassigned: number; open: number; breached: number }[];
   today: {
     dueTickets: TicketRow[];
@@ -28,7 +34,15 @@ export function EngineerDashboard() {
   const q = useQuery({ queryKey: ['dashboards', 'engineer'], queryFn: () => get<Engineer>('/dashboards/engineer'), refetchInterval: 120_000, placeholderData: (p) => p });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
-  if (!d) return <KpiSkeleton />;
+  if (!d)
+    return (
+      <div className="flex flex-col gap-6">
+        <KpiSkeleton />
+        <div className="card p-5">
+          <Skeleton rows={6} />
+        </div>
+      </div>
+    );
   const dueIn4h = d.assigned.dueSoon.filter((t) => t.sla && !t.sla.breached && t.sla.remainingMinutes <= 240).length;
   const todayItems: RowItem[] = [
     ...d.today.visits.map((v) => ({ key: `v-${v.id}`, href: `/field/${v.id}`, primary: v.title, secondary: `Site visit · ${v.customer_name ?? ''}${v.site_name ? ` · ${v.site_name}` : ''}`, right: v.scheduled_start ? fmtDateTime(v.scheduled_start).split(',').pop()?.trim() : 'unscheduled' })),
@@ -37,6 +51,9 @@ export function EngineerDashboard() {
     ...d.today.tasks.map((k) => ({ key: `k-${k.id}`, href: `/tickets/${k.ticket_id}`, primary: k.title, secondary: `Task on ${k.ticket_number}`, right: k.due_at ? relativeTime(k.due_at) : '' })),
   ];
   const queueTotal = d.teamQueues.reduce((s, t) => s + t.unassigned, 0);
+  const resolvedFlow = d.series.some((s) => s.resolved) ? d.series : [];
+  // Priority colours follow the level (P1 red → P5 slate); the API orders the queue P1 first.
+  const queueByPriority = d.assigned.byPriority.map((p) => ({ label: p.label, value: p.count, color: PRIORITY_LEVEL_COLORS[p.level] ?? p.color, href: p.id ? `/tickets?mine=true&open=true&priorityId=${p.id}` : '/tickets?mine=true&open=true' }));
   return (
     <div className="flex flex-col gap-6">
       <KpiGrid
@@ -60,6 +77,14 @@ export function EngineerDashboard() {
         </Panel>
         <Panel title="Today" subtitle="Visits, maintenance and deadlines">
           <RowList items={todayItems.slice(0, 8)} empty="Nothing scheduled for today" dense />
+        </Panel>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <Panel title="Resolved by me" subtitle="Tickets you resolved per day, last 14 days" className="xl:col-span-2" to="/tickets?mine=true&statusCategory=resolved" toLabel="Resolved tickets">
+          <TrendChart data={resolvedFlow} x="day" kind="bar" series={[{ key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={160} />
+        </Panel>
+        <Panel title="My queue by priority" subtitle="Open tickets assigned to you" to="/tickets?mine=true&open=true">
+          <BreakdownBar items={queueByPriority} emptyText="Nothing assigned to you" />
         </Panel>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

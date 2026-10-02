@@ -112,3 +112,25 @@ export function weightedOf(s: DayMetrics[], k: MetricKey, w: MetricKey) {
   return den ? Math.round((s.reduce((a, r) => a + (r[k] === null || r[k] === undefined ? 0 : num(r[k]) * num(r[w])), 0) / den) * 10) / 10 : null;
 }
 export const delta = (current: number | null, previous: number | null) => ({ current, previous, deltaPct: current !== null && previous !== null && previous !== 0 ? Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10 : null });
+
+// ---------------------------------------------------------------- ticket flow for one slice (domain, assignee)
+
+export interface FlowDay { day: string; opened: number; resolved: number; breaches: number }
+
+/**
+ * Daily opened / resolved / SLA-breached counts for the tickets matching `cond`
+ * (an `AND …` fragment over the alias `t`), computed live from the source tables.
+ * Every day in [from, to] is present. Used where a dashboard needs a slice that
+ * `dailySeries` (per customer only) cannot express: a domain or an assignee.
+ */
+export async function ticketFlowSeries(ctx: Ctx, from: string, to: string, cond: SQL = EMPTY): Promise<FlowDay[]> {
+  const win = (col: SQL) => sql`${col} >= ${from}::date AND ${col} < ${to}::date + interval '1 day'`;
+  const rows = await q<FlowDay>(ctx, sql`
+    WITH d AS (SELECT generate_series(${from}::date, ${to}::date, interval '1 day')::date AS day),
+    o AS (SELECT t.created_at::date AS day, count(*)::int AS opened FROM tickets t WHERE ${win(sql`t.created_at`)} ${cond} GROUP BY 1),
+    r AS (SELECT t.resolved_at::date AS day, count(*)::int AS resolved FROM tickets t WHERE ${win(sql`t.resolved_at`)} ${cond} GROUP BY 1),
+    b AS (SELECT s.breached_at::date AS day, count(*)::int AS breaches FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.state = 'breached' AND ${win(sql`s.breached_at`)} ${cond} GROUP BY 1)
+    SELECT d.day::text AS day, coalesce(o.opened, 0) AS opened, coalesce(r.resolved, 0) AS resolved, coalesce(b.breaches, 0) AS breaches
+    FROM d LEFT JOIN o ON o.day = d.day LEFT JOIN r ON r.day = d.day LEFT JOIN b ON b.day = d.day ORDER BY d.day`);
+  return rows.map((r) => ({ day: String(r.day), opened: num(r.opened), resolved: num(r.resolved), breaches: num(r.breaches) }));
+}

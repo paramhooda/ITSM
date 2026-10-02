@@ -5,11 +5,14 @@ import { Wrench, UserX, Timer, CalendarCheck } from 'lucide-react';
 import { get } from '@/api/client';
 import { fmtDate, fmtDateTime, fmtNumber } from '@/lib/format';
 import { KpiGrid } from './KpiGrid';
+import { TrendChart } from './TrendChart';
+import { BreakdownBar } from './BreakdownBar';
+import { SlaGauge } from './SlaGauge';
 import { TicketMiniTable } from './TicketMiniTable';
 import { EntitlementAlerts, type EntitlementAlert } from './EntitlementAlerts';
-import { Panel, KpiSkeleton, Segmented, Updated, RowList } from './Panel';
+import { Panel, KpiSkeleton, Skeleton, Segmented, Stat, Updated, RowList } from './Panel';
 import type { TicketRow } from './types';
-import { VISIT_STATUS_COLORS } from '@/lib/statusColors';
+import { VISIT_STATUS_COLORS, PM_STATUS_COLORS } from '@/lib/statusColors';
 
 interface Amc {
   generatedAt: string;
@@ -18,10 +21,21 @@ interface Amc {
   visits: { id: string; number: string; title: string; status: string; scheduled_start: string | null; customer_name: string | null; site_name: string | null; engineer: string | null; ticket_number: string | null; ticket_id: string | null }[];
   maintenance: { id: string; program: string; customer_name: string | null; site: string | null; due_date: string; status: string; overdue: boolean; engineer: string | null }[];
   entitlements: EntitlementAlert[];
+  period: { days: number; from: string; to: string };
+  /** Site visits and PM occurrences completed per day, last 30 days. */
+  series: { day: string; visitsCompleted: number; pmCompleted: number }[];
+  /** Fixed lifecycle order from the API; zero rows are dropped before rendering. */
+  visitsByStatus: { status: string; count: number }[];
+  pmByStatus: { status: string; count: number }[];
+  sla30d: { met: number; breached: number; compliancePct: number | null };
 }
 
 type Filter = 'all' | 'unassigned' | 'dueToday' | 'breached' | 'awaitingCustomer';
 const VISIT_COLOR = VISIT_STATUS_COLORS;
+const statusLabel = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ');
+/** Status rows keep their lifecycle order and their own status colour (never the row position). */
+const statusItems = (rows: { status: string; count: number }[], colors: Record<string, string>, href: (status: string) => string) =>
+  rows.filter((r) => r.count > 0).map((r) => ({ label: statusLabel(r.status), value: r.count, color: colors[r.status] ?? 'slate', href: href(r.status) }));
 
 /** AMC / field service view: an AMC ticket work queue first, visits and maintenance beside it. */
 export function AmcDashboard() {
@@ -44,9 +58,18 @@ export function AmcDashboard() {
     }
   }, [d, filter]);
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
-  if (!d) return <KpiSkeleton />;
+  if (!d)
+    return (
+      <div className="flex flex-col gap-6">
+        <KpiSkeleton />
+        <div className="card p-5">
+          <Skeleton rows={6} />
+        </div>
+      </div>
+    );
   const k = d.kpis;
   const c = d.queue.counts;
+  const work = d.series.some((s) => s.visitsCompleted || s.pmCompleted) ? d.series : [];
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between -mt-2">
@@ -86,6 +109,19 @@ export function AmcDashboard() {
         </div>
       </Panel>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Second series uses kit slot 6 (validated pair with blue); slot 2 orange fails the 3:1 contrast check on bars. */}
+        <Panel title="Completed work" subtitle="Site visits and preventive maintenance completed per day, last 30 days" className="xl:col-span-2" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report">
+          <TrendChart data={work} x="day" kind="bar" stacked={false} series={[{ key: 'visitsCompleted', label: 'Visits completed' }, { key: 'pmCompleted', label: 'Maintenance completed', color: '#1a7f37' }]} height={220} />
+        </Panel>
+        <Panel title="Service levels · 30 days" subtitle="Resolution targets on AMC tickets opened in the period">
+          <SlaGauge pct={d.sla30d.compliancePct} met={d.sla30d.met} breached={d.sla30d.breached} label="Targets met" />
+          <div className="mt-5 pt-4 border-t border-default grid grid-cols-2 gap-x-4 gap-y-4">
+            <Stat label="Resolved this week" value={fmtNumber(k.resolvedThisWeek)} />
+            <Stat label="Awaiting customer" value={fmtNumber(k.awaitingCustomer)} tone={k.awaitingCustomer > 0 ? 'warn' : 'default'} />
+          </div>
+        </Panel>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="Visits this week" subtitle="Scheduled and in-progress site visits" to="/field" toLabel="Field service">
           <RowList
             empty="No visits scheduled this week"
@@ -124,6 +160,14 @@ export function AmcDashboard() {
         </Panel>
         <Panel title="Entitlements near limit" subtitle="Visits and hours at 80% or more" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report">
           <EntitlementAlerts items={d.entitlements} emptyText="All AMC entitlements have headroom" />
+        </Panel>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <Panel title="Visits by status" subtitle="Scheduled in the last 30 and next 30 days" to="/field" toLabel="Field service">
+          <BreakdownBar items={statusItems(d.visitsByStatus, VISIT_STATUS_COLORS, (status) => `/field?status=${status}`)} emptyText="No visits in this window" />
+        </Panel>
+        <Panel title="Preventive maintenance by status" subtitle="Due in the last 30 and next 30 days" to="/maintenance" toLabel="Maintenance">
+          <BreakdownBar items={statusItems(d.pmByStatus, PM_STATUS_COLORS, (status) => `/maintenance?status=${status}`)} emptyText="No maintenance in this window" />
         </Panel>
       </div>
     </div>
