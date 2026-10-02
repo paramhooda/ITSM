@@ -34,7 +34,7 @@ export const ADMIN_NAV: AdminNavGroup[] = [
   {
     label: 'SLA & time',
     items: [
-      { to: '/admin/sla', label: 'SLA policies', perm: CONFIG, prefix: true },
+      { to: '/sla', label: 'SLA policies', perm: CONFIG, prefix: true },
       { to: '/admin/calendars', label: 'Business calendars', perm: CONFIG },
       { to: '/admin/holidays', label: 'Holiday calendars', perm: CONFIG },
     ],
@@ -92,7 +92,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
     <div className="flex gap-6 min-h-full">
       <aside className="hidden lg:block w-48 shrink-0">
         <div className="sticky top-0">
-          <div className="text-[15px] font-semibold px-2 pb-2">Administration</div>
+          <div className="text-[15px] font-semibold px-2 pb-2 tracking-[-0.01em]">Administration</div>
           {groups.map((g) => (
             <div key={g.label} className="mb-3">
               {g.label !== 'Overview' && <div className="px-2 pt-2 pb-1 text-[10.5px] uppercase tracking-wider text-subtle font-semibold">{g.label}</div>}
@@ -101,7 +101,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
                   key={item.to}
                   to={item.to}
                   end={!item.prefix}
-                  className={({ isActive }) => cn('block rounded-md px-2 py-1 text-[13px] my-0.5 transition-colors', isActive || (item.prefix && location.pathname.startsWith(item.to + '/')) ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2 hover:text-default')}
+                  className={({ isActive }) => cn('block rounded-md px-2 py-1 text-[13px] my-0.5 transition-colors', isActive || (item.prefix && location.pathname.startsWith(item.to + '/')) ? 'bg-surface-2 text-default font-medium' : 'text-muted hover:bg-surface-2/70 hover:text-default')}
                 >
                   {item.label}
                 </NavLink>

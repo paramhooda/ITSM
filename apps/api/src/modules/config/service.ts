@@ -1,5 +1,5 @@
 import { eq, and, asc, sql, inArray } from 'drizzle-orm';
-import { OPTION_TYPES } from '@itsm/shared';
+import { OPTION_TYPES, OPTION_PARENT_TYPES, type OptionType } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { schema } from '@/db/client';
 import { NotFoundError, ValidationError } from '@/core/errors';
@@ -15,7 +15,7 @@ export async function lookups(ctx: Ctx) {
     ctx.tx.select({ id: schema.ciRelationshipTypes.id, key: schema.ciRelationshipTypes.key, name: schema.ciRelationshipTypes.name, inverseName: schema.ciRelationshipTypes.inverseName }).from(schema.ciRelationshipTypes).where(eq(schema.ciRelationshipTypes.isActive, true)).orderBy(asc(schema.ciRelationshipTypes.name)),
     ctx.tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name, isDefault: schema.slaPolicies.isDefault }).from(schema.slaPolicies).where(eq(schema.slaPolicies.isActive, true)).orderBy(asc(schema.slaPolicies.name)),
     ctx.tx.select({ id: schema.businessCalendars.id, name: schema.businessCalendars.name, timezone: schema.businessCalendars.timezone, is24x7: schema.businessCalendars.is24x7 }).from(schema.businessCalendars).orderBy(asc(schema.businessCalendars.name)),
-    ctx.tx.select({ id: schema.services.id, key: schema.services.key, name: schema.services.name, domain: schema.services.domain, categoryId: schema.services.categoryId, isActive: schema.services.isActive }).from(schema.services).where(eq(schema.services.isActive, true)).orderBy(asc(schema.services.name)),
+    ctx.tx.select({ id: schema.services.id, key: schema.services.key, name: schema.services.name, domain: schema.services.domain, categoryId: schema.services.categoryId, subcategoryId: schema.services.subcategoryId, isActive: schema.services.isActive }).from(schema.services).where(eq(schema.services.isActive, true)).orderBy(asc(schema.services.name)),
     ctx.tx.select().from(schema.systemSettings),
   ]);
   const grouped: Record<string, typeof options> = {};
@@ -36,9 +36,23 @@ export async function listOptions(ctx: Ctx, type?: string, includeInactive = tru
 
 export type OptionInput = Partial<typeof schema.configOptions.$inferInsert> & { type: string; key: string; label: string };
 
+/**
+ * Sub-option types (ticket_subcategory, service_subcategory) must point at an
+ * option of their parent type. Returns without checking for other types.
+ */
+export async function assertOptionParent(ctx: Ctx, type: string, parentId: string | null | undefined) {
+  const parentType = OPTION_PARENT_TYPES[type as OptionType];
+  if (!parentType) return;
+  const label = type.replace(/_/g, ' ');
+  if (!parentId) throw new ValidationError(`A ${label} requires a parent ${parentType.replace(/_/g, ' ')}`);
+  const [parent] = await ctx.tx.select({ id: schema.configOptions.id, type: schema.configOptions.type }).from(schema.configOptions).where(eq(schema.configOptions.id, parentId)).limit(1);
+  if (!parent || parent.type !== parentType) throw new ValidationError(`The parent of a ${label} must be a ${parentType.replace(/_/g, ' ')} option`);
+}
+
 export async function createOption(ctx: Ctx, input: OptionInput) {
   if (!(OPTION_TYPES as readonly string[]).includes(input.type)) throw new ValidationError(`Unknown option type: ${input.type}`);
   if (input.type === 'ticket_status' && !input.statusCategory) throw new ValidationError('Ticket statuses require a status category');
+  await assertOptionParent(ctx, input.type, input.parentId);
   const [row] = await ctx.tx.insert(schema.configOptions).values({ ...input, isSystem: false }).returning();
   await ctx.audit({ entityType: 'config_option', entityId: row.id, entityLabel: `${row.type}:${row.key}`, action: 'create', metadata: { type: row.type } });
   return row;
@@ -48,6 +62,7 @@ export async function updateOption(ctx: Ctx, id: string, patch: Partial<OptionIn
   const [before] = await ctx.tx.select().from(schema.configOptions).where(eq(schema.configOptions.id, id)).limit(1);
   if (!before) throw new NotFoundError('Option');
   const { type: _t, key: _k, ...rest } = patch;
+  if (rest.parentId !== undefined) await assertOptionParent(ctx, before.type, rest.parentId);
   if (patch.isDefault) await ctx.tx.update(schema.configOptions).set({ isDefault: false }).where(and(eq(schema.configOptions.type, before.type), sql`${schema.configOptions.appliesTo} = ${before.appliesTo}`));
   const [after] = await ctx.tx.update(schema.configOptions).set({ ...rest, updatedAt: new Date() }).where(eq(schema.configOptions.id, id)).returning();
   await ctx.audit({ entityType: 'config_option', entityId: id, entityLabel: `${after.type}:${after.key}`, action: 'update', changes: diffChanges(before as Record<string, unknown>, rest as Record<string, unknown>) });

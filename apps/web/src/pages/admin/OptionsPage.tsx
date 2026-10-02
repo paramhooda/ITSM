@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Ban, Star } from 'lucide-react';
-import { OPTION_TYPES, TICKET_TYPES, DOMAINS, STATUS_CATEGORIES } from '@itsm/shared';
+import { OPTION_TYPES, OPTION_PARENT_TYPES, TICKET_TYPES, DOMAINS, STATUS_CATEGORIES } from '@itsm/shared';
 import { get, post, patch, del } from '@/api/client';
 import { Button, Select, Badge, type Column } from '@/components/ui';
 import { useLookups, type ConfigOption } from '@/hooks/useLookups';
@@ -18,7 +18,7 @@ export const OPTION_GROUPS: { group: string; types: [string, string][] }[] = [
   { group: 'Tickets', types: [['ticket_category', 'Categories'], ['ticket_subcategory', 'Subcategories'], ['ticket_priority', 'Priorities'], ['ticket_impact', 'Impact'], ['ticket_urgency', 'Urgency'], ['ticket_status', 'Statuses'], ['ticket_source', 'Sources'], ['resolution_code', 'Resolution codes'], ['closure_code', 'Closure codes']] },
   { group: 'Customers', types: [['customer_type', 'Customer types'], ['customer_status', 'Customer statuses'], ['customer_industry', 'Industries'], ['site_type', 'Site types']] },
   { group: 'Contracts & Scope', types: [['contract_type', 'Contract types'], ['contract_status', 'Contract statuses'], ['entitlement_type', 'Entitlement types'], ['scope_header', 'Scope headers'], ['scope_category', 'Scope categories'], ['scope_type', 'Scope types'], ['scope_status', 'Scope statuses']] },
-  { group: 'Services', types: [['service_category', 'Service categories'], ['service_status', 'Service statuses']] },
+  { group: 'Services', types: [['service_category', 'Service categories'], ['service_subcategory', 'Service subcategories'], ['service_status', 'Service statuses']] },
   { group: 'Assets', types: [['asset_category', 'Asset categories'], ['asset_status', 'Asset statuses']] },
   { group: 'Field & Maintenance', types: [['field_visit_type', 'Visit types'], ['field_visit_status', 'Visit statuses'], ['pm_frequency', 'PM frequencies']] },
   { group: 'Changes & Security', types: [['change_type', 'Change types'], ['change_risk', 'Change risk levels'], ['security_severity', 'Security severities']] },
@@ -33,7 +33,7 @@ const singular = (label: string) => (label.endsWith('ies') ? label.slice(0, -3) 
 
 const LEVEL_TYPES = ['ticket_priority', 'ticket_impact', 'ticket_urgency', 'change_risk', 'security_severity'];
 const APPLIES_TYPES = ['ticket_status', 'ticket_priority', 'ticket_category', 'ticket_subcategory', 'ticket_source', 'resolution_code', 'closure_code'];
-const DOMAIN_TYPES = ['ticket_category', 'ticket_subcategory', 'service_category', 'scope_header', 'scope_category'];
+const DOMAIN_TYPES = ['ticket_category', 'ticket_subcategory', 'service_category', 'service_subcategory', 'scope_header', 'scope_category'];
 
 type OptionValues = Record<string, unknown>;
 
@@ -52,18 +52,19 @@ export default function OptionsPage() {
   const remove = useAdminMutation((id: string) => del<{ deleted?: boolean; deactivated?: boolean }>(`/config/options/${id}`), { invalidate, lookups: true, onSuccess: (r) => toast.success(r.deactivated ? 'Entry deactivated' : 'Entry deleted') });
   const reorder = useAdminMutation((ids: string[]) => post('/config/options/reorder', { ids }), { invalidate, lookups: true });
 
-  const parentOptions = (lookups.options('ticket_category', { includeInactive: true }) ?? []).map((o) => ({ value: o.id, label: o.label }));
+  const parentType = (OPTION_PARENT_TYPES as Record<string, string>)[type];
+  const parentOptions = (parentType ? lookups.options(parentType, { includeInactive: true }) ?? [] : []).map((o) => ({ value: o.id, label: o.label }));
   const hasLevel = LEVEL_TYPES.includes(type);
   const hasApplies = APPLIES_TYPES.includes(type);
   const hasDomain = DOMAIN_TYPES.includes(type);
   const isStatus = type === 'ticket_status';
-  const isSub = type === 'ticket_subcategory';
+  const isSub = !!parentType;
 
   const fields: FieldSpec<OptionValues>[] = [
     { key: 'label', label: 'Label', type: 'text', required: true },
     { key: 'key', label: 'Key', type: 'key', required: true, hint: 'Stable identifier used by rules and integrations', disabled: (v) => !!v.id },
     { key: 'description', label: 'Description', type: 'textarea', rows: 2 },
-    ...(isSub ? [{ key: 'parentId', label: 'Parent category', type: 'select', options: parentOptions, required: true } as FieldSpec<OptionValues>] : []),
+    ...(isSub ? [{ key: 'parentId', label: 'Parent category', type: 'select', options: parentOptions, required: true, hint: 'The main header this entry sits under' } as FieldSpec<OptionValues>] : []),
     ...(hasDomain ? [{ key: 'domain', label: 'Domain', type: 'select', options: DOMAINS.map((d) => ({ value: d, label: d === 'general' ? 'General (all)' : d.toUpperCase().replace('_', ' ') })) } as FieldSpec<OptionValues>] : []),
     ...(isStatus ? [{ key: 'statusCategory', label: 'Status category', type: 'select', required: true, options: STATUS_CATEGORIES.map((s) => ({ value: s, label: titleCase(s) })), hint: 'Drives SLA clocks and reports for any custom status' } as FieldSpec<OptionValues>, { key: 'pausesSla', label: 'Pauses SLA clocks', type: 'boolean', placeholder: 'Clock stops while tickets are in this status' } as FieldSpec<OptionValues>] : []),
     ...(hasLevel ? [{ key: 'level', label: 'Level', type: 'number', min: 1, hint: '1 = highest' } as FieldSpec<OptionValues>] : []),

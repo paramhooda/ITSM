@@ -14,6 +14,7 @@ export interface OptionSeed {
   color?: string;
   icon?: string;
   appliesTo?: string[];
+  /** Key of the parent option (its type comes from OPTION_PARENT_TYPES, e.g. ticket_subcategory -> ticket_category). */
   parent?: string;
   isDefault?: boolean;
   metadata?: Record<string, unknown>;
@@ -271,15 +272,32 @@ export const OPTION_SEEDS: Record<string, OptionSeed[]> = {
     { key: 'pending_review', label: 'Pending Review' },
     { key: 'retired', label: 'Retired' },
   ],
+  // Service catalog taxonomy (two levels): MSP practice areas and the service lines within them.
   service_category: [
-    { key: 'infrastructure', label: 'Infrastructure' },
-    { key: 'network', label: 'Network' },
-    { key: 'security', label: 'Security' },
-    { key: 'cloud', label: 'Cloud' },
-    { key: 'end_user', label: 'End User Services' },
-    { key: 'backup_dr', label: 'Backup & DR' },
-    { key: 'maintenance', label: 'Maintenance & AMC' },
-    { key: 'professional_services', label: 'Professional Services' },
+    { key: 'managed_infrastructure', label: 'Managed Infrastructure (NOC)', description: 'Monitoring and management of network, server, storage, cloud and end-user infrastructure.', domain: 'noc', icon: 'server', color: 'blue' },
+    { key: 'managed_security', label: 'Managed Security (SOC)', description: 'Security monitoring, endpoint, perimeter and vulnerability management delivered by the SOC.', domain: 'soc', icon: 'shield-check', color: 'red' },
+    { key: 'amc_field', label: 'AMC & Field Services', description: 'Annual maintenance contracts, preventive maintenance and on-site engineering.', domain: 'amc', icon: 'wrench', color: 'amber' },
+    { key: 'service_desk', label: 'Service Desk & End User', description: 'Service desk, IT service requests and access management for end users.', domain: 'service_desk', icon: 'headset', color: 'teal' },
+    { key: 'professional_services', label: 'Professional Services', description: 'Projects, implementations, consulting and audits.', domain: 'general', icon: 'briefcase', color: 'violet' },
+  ],
+  service_subcategory: [
+    { key: 'network_management', label: 'Network Management', parent: 'managed_infrastructure', domain: 'noc' },
+    { key: 'server_virtualization', label: 'Server & Virtualization', parent: 'managed_infrastructure', domain: 'noc' },
+    { key: 'storage_backup', label: 'Storage & Backup', parent: 'managed_infrastructure', domain: 'noc' },
+    { key: 'cloud_management', label: 'Cloud Management', parent: 'managed_infrastructure', domain: 'noc' },
+    { key: 'end_user_computing', label: 'End-user Computing', parent: 'managed_infrastructure', domain: 'noc' },
+    { key: 'security_monitoring', label: 'Security Monitoring & SIEM', parent: 'managed_security', domain: 'soc' },
+    { key: 'endpoint_security', label: 'Endpoint Security', parent: 'managed_security', domain: 'soc' },
+    { key: 'perimeter_security', label: 'Perimeter & Firewall Management', parent: 'managed_security', domain: 'soc' },
+    { key: 'vulnerability_management', label: 'Vulnerability Management', parent: 'managed_security', domain: 'soc' },
+    { key: 'hardware_amc', label: 'Hardware AMC', parent: 'amc_field', domain: 'amc' },
+    { key: 'preventive_maintenance', label: 'Preventive Maintenance', parent: 'amc_field', domain: 'amc' },
+    { key: 'onsite_support', label: 'On-site Support', parent: 'amc_field', domain: 'amc' },
+    { key: 'service_desk_support', label: 'Service Desk', parent: 'service_desk', domain: 'service_desk' },
+    { key: 'service_requests', label: 'IT Service Requests', parent: 'service_desk', domain: 'service_desk' },
+    { key: 'access_management', label: 'Access Management', parent: 'service_desk', domain: 'service_desk' },
+    { key: 'projects_implementation', label: 'Projects & Implementation', parent: 'professional_services' },
+    { key: 'consulting_audits', label: 'Consulting & Audits', parent: 'professional_services' },
   ],
   service_status: [
     { key: 'active', label: 'Active', isDefault: true, color: 'green' },

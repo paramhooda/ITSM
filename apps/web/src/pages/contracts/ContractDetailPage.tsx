@@ -132,7 +132,7 @@ function OverviewTab({ c, canManage, onSaveMatrix, saving, goTo }: { c: Contract
             { label: 'Renewal date', value: c.renewalDate ? fmtDate(c.renewalDate) : '—' },
             { label: 'Notice period', value: c.noticePeriodDays != null ? `${c.noticePeriodDays} days` : '—' },
             { label: 'Auto-renew', value: c.autoRenew ? 'Yes' : 'No' },
-            { label: 'SLA policy', value: c.slaPolicyName ?? <span className="text-subtle">Platform default</span> },
+            { label: 'SLA policy', value: c.slaPolicyId ? <Link to={`/sla/${c.slaPolicyId}`} className="hover:underline">{c.slaPolicyName}</Link> : <span className="text-subtle">Platform default</span> },
             { label: 'Support hours', value: c.supportHoursCalendarName ?? <span className="text-subtle">Policy calendar</span> },
             { label: 'Holiday calendar', value: c.holidayCalendarName ?? '—' },
             { label: 'Tickets', value: <span>{c.tickets.open} open · {c.tickets.total} total</span> },
@@ -375,7 +375,7 @@ function SlaTab({ c }: { c: ContractDetail }) {
   const overrides = c.services.filter((s) => s.slaPolicyId);
   return (
     <div className="space-y-4">
-      <Card title={`Contract SLA policy: ${c.slaPolicyName ?? 'platform default'}`} padded={!q.data}>
+      <Card title={<span>Contract SLA policy: {c.slaPolicyId ? <Link to={`/sla/${c.slaPolicyId}`} className="hover:underline">{c.slaPolicyName}</Link> : 'platform default'}</span>} padded={!q.data}>
         {!policyId && <div className="text-[13px] text-muted">No contract-level SLA policy. Tickets use the service default or the platform default policy.</div>}
         {policyId && q.isLoading && <LoadingBlock />}
         {policyId && q.isError && <div className="text-[13px] text-muted">{(q.error as ApiError)?.status === 404 ? 'SLA policy details are not available (policy not found or the SLA module is not deployed).' : errMsg(q.error)}</div>}

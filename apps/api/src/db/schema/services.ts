@@ -10,6 +10,8 @@ export const services = pgTable('services', {
   name: text('name').notNull(),
   description: text('description'),
   categoryId: uuid('category_id').references(() => configOptions.id, { onDelete: 'set null' }),
+  /** Second catalog level (a `service_subcategory` option whose parent is `categoryId`). */
+  subcategoryId: uuid('subcategory_id').references(() => configOptions.id, { onDelete: 'set null' }),
   statusId: uuid('status_id').references(() => configOptions.id, { onDelete: 'set null' }),
   domain: domainEnum('domain').notNull().default('general'),
   defaultTeamId: uuid('default_team_id').references(() => teams.id, { onDelete: 'set null' }),
@@ -21,4 +23,4 @@ export const services = pgTable('services', {
   isActive: boolean('is_active').notNull().default(true),
   customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
   ...timestamps,
-}, (t) => [uniqueIndex('services_key_idx').on(t.key), index('services_category_idx').on(t.categoryId)]);
+}, (t) => [uniqueIndex('services_key_idx').on(t.key), index('services_category_idx').on(t.categoryId), index('services_subcategory_idx').on(t.subcategoryId)]);

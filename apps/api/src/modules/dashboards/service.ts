@@ -117,7 +117,7 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
     period: { days, from, to: today, previousFrom: prevFrom, previousTo: prevTo },
     customerId,
     kpis,
-    series: series.map((d) => ({ day: d.day, opened: num(d.opened), resolved: num(d.resolved), closed: num(d.closed), breaches: num(d.slaBreached), outOfScope: num(d.outOfScope), mttrMinutes: d.mttrMinutes })),
+    series: series.map((d) => ({ day: d.day, opened: num(d.opened), resolved: num(d.resolved), closed: num(d.closed), breaches: num(d.slaBreached), outOfScope: num(d.outOfScope), mttrMinutes: d.mttrMinutes, resolutionMet: num(d.resolutionMet), resolutionBreached: num(d.resolutionBreached), compliancePct: pct(num(d.resolutionMet), num(d.resolutionMet) + num(d.resolutionBreached)) })),
     byService,
     byCustomer,
     outOfScopeByCustomer,
@@ -173,8 +173,11 @@ export async function noc(ctx: Ctx) {
   const recentlyResolved = await q<Row>(ctx, sql`SELECT ${TICKET_LIST_COLS}, round(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 60)::int AS mttr_minutes FROM tickets t ${TICKET_LIST_JOINS} WHERE ${base} AND t.resolved_at IS NOT NULL ORDER BY t.resolved_at DESC LIMIT 10`);
   const aging = await q<Row>(ctx, sql`SELECT ${AGE_BUCKET} AS bucket, count(*)::int AS count FROM tickets t WHERE ${base} AND ${openCond()} GROUP BY 1`);
   const order = ['< 4h', '4-24h', '1-3d', '> 3d'];
+  const sparkTo = toDay(new Date());
+  const spark = await dailySeries(ctx, addDays(sparkTo, -13), sparkTo, null);
   return {
     generatedAt: new Date(),
+    series: spark.map((d) => ({ day: d.day, opened: num(d.opened), incidents: num(d.incidentsOpened), security: num(d.securityOpened), resolved: num(d.resolved), breaches: num(d.slaBreached) })),
     totals: { open: num(totals.open), openIncidents: num(totals.open_incidents), breached: num(totals.breached), atRisk: num(totals.at_risk), unassigned: num(totals.unassigned), major: num(totals.major), escalated: num(totals.escalated), openedToday: num(totals.opened_today), resolvedToday: num(resolvedToday.n), mttrTodayMinutes: resolvedToday.mttr === null || resolvedToday.mttr === undefined ? null : num(resolvedToday.mttr) },
     openIncidents,
     criticalOpen,
@@ -221,8 +224,11 @@ export async function soc(ctx: Ctx) {
     SELECT count(*)::int AS resolved, round((avg(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 60))::numeric)::int AS mttr, round((avg(EXTRACT(EPOCH FROM (t.first_response_at - t.created_at)) / 60))::numeric)::int AS response,
       (SELECT count(*)::int FROM tickets t2 WHERE t2.domain = 'soc' AND t2.created_at >= now() - interval '30 days') AS opened_30d
     FROM tickets t WHERE ${base} AND t.resolved_at >= now() - interval '30 days'`);
+  const sparkTo = toDay(new Date());
+  const spark = await dailySeries(ctx, addDays(sparkTo, -13), sparkTo, null);
   return {
     generatedAt: new Date(),
+    series: spark.map((d) => ({ day: d.day, opened: num(d.opened), incidents: num(d.incidentsOpened), security: num(d.securityOpened), resolved: num(d.resolved), breaches: num(d.slaBreached) })),
     totals: { open: num(totals.open), breached: num(totals.breached), atRisk: num(totals.at_risk), escalated: num(totals.escalated), unassigned: num(totals.unassigned), openedToday: num(totals.opened_today), criticalHigh: num(totals.critical_high) },
     bySeverity,
     byCategory,

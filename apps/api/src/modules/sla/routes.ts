@@ -48,6 +48,16 @@ export default async function routes(app: FastifyInstance) {
 
   r.post('/sla/policies/:id/clone', { preHandler: app.auth('admin:config'), schema: { tags: ['sla'], params: idParam, body: z.object({ name: z.string().max(120).optional() }).optional() } }, h((ctx, req) => policies.clonePolicy(ctx, (req.params as { id: string }).id, (req.body as { name?: string } | undefined)?.name)));
 
+  // Contracts mapped to a policy (contract-wide or per-service overrides).
+  r.get('/sla/policies/:id/contracts', { preHandler: app.auth('contracts:read'), schema: { tags: ['sla'], params: idParam } }, h((ctx, req) => policies.policyContracts(ctx, (req.params as { id: string }).id)));
+  r.post('/sla/policies/:id/contracts', { preHandler: app.auth('contracts:manage'), schema: { tags: ['sla'], params: idParam, body: z.object({ contractIds: z.array(z.string().uuid()).min(1).max(200) }) } }, h((ctx, req) => policies.assignContracts(ctx, (req.params as { id: string }).id, (req.body as { contractIds: string[] }).contractIds)));
+  r.delete('/sla/policies/:id/contracts/:contractId', { preHandler: app.auth('contracts:manage'), schema: { tags: ['sla'], params: idParam.extend({ contractId: z.string().uuid() }) } }, h((ctx, req) => policies.unassignContract(ctx, (req.params as { id: string }).id, (req.params as { contractId: string }).contractId)));
+
+  r.get('/sla/policies/:id/compliance', {
+    preHandler: app.auth('tickets:read', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'reports:run', 'admin:config', 'portal:contracts'),
+    schema: { tags: ['sla'], params: idParam, querystring: z.object({ days: z.coerce.number().int().min(1).max(366).default(30) }) },
+  }, h((ctx, req) => policies.policyCompliance(ctx, (req.params as { id: string }).id, (req.query as { days?: number }).days ?? 30)));
+
   r.get('/sla/preview', {
     preHandler: app.auth(),
     schema: { tags: ['sla'], querystring: z.object({ policyId: z.string().uuid(), ticketType: z.enum(TICKET_TYPES).default('incident'), priorityId: z.string().uuid().optional(), start: z.string().optional() }) },

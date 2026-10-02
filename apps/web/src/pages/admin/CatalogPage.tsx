@@ -9,7 +9,7 @@ import { ConfigTable, ActiveDot, MutedCell, MonoCell } from '@/components/admin/
 import { FormDialog, FormFields, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { FormSchemaBuilder, type FormFieldDef } from '@/components/admin/FormSchemaBuilder';
 import { useAdminMutation, slugify } from '@/components/admin/api';
-import { useSlaPolicies } from './SlaPoliciesPage';
+import { useSlaPolicies } from '@/pages/sla/ServiceLevelsPage';
 import { useConfigKind } from '@/components/admin/api';
 
 interface CatalogItem {

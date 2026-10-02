@@ -9,7 +9,7 @@ export function Panel({ title, subtitle, action, to, toLabel = 'View all', child
     <section className={cn('card flex flex-col', className)}>
       <header className="flex items-start justify-between gap-3 px-5 pt-4 pb-3">
         <div className="min-w-0">
-          <h2 className="text-[13.5px] font-semibold text-default leading-tight">{title}</h2>
+          <h2 className="text-[14px] font-semibold text-default leading-tight tracking-[-0.01em]">{title}</h2>
           {subtitle && <p className="text-[12.5px] text-muted mt-0.5">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -24,7 +24,7 @@ export function Panel({ title, subtitle, action, to, toLabel = 'View all', child
 
 export function ViewAll({ to, label = 'View all' }: { to: string; label?: string }) {
   return (
-    <Link to={to} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-brand-700 hover:text-brand-800 whitespace-nowrap">
+    <Link to={to} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-muted hover:text-default whitespace-nowrap transition-colors">
       {label} <ArrowRight className="h-3.5 w-3.5" />
     </Link>
   );
@@ -97,7 +97,7 @@ export function Stat({ label, value, tone }: { label: ReactNode; value: ReactNod
   return (
     <div className="min-w-0">
       <div className="text-[12px] text-muted truncate">{label}</div>
-      <div className={cn('text-[17px] font-semibold tnum tracking-[-0.01em] mt-0.5', cls)}>{value}</div>
+      <div className={cn('text-[18px] font-semibold tnum tracking-[-0.02em] mt-0.5', cls)}>{value}</div>
     </div>
   );
 }
@@ -111,7 +111,7 @@ export function Segmented<T extends string | number>({ options, value, onChange,
           key={String(o.value)}
           type="button"
           onClick={() => onChange(o.value)}
-          className={cn('inline-flex items-center gap-1.5 rounded-md px-3 h-full text-[12.5px] font-medium whitespace-nowrap transition-colors', value === o.value ? 'bg-white text-default shadow-card' : 'text-muted hover:text-default')}
+          className={cn('inline-flex items-center gap-1.5 rounded-md px-3 h-full text-[12.5px] font-medium whitespace-nowrap transition-colors', value === o.value ? 'bg-white text-default shadow-[0_1px_2px_rgba(9,9,11,0.08)] border border-default' : 'text-muted hover:text-default border border-transparent')}
         >
           {o.label}
           {o.count !== undefined && <span className={cn('tnum text-[11.5px]', value === o.value ? 'text-muted' : 'text-subtle')}>{o.count}</span>}

@@ -1,5 +1,5 @@
 import { eq, and, sql } from 'drizzle-orm';
-import { ALL_PERMISSIONS, SYSTEM_ROLES } from '@itsm/shared';
+import { ALL_PERMISSIONS, SYSTEM_ROLES, OPTION_PARENT_TYPES, type OptionType } from '@itsm/shared';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { OPTION_SEEDS, PRIORITY_MATRIX, TEAM_SEEDS, CI_TYPE_SEEDS, RELATIONSHIP_TYPE_SEEDS, KB_CATEGORY_SEEDS } from './options';
@@ -49,10 +49,12 @@ async function seedRoles(tx: Tx) {
 async function seedOptions(tx: Tx) {
   const idByTypeKey = new Map<string, string>();
   for (const [type, items] of Object.entries(OPTION_SEEDS)) {
+    // Parent options (e.g. service_category) are listed before their children in OPTION_SEEDS, so their ids are already resolved here.
+    const parentType = OPTION_PARENT_TYPES[type as OptionType];
     let order = 0;
     for (const item of items) {
       order += 10;
-      const parentId = item.parent ? idByTypeKey.get(`ticket_category:${item.parent}`) ?? null : null;
+      const parentId = item.parent && parentType ? idByTypeKey.get(`${parentType}:${item.parent}`) ?? null : null;
       const [row] = await tx
         .insert(schema.configOptions)
         .values({

@@ -53,6 +53,7 @@ export const OPTION_TYPES = [
   'scope_type',
   'scope_status',
   'service_category',
+  'service_subcategory',
   'service_status',
   'asset_category',
   'asset_status',
@@ -66,6 +67,12 @@ export const OPTION_TYPES = [
   'team_type',
 ] as const;
 export type OptionType = (typeof OPTION_TYPES)[number];
+
+/** Option types that hang off a parent type: their `parentId` must reference an option of the parent type. */
+export const OPTION_PARENT_TYPES: Partial<Record<OptionType, OptionType>> = {
+  ticket_subcategory: 'ticket_category',
+  service_subcategory: 'service_category',
+};
 
 export const CHANGE_TYPES = ['standard', 'normal', 'emergency'] as const;
 export const LINK_TYPES = ['related', 'duplicate_of', 'caused_by', 'blocks', 'child_of', 'problem_of', 'change_for', 'resolved_by'] as const;

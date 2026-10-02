@@ -22,6 +22,7 @@ interface Noc {
   engineerWorkload: WorkloadItem[];
   recentlyResolved: TicketRow[];
   aging: { bucket: string; count: number }[];
+  series: { day: string; opened: number; incidents: number; security: number; resolved: number; breaches: number }[];
 }
 
 export function NocDashboard() {
@@ -39,9 +40,9 @@ export function NocDashboard() {
       </div>
       <KpiGrid
         items={[
-          { label: 'Open incidents', value: fmtNumber(t.openIncidents), hint: `${fmtNumber(t.openedToday)} opened · ${fmtNumber(t.resolvedToday)} resolved today`, onClick: () => (window.location.href = '/tickets?type=incident&open=true') },
+          { label: 'Open incidents', value: fmtNumber(t.openIncidents), hint: `${fmtNumber(t.openedToday)} opened · ${fmtNumber(t.resolvedToday)} resolved today`, spark: d.series.map((s) => s.incidents), sparkLabel: 'Incidents opened per day, last 14 days', onClick: () => (window.location.href = '/tickets?type=incident&open=true') },
           { label: 'P1 / P2 open', value: fmtNumber(p1p2), tone: p1p2 > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.major)} major · ${fmtNumber(t.escalated)} escalated` },
-          { label: 'SLA at risk', value: fmtNumber(t.atRisk), tone: t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} already breached`, onClick: () => (window.location.href = '/tickets?open=true&slaState=breached') },
+          { label: 'SLA at risk', value: fmtNumber(t.atRisk), tone: t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} already breached`, spark: d.series.map((s) => s.breaches), sparkLabel: 'SLA breaches per day, last 14 days', onClick: () => (window.location.href = '/tickets?open=true&slaState=breached') },
           { label: 'Unassigned', value: fmtNumber(t.unassigned), tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', onClick: () => (window.location.href = '/tickets?open=true&unassigned=true') },
         ]}
       />

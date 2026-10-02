@@ -1,7 +1,7 @@
-/** Categorical slots (validated reference palette, light surface). Fixed order, never cycled past 8. */
-const SERIES_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+/** Categorical slots (validated with the dataviz palette checks on a white surface). Fixed order, never cycled past 8. */
+const SERIES_LIGHT = ['#2563eb', '#f97316', '#0f9d6f', '#eda100', '#c026d3', '#1a7f37', '#6d28d9', '#e11d48'];
 /** Status colours are reserved for state (good/warning/serious/critical) and always paired with a label. */
-export const STATUS_COLORS = { good: '#0ca30c', warning: '#fab219', serious: '#ec835a', critical: '#d03b3b' } as const;
+export const STATUS_COLORS = { good: '#16a34a', warning: '#f59e0b', serious: '#ea580c', critical: '#dc2626' } as const;
 
 export interface ChartTheme {
   dark: boolean;
@@ -21,11 +21,11 @@ export function useIsDark() {
 const LIGHT: ChartTheme = {
   dark: false,
   series: SERIES_LIGHT,
-  grid: '#eceff4',
-  axis: '#c3cad6',
-  text: '#67758a',
+  grid: '#f0f0f1',
+  axis: '#d4d4d8',
+  text: '#71717a',
   surface: '#ffffff',
-  tooltip: { background: '#ffffff', border: '#e6e9ef', color: '#0b1a33' },
+  tooltip: { background: '#ffffff', border: '#e4e4e7', color: '#09090b' },
 };
 
 export function useChartTheme(): ChartTheme {
@@ -34,8 +34,8 @@ export function useChartTheme(): ChartTheme {
 
 /** Option colour names (config_options.color) → chart hex, matching the badge palette. */
 const OPTION_HEX: Record<string, string> = {
-  red: '#e34948', orange: '#eb6834', amber: '#eda100', yellow: '#eda100', green: '#008300', emerald: '#1baf7a',
-  teal: '#1baf7a', cyan: '#2a78d6', sky: '#2a78d6', blue: '#2a78d6', indigo: '#4a3aa7', violet: '#4a3aa7', purple: '#4a3aa7',
-  rose: '#e87ba4', lime: '#008300', slate: '#97a3b5', gray: '#97a3b5',
+  red: '#e11d48', orange: '#f97316', amber: '#eda100', yellow: '#eda100', green: '#1a7f37', emerald: '#0f9d6f',
+  teal: '#0f9d6f', cyan: '#2563eb', sky: '#2563eb', blue: '#2563eb', indigo: '#6d28d9', violet: '#6d28d9', purple: '#c026d3',
+  rose: '#e11d48', lime: '#1a7f37', slate: '#a1a1aa', gray: '#a1a1aa',
 };
 export const optionHex = (color: string | null | undefined, _dark: boolean, fallback: string) => (color && OPTION_HEX[color] ? OPTION_HEX[color] : fallback);

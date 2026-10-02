@@ -28,15 +28,15 @@ export function SidebarNav({ items }: { items: NavItem[] }) {
     <nav className="flex-1 overflow-y-auto px-3 py-3">
       {visible.map((item) => (
         <div key={item.to}>
-          {item.section && !collapsed && <div className="px-2.5 pt-5 pb-1.5 text-[11px] uppercase tracking-[0.08em] text-subtle font-semibold">{item.section}</div>}
+          {item.section && !collapsed && <div className="px-2.5 pt-5 pb-1.5 text-[11px] uppercase tracking-[0.08em] text-subtle font-medium">{item.section}</div>}
           <NavLink
             to={item.to}
             end={item.to === '/'}
             title={item.label}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-2.5 rounded-lg px-2.5 h-9 text-[13.5px] my-px transition-colors',
-                isActive ? 'bg-brand-50 text-brand-700 font-medium' : 'text-secondary hover:bg-surface-2 hover:text-default',
+                'flex items-center gap-2.5 rounded-lg px-2.5 h-8.5 text-[13.5px] my-0.5 transition-colors',
+                isActive ? 'bg-white text-default font-medium border border-default shadow-[0_1px_2px_rgba(9,9,11,0.05)]' : 'text-secondary border border-transparent hover:bg-white/70 hover:text-default',
                 collapsed && 'justify-center px-0',
               )
             }
@@ -93,7 +93,7 @@ export function UserMenu() {
 export function Sidebar({ items, label }: { items: NavItem[]; label: string }) {
   const { sidebarCollapsed, toggleSidebar } = useUiStore();
   return (
-    <aside className={cn('hidden md:flex flex-col border-r border-default bg-surface shrink-0 transition-[width] duration-200', sidebarCollapsed ? 'w-[60px]' : 'w-60')}>
+    <aside className={cn('hidden md:flex flex-col border-r border-default bg-[#fafafa] shrink-0 transition-[width] duration-200', sidebarCollapsed ? 'w-[60px]' : 'w-60')}>
       <div className={cn('flex items-center h-14 px-5 border-b border-default', sidebarCollapsed && 'justify-center px-0')}>
         {sidebarCollapsed ? (
           <img src="/favicon.svg" alt="" className="h-6 w-6 rounded-md" />
@@ -133,19 +133,19 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sidebar items={MSP_NAV} label="Service Management" />
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 flex items-center gap-2 px-4 md:px-6 border-b border-default bg-surface shrink-0">
-          <button onClick={() => setSearchOpen(true)} className="flex items-center gap-2.5 h-9 px-3 rounded-lg bg-surface-2 border border-transparent hover:border-strong text-muted text-[13px] w-full max-w-md transition-colors">
+          <button onClick={() => setSearchOpen(true)} className="flex items-center gap-2.5 h-9 px-3 rounded-lg bg-white border border-default hover:border-strong text-muted text-[13px] w-full max-w-md transition-colors shadow-[0_1px_2px_rgba(9,9,11,0.03)]">
             <Search className="h-4 w-4" />
             <span className="flex-1 text-left truncate">Search tickets, customers, assets, CIs…</span>
             <Kbd>⌘K</Kbd>
           </button>
           <div className="flex-1" />
           {can('tickets:create') && (
-            <button onClick={() => navigate('/tickets/new')} className="hidden sm:inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-brand-600 text-white text-[13px] font-medium hover:bg-brand-700 shadow-[0_1px_2px_rgba(10,31,61,0.12)]">
+            <button onClick={() => navigate('/tickets/new')} className="hidden sm:inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-white border border-default text-default text-[13px] font-medium hover:bg-surface-2 hover:border-strong shadow-[0_1px_2px_rgba(9,9,11,0.04)] transition-colors">
               <Plus className="h-4 w-4" /> New ticket
             </button>
           )}
           {can('ai:use') && (
-            <button onClick={() => setAssistantOpen(!assistantOpen)} className={cn('h-9 w-9 rounded-lg flex items-center justify-center text-muted hover:bg-surface-2 hover:text-default', assistantOpen && 'bg-brand-50 text-brand-700')} title="AI assistant">
+            <button onClick={() => setAssistantOpen(!assistantOpen)} className={cn('h-9 w-9 rounded-lg flex items-center justify-center text-muted hover:bg-surface-2 hover:text-default', assistantOpen && 'bg-surface-2 text-default')} title="AI assistant">
               <Sparkles className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
           )}
@@ -173,7 +173,7 @@ export function MobileNav({ items }: { items: NavItem[] }) {
   return (
     <nav className="md:hidden flex border-t border-default bg-surface shrink-0">
       {visible.map((item) => (
-        <NavLink key={item.to} to={item.to} end={item.to === '/'} className={({ isActive }) => cn('flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px]', isActive ? 'text-brand-700' : 'text-muted')}>
+        <NavLink key={item.to} to={item.to} end={item.to === '/'} className={({ isActive }) => cn('flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px]', isActive ? 'text-default' : 'text-muted')}>
           <item.icon className="h-4 w-4" />
           {item.label.split(' ')[0]}
         </NavLink>

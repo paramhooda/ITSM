@@ -3,9 +3,12 @@ import { eq, and, inArray } from 'drizzle-orm';
 import { withSystem, closeDb, schema } from '../src/db/client';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { runAs } from '../src/core/context';
-import { ValidationError, ConflictError } from '../src/core/errors';
+import { ValidationError, ConflictError, NotFoundError } from '../src/core/errors';
 import * as policies from '../src/modules/sla/policies';
 import * as catalog from '../src/modules/catalog/service';
+import * as contracts from '../src/modules/contracts/service';
+import * as services from '../src/modules/services/service';
+import { addDays, todayStr } from '../src/modules/contracts/common';
 
 /**
  * DB-backed tests for SLA policy administration and the service request catalog.
@@ -27,6 +30,7 @@ let adminUserId: string;
 let customerUserId: string;
 const createdPolicyIds: string[] = [];
 const createdItemIds: string[] = [];
+const createdServiceIds: string[] = [];
 
 async function asAdmin<T>(fn: Parameters<typeof runAs<T>>[2]) {
   return runAs(admin, { requestId: 'test' }, fn);
@@ -73,6 +77,7 @@ afterAll(async () => {
     if (createdItemIds.length) await tx.delete(schema.catalogItems).where(inArray(schema.catalogItems.id, createdItemIds));
     if (createdPolicyIds.length) await tx.delete(schema.slaPolicies).where(inArray(schema.slaPolicies.id, createdPolicyIds));
     await tx.delete(schema.customers).where(inArray(schema.customers.id, [customerId, otherCustomerId]));
+    if (createdServiceIds.length) await tx.delete(schema.services).where(inArray(schema.services.id, createdServiceIds));
   });
   await closeDb();
 });
@@ -97,6 +102,11 @@ describe('SLA policies', () => {
     expect(created.targets.find((t) => t.priorityId === p1 && t.metric === 'response')?.priorityLabel).toContain('P1');
     expect(created.usage).toEqual({ contracts: 0, contractServices: 0, catalogItems: 0, services: 0, tickets: 0 });
     expect(created.calendarName).toBeTruthy();
+    // incident response/resolution per priority, "any priority" last
+    expect(created.targetSummary).toEqual([
+      { priorityId: p1, priorityLabel: expect.stringContaining('P1'), priorityLevel: 1, response: 30, resolution: 240 },
+      { priorityId: null, priorityLabel: 'Any priority', priorityLevel: null, response: null, resolution: 480 },
+    ]);
 
     const listed = await asAdmin((ctx) => policies.listPolicies(ctx));
     expect(listed.items.some((p) => p.id === created.id)).toBe(true);
@@ -204,6 +214,102 @@ describe('SLA policies', () => {
     expect(c.groupBy).toBe('priority');
     expect(c.totals.met).toBe(0);
     expect(c.totals.compliancePct).toBeNull();
+  });
+});
+
+describe('SLA policy contract mapping', () => {
+  const today = todayStr();
+  let policyId: string;
+  let contractA: string;
+  let contractB: string;
+  let contractC: string;
+  let serviceId: string;
+  let serviceName: string;
+  const newContract = (name: string, customer: string, extra: Record<string, unknown> = {}) =>
+    asAdmin((ctx) => contracts.createContract(ctx, { customerId: customer, name, status: 'active', startDate: addDays(today, -10), endDate: addDays(today, 355), ...extra } as Parameters<typeof contracts.createContract>[1]));
+
+  it('assigns contracts to a policy and lists them at contract level', async () => {
+    const policy = await asAdmin((ctx) => policies.createPolicy(ctx, { name: `Mapped ${suffix}`, targets: [{ ticketType: 'incident', priorityId: p1, metric: 'response', minutes: 30 }] }));
+    createdPolicyIds.push(policy.id);
+    policyId = policy.id;
+    const svc = await asAdmin((ctx) => services.createService(ctx, { name: `Mapped service ${suffix}` }));
+    createdServiceIds.push(svc.id);
+    serviceId = svc.id;
+    serviceName = svc.name;
+    contractA = (await newContract('Alpha', customerId)).id;
+    contractB = (await newContract('Beta', customerId)).id;
+
+    const res = await asAdmin((ctx) => policies.assignContracts(ctx, policyId, [contractA, contractB, contractA]));
+    expect(res.total).toBe(2);
+    expect(res.items.every((i) => i.level === 'contract' && i.serviceNames.length === 0)).toBe(true);
+    expect(res.items.map((i) => i.contractId).sort()).toEqual([contractA, contractB].sort());
+    expect(res.items[0]).toMatchObject({ customerId, customerName: `Test Customer ${suffix}`, customerCode: `TST${suffix}`.toUpperCase(), status: 'active', statusLabel: 'Active', statusColor: 'green' });
+    expect(res.items[0].number).toBeTruthy();
+    expect(res.items[0].endDate).toBe(addDays(today, 355));
+
+    const listed = await asAdmin((ctx) => policies.policyContracts(ctx, policyId));
+    expect(listed).toEqual(res);
+    expect((await asAdmin((ctx) => policies.getPolicy(ctx, policyId))).usage.contracts).toBe(2);
+    const audits = await withSystem((tx) => tx.select({ entityId: schema.auditLog.entityId, changes: schema.auditLog.changes }).from(schema.auditLog).where(and(eq(schema.auditLog.action, 'sla_policy.assign'), inArray(schema.auditLog.entityId, [contractA, contractB]))));
+    expect(audits).toHaveLength(2);
+    expect(audits[0].changes).toEqual({ slaPolicyId: { old: null, new: policyId } });
+  });
+
+  it('lists contracts that reference the policy through a service override at service level', async () => {
+    contractC = (await newContract('Gamma', customerId, { services: [{ serviceId, slaPolicyId: policyId }] })).id;
+    const listed = await asAdmin((ctx) => policies.policyContracts(ctx, policyId));
+    expect(listed.total).toBe(3);
+    const item = listed.items.find((i) => i.contractId === contractC);
+    expect(item?.level).toBe('service');
+    expect(item?.serviceNames).toEqual([serviceName]);
+    expect(listed.items.filter((i) => i.level === 'contract')).toHaveLength(2);
+  });
+
+  it('unassigns a contract and refuses contracts that are not mapped at contract level', async () => {
+    const res = await asAdmin((ctx) => policies.unassignContract(ctx, policyId, contractA));
+    expect(res.items.some((i) => i.contractId === contractA)).toBe(false);
+    expect(res.items.filter((i) => i.level === 'contract').map((i) => i.contractId)).toEqual([contractB]);
+    await expect(asAdmin((ctx) => policies.unassignContract(ctx, policyId, contractA))).rejects.toBeInstanceOf(NotFoundError);
+    // a service-level reference is not a contract-level assignment
+    await expect(asAdmin((ctx) => policies.unassignContract(ctx, policyId, contractC))).rejects.toBeInstanceOf(NotFoundError);
+    const [row] = await withSystem((tx) => tx.select({ slaPolicyId: schema.contracts.slaPolicyId }).from(schema.contracts).where(eq(schema.contracts.id, contractA)));
+    expect(row.slaPolicyId).toBeNull();
+    const audits = await withSystem((tx) => tx.select({ id: schema.auditLog.id }).from(schema.auditLog).where(and(eq(schema.auditLog.action, 'sla_policy.unassign'), eq(schema.auditLog.entityId, contractA))));
+    expect(audits).toHaveLength(1);
+  });
+
+  it('refuses to assign contracts to an inactive or unknown policy', async () => {
+    const inactive = await asAdmin((ctx) => policies.createPolicy(ctx, { name: `Inactive ${suffix}`, isActive: false }));
+    createdPolicyIds.push(inactive.id);
+    await expect(asAdmin((ctx) => policies.assignContracts(ctx, inactive.id, [contractA]))).rejects.toBeInstanceOf(ValidationError);
+    await expect(asAdmin((ctx) => policies.assignContracts(ctx, '00000000-0000-0000-0000-000000000000', [contractA]))).rejects.toBeInstanceOf(NotFoundError);
+    await expect(asAdmin((ctx) => policies.assignContracts(ctx, policyId, ['00000000-0000-0000-0000-000000000000']))).rejects.toBeInstanceOf(NotFoundError);
+    const [row] = await withSystem((tx) => tx.select({ slaPolicyId: schema.contracts.slaPolicyId }).from(schema.contracts).where(eq(schema.contracts.id, contractA)));
+    expect(row.slaPolicyId).toBeNull();
+  });
+
+  it('a customer-scoped principal cannot map contracts of another customer', async () => {
+    const foreign = await newContract('Foreign', otherCustomerId);
+    await expect(runAs(customerUser, { requestId: 'test' }, (ctx) => policies.assignContracts(ctx, policyId, [foreign.id]))).rejects.toThrow();
+    const [row] = await withSystem((tx) => tx.select({ slaPolicyId: schema.contracts.slaPolicyId }).from(schema.contracts).where(eq(schema.contracts.id, foreign.id)));
+    expect(row.slaPolicyId).toBeNull();
+    // mapped contracts of other customers stay invisible as well
+    await asAdmin((ctx) => policies.assignContracts(ctx, policyId, [foreign.id]));
+    const visible = await runAs(customerUser, { requestId: 'test' }, (ctx) => policies.policyContracts(ctx, policyId));
+    expect(visible.items.length).toBeGreaterThan(0);
+    expect(visible.items.every((i) => i.customerId === customerId)).toBe(true);
+    expect((await asAdmin((ctx) => policies.policyContracts(ctx, policyId))).items.some((i) => i.contractId === foreign.id)).toBe(true);
+  });
+
+  it('summarises incident targets per priority and reports compliance per policy', async () => {
+    const listed = await asAdmin((ctx) => policies.listPolicies(ctx));
+    const p = listed.items.find((x) => x.id === policyId)!;
+    expect(p.targetSummary).toEqual([{ priorityId: p1, priorityLabel: expect.stringContaining('P1'), priorityLevel: 1, response: 30, resolution: null }]);
+    const c = await asAdmin((ctx) => policies.policyCompliance(ctx, policyId, 30));
+    expect(c).toMatchObject({ groupBy: 'metric', policyId, days: 30 });
+    expect(c.totals.completed).toBe(0);
+    expect(c.totals.compliancePct).toBeNull();
+    await expect(asAdmin((ctx) => policies.policyCompliance(ctx, '00000000-0000-0000-0000-000000000000', 30))).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

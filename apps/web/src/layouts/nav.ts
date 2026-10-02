@@ -1,5 +1,5 @@
 import type { Permission } from '@itsm/shared';
-import { LayoutDashboard, Ticket, Building2, FileSignature, Boxes, Server, Share2, Radar, Wrench, CalendarCheck, BookOpen, BarChart3, Settings, Plug, Layers, ClipboardCheck, Users, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Ticket, Building2, FileSignature, Boxes, Server, Share2, Radar, Wrench, CalendarCheck, BookOpen, BarChart3, Settings, Plug, Layers, ClipboardCheck, Users, ShieldCheck, Gauge } from 'lucide-react';
 
 export interface NavItem {
   to: string;
@@ -15,6 +15,7 @@ export const MSP_NAV: NavItem[] = [
   { to: '/customers', label: 'Customers', icon: Building2, perm: ['customers:read'], section: 'Accounts' },
   { to: '/contracts', label: 'Contracts & Scope', icon: FileSignature, perm: ['contracts:read'] },
   { to: '/services', label: 'Service Catalog', icon: Layers, perm: ['services:read'] },
+  { to: '/sla', label: 'Service Levels', icon: Gauge, perm: ['contracts:read', 'admin:config'] },
   { to: '/assets', label: 'Assets', icon: Boxes, perm: ['assets:read'], section: 'Infrastructure' },
   { to: '/cmdb', label: 'CMDB', icon: Server, perm: ['cmdb:read'] },
   { to: '/discovery', label: 'Discovery', icon: Radar, perm: ['discovery:run', 'discovery:manage'] },

@@ -45,7 +45,7 @@ export default function OverviewPage() {
         {canUsers && <StatTile label="Roles" value={val(roles)} icon={<Shield className="h-4 w-4" />} onClick={() => navigate('/admin/roles')} />}
         {canUsers && <StatTile label="Teams" value={val(teams)} icon={<UsersRound className="h-4 w-4" />} onClick={() => navigate('/admin/teams')} />}
         {canConfig && <StatTile label="Option list entries" value={val(options)} hint={`${OPTION_TYPES.length} configurable lists`} icon={<ListChecks className="h-4 w-4" />} onClick={() => navigate('/admin/options')} />}
-        {canConfig && <StatTile label="SLA policies" value={val(sla)} icon={<Timer className="h-4 w-4" />} onClick={() => navigate('/admin/sla')} />}
+        {canConfig && <StatTile label="SLA policies" value={val(sla)} icon={<Timer className="h-4 w-4" />} onClick={() => navigate('/sla')} />}
         {canConfig && <StatTile label="Catalog items" value={val(catalog)} hint="active request types" icon={<ClipboardList className="h-4 w-4" />} onClick={() => navigate('/admin/catalog')} />}
         {can('admin:system', 'admin:config') && (
           <StatTile label="Notification outbox" value={outbox.isError ? '—' : outbox.isLoading ? '…' : pending} hint={outbox.data ? `${sent} sent · ${failed} failed` : 'pending messages'} tone={failed > 0 ? 'bad' : pending > 50 ? 'warn' : 'default'} icon={<Mail className="h-4 w-4" />} onClick={() => navigate('/admin/outbox')} />

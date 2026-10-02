@@ -19,6 +19,7 @@ interface Soc {
   siemEvents24h: { total: number; ticketsCreated: number; bySeverity: { severity: string; count: number; ticketed: number }[] };
   recent: TicketRow[];
   mttrSecurity30d: { resolved: number; opened: number; mttrMinutes: number | null; responseMinutes: number | null };
+  series: { day: string; opened: number; incidents: number; security: number; resolved: number; breaches: number }[];
 }
 
 export function SocDashboard() {
@@ -35,9 +36,9 @@ export function SocDashboard() {
       </div>
       <KpiGrid
         items={[
-          { label: 'Open security incidents', value: fmtNumber(t.open), hint: `${fmtNumber(t.openedToday)} opened today`, onClick: () => (window.location.href = '/tickets?domain=soc&open=true') },
+          { label: 'Open security incidents', value: fmtNumber(t.open), hint: `${fmtNumber(t.openedToday)} opened today`, spark: d.series.map((s) => s.security), sparkLabel: 'Security incidents opened per day, last 14 days', onClick: () => (window.location.href = '/tickets?domain=soc&open=true') },
           { label: 'Critical / high', value: fmtNumber(t.criticalHigh), tone: t.criticalHigh > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.escalated)} escalated` },
-          { label: 'SLA at risk', value: fmtNumber(t.atRisk + t.breached), tone: t.breached > 0 ? 'bad' : t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} breached · ${fmtNumber(t.unassigned)} unassigned` },
+          { label: 'SLA at risk', value: fmtNumber(t.atRisk + t.breached), tone: t.breached > 0 ? 'bad' : t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} breached · ${fmtNumber(t.unassigned)} unassigned`, spark: d.series.map((s) => s.breaches), sparkLabel: 'SLA breaches per day, last 14 days' },
           { label: 'SIEM events · 24h', value: fmtNumber(d.siemEvents24h.total), hint: `${fmtNumber(d.siemEvents24h.ticketsCreated)} became tickets`, onClick: () => (window.location.href = '/integrations') },
         ]}
       />

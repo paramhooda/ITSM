@@ -5,6 +5,7 @@ import { schema } from '@/db/client';
 import { NotFoundError, ValidationError, ConflictError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { addWorkingMinutes, CALENDAR_24X7, type CalendarDef } from '@/lib/calendar';
+import { contractStatusOptions, statusDisplay, sequential } from '@/modules/contracts/common';
 
 /**
  * SLA policy administration: policies, targets (ticket type x priority x metric),
@@ -128,10 +129,35 @@ function policySelect() {
   };
 }
 
+export interface TargetSummaryRow {
+  priorityId: string | null;
+  priorityLabel: string;
+  priorityLevel: number | null;
+  response: number | null;
+  resolution: number | null;
+}
+
+/** Incident response/resolution minutes per priority, the figures a contract manager compares policies by. */
+export function targetSummary(targets: { ticketType: string; priorityId: string | null; priorityLabel: string | null; priorityLevel: number | null; metric: string; minutes: number }[]): TargetSummaryRow[] {
+  const rows = new Map<string, TargetSummaryRow>();
+  for (const t of targets) {
+    if (t.ticketType !== 'incident') continue;
+    const key = t.priorityId ?? 'any';
+    const row = rows.get(key) ?? { priorityId: t.priorityId, priorityLabel: t.priorityLabel ?? 'Any priority', priorityLevel: t.priorityId ? t.priorityLevel : null, response: null, resolution: null };
+    if (t.metric === 'response') row.response = t.minutes;
+    if (t.metric === 'resolution') row.resolution = t.minutes;
+    rows.set(key, row);
+  }
+  // priority-specific rows by level, the "any priority" fallback last
+  return [...rows.values()].sort((a, b) => (a.priorityLevel ?? Number.MAX_SAFE_INTEGER) - (b.priorityLevel ?? Number.MAX_SAFE_INTEGER) || a.priorityLabel.localeCompare(b.priorityLabel));
+}
+
 function decorate<T extends { id: string }>(row: T, extras: Awaited<ReturnType<typeof loadExtras>>) {
+  const targets = extras.targets.filter((t) => t.policyId === row.id);
   return {
     ...row,
-    targets: extras.targets.filter((t) => t.policyId === row.id).map(({ policyId: _p, ...t }) => t),
+    targets: targets.map(({ policyId: _p, ...t }) => t),
+    targetSummary: targetSummary(targets),
     pauseStatusIds: extras.pauses.filter((p) => p.policyId === row.id).map((p) => p.statusId),
     pauseStatuses: extras.pauses.filter((p) => p.policyId === row.id).map((p) => ({ id: p.statusId, label: p.label })),
     usage: extras.usage.get(row.id) ?? { contracts: 0, contractServices: 0, catalogItems: 0, services: 0, tickets: 0 },
@@ -337,6 +363,127 @@ export async function preview(ctx: Ctx, params: { policyId: string; ticketType: 
   };
 }
 
+// ---------------------------------------------------------------- contracts mapped to a policy
+
+export interface PolicyContractItem {
+  contractId: string;
+  number: string;
+  name: string;
+  customerId: string;
+  customerName: string;
+  customerCode: string;
+  status: string;
+  statusLabel: string;
+  statusColor: string;
+  startDate: string;
+  endDate: string;
+  /** 'contract': contracts.sla_policy_id; 'service': one or more contract_services rows reference the policy. */
+  level: 'contract' | 'service';
+  serviceNames: string[];
+}
+
+async function loadPolicy(ctx: Ctx, id: string) {
+  const [policy] = await ctx.tx.select().from(schema.slaPolicies).where(eq(schema.slaPolicies.id, id)).limit(1);
+  if (!policy) throw new NotFoundError('SLA policy');
+  return policy;
+}
+
+/**
+ * Contracts that use a policy, either as their contract-wide policy or as a
+ * per-service override. A contract referencing the policy at both levels is
+ * listed once per level. Tenant RLS limits the rows to the caller's customers.
+ */
+export async function policyContracts(ctx: Ctx, id: string): Promise<{ items: PolicyContractItem[]; total: number }> {
+  await loadPolicy(ctx, id);
+  const c = schema.contracts;
+  const base = { contractId: c.id, number: c.number, name: c.name, customerId: c.customerId, customerName: schema.customers.name, customerCode: schema.customers.code, status: c.status, startDate: c.startDate, endDate: c.endDate };
+  const [direct, viaServices, statusMap] = await sequential([
+    () => ctx.tx.select(base).from(c).innerJoin(schema.customers, eq(schema.customers.id, c.customerId)).where(eq(c.slaPolicyId, id)),
+    () =>
+      ctx.tx
+        .select({ ...base, serviceName: schema.services.name })
+        .from(schema.contractServices)
+        .innerJoin(c, eq(c.id, schema.contractServices.contractId))
+        .innerJoin(schema.customers, eq(schema.customers.id, c.customerId))
+        .innerJoin(schema.services, eq(schema.services.id, schema.contractServices.serviceId))
+        .where(eq(schema.contractServices.slaPolicyId, id)),
+    () => contractStatusOptions(ctx.tx),
+  ]);
+  const items: PolicyContractItem[] = direct.map((r) => ({ ...r, ...statusDisplay(r.status, statusMap), level: 'contract', serviceNames: [] }));
+  const byContract = new Map<string, PolicyContractItem>();
+  for (const { serviceName, ...r } of viaServices) {
+    const item = byContract.get(r.contractId) ?? { ...r, ...statusDisplay(r.status, statusMap), level: 'service' as const, serviceNames: [] };
+    item.serviceNames.push(serviceName);
+    byContract.set(r.contractId, item);
+  }
+  for (const item of byContract.values()) {
+    item.serviceNames.sort((a, b) => a.localeCompare(b));
+    items.push(item);
+  }
+  items.sort((a, b) => a.customerName.localeCompare(b.customerName) || a.endDate.localeCompare(b.endDate) || a.level.localeCompare(b.level) || a.number.localeCompare(b.number));
+  return { items, total: items.length };
+}
+
+/** Makes the policy the contract-wide SLA of each contract (per-service overrides are left untouched). */
+export async function assignContracts(ctx: Ctx, id: string, contractIds: string[]) {
+  const policy = await loadPolicy(ctx, id);
+  if (!policy.isActive) throw new ValidationError(`SLA policy "${policy.name}" is inactive and cannot be assigned to contracts`);
+  const ids = [...new Set(contractIds)];
+  if (!ids.length) throw new ValidationError('At least one contract is required');
+  const rows = await ctx.tx.select().from(schema.contracts).where(inArray(schema.contracts.id, ids));
+  // Validate every contract before touching any of them so a single bad id leaves nothing half-applied.
+  const contracts = ids.map((cid) => {
+    const contract = rows.find((r) => r.id === cid);
+    if (!contract) throw new NotFoundError('Contract');
+    ctx.requireCustomer(contract.customerId);
+    ctx.require('contracts:manage', contract.customerId);
+    return contract;
+  });
+  for (const contract of contracts) {
+    await ctx.tx.update(schema.contracts).set({ slaPolicyId: id, updatedAt: new Date() }).where(eq(schema.contracts.id, contract.id));
+    await ctx.audit({
+      entityType: 'contract',
+      entityId: contract.id,
+      entityLabel: `${contract.number} ${contract.name}`,
+      action: 'sla_policy.assign',
+      customerId: contract.customerId,
+      changes: { slaPolicyId: { old: contract.slaPolicyId, new: id } },
+      metadata: { contractId: contract.id, policyId: id, policyName: policy.name },
+    });
+  }
+  return policyContracts(ctx, id);
+}
+
+/** Clears the contract-wide policy of a contract currently mapped to this policy. */
+export async function unassignContract(ctx: Ctx, id: string, contractId: string) {
+  const policy = await loadPolicy(ctx, id);
+  const [contract] = await ctx.tx.select().from(schema.contracts).where(and(eq(schema.contracts.id, contractId), eq(schema.contracts.slaPolicyId, id))).limit(1);
+  if (!contract) throw new NotFoundError('Contract', 'Contract is not assigned to this SLA policy');
+  ctx.requireCustomer(contract.customerId);
+  ctx.require('contracts:manage', contract.customerId);
+  await ctx.tx.update(schema.contracts).set({ slaPolicyId: null, updatedAt: new Date() }).where(eq(schema.contracts.id, contract.id));
+  await ctx.audit({
+    entityType: 'contract',
+    entityId: contract.id,
+    entityLabel: `${contract.number} ${contract.name}`,
+    action: 'sla_policy.unassign',
+    customerId: contract.customerId,
+    changes: { slaPolicyId: { old: id, new: null } },
+    metadata: { contractId: contract.id, policyId: id, policyName: policy.name },
+  });
+  return policyContracts(ctx, id);
+}
+
+/** Compliance of the clocks this policy produced over the last `days` days, grouped by metric. */
+export async function policyCompliance(ctx: Ctx, id: string, days = 30) {
+  await loadPolicy(ctx, id);
+  if (!Number.isInteger(days) || days < 1 || days > 366) throw new ValidationError('days must be between 1 and 366');
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 86_400_000);
+  const compliance = await slaCompliance(ctx, { from: from.toISOString(), to: to.toISOString(), groupBy: 'metric', policyId: id });
+  return { ...compliance, days };
+}
+
 // ---------------------------------------------------------------- compliance
 
 export type ComplianceGroupBy = 'metric' | 'priority' | 'customer' | 'service' | 'policy' | 'ticketType';
@@ -348,6 +495,8 @@ export interface ComplianceParams {
   groupBy?: ComplianceGroupBy;
   ticketType?: TicketType;
   metric?: SlaMetric;
+  /** Restrict to clocks attached under one SLA policy. */
+  policyId?: string;
 }
 
 /**
@@ -372,6 +521,7 @@ export async function slaCompliance(ctx: Ctx, params: ComplianceParams = {}) {
   }
   if (params.ticketType) conds.push(eq(schema.tickets.type, params.ticketType));
   if (params.metric) conds.push(eq(schema.ticketSlas.metric, params.metric));
+  if (params.policyId) conds.push(eq(schema.ticketSlas.policyId, params.policyId));
 
   const groupKey = {
     metric: sql<string>`${schema.ticketSlas.metric}::text`,
@@ -426,6 +576,7 @@ export async function slaCompliance(ctx: Ctx, params: ComplianceParams = {}) {
     from: params.from ?? null,
     to: params.to ?? null,
     customerId: params.customerId ?? null,
+    policyId: params.policyId ?? null,
     totals: { ...totals, completed: totals.met + totals.breached, compliancePct: pct(totals.met, totals.breached), avgElapsedMinutes },
     groups,
   };

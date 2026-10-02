@@ -1,48 +1,53 @@
 @import 'tailwindcss';
 
 /*
-  Progression design system — light, calm, Stripe/Apple-inspired.
+  Progression design system — Vercel / shadcn inspired.
+  Neutral zinc surfaces, Geist type, black primary actions, blue accent,
+  crisp 1px borders, colour reserved for status, data and emphasis.
   Tokens live on :root; components in @layer components so utilities win.
 */
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Geist Variable', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-sans: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  /* Brand accent: indigo-violet, used for interactive chrome (buttons, links, focus, active nav). */
-  --color-brand-50: #f4f3ff;
-  --color-brand-100: #e8e6ff;
-  --color-brand-200: #d3d0ff;
-  --color-brand-300: #b4aeff;
-  --color-brand-400: #8f87ff;
-  --color-brand-500: #6c63ff;
-  --color-brand-600: #5b53f0;
-  --color-brand-700: #4b44d1;
-  --color-brand-800: #3d38a8;
-  --color-brand-900: #332f85;
+  /* Brand accent: blue, used for links, focus and selected states. Primary buttons are black. */
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-300: #93c5fd;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e40af;
+  --color-brand-900: #1e3a8a;
 
-  /* Deep navy for headings and emphasis. */
-  --color-navy-900: #0a1f3d;
-  --color-navy-800: #12304f;
-  --color-navy-700: #1e3f63;
+  /* Ink scale used for emphasis and the primary action. */
+  --color-navy-900: #09090b;
+  --color-navy-800: #18181b;
+  --color-navy-700: #27272a;
 }
 
 :root {
-  --bg: #f6f8fb;
+  --bg: #fafafa;
   --surface: #ffffff;
-  --surface-2: #f3f5f8;
-  --surface-3: #eaeef3;
-  --border: #e6e9ef;
-  --border-strong: #d3d9e2;
-  --text: #0b1a33;
-  --text-2: #3b4a5f;
-  --text-muted: #67758a;
-  --text-subtle: #97a3b5;
-  --accent: #5b53f0;
-  --ring: rgba(91, 83, 240, 0.22);
-  --shadow-card: 0 1px 2px rgba(10, 31, 61, 0.05), 0 0 0 1px rgba(10, 31, 61, 0.025);
-  --shadow-raised: 0 4px 12px rgba(10, 31, 61, 0.06), 0 1px 2px rgba(10, 31, 61, 0.04);
-  --shadow-pop: 0 24px 48px -12px rgba(10, 31, 61, 0.25), 0 0 0 1px rgba(10, 31, 61, 0.06);
+  --surface-2: #f4f4f5;
+  --surface-3: #e4e4e7;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #09090b;
+  --text-2: #3f3f46;
+  --text-muted: #71717a;
+  --text-subtle: #a1a1aa;
+  --accent: #2563eb;
+  --ring: rgba(37, 99, 235, 0.28);
+  --primary: #18181b;
+  --primary-hover: #27272a;
+  --shadow-card: 0 1px 2px rgba(9, 9, 11, 0.04);
+  --shadow-raised: 0 2px 8px rgba(9, 9, 11, 0.06), 0 1px 2px rgba(9, 9, 11, 0.04);
+  --shadow-pop: 0 20px 50px -16px rgba(9, 9, 11, 0.28), 0 0 0 1px rgba(9, 9, 11, 0.05);
   --radius-card: 12px;
+  --radius-control: 8px;
   color-scheme: light;
 }
 
@@ -58,14 +63,19 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
-  letter-spacing: -0.006em;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv11', 'ss01', 'calt';
 }
 
-* {
-  border-color: var(--border);
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
 }
 
 a {
@@ -75,7 +85,7 @@ a {
 h1,
 h2,
 h3 {
-  letter-spacing: -0.02em;
+  letter-spacing: -0.022em;
   font-weight: 600;
   color: var(--text);
 }
@@ -89,7 +99,7 @@ textarea {
 }
 
 ::selection {
-  background: rgba(91, 83, 240, 0.16);
+  background: rgba(37, 99, 235, 0.16);
 }
 
 ::-webkit-scrollbar {
@@ -97,13 +107,13 @@ textarea {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(103, 117, 138, 0.28);
+  background: rgba(113, 113, 122, 0.28);
   border-radius: 8px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(103, 117, 138, 0.45);
+  background: rgba(113, 113, 122, 0.45);
   border: 3px solid transparent;
   background-clip: padding-box;
 }
@@ -113,6 +123,7 @@ textarea {
 @utility bg-surface { background-color: var(--surface); }
 @utility bg-surface-2 { background-color: var(--surface-2); }
 @utility bg-surface-3 { background-color: var(--surface-3); }
+@utility bg-primary { background-color: var(--primary); }
 @utility text-default { color: var(--text); }
 @utility text-secondary { color: var(--text-2); }
 @utility text-muted { color: var(--text-muted); }
@@ -123,6 +134,11 @@ textarea {
 @utility shadow-raised { box-shadow: var(--shadow-raised); }
 @utility shadow-pop { box-shadow: var(--shadow-pop); }
 @utility tnum { font-variant-numeric: tabular-nums; }
+/* Subtle dotted backdrop used behind hero surfaces (login, empty states). */
+@utility bg-dots {
+  background-image: radial-gradient(rgba(9, 9, 11, 0.09) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
 
 @layer components {
   .card {
@@ -134,19 +150,25 @@ textarea {
 
   .input {
     width: 100%;
+    height: 36px;
     background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    padding: 8px 11px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    padding: 0 11px;
     font-size: 13.5px;
-    line-height: 1.4;
+    line-height: 34px;
     color: var(--text);
     outline: none;
-    box-shadow: 0 1px 2px rgba(10, 31, 61, 0.03);
+    box-shadow: 0 1px 2px rgba(9, 9, 11, 0.03);
     transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
   }
+  textarea.input {
+    height: auto;
+    line-height: 1.5;
+    padding: 8px 11px;
+  }
   .input:hover:not(:disabled):not(:focus) {
-    border-color: #c2cad6;
+    border-color: var(--border-strong);
   }
   .input:focus {
     border-color: var(--accent);
@@ -155,13 +177,14 @@ textarea {
   .input:disabled {
     background: var(--surface-2);
     color: var(--text-muted);
+    box-shadow: none;
   }
   .input::placeholder {
     color: var(--text-subtle);
   }
   select.input {
     appearance: none;
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2397a3b5' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2371717a' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
     background-position: right 9px center;
     background-repeat: no-repeat;
     background-size: 16px;
@@ -182,11 +205,11 @@ textarea {
     text-align: left;
     font-weight: 500;
     font-size: 12.5px;
-    letter-spacing: -0.003em;
+    letter-spacing: -0.002em;
     color: var(--text-muted);
-    padding: 10px 14px;
+    padding: 9px 14px;
     border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    background: #fafafa;
     white-space: nowrap;
     position: sticky;
     top: 0;
@@ -207,7 +230,7 @@ textarea {
     white-space: nowrap;
   }
   .table tbody tr:hover td {
-    background: #f8f9fc;
+    background: #fafafa;
   }
   .table tbody tr.clickable {
     cursor: pointer;
@@ -263,4 +286,18 @@ textarea {
 }
 .scale-in {
   animation: scale-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.rise-in {
+  animation: rise-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.rise-in-1 { animation-delay: 40ms; }
+.rise-in-2 { animation-delay: 80ms; }
+.rise-in-3 { animation-delay: 120ms; }
+.rise-in-4 { animation-delay: 160ms; }
+@media (prefers-reduced-motion: reduce) {
+  .fade-in, .scale-in, .rise-in { animation: none; }
 }

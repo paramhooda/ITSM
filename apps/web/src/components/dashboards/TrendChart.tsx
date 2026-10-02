@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import { ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { useChartTheme } from './chartTheme';
 import { EmptyState } from '@/components/ui';
@@ -24,41 +24,61 @@ export interface TrendChartProps {
 }
 
 const shortDay = (v: string) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.slice(5) : String(v));
+const longDay = (v: string) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) : String(v));
 
-/** One-axis time series / categorical chart (recharts), theme aware, crosshair tooltip by default. */
-export function TrendChart({ data, x, series, kind = 'line', height = 220, stacked, valueFormatter, xFormatter = shortDay, title }: TrendChartProps) {
+interface TipPayload { name?: string; value?: number | string; color?: string; dataKey?: string }
+
+function ChartTooltip({ active, payload, label, valueFormatter }: { active?: boolean; payload?: TipPayload[]; label?: string | number; valueFormatter?: (v: number) => string }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border border-default bg-white shadow-raised px-3 py-2 text-[12px] min-w-[150px]">
+      <div className="font-medium text-default mb-1.5">{longDay(String(label ?? ''))}</div>
+      <div className="flex flex-col gap-1">
+        {payload.map((p) => (
+          <div key={String(p.dataKey)} className="flex items-center justify-between gap-4">
+            <span className="inline-flex items-center gap-1.5 text-muted"><span className="h-2 w-2 rounded-full" style={{ background: p.color }} />{p.name}</span>
+            <span className="font-medium text-default tnum">{valueFormatter ? valueFormatter(Number(p.value)) : String(p.value ?? '—')}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One-axis time series / categorical chart (recharts): gradient areas, crosshair tooltip, quiet grid. */
+export function TrendChart({ data, x, series, kind = 'area', height = 220, stacked, valueFormatter, xFormatter = shortDay, title }: TrendChartProps) {
   const t = useChartTheme();
+  const uid = useId().replace(/:/g, '');
   const colored = useMemo(() => series.map((s, i) => ({ ...s, color: s.color ?? t.series[i % t.series.length] })), [series, t]);
   if (!data.length) return <EmptyState title="No data" description="Nothing recorded for this period." />;
-  const common = { data, margin: { top: 8, right: 8, left: -12, bottom: 0 } };
-  const axisProps = { stroke: t.axis, tick: { fill: t.text, fontSize: 11 }, tickLine: false as const, axisLine: { stroke: t.grid } };
-  const tooltip = (
-    <Tooltip
-      cursor={{ stroke: t.axis, strokeWidth: 1, fill: t.dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)' }}
-      contentStyle={{ background: t.tooltip.background, border: `1px solid ${t.tooltip.border}`, borderRadius: 8, color: t.tooltip.color, fontSize: 12, padding: '6px 10px' }}
-      labelStyle={{ color: t.tooltip.color, fontWeight: 600, marginBottom: 2 }}
-      itemStyle={{ color: t.tooltip.color, padding: 0 }}
-      formatter={(v: unknown, name: unknown) => [valueFormatter ? valueFormatter(Number(v)) : String(v ?? '—'), String(name)]}
-      labelFormatter={(l: unknown) => String(l)}
-    />
-  );
-  const legend = colored.length > 1 ? <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: t.text, paddingTop: 6 }} /> : null;
+  const common = { data, margin: { top: 10, right: 8, left: -14, bottom: 0 } };
+  const axisProps = { stroke: t.axis, tick: { fill: t.text, fontSize: 11 }, tickLine: false as const, axisLine: false as const };
+  const tooltip = <Tooltip cursor={{ stroke: t.axis, strokeWidth: 1, strokeDasharray: '3 3', fill: 'rgba(9,9,11,0.03)' }} content={<ChartTooltip valueFormatter={valueFormatter} />} />;
+  const legend = colored.length > 1 ? <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 12, color: t.text, paddingTop: 10 }} /> : null;
   const grid = <CartesianGrid stroke={t.grid} vertical={false} />;
-  const xAxis = <XAxis dataKey={x} {...axisProps} tickFormatter={xFormatter} interval="preserveStartEnd" minTickGap={24} />;
+  const xAxis = <XAxis dataKey={x} {...axisProps} tickFormatter={xFormatter} interval="preserveStartEnd" minTickGap={28} dy={6} />;
   const yAxis = <YAxis {...axisProps} allowDecimals={false} width={44} tickFormatter={(v: number) => (valueFormatter ? valueFormatter(v) : String(v))} />;
   return (
     <div>
       {title && <div className="text-[12.5px] font-medium text-muted mb-1">{title}</div>}
       <ResponsiveContainer width="100%" height={height}>
         {kind === 'bar' ? (
-          <BarChart {...common} barCategoryGap="20%" barGap={2}>
+          <BarChart {...common} barCategoryGap="24%" barGap={3}>
             {grid}{xAxis}{yAxis}{tooltip}{legend}
-            {colored.map((s) => <Bar key={s.key} dataKey={s.key} name={s.label} fill={s.color} radius={[3, 3, 0, 0]} stackId={stacked ? 'a' : undefined} maxBarSize={28} isAnimationActive={false} />)}
+            {colored.map((s) => <Bar key={s.key} dataKey={s.key} name={s.label} fill={s.color} radius={[4, 4, 0, 0]} stackId={stacked ? 'a' : undefined} maxBarSize={26} isAnimationActive={false} />)}
           </BarChart>
         ) : kind === 'area' ? (
           <AreaChart {...common}>
+            <defs>
+              {colored.map((s) => (
+                <linearGradient key={s.key} id={`g-${uid}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={s.color} stopOpacity={0.24} />
+                  <stop offset="100%" stopColor={s.color} stopOpacity={0.02} />
+                </linearGradient>
+              ))}
+            </defs>
             {grid}{xAxis}{yAxis}{tooltip}{legend}
-            {colored.map((s) => <Area key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} fill={s.color} fillOpacity={0.12} strokeWidth={2} stackId={stacked ? 'a' : undefined} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: t.surface }} isAnimationActive={false} />)}
+            {colored.map((s) => <Area key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} fill={`url(#g-${uid}-${s.key})`} strokeWidth={2} stackId={stacked ? 'a' : undefined} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: t.surface }} isAnimationActive={false} />)}
           </AreaChart>
         ) : (
           <LineChart {...common}>
