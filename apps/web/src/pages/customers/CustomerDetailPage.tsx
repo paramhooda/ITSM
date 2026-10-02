@@ -350,7 +350,7 @@ function TicketsTab({ id }: { id: string }) {
     { key: 'title', header: 'Title', render: (t) => <span className="font-medium">{t.title}</span> },
     { key: 'type', header: 'Type', render: (t) => <span className="text-muted">{titleCase(t.type)}</span> },
     { key: 'priority', header: 'Priority', render: (t) => (t.priorityLabel ? <Badge color={t.priorityColor ?? undefined}>{t.priorityLabel}</Badge> : '—') },
-    { key: 'status', header: 'Status', render: (t) => (t.statusLabel ? <Badge color={t.statusColor ?? undefined}>{t.statusLabel}</Badge> : '—') },
+    { key: 'status', header: 'Status', render: (t) => (t.statusLabel ? <Badge color={t.statusColor ?? undefined} dot>{t.statusLabel}</Badge> : '—') },
     { key: 'assigneeName', header: 'Assignee', render: (t) => <span className="text-muted">{t.assigneeName ?? 'Unassigned'}</span> },
     { key: 'createdAt', header: 'Created', render: (t) => <span className="text-muted" title={fmtDateTime(t.createdAt)}>{relativeTime(t.createdAt)}</span> },
   ];

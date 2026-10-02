@@ -2,20 +2,24 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Bookmark, Trash2, Share2, X, AlertTriangle, Flame, ChevronDown, Filter, Inbox, Timer, UserX, UserCheck } from 'lucide-react';
-import { KpiGrid } from '@/components/dashboards/KpiGrid';
-import { PageHeader, Button, Select, SearchInput, DataTable, Pagination, Dialog, Input, Checkbox, Avatar, Kbd, type Column } from '@/components/ui';
+import { Plus, Bookmark, Trash2, Share2, AlertTriangle, Flame, ChevronDown, Inbox, Timer, UserX, UserCheck } from 'lucide-react';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { TrendChart } from '@/components/dashboards/TrendChart';
+import { BreakdownBar, type BreakdownItem } from '@/components/dashboards/BreakdownBar';
+import { Panel, Segmented } from '@/components/dashboards/Panel';
+import { PageHeader, Button, Select, SearchInput, DataTable, Pagination, Dialog, Input, Checkbox, Avatar, Kbd, FilterBar, FilterChip, type Column } from '@/components/ui';
 import { Menu } from '@/components/Menu';
 import { useListState } from '@/hooks/useListState';
 import { useLookups, useEngineers, useCustomersLookup } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
-import { relativeTime, fmtDateTime } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { relativeTime, fmtDateTime, fmtNumber } from '@/lib/format';
+import { dotClass } from '@/lib/utils';
+import { TICKET_CATEGORY_COLORS, PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
 import { ticketsApi, qk, itemsOf } from '@/components/tickets/api';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { ScopeBadge } from '@/components/tickets/ScopeBadge';
-import { SlaIndicator } from '@/components/tickets/SlaIndicator';
+import { SlaIndicator, slaTone } from '@/components/tickets/SlaIndicator';
 import type { TicketListRow, TicketType, SavedView } from '@/components/tickets/types';
 
 type Tab = 'all' | TicketType;
@@ -36,6 +40,14 @@ const STATUS_CATEGORIES = [
 ];
 const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'createdFrom', 'createdTo', 'isMajor', 'type', 'sort', 'order'];
 const DEFAULTS = { statusCategory: 'new,open,pending', sort: 'lastActivityAt', order: 'desc' };
+type Breakdown = 'priority' | 'status' | 'team';
+
+/** A breached SLA gets a red rail, a clock past 75% an amber one; everything else stays quiet. */
+const rowRail = (r: TicketListRow) => {
+  const tone = slaTone(r.sla);
+  if (r.sla?.state === 'met' || r.sla?.state === 'cancelled') return undefined;
+  return tone === 'bad' ? 'row-rail-bad' : tone === 'warn' ? 'row-rail-warn' : undefined;
+};
 
 export default function TicketListPage() {
   const navigate = useNavigate();
@@ -48,11 +60,12 @@ export default function TicketListPage() {
   const can = useAuthStore((s) => s.can);
   const [saveOpen, setSaveOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [breakdown, setBreakdown] = useState<Breakdown>('priority');
 
   const tab = (state.type as Tab) || 'all';
   const assigneeFilter = state.assignee ?? '';
-  const params = useMemo(() => {
-    const p: Record<string, unknown> = { page, pageSize, sort: state.sort, order: state.order };
+  const filterParams = useMemo(() => {
+    const p: Record<string, unknown> = {};
     if (state.q) p.q = state.q;
     if (tab !== 'all') p.type = tab;
     for (const k of ['customerId', 'statusCategory', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'createdFrom', 'createdTo'] as const) if (state[k]) p[k] = state[k];
@@ -62,10 +75,12 @@ export default function TicketListPage() {
     else if (assigneeFilter === 'watching') p.watching = 'true';
     else if (assigneeFilter) p.assigneeId = assigneeFilter;
     return p;
-  }, [state, page, pageSize, tab, assigneeFilter]);
+  }, [state, tab, assigneeFilter]);
+  const params = useMemo(() => ({ ...filterParams, page, pageSize, sort: state.sort, order: state.order }), [filterParams, page, pageSize, state.sort, state.order]);
 
   const list = useQuery({ queryKey: qk.list(params), queryFn: () => ticketsApi.list(params), placeholderData: (prev) => prev });
-  const stats = useQuery({ queryKey: qk.stats({ customerId: state.customerId }), queryFn: () => ticketsApi.stats(state.customerId ? { customerId: state.customerId } : {}), refetchInterval: 60_000 });
+  // Stats honour the same filters as the list, so the band above the table always describes what is in it.
+  const stats = useQuery({ queryKey: qk.stats(filterParams), queryFn: () => ticketsApi.stats(filterParams), refetchInterval: 60_000, placeholderData: (prev) => prev });
   const views = useQuery({ queryKey: qk.views, queryFn: () => ticketsApi.views() });
 
   useEffect(() => {
@@ -85,7 +100,7 @@ export default function TicketListPage() {
     const next = cats.includes(key) ? cats.filter((c) => c !== key) : [...cats, key];
     set({ statusCategory: next.join(',') });
   };
-  const activeFilterCount = ['q', 'customerId', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'createdFrom', 'createdTo', 'isMajor'].filter((k) => state[k]).length + (state.statusCategory !== DEFAULTS.statusCategory ? 1 : 0);
+  const activeFilterCount = ['q', 'customerId', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'createdFrom', 'createdTo', 'isMajor'].filter((k) => state[k]).length + (state.statusCategory !== DEFAULTS.statusCategory ? 1 : 0) + (tab !== 'all' ? 1 : 0);
   const clearFilters = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
 
   const applyView = (v: SavedView) => {
@@ -129,12 +144,13 @@ export default function TicketListPage() {
   const rows = list.data?.items ?? [];
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)));
-  const toggleOne = (id: string) => setSelected((s) => {
-    const n = new Set(s);
-    if (n.has(id)) n.delete(id);
-    else n.add(id);
-    return n;
-  });
+  const toggleOne = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   const canBulk = can('tickets:assign') || can('tickets:update');
 
   const columns: Column<TicketListRow>[] = [
@@ -195,17 +211,38 @@ export default function TicketListPage() {
     { key: 'lastActivityAt', header: 'Updated', sortable: true, width: '110px', render: (r) => <span className="text-[12.5px] text-muted whitespace-nowrap" title={fmtDateTime(r.lastActivityAt)}>{relativeTime(r.lastActivityAt)}</span> },
   ];
 
-  const byType = stats.data?.byType ?? {};
-  const openTotal = stats.data?.open ?? 0;
+  const s = stats.data;
+  const byType = s?.byType ?? {};
+  const openTotal = s?.open ?? 0;
   const teams = lookups?.teams ?? [];
   const services = lookups?.services ?? [];
   const customerItems = itemsOf<{ id: string; name: string; code: string }>(customers.data);
+  const series = s?.series ?? [];
+
+  const breakdownItems: BreakdownItem[] = useMemo(() => {
+    if (!s) return [];
+    if (breakdown === 'priority') return (s.byPriority ?? []).map((p) => ({ label: p.label, value: p.count, color: p.color ?? (p.level ? PRIORITY_LEVEL_COLORS[p.level] : null), active: !!p.id && state.priorityId === p.id }));
+    if (breakdown === 'status') return (s.byStatus ?? []).map((st) => ({ label: st.label, value: st.count, color: st.color ?? TICKET_CATEGORY_COLORS[st.category ?? ''] ?? null }));
+    return (s.byTeam ?? []).map((t) => ({ label: t.label, value: t.count, secondary: t.breached, secondaryLabel: 'breached', active: !!t.id && state.teamId === t.id }));
+  }, [s, breakdown, state.priorityId, state.teamId]);
+  const onBreakdownSelect = (item: BreakdownItem) => {
+    if (breakdown === 'priority') {
+      const p = s?.byPriority.find((x) => x.label === item.label);
+      if (p?.id) set({ priorityId: state.priorityId === p.id ? undefined : p.id });
+    } else if (breakdown === 'team') {
+      const t = s?.byTeam.find((x) => x.label === item.label);
+      if (t?.id) set({ teamId: state.teamId === t.id ? undefined : t.id });
+    } else {
+      const st = s?.byStatus.find((x) => x.label === item.label);
+      if (st?.category) set({ statusCategory: st.category });
+    }
+  };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="Tickets"
-        subtitle={stats.data ? <span>{openTotal} open · {stats.data.breached} breached · {stats.data.unassigned} unassigned · {stats.data.mine} mine</span> : undefined}
+        subtitle={s ? <span>{fmtNumber(s.total)} match the current filters · {fmtNumber(s.breached)} breached · {fmtNumber(s.unassigned)} unassigned</span> : 'Incidents, requests, problems and changes across every customer'}
         actions={
           <>
             <Menu
@@ -248,98 +285,99 @@ export default function TicketListPage() {
         }
       />
 
-      {stats.data && (
-        <KpiGrid
-          items={[
-            { label: 'Open tickets', value: openTotal, icon: <Inbox className="h-4 w-4" />, hint: `${stats.data.createdToday} opened today · ${stats.data.resolvedToday} resolved`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: undefined, assignee: undefined }) },
-            { label: 'SLA breached', value: stats.data.breached, tone: stats.data.breached > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: `${stats.data.atRisk} at risk · ${stats.data.overdue} overdue`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: 'breached' }) },
-            { label: 'Unassigned', value: stats.data.unassigned, tone: stats.data.unassigned > 0 ? 'warn' : 'good', icon: <UserX className="h-4 w-4" />, hint: `${stats.data.major} major open`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: 'unassigned' }) },
-            { label: 'Assigned to me', value: stats.data.mine, icon: <UserCheck className="h-4 w-4" />, hint: `${stats.data.dueToday} due today · ${stats.data.pendingApprovals} awaiting approval`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: 'me' }) },
-          ]}
-        />
-      )}
-
-      {/* type tabs */}
-      <div className="flex items-center gap-1 border-b border-default overflow-x-auto">
-        {TABS.map((t) => {
-          const count = t.key === 'all' ? openTotal : (byType[t.key] ?? 0);
-          return (
-            <button key={t.key} onClick={() => set({ type: t.key === 'all' ? undefined : t.key })} className={cn('px-3 py-2 text-[13px] font-medium border-b-2 -mb-px whitespace-nowrap transition-colors', tab === t.key ? 'border-brand-600 text-default' : 'border-transparent text-muted hover:text-default')}>
-              {t.label}
-              <span className="ml-1.5 rounded-full bg-surface-2 px-1.5 text-[11px] text-muted">{count}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* filter bar */}
-      <div className="card p-2.5 flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search number, title, description…" className="w-64" />
-          <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" className="w-48 h-8 py-0 text-[13px]" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
-          <Select value={state.priorityId ?? ''} onChange={(e) => set({ priorityId: e.target.value })} placeholder="Priority" className="w-36 h-8 py-0 text-[13px]" options={options('ticket_priority').map((o) => ({ value: o.id, label: o.label }))} />
-          <Select value={assigneeFilter} onChange={(e) => set({ assignee: e.target.value })} placeholder="Assignee" className="w-44 h-8 py-0 text-[13px]">
-            <option value="me">Mine</option>
-            <option value="unassigned">Unassigned</option>
-            <option value="watching">Watching</option>
-            {(engineers.data ?? []).filter((u) => u.id !== user.id).map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
+      {/* 1. Filters */}
+      <FilterBar
+        activeCount={activeFilterCount}
+        onClear={clearFilters}
+        chips={
+          <>
+            {STATUS_CATEGORIES.map((c) => (
+              <FilterChip key={c.key} active={cats.includes(c.key)} onClick={() => toggleCat(c.key)} dot={dotClass(TICKET_CATEGORY_COLORS[c.key])} count={s?.byStatusCategory?.[c.key] ?? 0}>
+                {c.label}
+              </FilterChip>
             ))}
-          </Select>
-          <Select value={state.teamId ?? ''} onChange={(e) => set({ teamId: e.target.value })} placeholder="Team" className="w-40 h-8 py-0 text-[13px]" options={teams.map((t) => ({ value: t.id, label: t.name }))} />
-          <Select value={state.serviceId ?? ''} onChange={(e) => set({ serviceId: e.target.value })} placeholder="Service" className="w-44 h-8 py-0 text-[13px]" options={services.map((s) => ({ value: s.id, label: s.name }))} />
-          <Select value={state.scopeStatus ?? ''} onChange={(e) => set({ scopeStatus: e.target.value })} placeholder="Scope" className="w-32 h-8 py-0 text-[13px]" options={[{ value: 'in_scope', label: 'In scope' }, { value: 'out_of_scope', label: 'Out of scope' }, { value: 'unknown', label: 'Unknown' }]} />
-          <Select value={state.slaState ?? ''} onChange={(e) => set({ slaState: e.target.value })} placeholder="SLA" className="w-32 h-8 py-0 text-[13px]" options={[{ value: 'breached', label: 'Breached' }, { value: 'at_risk', label: 'At risk' }, { value: 'ok', label: 'On track' }]} />
-          <Input type="date" value={state.createdFrom ?? ''} onChange={(e) => set({ createdFrom: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Created from" />
-          <Input type="date" value={state.createdTo ?? ''} onChange={(e) => set({ createdTo: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Created to" />
-          <Checkbox checked={state.isMajor === 'true'} onChange={(e) => set({ isMajor: e.target.checked ? 'true' : undefined })} label={<span className="inline-flex items-center gap-1"><Flame className="h-3.5 w-3.5 text-red-500" /> Major</span>} />
-          {activeFilterCount > 0 && (
-            <Button variant="ghost" size="sm" onClick={clearFilters} icon={<X className="h-3.5 w-3.5" />}>
-              Clear
-            </Button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Filter className="h-3.5 w-3.5 text-subtle mr-0.5" />
-          {STATUS_CATEGORIES.map((c) => {
-            const on = cats.includes(c.key);
-            const count = stats.data?.byStatusCategory?.[c.key] ?? 0;
-            return (
-              <button key={c.key} onClick={() => toggleCat(c.key)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>
-                {c.label} <span className="opacity-60">{count}</span>
-              </button>
-            );
-          })}
-          {selected.size > 0 && canBulk && (
-            <div className="ml-auto flex items-center gap-2 text-[12.5px]">
-              <span className="text-muted">{selected.size} selected</span>
-              {can('tickets:assign') && (
-                <Select className="h-7 py-0 w-40 text-[12.5px]" placeholder="Assign to…" value="" onChange={(e) => e.target.value && bulk.mutate({ action: 'assign', payload: { assigneeId: e.target.value } })}>
-                  {(engineers.data ?? []).map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </Select>
-              )}
-              {can('tickets:update') && <Select className="h-7 py-0 w-36 text-[12.5px]" placeholder="Set priority…" value="" onChange={(e) => e.target.value && bulk.mutate({ action: 'priority', payload: { priorityId: e.target.value } })} options={options('ticket_priority').map((o) => ({ value: o.id, label: o.label }))} />}
-              {can('tickets:update') && <Select className="h-7 py-0 w-40 text-[12.5px]" placeholder="Set status…" value="" onChange={(e) => e.target.value && bulk.mutate({ action: 'status', payload: { statusId: e.target.value } })} options={options('ticket_status', tab !== 'all' ? { ticketType: tab } : undefined).map((o) => ({ value: o.id, label: o.label }))} />}
-              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                Clear
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
+            {selected.size > 0 && canBulk && (
+              <div className="ml-auto flex items-center gap-2 text-[12.5px]">
+                <span className="text-muted">{selected.size} selected</span>
+                {can('tickets:assign') && (
+                  <Select className="h-7 py-0 w-40 text-[12.5px]" placeholder="Assign to…" value="" onChange={(e) => e.target.value && bulk.mutate({ action: 'assign', payload: { assigneeId: e.target.value } })}>
+                    {(engineers.data ?? []).map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+                {can('tickets:update') && <Select className="h-7 py-0 w-36 text-[12.5px]" placeholder="Set priority…" value="" onChange={(e) => e.target.value && bulk.mutate({ action: 'priority', payload: { priorityId: e.target.value } })} options={options('ticket_priority').map((o) => ({ value: o.id, label: o.label }))} />}
+                {can('tickets:update') && <Select className="h-7 py-0 w-40 text-[12.5px]" placeholder="Set status…" value="" onChange={(e) => e.target.value && bulk.mutate({ action: 'status', payload: { statusId: e.target.value } })} options={options('ticket_status', tab !== 'all' ? { ticketType: tab } : undefined).map((o) => ({ value: o.id, label: o.label }))} />}
+                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                  Clear
+                </Button>
+              </div>
+            )}
+          </>
+        }
+      >
+        <Segmented size="sm" options={TABS.map((t) => ({ value: t.key, label: t.label, count: t.key === 'all' ? openTotal : (byType[t.key] ?? 0) }))} value={tab} onChange={(v) => set({ type: v === 'all' ? undefined : v })} />
+        <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search number, title, description…" className="w-64" />
+        <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" className="w-44 h-8 py-0 text-[13px]" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
+        <Select value={state.priorityId ?? ''} onChange={(e) => set({ priorityId: e.target.value })} placeholder="Priority" className="w-32 h-8 py-0 text-[13px]" options={options('ticket_priority').map((o) => ({ value: o.id, label: o.label }))} />
+        <Select value={assigneeFilter} onChange={(e) => set({ assignee: e.target.value })} placeholder="Assignee" className="w-40 h-8 py-0 text-[13px]">
+          <option value="me">Mine</option>
+          <option value="unassigned">Unassigned</option>
+          <option value="watching">Watching</option>
+          {(engineers.data ?? []).filter((u) => u.id !== user.id).map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </Select>
+        <Select value={state.teamId ?? ''} onChange={(e) => set({ teamId: e.target.value })} placeholder="Team" className="w-36 h-8 py-0 text-[13px]" options={teams.map((t) => ({ value: t.id, label: t.name }))} />
+        <Select value={state.serviceId ?? ''} onChange={(e) => set({ serviceId: e.target.value })} placeholder="Service" className="w-40 h-8 py-0 text-[13px]" options={services.map((sv) => ({ value: sv.id, label: sv.name }))} />
+        <Select value={state.scopeStatus ?? ''} onChange={(e) => set({ scopeStatus: e.target.value })} placeholder="Scope" className="w-32 h-8 py-0 text-[13px]" options={[{ value: 'in_scope', label: 'In scope' }, { value: 'out_of_scope', label: 'Out of scope' }, { value: 'unknown', label: 'Unknown' }]} />
+        <Select value={state.slaState ?? ''} onChange={(e) => set({ slaState: e.target.value })} placeholder="SLA" className="w-28 h-8 py-0 text-[13px]" options={[{ value: 'breached', label: 'Breached' }, { value: 'at_risk', label: 'At risk' }, { value: 'ok', label: 'On track' }]} />
+        <Input type="date" value={state.createdFrom ?? ''} onChange={(e) => set({ createdFrom: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Created from" aria-label="Created from" />
+        <Input type="date" value={state.createdTo ?? ''} onChange={(e) => set({ createdTo: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Created to" aria-label="Created to" />
+        <Checkbox checked={state.isMajor === 'true'} onChange={(e) => set({ isMajor: e.target.checked ? 'true' : undefined })} label={<span className="inline-flex items-center gap-1"><Flame className="h-3.5 w-3.5 text-red-500" /> Major</span>} />
+      </FilterBar>
 
+      {/* 2. Insights for the filtered set */}
+      <InsightBand
+        id="tickets"
+        loading={stats.isLoading}
+        summary={s ? `${fmtNumber(s.total)} tickets match` : undefined}
+        kpis={
+          s
+            ? [
+                { label: 'Open tickets', value: fmtNumber(s.open), icon: <Inbox className="h-4 w-4" />, hint: `${fmtNumber(s.createdToday)} opened today · ${fmtNumber(s.resolvedToday)} resolved`, spark: series.map((d) => d.opened), sparkLabel: 'Tickets opened per day', onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: undefined, assignee: undefined }) },
+                { label: 'SLA breached', value: fmtNumber(s.breached), tone: s.breached > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: `${fmtNumber(s.atRisk)} at risk · ${fmtNumber(s.overdue)} overdue`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: state.slaState === 'breached' ? undefined : 'breached' }) },
+                { label: 'Unassigned', value: fmtNumber(s.unassigned), tone: s.unassigned > 0 ? 'warn' : 'good', icon: <UserX className="h-4 w-4" />, hint: `${fmtNumber(s.major)} major open`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: assigneeFilter === 'unassigned' ? undefined : 'unassigned' }) },
+                { label: 'Assigned to me', value: fmtNumber(s.mine), icon: <UserCheck className="h-4 w-4" />, hint: `${fmtNumber(s.dueToday)} due today · ${fmtNumber(s.pendingApprovals)} awaiting approval`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: assigneeFilter === 'me' ? undefined : 'me' }) },
+              ]
+            : []
+        }
+        panels={
+          s && (
+            <>
+              <Panel title="Ticket flow" subtitle={state.createdFrom && state.createdTo ? 'Opened and resolved per day in the selected range' : 'Opened and resolved per day, last 14 days'}>
+                <TrendChart data={series} x="day" series={[{ key: 'opened', label: 'Opened', color: '#2563eb' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} kind="area" height={190} />
+              </Panel>
+              <Panel title="Breakdown" subtitle="Click a row to filter" action={<Segmented size="sm" options={[{ value: 'priority', label: 'Priority' }, { value: 'status', label: 'Status' }, { value: 'team', label: 'Team' }]} value={breakdown} onChange={setBreakdown} />}>
+                <BreakdownBar items={breakdownItems} dense emptyText="No tickets in this view" onSelect={onBreakdownSelect} />
+              </Panel>
+            </>
+          )
+        }
+      />
+
+      {/* 3. The list */}
       <div className="card overflow-hidden">
         <DataTable
           columns={columns}
           rows={rows}
           loading={list.isLoading}
           dense
+          rowClassName={rowRail}
           onRowClick={(r) => navigate(`/tickets/${r.id}`)}
           sort={{ key: state.sort === 'dueAt' ? 'dueAt' : state.sort ?? 'lastActivityAt', order: (state.order as 'asc' | 'desc') ?? 'desc' }}
           onSort={(key) => {
@@ -397,4 +435,3 @@ function SaveViewDialog({ open, onClose, onSave, saving }: { open: boolean; onCl
     </Dialog>
   );
 }
-

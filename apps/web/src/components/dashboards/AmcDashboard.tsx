@@ -9,6 +9,7 @@ import { TicketMiniTable } from './TicketMiniTable';
 import { EntitlementAlerts, type EntitlementAlert } from './EntitlementAlerts';
 import { Panel, KpiSkeleton, Segmented, Updated, RowList } from './Panel';
 import type { TicketRow } from './types';
+import { VISIT_STATUS_COLORS } from '@/lib/statusColors';
 
 interface Amc {
   generatedAt: string;
@@ -20,7 +21,7 @@ interface Amc {
 }
 
 type Filter = 'all' | 'unassigned' | 'dueToday' | 'breached' | 'awaitingCustomer';
-const VISIT_COLOR: Record<string, string> = { requested: 'slate', scheduled: 'blue', in_progress: 'indigo', completed: 'green', cancelled: 'gray' };
+const VISIT_COLOR = VISIT_STATUS_COLORS;
 
 /** AMC / field service view: an AMC ticket work queue first, visits and maintenance beside it. */
 export function AmcDashboard() {

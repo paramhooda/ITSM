@@ -5,7 +5,7 @@ import { h } from '@/core/context';
 import * as svc from './service';
 import * as ent from './entitlements';
 import * as scope from './scope';
-import { contractCreate, contractPatch, contractListQuery, contractServiceInput, entitlementInput, consumptionInput, scopeItemInput, renewInput, uuid, boolQuery, dateStr } from './schemas';
+import { contractCreate, contractPatch, contractListQuery, contractSummaryQuery, contractServiceInput, entitlementInput, consumptionInput, scopeItemInput, renewInput, uuid, boolQuery, dateStr } from './schemas';
 
 const idParam = z.object({ id: z.string().uuid() });
 const tags = ['contracts'];
@@ -15,6 +15,8 @@ export default async function routes(app: FastifyInstance) {
 
   // ---- collection routes (static paths before /contracts/:id)
   r.get('/contracts', { preHandler: app.auth('contracts:read'), schema: { tags, querystring: contractListQuery } }, h((ctx, req) => svc.listContracts(ctx, req.query as z.infer<typeof contractListQuery>)));
+
+  r.get('/contracts/summary', { preHandler: app.auth('contracts:read'), schema: { tags, querystring: contractSummaryQuery } }, h((ctx, req) => svc.contractSummary(ctx, req.query as z.infer<typeof contractSummaryQuery>)));
 
   r.get('/contracts/expiring', { preHandler: app.auth('contracts:read'), schema: { tags, querystring: z.object({ days: z.coerce.number().int().min(0).max(3650).default(90), customerId: uuid.optional() }) } }, h((ctx, req) => {
     const q = req.query as { days: number; customerId?: string };

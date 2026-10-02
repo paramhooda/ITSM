@@ -1,8 +1,9 @@
+import { PM_STATUS_COLORS as SHARED_PM_STATUS_COLORS } from '@/lib/statusColors';
 /** API shapes of the preventive maintenance module (mirrors apps/api/src/modules/pm). */
 export type PmStatus = 'planned' | 'scheduled' | 'completed' | 'missed' | 'rescheduled' | 'cancelled';
 export const PM_STATUSES: PmStatus[] = ['planned', 'scheduled', 'rescheduled', 'completed', 'missed', 'cancelled'];
 export const PM_STATUS_LABELS: Record<PmStatus, string> = { planned: 'Planned', scheduled: 'Scheduled', rescheduled: 'Rescheduled', completed: 'Completed', missed: 'Missed', cancelled: 'Cancelled' };
-export const PM_STATUS_COLORS: Record<PmStatus, string> = { planned: 'slate', scheduled: 'blue', rescheduled: 'indigo', completed: 'green', missed: 'red', cancelled: 'gray' };
+export const PM_STATUS_COLORS: Record<PmStatus, string> = SHARED_PM_STATUS_COLORS as Record<PmStatus, string>;
 export type PmFrequency = 'weekly' | 'monthly' | 'quarterly' | 'half_yearly' | 'annual' | 'custom';
 export const FREQUENCY_LABELS: Record<PmFrequency, string> = { weekly: 'Weekly', monthly: 'Monthly', quarterly: 'Quarterly', half_yearly: 'Half-yearly', annual: 'Annual', custom: 'Custom interval' };
 

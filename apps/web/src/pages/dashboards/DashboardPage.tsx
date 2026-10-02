@@ -80,16 +80,13 @@ export default function DashboardPage() {
   const meta = META[tab];
   return (
     <div>
-      <PageHeader
-        title={meta.title}
-        subtitle={meta.subtitle}
-        actions={
-          <div className="flex flex-wrap items-center gap-2 justify-end">
-            {tab === 'management' && <ManagementControls days={days} customerId={state.customerId ?? ''} onDays={(d) => set({ days: d }, false)} onCustomer={(id) => set({ customerId: id }, false)} />}
-            {tabs.length > 1 && <Segmented options={tabs.map((t) => ({ value: t, label: META[t].label }))} value={tab} onChange={pick} />}
-          </div>
-        }
-      />
+      <PageHeader title={meta.title} subtitle={meta.subtitle} actions={tabs.length > 1 ? <Segmented options={tabs.map((t) => ({ value: t, label: META[t].label }))} value={tab} onChange={pick} /> : undefined} />
+      {/* Period/scope controls live in their own row, so the view switcher above never moves. */}
+      {tab === 'management' && (
+        <div className="flex flex-wrap items-center justify-between gap-3 min-h-9 -mt-2 mb-4">
+          <ManagementControls days={days} customerId={state.customerId ?? ''} onDays={(d) => set({ days: d }, false)} onCustomer={(id) => set({ customerId: id }, false)} />
+        </div>
+      )}
       {tab === 'management' && <ManagementDashboard days={days} customerId={state.customerId ?? ''} />}
       {tab === 'noc' && <NocDashboard />}
       {tab === 'soc' && <SocDashboard />}

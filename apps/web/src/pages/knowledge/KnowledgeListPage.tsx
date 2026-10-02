@@ -1,12 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, BookOpen, FolderOpen, Folder, BarChart3, AlertTriangle } from 'lucide-react';
+import { Plus, BookOpen, FolderOpen, Folder, AlertTriangle, FileText, PenLine, CalendarClock } from 'lucide-react';
 import { get } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useLookups } from '@/hooks/useLookups';
 import { useListState } from '@/hooks/useListState';
-import { Button, PageHeader, SearchInput, Select, Pagination, EmptyState, LoadingBlock, ErrorBlock, Badge, Card } from '@/components/ui';
+import { Button, PageHeader, SearchInput, Select, Pagination, EmptyState, LoadingBlock, ErrorBlock, Badge, FilterBar } from '@/components/ui';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { Panel, RowList } from '@/components/dashboards/Panel';
+import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
+import { fmtNumber, titleCase } from '@/lib/format';
 import { ArticleCard, type ArticleSummary } from '@/components/knowledge/ArticleCard';
 import { ArticleEditor, DOMAIN_OPTIONS, type KbCategory } from '@/components/knowledge/ArticleEditor';
 import { cn } from '@/lib/utils';
@@ -37,10 +41,9 @@ export default function KnowledgeListPage() {
   const { state, set, page, pageSize, setPage } = useListState(DEFAULTS);
   const { options } = useLookups();
   const [editorOpen, setEditorOpen] = useState(false);
-  const [showStats, setShowStats] = useState(false);
 
   const categories = useQuery({ queryKey: ['knowledge', 'categories'], queryFn: () => get<{ items: KbCategory[]; uncategorized: number }>('/knowledge/categories'), staleTime: 60_000 });
-  const stats = useQuery({ queryKey: ['knowledge', 'stats'], queryFn: () => get<Stats>('/knowledge/stats'), enabled: canManage && showStats, staleTime: 60_000 });
+  const stats = useQuery({ queryKey: ['knowledge', 'stats'], queryFn: () => get<Stats>('/knowledge/stats'), enabled: canManage, staleTime: 60_000 });
 
   const query = useMemo(
     () => ({
@@ -79,64 +82,81 @@ export default function KnowledgeListPage() {
     return rows;
   }, [categories.data]);
   const totalArticles = (categories.data?.items ?? []).reduce((n, c) => n + (c.articleCount ?? 0), 0) + (categories.data?.uncategorized ?? 0);
+  const FILTER_KEYS = ['q', 'categoryId', 'type', 'status', 'domain', 'visibility', 'tag', 'sort', 'order'];
+  const activeCount = FILTER_KEYS.filter((k) => state[k]).length;
+  const clear = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
 
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="Knowledge base"
         subtitle={isCustomer ? 'Procedures, guides and answers published for your organization.' : 'Runbooks, SOPs, known errors and customer procedures.'}
         actions={
           canManage && (
-            <>
-              <Button variant="outline" icon={<BarChart3 className="h-4 w-4" />} onClick={() => setShowStats((v) => !v)}>
-                {showStats ? 'Hide stats' : 'Stats'}
-              </Button>
-              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditorOpen(true)}>
-                New article
-              </Button>
-            </>
+            <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditorOpen(true)}>
+              New article
+            </Button>
           )
         }
       />
 
-      {canManage && showStats && stats.data && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-          <Card padded className="py-3">
-            <div className="text-xs text-muted">Published</div>
-            <div className="text-xl font-semibold">{stats.data.byStatus.published ?? 0}</div>
-          </Card>
-          <Card padded className="py-3">
-            <div className="text-xs text-muted">Drafts</div>
-            <div className="text-xl font-semibold">{stats.data.byStatus.draft ?? 0}</div>
-          </Card>
-          <Card padded className="py-3">
-            <div className="text-xs text-muted">Archived</div>
-            <div className="text-xl font-semibold">{stats.data.byStatus.archived ?? 0}</div>
-          </Card>
-          <Card padded className={cn('py-3', stats.data.stale.count > 0 && 'border-amber-400')}>
-            <div className="text-xs text-muted flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3" /> Review overdue (12m+)
-            </div>
-            <div className="text-xl font-semibold">{stats.data.stale.count}</div>
-          </Card>
-          <Card padded className="py-3">
-            <div className="text-xs text-muted">Expiring in 30 days</div>
-            <div className="text-xl font-semibold">{stats.data.expiringSoon}</div>
-          </Card>
-          {stats.data.topViewed.length > 0 && (
-            <Card title="Most viewed" className="col-span-2 md:col-span-5" padded={false}>
-              <ul className="divide-y divide-[var(--border)] text-[13px]">
-                {stats.data.topViewed.slice(0, 5).map((t) => (
-                  <li key={t.id} className="flex items-center gap-2 px-4 py-1.5 cursor-pointer hover:bg-surface-2/60" onClick={() => navigate(`/knowledge/${t.id}`)}>
-                    <span className="font-mono text-[11px] text-subtle">{t.number}</span>
-                    <span className="flex-1 truncate">{t.title}</span>
-                    <span className="text-xs text-muted">{t.viewCount} views</span>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
-        </div>
+      <FilterBar activeCount={activeCount} onClear={clear}>
+        <SearchInput className="w-72" value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search titles, numbers and content…" />
+        <Select className="w-36 h-8 py-0 text-[13px]" value={state.type ?? ''} onChange={(e) => set({ type: e.target.value })} placeholder="All types" options={typeOptions} />
+        <Select className="w-44 h-8 py-0 text-[13px] lg:hidden" value={state.categoryId ?? ''} onChange={(e) => set({ categoryId: e.target.value })} placeholder="All categories" options={tree.map(({ cat, depth }) => ({ value: cat.id, label: `${'— '.repeat(depth)}${cat.name}` }))} />
+        {!isCustomer && <Select className="w-36 h-8 py-0 text-[13px]" value={state.domain ?? ''} onChange={(e) => set({ domain: e.target.value })} placeholder="All domains" options={DOMAIN_OPTIONS} />}
+        {!isCustomer && <Select className="w-36 h-8 py-0 text-[13px]" value={state.status ?? ''} onChange={(e) => set({ status: e.target.value })} placeholder="All statuses" options={[{ value: 'published', label: 'Published' }, { value: 'draft', label: 'Draft' }, { value: 'archived', label: 'Archived' }]} />}
+        {!isCustomer && <Select className="w-40 h-8 py-0 text-[13px]" value={state.visibility ?? ''} onChange={(e) => set({ visibility: e.target.value })} placeholder="All visibility" options={[{ value: 'internal', label: 'Internal' }, { value: 'customer', label: 'Customer-specific' }, { value: 'public', label: 'Public' }]} />}
+        <Select
+          className="w-44 h-8 py-0 text-[13px]"
+          value={state.sort ? `${state.sort}:${state.order ?? 'desc'}` : ''}
+          onChange={(e) => {
+            const [sort, order] = e.target.value.split(':');
+            set({ sort: sort || undefined, order: order || undefined });
+          }}
+          placeholder={state.q ? 'Sort: relevance' : 'Sort: recently updated'}
+          options={[
+            { value: 'updatedAt:desc', label: 'Recently updated' },
+            { value: 'viewCount:desc', label: 'Most viewed' },
+            { value: 'title:asc', label: 'Title A–Z' },
+            { value: 'publishedAt:desc', label: 'Recently published' },
+          ]}
+        />
+        {state.tag && (
+          <Badge className="cursor-pointer" onClick={() => set({ tag: undefined })}>
+            tag: {state.tag} ×
+          </Badge>
+        )}
+      </FilterBar>
+
+      {canManage && (
+        <InsightBand
+          id="knowledge"
+          loading={stats.isLoading}
+          summary={stats.data ? `${fmtNumber(totalArticles)} articles` : undefined}
+          kpis={
+            stats.data
+              ? [
+                  { label: 'Published', value: fmtNumber(stats.data.byStatus.published ?? 0), icon: <BookOpen className="h-4 w-4" />, hint: `${fmtNumber(stats.data.byStatus.archived ?? 0)} archived`, onClick: () => set({ status: state.status === 'published' ? undefined : 'published' }) },
+                  { label: 'Drafts', value: fmtNumber(stats.data.byStatus.draft ?? 0), tone: (stats.data.byStatus.draft ?? 0) > 0 ? 'warn' : 'default', icon: <PenLine className="h-4 w-4" />, hint: 'waiting to be published', onClick: () => set({ status: state.status === 'draft' ? undefined : 'draft' }) },
+                  { label: 'Review overdue', value: fmtNumber(stats.data.stale.count), tone: stats.data.stale.count > 0 ? 'bad' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'published over 12 months ago, not reviewed' },
+                  { label: 'Expiring · 30d', value: fmtNumber(stats.data.expiringSoon), tone: stats.data.expiringSoon > 0 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: 'articles with an expiry date coming up' },
+                ]
+              : []
+          }
+          panels={
+            stats.data && (
+              <>
+                <Panel title="Most viewed" subtitle="What people actually open">
+                  <RowList dense empty="No views recorded yet" items={stats.data.topViewed.slice(0, 6).map((t) => ({ key: t.id, leading: <FileText className="h-3.5 w-3.5 text-subtle" />, primary: t.title, secondary: t.number, right: `${fmtNumber(t.viewCount)} views`, href: `/knowledge/${t.id}` }))} />
+                </Panel>
+                <Panel title="By type" subtitle="Runbooks, SOPs, known errors…">
+                  <BreakdownBar dense items={Object.entries(stats.data.byType).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: typeLabel(k) ?? titleCase(k), value: v, active: state.type === k }))} onSelect={(i) => { const k = Object.keys(stats.data!.byType).find((key) => (typeLabel(key) ?? titleCase(key)) === i.label); if (k) set({ type: state.type === k ? undefined : k }); }} />
+                </Panel>
+              </>
+            )
+          }
+        />
       )}
 
       <div className="flex gap-4">
@@ -165,59 +185,6 @@ export default function KnowledgeListPage() {
         </aside>
 
         <div className="flex-1 min-w-0">
-          <div className="card mb-3 p-3 flex flex-wrap items-center gap-2">
-            <SearchInput className="w-full sm:w-72" value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search titles, numbers and content…" />
-            <Select className="w-auto" value={state.type ?? ''} onChange={(e) => set({ type: e.target.value })} placeholder="All types" options={typeOptions} />
-            <Select className="w-auto lg:hidden" value={state.categoryId ?? ''} onChange={(e) => set({ categoryId: e.target.value })} placeholder="All categories" options={tree.map(({ cat, depth }) => ({ value: cat.id, label: `${'— '.repeat(depth)}${cat.name}` }))} />
-            {!isCustomer && <Select className="w-auto" value={state.domain ?? ''} onChange={(e) => set({ domain: e.target.value })} placeholder="All domains" options={DOMAIN_OPTIONS} />}
-            {!isCustomer && (
-              <Select
-                className="w-auto"
-                value={state.status ?? ''}
-                onChange={(e) => set({ status: e.target.value })}
-                placeholder="All statuses"
-                options={[
-                  { value: 'published', label: 'Published' },
-                  { value: 'draft', label: 'Draft' },
-                  { value: 'archived', label: 'Archived' },
-                ]}
-              />
-            )}
-            {!isCustomer && (
-              <Select
-                className="w-auto"
-                value={state.visibility ?? ''}
-                onChange={(e) => set({ visibility: e.target.value })}
-                placeholder="All visibility"
-                options={[
-                  { value: 'internal', label: 'Internal' },
-                  { value: 'customer', label: 'Customer-specific' },
-                  { value: 'public', label: 'Public' },
-                ]}
-              />
-            )}
-            <Select
-              className="w-auto ml-auto"
-              value={state.sort ? `${state.sort}:${state.order ?? 'desc'}` : ''}
-              onChange={(e) => {
-                const [sort, order] = e.target.value.split(':');
-                set({ sort: sort || undefined, order: order || undefined });
-              }}
-              placeholder={state.q ? 'Sort: relevance' : 'Sort: recently updated'}
-              options={[
-                { value: 'updatedAt:desc', label: 'Recently updated' },
-                { value: 'viewCount:desc', label: 'Most viewed' },
-                { value: 'title:asc', label: 'Title A–Z' },
-                { value: 'publishedAt:desc', label: 'Recently published' },
-              ]}
-            />
-            {state.tag && (
-              <Badge className="cursor-pointer" onClick={() => set({ tag: undefined })}>
-                tag: {state.tag} ×
-              </Badge>
-            )}
-          </div>
-
           <div className="card" style={{ padding: 0 }}>
             {list.isLoading && <LoadingBlock />}
             {list.isError && <ErrorBlock error={list.error} retry={() => list.refetch()} />}

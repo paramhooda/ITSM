@@ -2,15 +2,20 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, X, Filter, CalendarDays, List as ListIcon, MoreHorizontal, CalendarPlus, CheckCircle2, RefreshCw, Ban, Ticket, ExternalLink, AlertTriangle, ChevronLeft, ChevronRight, ClipboardCheck } from 'lucide-react';
-import { PageHeader, Button, Select, SearchInput, DataTable, Pagination, Input, Checkbox, StatTile, Tabs, Badge, Card, EmptyState, type Column } from '@/components/ui';
+import { Plus, CalendarDays, List as ListIcon, MoreHorizontal, CalendarPlus, CheckCircle2, RefreshCw, Ban, Ticket, ExternalLink, AlertTriangle, ChevronLeft, ChevronRight, ClipboardCheck, CalendarX2, BadgeCheck } from 'lucide-react';
+import { PageHeader, Button, Select, SearchInput, DataTable, Pagination, Input, Checkbox, Tabs, Badge, Card, EmptyState, FilterBar, FilterChip, type Column } from '@/components/ui';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { Panel, Segmented } from '@/components/dashboards/Panel';
+import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
+import { SlaGauge } from '@/components/dashboards/SlaGauge';
 import { Menu } from '@/components/Menu';
 import { useListState } from '@/hooks/useListState';
 import { useLookups, useEngineers, useCustomersLookup } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
 import { errorMessage } from '@/components/cmdb/hooks';
-import { fmtDate, fmtPct } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { fmtDate, fmtPct, fmtNumber } from '@/lib/format';
+import { cn, dotClass } from '@/lib/utils';
+import { PM_STATUS_COLORS } from '@/lib/statusColors';
 import { itemsOf } from '@/components/tickets/api';
 import { pmApi, pmKeys } from '@/components/pm/api';
 import { OccurrenceStatusBadge, FrequencyBadge, DueIn } from '@/components/pm/OccurrenceStatusBadge';
@@ -122,70 +127,87 @@ export default function MaintenancePage() {
   const s = summary.data;
   const teams = lookups?.teams ?? [];
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="Preventive maintenance"
         subtitle={s ? <span>{s.counts.planned + s.counts.scheduled + s.counts.rescheduled} open · {s.overdue.length} overdue · {s.counts.completed} completed · on-time {fmtPct(s.onTimePct, 0)}</span> : undefined}
         actions={canManage ? <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setNewProgram(true)}>New program</Button> : undefined}
       />
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <StatTile label="Overdue" value={s?.overdue.length ?? '—'} tone={s?.overdue.length ? 'bad' : 'default'} icon={<AlertTriangle className="h-4 w-4" />} onClick={() => set({ tab: 'schedule', view: undefined, overdue: 'true', status: 'planned,scheduled,rescheduled' })} />
-        <StatTile label="Due in 30 days" value={s?.upcoming.length ?? '—'} icon={<CalendarDays className="h-4 w-4" />} onClick={() => set({ tab: 'schedule', view: undefined, overdue: undefined, status: 'planned,scheduled,rescheduled', from: ymd(new Date()), to: ymd(new Date(Date.now() + 30 * 86_400_000)) })} />
-        <StatTile label="Missed (12 mo)" value={s?.counts.missed ?? '—'} tone={s?.counts.missed ? 'bad' : 'default'} onClick={() => set({ tab: 'schedule', view: undefined, status: 'missed', from: undefined, to: undefined, overdue: undefined })} />
-        <StatTile label="Completed (12 mo)" value={s?.counts.completed ?? '—'} tone="good" onClick={() => set({ tab: 'schedule', view: undefined, status: 'completed', from: undefined, to: undefined, overdue: undefined })} />
-        <StatTile label="On time" value={s ? fmtPct(s.onTimePct, 0) : '—'} hint={s ? `completion ${fmtPct(s.completionPct, 0)}` : undefined} tone={s?.onTimePct !== null && s?.onTimePct !== undefined && s.onTimePct < 80 ? 'warn' : 'default'} onClick={() => set({ tab: 'performance' }, false)} />
-      </div>
-
       <Tabs tabs={TABS} value={tab} onChange={(t) => set({ tab: t, page: undefined }, false)} />
 
       {tab !== 'performance' && (
-        <div className="card p-2.5 flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            {tab === 'schedule' && (
-              <div className="inline-flex rounded-lg border border-default overflow-hidden">
-                <button className={cn('px-2.5 py-1 text-[12.5px] inline-flex items-center gap-1', state.view !== 'calendar' ? 'bg-surface-2 font-medium' : 'text-muted')} onClick={() => set({ view: undefined }, false)}><ListIcon className="h-3.5 w-3.5" />List</button>
-                <button className={cn('px-2.5 py-1 text-[12.5px] inline-flex items-center gap-1 border-l border-default', state.view === 'calendar' ? 'bg-surface-2 font-medium' : 'text-muted')} onClick={() => set({ view: 'calendar' }, false)}><CalendarDays className="h-3.5 w-3.5" />Calendar</button>
-              </div>
-            )}
-            <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search program…" className="w-52" />
-            <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" className="w-48 h-8 py-0 text-[13px]" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
-            <Select value={state.engineerId ?? ''} onChange={(e) => set({ engineerId: e.target.value, mine: undefined })} placeholder="Engineer" className="w-44 h-8 py-0 text-[13px]" options={(engineers.data ?? []).map((u) => ({ value: u.id, label: u.name }))} />
-            <Select value={state.teamId ?? ''} onChange={(e) => set({ teamId: e.target.value })} placeholder="Team" className="w-40 h-8 py-0 text-[13px]" options={teams.map((t) => ({ value: t.id, label: t.name }))} />
-            {tab === 'schedule' && state.view !== 'calendar' && (
-              <>
-                <Input type="date" value={state.from ?? ''} onChange={(e) => set({ from: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Planned from" />
-                <Input type="date" value={state.to ?? ''} onChange={(e) => set({ to: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Planned to" />
-                <Checkbox checked={state.overdue === 'true'} onChange={(e) => set({ overdue: e.target.checked ? 'true' : undefined })} label="Overdue" />
-                <Checkbox checked={state.mine === 'true'} onChange={(e) => set({ mine: e.target.checked ? 'true' : undefined, engineerId: undefined })} label="Mine" />
-              </>
-            )}
-            {tab === 'programs' && (
-              <>
-                <Select value={state.frequency ?? ''} onChange={(e) => set({ frequency: e.target.value })} placeholder="Frequency" className="w-40 h-8 py-0 text-[13px]" options={(Object.keys(FREQUENCY_LABELS) as PmFrequency[]).map((k) => ({ value: k, label: FREQUENCY_LABELS[k] }))} />
-                <Select value={state.isActive ?? ''} onChange={(e) => set({ isActive: e.target.value })} placeholder="Active + inactive" className="w-40 h-8 py-0 text-[13px]" options={[{ value: 'true', label: 'Active only' }, { value: 'false', label: 'Inactive only' }]} />
-              </>
-            )}
-            {activeFilterCount > 0 && <Button variant="ghost" size="sm" onClick={clearFilters} icon={<X className="h-3.5 w-3.5" />}>Clear</Button>}
-          </div>
+        <FilterBar
+          activeCount={activeFilterCount}
+          onClear={clearFilters}
+          trailing={tab === 'schedule' ? <Segmented size="sm" options={[{ value: 'list', label: <span className="inline-flex items-center gap-1.5"><ListIcon className="h-3.5 w-3.5" />List</span> }, { value: 'calendar', label: <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />Calendar</span> }]} value={state.view === 'calendar' ? 'calendar' : 'list'} onChange={(v) => set({ view: v === 'calendar' ? 'calendar' : undefined }, false)} /> : undefined}
+          chips={
+            tab === 'schedule' && state.view !== 'calendar'
+              ? PM_STATUSES.map((st: PmStatus) => (
+                  <FilterChip key={st} active={statuses.includes(st)} onClick={() => toggleStatus(st)} dot={dotClass(PM_STATUS_COLORS[st])} count={s?.counts[st] ?? 0}>
+                    {PM_STATUS_LABELS[st]}
+                  </FilterChip>
+                ))
+              : undefined
+          }
+        >
+          <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search program…" className="w-52" />
+          <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" className="w-48 h-8 py-0 text-[13px]" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
+          <Select value={state.engineerId ?? ''} onChange={(e) => set({ engineerId: e.target.value, mine: undefined })} placeholder="Engineer" className="w-44 h-8 py-0 text-[13px]" options={(engineers.data ?? []).map((u) => ({ value: u.id, label: u.name }))} />
+          <Select value={state.teamId ?? ''} onChange={(e) => set({ teamId: e.target.value })} placeholder="Team" className="w-40 h-8 py-0 text-[13px]" options={teams.map((t) => ({ value: t.id, label: t.name }))} />
           {tab === 'schedule' && state.view !== 'calendar' && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Filter className="h-3.5 w-3.5 text-subtle mr-0.5" />
-              {PM_STATUSES.map((st: PmStatus) => {
-                const on = statuses.includes(st);
-                return (
-                  <button key={st} onClick={() => toggleStatus(st)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>
-                    {PM_STATUS_LABELS[st]} <span className="opacity-60">{s?.counts[st] ?? 0}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              <Input type="date" value={state.from ?? ''} onChange={(e) => set({ from: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Planned from" aria-label="Planned from" />
+              <Input type="date" value={state.to ?? ''} onChange={(e) => set({ to: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Planned to" aria-label="Planned to" />
+              <Checkbox checked={state.overdue === 'true'} onChange={(e) => set({ overdue: e.target.checked ? 'true' : undefined })} label="Overdue" />
+              <Checkbox checked={state.mine === 'true'} onChange={(e) => set({ mine: e.target.checked ? 'true' : undefined, engineerId: undefined })} label="Mine" />
+            </>
           )}
-        </div>
+          {tab === 'programs' && (
+            <>
+              <Select value={state.frequency ?? ''} onChange={(e) => set({ frequency: e.target.value })} placeholder="Frequency" className="w-40 h-8 py-0 text-[13px]" options={(Object.keys(FREQUENCY_LABELS) as PmFrequency[]).map((k) => ({ value: k, label: FREQUENCY_LABELS[k] }))} />
+              <Select value={state.isActive ?? ''} onChange={(e) => set({ isActive: e.target.value })} placeholder="Active + inactive" className="w-40 h-8 py-0 text-[13px]" options={[{ value: 'true', label: 'Active only' }, { value: 'false', label: 'Inactive only' }]} />
+            </>
+          )}
+        </FilterBar>
+      )}
+
+      {tab !== 'performance' && (
+        <InsightBand
+          id="maintenance"
+          loading={summary.isLoading}
+          columns={5}
+          summary={s ? `${fmtNumber(s.counts.total)} occurrences · ${fmtDate(s.range.from)} – ${fmtDate(s.range.to)}` : undefined}
+          kpis={
+            s
+              ? [
+                  { label: 'Overdue', value: fmtNumber(s.overdue.length), tone: s.overdue.length ? 'bad' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'planned date passed, not done', onClick: () => set({ tab: 'schedule', view: undefined, overdue: 'true', status: 'planned,scheduled,rescheduled' }) },
+                  { label: 'Due in 30 days', value: fmtNumber(s.upcoming.length), icon: <CalendarDays className="h-4 w-4" />, hint: 'coming up next', onClick: () => set({ tab: 'schedule', view: undefined, overdue: undefined, status: 'planned,scheduled,rescheduled', from: ymd(new Date()), to: ymd(new Date(Date.now() + 30 * 86_400_000)) }) },
+                  { label: 'Missed · 12 mo', value: fmtNumber(s.counts.missed), tone: s.counts.missed ? 'bad' : 'good', icon: <CalendarX2 className="h-4 w-4" />, hint: 'never completed', onClick: () => set({ tab: 'schedule', view: undefined, status: 'missed', from: undefined, to: undefined, overdue: undefined }) },
+                  { label: 'Completed · 12 mo', value: fmtNumber(s.counts.completed), tone: 'good', icon: <BadgeCheck className="h-4 w-4" />, hint: `completion ${fmtPct(s.completionPct, 0)}`, onClick: () => set({ tab: 'schedule', view: undefined, status: 'completed', from: undefined, to: undefined, overdue: undefined }) },
+                  { label: 'On time', value: fmtPct(s.onTimePct, 0), tone: s.onTimePct === null ? 'default' : s.onTimePct >= 90 ? 'good' : s.onTimePct >= 80 ? 'warn' : 'bad', icon: <CheckCircle2 className="h-4 w-4" />, hint: 'completed within the grace window', onClick: () => set({ tab: 'performance' }, false) },
+                ]
+              : []
+          }
+          panels={
+            s && (
+              <>
+                <Panel title="Occurrences by status" subtitle="Click a status to filter the schedule">
+                  <BreakdownBar dense items={PM_STATUSES.map((st) => ({ label: PM_STATUS_LABELS[st], value: s.counts[st] ?? 0, color: PM_STATUS_COLORS[st], active: statuses.length === 1 && statuses[0] === st })).filter((i) => i.value > 0)} onSelect={(i) => { const st = PM_STATUSES.find((x) => PM_STATUS_LABELS[x] === i.label); if (st) set({ tab: 'schedule', view: undefined, status: st, overdue: undefined }); }} />
+                </Panel>
+                <Panel title="On-time completion" subtitle="Share of completed occurrences done within the grace window">
+                  <div className="flex items-center justify-center py-2">
+                    <SlaGauge pct={s.onTimePct} met={s.counts.completed} breached={s.counts.missed} label="On time" target={90} metLabel="completed" breachedLabel="missed" />
+                  </div>
+                </Panel>
+              </>
+            )
+          }
+        />
       )}
 
       {tab === 'schedule' && state.view !== 'calendar' && (
         <div className="card overflow-hidden">
-          <DataTable columns={occColumns} rows={occurrences.data?.items ?? []} loading={occurrences.isLoading} dense sort={{ key: state.sort ?? 'plannedDate', order: (state.order as 'asc' | 'desc') ?? 'asc' }} onSort={(key) => set({ sort: key, order: state.sort === key && state.order === 'asc' ? 'desc' : 'asc' }, false)} empty={<div className="py-10 text-center"><div className="font-medium">No occurrences match these filters</div><div className="text-[13px] text-muted mt-1">Adjust the filters or <button className="text-brand-600 hover:underline" onClick={clearFilters}>clear them</button>.</div></div>} />
+          <DataTable columns={occColumns} rows={occurrences.data?.items ?? []} loading={occurrences.isLoading} dense rowClassName={(o) => (o.status === 'missed' || (o.overdue && o.status !== 'completed' && o.status !== 'cancelled') ? 'row-rail-bad' : o.dueSoon && o.status !== 'completed' ? 'row-rail-warn' : undefined)} sort={{ key: state.sort ?? 'plannedDate', order: (state.order as 'asc' | 'desc') ?? 'asc' }} onSort={(key) => set({ sort: key, order: state.sort === key && state.order === 'asc' ? 'desc' : 'asc' }, false)} empty={<div className="py-10 text-center"><div className="font-medium">No occurrences match these filters</div><div className="text-[13px] text-muted mt-1">Adjust the filters or <button className="text-brand-600 hover:underline" onClick={clearFilters}>clear them</button>.</div></div>} />
           <Pagination page={page} pageSize={pageSize} total={occurrences.data?.total ?? 0} onPage={setPage} />
           {occurrences.isError && <div className="px-3 py-2 text-[12.5px] text-red-600">{(occurrences.error as Error).message}</div>}
         </div>

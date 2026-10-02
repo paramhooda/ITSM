@@ -18,6 +18,7 @@ import { EscalationMatrixEditor } from '@/components/contracts/EscalationMatrixE
 import { OptionalAttachmentList, OptionalAuditTrail } from '@/components/customers/OptionalModules';
 import type { ContractDetail, Entitlement, Consumption, ScopeItem, ServiceCoverageInput, EscalationLevel } from '@/components/contracts/types';
 import type { Contact, Site } from '@/components/customers/types';
+import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
 
 type TabKey = 'overview' | 'services' | 'entitlements' | 'scope' | 'sla' | 'documents' | 'history';
 const TABS: { key: TabKey; label: string }[] = [
@@ -388,7 +389,7 @@ function SlaTab({ c }: { c: ContractDetail }) {
               <thead><tr><th>Ticket type</th><th>Priority</th><th>Metric</th><th>Target</th><th>Warn at</th><th>Clock</th></tr></thead>
               <tbody>
                 {q.data.targets.map((t) => (
-                  <tr key={t.id}><td>{titleCase(t.ticketType)}</td><td>{t.priorityLabel ?? 'Any'}</td><td>{titleCase(t.metric)}</td><td className="tabular-nums">{fmtDuration(t.minutes)}</td><td className="tabular-nums">{t.warnPct}%</td><td className="text-muted">{t.calendarTime ? '24x7 elapsed' : 'Business hours'}</td></tr>
+                  <tr key={t.id}><td>{titleCase(t.ticketType)}</td><td>{t.priorityLabel ? <Badge color={PRIORITY_LEVEL_COLORS[t.priorityLevel ?? 0] ?? 'slate'}>{t.priorityLabel}</Badge> : <span className="text-muted">Any</span>}</td><td>{titleCase(t.metric)}</td><td className="tabular-nums">{fmtDuration(t.minutes)}</td><td className="tabular-nums">{t.warnPct}%</td><td className="text-muted">{t.calendarTime ? '24x7 elapsed' : 'Business hours'}</td></tr>
                 ))}
                 {q.data.targets.length === 0 && <tr><td colSpan={6} className="text-muted">No targets defined.</td></tr>}
               </tbody>

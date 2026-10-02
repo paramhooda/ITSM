@@ -3,6 +3,7 @@ import { create } from 'zustand';
 interface UiState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+  setSidebarCollapsed: (v: boolean) => void;
   assistantOpen: boolean;
   setAssistantOpen: (v: boolean) => void;
   assistantContext: Record<string, unknown> | null;
@@ -29,6 +30,14 @@ export const useUiStore = create<UiState>((set) => ({
       }
       return { sidebarCollapsed: next };
     }),
+  setSidebarCollapsed: (sidebarCollapsed) => {
+    try {
+      localStorage.setItem('itsm.sidebar', sidebarCollapsed ? 'collapsed' : 'open');
+    } catch {
+      /* ignore */
+    }
+    set({ sidebarCollapsed });
+  },
   assistantOpen: false,
   setAssistantOpen: (assistantOpen) => set({ assistantOpen }),
   assistantContext: null,

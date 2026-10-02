@@ -7,8 +7,9 @@ import { Button, Textarea, Badge } from '@/components/ui';
 import { fmtDateTime } from '@/lib/format';
 import { ticketsApi } from '../api';
 import type { Approval, TicketDetail } from '../types';
+import { APPROVAL_STATUS_COLORS } from '@/lib/statusColors';
 
-const STATUS_COLORS: Record<string, string> = { pending: 'amber', approved: 'green', rejected: 'red', skipped: 'gray', superseded: 'gray' };
+const STATUS_COLORS = APPROVAL_STATUS_COLORS;
 
 function approverLabel(a: Approval) {
   if (a.approverUser) return a.approverUser.name;

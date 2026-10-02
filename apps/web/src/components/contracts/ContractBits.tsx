@@ -2,12 +2,12 @@ import { Badge } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { fmtDate } from '@/lib/format';
 import type { Entitlement } from './types';
+import { CONTRACT_STATUS_COLORS } from '@/lib/statusColors';
 
 /** Status badge using the colour from the contract_status option list (falls back per status). */
 export function ContractStatusBadge({ status, label, color }: { status: string; label?: string | null; color?: string | null }) {
-  const fallback: Record<string, string> = { draft: 'slate', active: 'green', expiring: 'amber', expired: 'red', renewed: 'blue', terminated: 'gray' };
   return (
-    <Badge color={color ?? fallback[status] ?? 'slate'} dot>
+    <Badge color={color ?? CONTRACT_STATUS_COLORS[status] ?? 'slate'} dot>
       {label ?? status}
     </Badge>
   );

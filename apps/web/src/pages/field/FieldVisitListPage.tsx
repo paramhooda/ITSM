@@ -1,13 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Filter, CheckCircle2, CalendarDays, List as ListIcon, Clock, Wrench, BadgeCheck, Hourglass } from 'lucide-react';
-import { PageHeader, Button, Select, SearchInput, DataTable, Pagination, Input, Checkbox, Avatar, StatTile, Tabs, type Column } from '@/components/ui';
+import { Plus, CheckCircle2, CalendarDays, List as ListIcon, Clock, Wrench, BadgeCheck, Hourglass } from 'lucide-react';
+import { PageHeader, Button, Select, SearchInput, DataTable, Pagination, Input, Checkbox, Avatar, FilterBar, FilterChip, type Column } from '@/components/ui';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { Panel, RowList, Segmented } from '@/components/dashboards/Panel';
+import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { useListState } from '@/hooks/useListState';
 import { useLookups, useEngineers, useCustomersLookup } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
-import { fmtDateTime, fmtDate } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { fmtDateTime, fmtDate, fmtNumber, fmtDuration } from '@/lib/format';
+import { dotClass } from '@/lib/utils';
+import { VISIT_STATUS_COLORS } from '@/lib/statusColors';
 import { itemsOf } from '@/components/tickets/api';
 import { fieldApi, fieldKeys } from '@/components/field/api';
 import { VisitStatusBadge } from '@/components/field/VisitStatusBadge';
@@ -102,56 +106,75 @@ export default function FieldVisitListPage() {
   const teams = lookups?.teams ?? [];
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="Field service"
         subtitle={summary.data ? <span>{summary.data.byStatus.scheduled ?? 0} scheduled · {summary.data.byStatus.in_progress ?? 0} on site · {summary.data.entitlements.used}/{summary.data.entitlements.entitled} entitled visits used</span> : undefined}
         actions={can('field:manage') ? <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setCreateOpen(true)}>New visit</Button> : undefined}
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatTile label="Scheduled this week" value={tiles?.scheduledThisWeek ?? '—'} icon={<CalendarDays className="h-4 w-4" />} onClick={() => set({ view: 'calendar', week: undefined })} />
-        <StatTile label="In progress" value={tiles?.inProgress ?? '—'} tone={tiles?.inProgress ? 'warn' : 'default'} icon={<Wrench className="h-4 w-4" />} onClick={() => set({ view: 'list', status: 'in_progress' })} />
-        <StatTile label="Completed this month" value={tiles?.completedThisMonth ?? '—'} tone="good" icon={<BadgeCheck className="h-4 w-4" />} hint={summary.data?.avgWorkMinutes ? `avg ${summary.data.avgWorkMinutes} min on site` : undefined} onClick={() => set({ view: 'list', status: 'completed', from: ymd(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to: undefined })} />
-        <StatTile label="Pending acknowledgement" value={tiles?.pendingAcknowledgement ?? '—'} tone={tiles?.pendingAcknowledgement ? 'warn' : 'default'} icon={<Clock className="h-4 w-4" />} onClick={() => set({ view: 'list', status: 'completed', unacknowledged: 'true' })} />
-      </div>
-
-      <Tabs tabs={[{ key: 'list', label: <span className="inline-flex items-center gap-1.5"><ListIcon className="h-3.5 w-3.5" />List</span> }, { key: 'calendar', label: <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />Calendar</span> }]} value={view} onChange={(v) => set({ view: v }, false)} />
-
-      <div className="card p-2.5 flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {view === 'list' && <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search number or title…" className="w-56" />}
-          <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" className="w-48 h-8 py-0 text-[13px]" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
-          <Select value={state.engineerId ?? ''} onChange={(e) => set({ engineerId: e.target.value, mine: undefined })} placeholder="Engineer" className="w-44 h-8 py-0 text-[13px]" options={(engineers.data ?? []).map((u) => ({ value: u.id, label: u.name }))} />
-          <Select value={state.teamId ?? ''} onChange={(e) => set({ teamId: e.target.value })} placeholder="Team" className="w-40 h-8 py-0 text-[13px]" options={teams.map((t) => ({ value: t.id, label: t.name }))} />
-          {view === 'list' && (
+      <FilterBar
+        activeCount={activeFilterCount}
+        onClear={clearFilters}
+        trailing={<Segmented size="sm" options={[{ value: 'list', label: <span className="inline-flex items-center gap-1.5"><ListIcon className="h-3.5 w-3.5" />List</span> }, { value: 'calendar', label: <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />Calendar</span> }]} value={view} onChange={(v) => set({ view: v }, false)} />}
+        chips={
+          view === 'list' ? (
             <>
-              <Select value={state.typeId ?? ''} onChange={(e) => set({ typeId: e.target.value })} placeholder="Type" className="w-44 h-8 py-0 text-[13px]" options={options('field_visit_type').map((o) => ({ value: o.id, label: o.label }))} />
-              <Input type="date" value={state.from ?? ''} onChange={(e) => set({ from: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Scheduled from" />
-              <Input type="date" value={state.to ?? ''} onChange={(e) => set({ to: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Scheduled to" />
+              {VISIT_STATUSES.map((st: VisitStatus) => (
+                <FilterChip key={st} active={statuses.includes(st)} onClick={() => toggleStatus(st)} dot={dotClass(VISIT_STATUS_COLORS[st])} count={summary.data?.byStatus?.[st] ?? 0}>
+                  {STATUS_LABELS[st]}
+                </FilterChip>
+              ))}
+              {state.unacknowledged === 'true' && (
+                <FilterChip active onClick={() => set({ unacknowledged: undefined })} dot={dotClass('amber')}>
+                  Pending acknowledgement ×
+                </FilterChip>
+              )}
             </>
-          )}
-          <Checkbox checked={state.mine === 'true'} onChange={(e) => set({ mine: e.target.checked ? 'true' : undefined, engineerId: undefined })} label="Mine" />
-          {activeFilterCount > 0 && (
-            <Button variant="ghost" size="sm" onClick={clearFilters} icon={<X className="h-3.5 w-3.5" />}>Clear</Button>
-          )}
-        </div>
+          ) : undefined
+        }
+      >
+        {view === 'list' && <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search number or title…" className="w-56" />}
+        <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" className="w-48 h-8 py-0 text-[13px]" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
+        <Select value={state.engineerId ?? ''} onChange={(e) => set({ engineerId: e.target.value, mine: undefined })} placeholder="Engineer" className="w-44 h-8 py-0 text-[13px]" options={(engineers.data ?? []).map((u) => ({ value: u.id, label: u.name }))} />
+        <Select value={state.teamId ?? ''} onChange={(e) => set({ teamId: e.target.value })} placeholder="Team" className="w-40 h-8 py-0 text-[13px]" options={teams.map((t) => ({ value: t.id, label: t.name }))} />
         {view === 'list' && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Filter className="h-3.5 w-3.5 text-subtle mr-0.5" />
-            {VISIT_STATUSES.map((s: VisitStatus) => {
-              const on = statuses.includes(s);
-              const count = summary.data?.byStatus?.[s] ?? 0;
-              return (
-                <button key={s} onClick={() => toggleStatus(s)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', on ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>
-                  {STATUS_LABELS[s]} <span className="opacity-60">{count}</span>
-                </button>
-              );
-            })}
-            {state.unacknowledged === 'true' && <span className="ml-1 rounded-full border border-amber-400 bg-amber-500/10 px-2.5 py-0.5 text-[12px] text-amber-700">Pending acknowledgement</span>}
-          </div>
+          <>
+            <Select value={state.typeId ?? ''} onChange={(e) => set({ typeId: e.target.value })} placeholder="Type" className="w-44 h-8 py-0 text-[13px]" options={options('field_visit_type').map((o) => ({ value: o.id, label: o.label }))} />
+            <Input type="date" value={state.from ?? ''} onChange={(e) => set({ from: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Scheduled from" aria-label="Scheduled from" />
+            <Input type="date" value={state.to ?? ''} onChange={(e) => set({ to: e.target.value })} className="w-36 h-8 py-0 text-[13px]" title="Scheduled to" aria-label="Scheduled to" />
+          </>
         )}
-      </div>
+        <Checkbox checked={state.mine === 'true'} onChange={(e) => set({ mine: e.target.checked ? 'true' : undefined, engineerId: undefined })} label="Mine" />
+      </FilterBar>
+
+      <InsightBand
+        id="field"
+        loading={summary.isLoading}
+        summary={summary.data ? `${fmtNumber(summary.data.total)} visits in the last 90 days${state.customerId ? ' for this customer' : ''}` : undefined}
+        kpis={
+          tiles
+            ? [
+                { label: 'Scheduled this week', value: fmtNumber(tiles.scheduledThisWeek), icon: <CalendarDays className="h-4 w-4" />, hint: `${fmtNumber(tiles.requested)} requested, not yet scheduled`, onClick: () => set({ view: 'calendar', week: undefined }, false) },
+                { label: 'On site now', value: fmtNumber(tiles.inProgress), tone: tiles.inProgress ? 'warn' : 'default', icon: <Wrench className="h-4 w-4" />, hint: tiles.overdue ? `${fmtNumber(tiles.overdue)} overdue` : 'nothing overdue', onClick: () => set({ view: 'list', status: 'in_progress' }) },
+                { label: 'Completed this month', value: fmtNumber(tiles.completedThisMonth), tone: 'good', icon: <BadgeCheck className="h-4 w-4" />, hint: summary.data?.avgWorkMinutes ? `avg ${fmtDuration(summary.data.avgWorkMinutes)} on site` : undefined, onClick: () => set({ view: 'list', status: 'completed', from: ymd(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to: undefined }) },
+                { label: 'Pending acknowledgement', value: fmtNumber(tiles.pendingAcknowledgement), tone: tiles.pendingAcknowledgement ? 'warn' : 'good', icon: <Clock className="h-4 w-4" />, hint: 'completed, awaiting customer sign-off', onClick: () => set({ view: 'list', status: 'completed', unacknowledged: 'true' }) },
+              ]
+            : []
+        }
+        panels={
+          summary.data && (
+            <>
+              <Panel title="Visits by status" subtitle="Last 90 days · click to filter">
+                <BreakdownBar dense items={VISIT_STATUSES.map((st) => ({ label: STATUS_LABELS[st], value: summary.data?.byStatus?.[st] ?? 0, color: VISIT_STATUS_COLORS[st], active: statuses.length === 1 && statuses[0] === st })).filter((i) => i.value > 0)} onSelect={(i) => { const st = VISIT_STATUSES.find((x) => STATUS_LABELS[x] === i.label); if (st) set({ view: 'list', status: st }); }} />
+              </Panel>
+              <Panel title="Top engineers" subtitle="Completed visits and time on site">
+                <RowList dense empty="No completed visits yet" items={summary.data.topEngineers.slice(0, 6).map((e) => ({ key: e.engineerId ?? e.engineerName ?? 'none', leading: <Avatar name={e.engineerName} size="xs" />, primary: e.engineerName ?? 'Unassigned', secondary: `${fmtDuration(e.workMinutes)} on site`, right: `${fmtNumber(e.count)} visits` }))} />
+              </Panel>
+            </>
+          )
+        }
+      />
 
       {view === 'list' ? (
         <div className="card overflow-hidden">
@@ -160,6 +183,7 @@ export default function FieldVisitListPage() {
             rows={list.data?.items ?? []}
             loading={list.isLoading}
             dense
+            rowClassName={(r) => (r.status === 'completed' && !r.customerAckAt ? 'row-rail-warn' : r.scheduledStart && ['requested', 'scheduled'].includes(r.status) && new Date(r.scheduledStart).getTime() < Date.now() ? 'row-rail-bad' : undefined)}
             onRowClick={(r) => navigate(`/field/${r.id}`)}
             sort={{ key: state.sort ?? 'scheduledStart', order: (state.order as 'asc' | 'desc') ?? 'asc' }}
             onSort={(key) => set({ sort: key, order: state.sort === key && state.order === 'asc' ? 'desc' : 'asc' }, false)}

@@ -1,9 +1,10 @@
 import { Badge } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
+import { COVERAGE_COLORS, LIFECYCLE_COLORS } from '@/lib/statusColors';
 
 export interface Coverage { status: 'none' | 'active' | 'expiring' | 'expired'; days: number | null; end: string | null }
 
-const COLORS: Record<Coverage['status'], string> = { none: 'slate', active: 'green', expiring: 'amber', expired: 'red' };
+const COLORS: Record<Coverage['status'], string> = COVERAGE_COLORS as Record<Coverage['status'], string>;
 
 /** Warranty / AMC coverage badge: colour by status, with the end date and remaining days. */
 export function CoverageBadge({ coverage, end, showDate = true }: { coverage?: Coverage | null; end?: string | null; showDate?: boolean }) {
@@ -24,7 +25,7 @@ export function computeCoverage(end?: string | null, window = 90): Coverage {
   return { status: days < 0 ? 'expired' : days <= window ? 'expiring' : 'active', days, end };
 }
 
-export const LIFECYCLE_COLORS: Record<string, string> = { ordered: 'blue', in_stock: 'sky', deployed: 'green', in_repair: 'amber', retired: 'slate', disposed: 'gray' };
+export { LIFECYCLE_COLORS };
 export function LifecycleBadge({ stage }: { stage?: string | null }) {
   return <Badge color={LIFECYCLE_COLORS[stage ?? ''] ?? 'slate'}>{(stage ?? '—').replace(/_/g, ' ')}</Badge>;
 }

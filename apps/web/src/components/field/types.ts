@@ -1,3 +1,4 @@
+import { VISIT_STATUS_COLORS } from '@/lib/statusColors';
 /** API shapes of the field service module (mirrors apps/api/src/modules/field). */
 export type VisitStatus = 'requested' | 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
 export const VISIT_STATUSES: VisitStatus[] = ['requested', 'scheduled', 'in_progress', 'completed', 'cancelled'];
@@ -195,4 +196,4 @@ export interface Paginated<T> {
 }
 
 export const STATUS_LABELS: Record<VisitStatus, string> = { requested: 'Requested', scheduled: 'Scheduled', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled' };
-export const STATUS_COLORS: Record<VisitStatus, string> = { requested: 'slate', scheduled: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'gray' };
+export const STATUS_COLORS: Record<VisitStatus, string> = VISIT_STATUS_COLORS as Record<VisitStatus, string>;

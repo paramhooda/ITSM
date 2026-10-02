@@ -10,10 +10,11 @@ import { cn } from '@/lib/utils';
 import { Panel } from '@/components/tickets/Panel';
 import { AcknowledgeDialog, type AcknowledgeInput } from '@/components/portal/AcknowledgeDialog';
 import { portalApi, pk, type PortalOccurrence, type PortalVisit } from '@/components/portal/api';
+import { VISIT_STATUS_COLORS, PM_STATUS_COLORS } from '@/lib/statusColors';
 
 type Entry = { kind: 'visit'; date: string; visit: PortalVisit } | { kind: 'pm'; date: string; occurrence: PortalOccurrence };
 
-const STATUS_COLOR: Record<string, string> = { requested: 'slate', scheduled: 'blue', in_progress: 'indigo', completed: 'green', cancelled: 'gray', planned: 'slate', missed: 'red', rescheduled: 'amber' };
+const STATUS_COLOR: Record<string, string> = { ...VISIT_STATUS_COLORS, ...PM_STATUS_COLORS };
 
 function dayLabel(iso: string) {
   const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso);

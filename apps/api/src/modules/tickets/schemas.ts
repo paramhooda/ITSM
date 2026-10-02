@@ -222,7 +222,10 @@ export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
 });
 export type ListQuery = z.infer<typeof listQuerySchema>;
 
-export const statsQuerySchema = z.object({ customerId: uuid.optional(), type: z.enum(TICKET_TYPES).optional() });
+/** Stats accept every list filter (the paging/sort/projection fields are meaningless for aggregates). */
+export const statsQuerySchema = listQuerySchema.omit({ page: true, pageSize: true, sort: true, order: true, fields: true });
+/** The list filters alone (every key optional): what `buildWhere`/`ticketStats` consume; callers may pass a subset. */
+export type StatsQuery = Partial<z.infer<typeof statsQuerySchema>>;
 
 export const savedViewSchema = z.object({
   name: z.string().trim().min(1).max(100),

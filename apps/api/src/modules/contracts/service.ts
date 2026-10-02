@@ -7,8 +7,8 @@ import { diffChanges } from '@/core/audit';
 import { orderBy, searchLike } from '@/core/query';
 import { getSetting } from '@/modules/config/service';
 import { loadContract, todayStr, addDays, daysToExpiry, contractStatusOptions, statusDisplay, optionLabels, userNames, type ContractRow, sequential } from './common';
-import { COVERING_STATUSES, commercialFields, type ContractCreate, type ContractPatch, type ContractListQuery, type ContractServiceInput, type RenewInput, type EntitlementInput, type ScopeItemInput } from './schemas';
-import { utilizationBatch, decorateEntitlements } from './entitlements';
+import { COVERING_STATUSES, CONTRACT_STATUSES, commercialFields, type ContractCreate, type ContractPatch, type ContractListQuery, type ContractSummaryQuery, type ContractServiceInput, type RenewInput, type EntitlementInput, type ScopeItemInput } from './schemas';
+import { utilizationBatch, decorateEntitlements, entitlementSummary } from './entitlements';
 import { listScopeItems } from './scope';
 
 const c = schema.contracts;
@@ -230,6 +230,68 @@ export async function listContracts(ctx: Ctx, q: ContractListQuery) {
 export async function expiringContracts(ctx: Ctx, days = 90, customerId?: string) {
   const res = await listContracts(ctx, { page: 1, pageSize: 500, sort: 'endDate', order: 'asc', expiringWithinDays: days, customerId });
   return { items: res.items, total: res.total, days };
+}
+
+// ---------------------------------------------------------------- summary
+
+/**
+ * Headline numbers for the contracts page. `active` = covering (active/expiring)
+ * contracts whose end date has not passed; `expiring30/90` = covering contracts
+ * ending within 30/90 days; `expired` = status expired or end date in the past.
+ * Entitlement counts come from the same calculation as /contracts/entitlements/summary.
+ */
+export async function contractSummary(ctx: Ctx, q: ContractSummaryQuery) {
+  ctx.require('contracts:read', q.customerId);
+  const conds: SQL[] = [];
+  if (q.customerId) {
+    ctx.requireCustomer(q.customerId);
+    conds.push(eq(c.customerId, q.customerId));
+  }
+  const where = conds.length ? and(...conds) : undefined;
+  const today = todayStr();
+  const count = sql<number>`count(*)::int`;
+  const covering = inArray(c.status, COVERING_STATUSES);
+  const endsWithin = (days: number) => sql`${c.endDate} >= ${today}::date AND ${c.endDate} <= ${addDays(today, days)}::date`;
+  const [agg, byStatusRows, byTypeRows, statusMap, ents] = await sequential([
+    () => ctx.tx
+      .select({
+        total: count,
+        active: sql<number>`count(*) FILTER (WHERE ${covering} AND ${c.endDate} >= ${today}::date)::int`,
+        expiring30: sql<number>`count(*) FILTER (WHERE ${covering} AND ${endsWithin(30)})::int`,
+        expiring90: sql<number>`count(*) FILTER (WHERE ${covering} AND ${endsWithin(90)})::int`,
+        expired: sql<number>`count(*) FILTER (WHERE ${c.status} = 'expired' OR ${c.endDate} < ${today}::date)::int`,
+      })
+      .from(c)
+      .where(where),
+    () => ctx.tx.select({ key: c.status, count }).from(c).where(where).groupBy(c.status),
+    () => ctx.tx
+      .select({ id: c.typeId, key: schema.configOptions.key, label: schema.configOptions.label, count })
+      .from(c)
+      .leftJoin(schema.configOptions, eq(schema.configOptions.id, c.typeId))
+      .where(where)
+      .groupBy(c.typeId, schema.configOptions.key, schema.configOptions.label)
+      .orderBy(desc(count)),
+    () => contractStatusOptions(ctx.tx),
+    () => entitlementSummary(ctx, q.customerId, 1),
+  ]);
+  const statusOrder = new Map<string, number>(CONTRACT_STATUSES.map((s, i) => [s, i]));
+  const byStatus = byStatusRows
+    .sort((a, b) => (statusOrder.get(a.key) ?? 99) - (statusOrder.get(b.key) ?? 99))
+    .map((r) => {
+      const d = statusDisplay(r.key, statusMap);
+      return { key: r.key, label: d.statusLabel, color: d.statusColor, count: r.count };
+    });
+  return {
+    total: agg[0]?.total ?? 0,
+    active: agg[0]?.active ?? 0,
+    expiring30: agg[0]?.expiring30 ?? 0,
+    expiring90: agg[0]?.expiring90 ?? 0,
+    expired: agg[0]?.expired ?? 0,
+    byStatus,
+    byType: byTypeRows.map((r) => ({ id: r.id, key: r.key ?? null, label: r.label ?? 'Unset', count: r.count })),
+    entitlementsOverThreshold: ents.overThreshold,
+    entitlementsExhausted: ents.exhausted,
+  };
 }
 
 // ---------------------------------------------------------------- get

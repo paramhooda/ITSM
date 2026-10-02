@@ -12,10 +12,12 @@ export interface BreakdownItem {
   /** Option colour name (priority/severity); falls back to series slot 1. */
   color?: string | null;
   href?: string;
+  /** Marks the row as the active selection (e.g. the filter currently applied). */
+  active?: boolean;
 }
 
 /** Horizontal bar list for categorical breakdowns (identity → one colour unless the entity carries its own). */
-export function BreakdownBar({ items, emptyText = 'Nothing to show', max, dense }: { items: BreakdownItem[]; emptyText?: string; max?: number; dense?: boolean }) {
+export function BreakdownBar({ items, emptyText = 'Nothing to show', max, dense, onSelect }: { items: BreakdownItem[]; emptyText?: string; max?: number; dense?: boolean; /** Click handler (rows render as buttons); `href` wins when both are set. */ onSelect?: (item: BreakdownItem) => void }) {
   const t = useChartTheme();
   if (!items.length) return <div className="text-[13px] text-subtle py-4 text-center">{emptyText}</div>;
   const top = max ?? Math.max(1, ...items.map((i) => i.value));
@@ -25,7 +27,7 @@ export function BreakdownBar({ items, emptyText = 'Nothing to show', max, dense 
         const row = (
           <>
             <div className="flex items-center justify-between gap-2 text-[12.5px]">
-              <span className="truncate min-w-0">{i.label}</span>
+              <span className={cn('truncate min-w-0', i.active && 'font-medium text-default')}>{i.label}</span>
               <span className="tabular-nums text-muted shrink-0">
                 {fmtNumber(i.value)}
                 {i.secondary !== undefined && i.secondary !== null && i.secondary > 0 && <span className="ml-1.5 text-red-600" title={i.secondaryLabel ?? 'breached'}>({i.secondary})</span>}
@@ -38,7 +40,13 @@ export function BreakdownBar({ items, emptyText = 'Nothing to show', max, dense 
         );
         return (
           <li key={`${i.label}-${idx}`}>
-            {i.href ? <Link to={i.href} className="block rounded-md hover:bg-surface-2 px-1 -mx-1 py-0.5">{row}</Link> : <div className="px-1 -mx-1 py-0.5">{row}</div>}
+            {i.href ? (
+              <Link to={i.href} className="block rounded-md hover:bg-surface-2 px-1 -mx-1 py-0.5">{row}</Link>
+            ) : onSelect ? (
+              <button type="button" onClick={() => onSelect(i)} aria-pressed={i.active} className={cn('block w-full text-left rounded-md hover:bg-surface-2 px-1 -mx-1 py-0.5', i.active && 'bg-surface-2')}>{row}</button>
+            ) : (
+              <div className="px-1 -mx-1 py-0.5">{row}</div>
+            )}
           </li>
         );
       })}

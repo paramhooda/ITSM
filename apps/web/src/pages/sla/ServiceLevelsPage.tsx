@@ -3,14 +3,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Star, CalendarClock, FileSignature, Layers, ArrowRight, ShieldCheck } from 'lucide-react';
 import { get } from '@/api/client';
-import { Button, Badge, ErrorBlock, EmptyState, Card } from '@/components/ui';
-import { KpiGrid } from '@/components/dashboards/KpiGrid';
-import { KpiSkeleton } from '@/components/dashboards/Panel';
+import { Button, Badge, ErrorBlock, EmptyState, Card, PageHeader } from '@/components/ui';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { KpiSkeleton, Panel } from '@/components/dashboards/Panel';
+import { SlaGauge } from '@/components/dashboards/SlaGauge';
+import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { useAuthStore } from '@/stores/auth';
 import { formatDuration } from '@/components/admin/DurationInput';
-import { fmtNumber, fmtPct } from '@/lib/format';
+import { fmtNumber, fmtPct, titleCase } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { usageSummary, type SlaPolicy, type Compliance } from './types';
+import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
 
 export const useSlaPolicies = () => useQuery({ queryKey: ['sla', 'policies'], queryFn: () => get<{ items: SlaPolicy[] }>('/sla/policies') });
 
@@ -36,26 +39,35 @@ export default function ServiceLevelsPage() {
   const tone = c?.compliancePct === null || c?.compliancePct === undefined ? 'default' : c.compliancePct >= 95 ? 'good' : c.compliancePct >= 85 ? 'warn' : 'bad';
 
   return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
-        <div className="min-w-0">
-          <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.025em]">Service levels</h1>
-          <div className="text-[13.5px] text-muted mt-1">Define the response and resolution targets you commit to, then map each contract to a policy.</div>
-        </div>
-        {canEdit && <Button icon={<Plus className="h-4 w-4" />} onClick={() => navigate('/sla/new')}>New policy</Button>}
-      </div>
-
+    <div className="flex flex-col gap-4">
+      <PageHeader title="Service levels" subtitle="Define the response and resolution targets you commit to, then map each contract to a policy." actions={canEdit ? <Button icon={<Plus className="h-4 w-4" />} onClick={() => navigate('/sla/new')}>New policy</Button> : undefined} />
       {q.isError && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
       {q.isLoading && <KpiSkeleton />}
       {q.data && (
         <div className="flex flex-col gap-6">
-          <KpiGrid
-            items={[
+          <InsightBand
+            id="sla"
+            summary={`${fmtNumber(totals.policies)} policies · compliance ${fmtPct(c?.compliancePct ?? null, 1)} over 30 days`}
+            kpis={[
               { label: 'SLA policies', value: fmtNumber(totals.policies), hint: `${fmtNumber(totals.active)} active`, icon: <ShieldCheck className="h-4 w-4" /> },
               { label: 'Contracts mapped', value: fmtNumber(totals.contracts), hint: 'contract and service-level mappings', icon: <FileSignature className="h-4 w-4" />, onClick: () => navigate('/contracts') },
               { label: 'Services with a default', value: fmtNumber(totals.services), hint: 'policy applied when a contract sets none', icon: <Layers className="h-4 w-4" />, onClick: () => navigate('/services') },
               { label: 'Compliance · 30 days', value: fmtPct(c?.compliancePct ?? null, 1), tone, hint: c ? `${fmtNumber(c.met)} met · ${fmtNumber(c.breached)} breached · ${fmtNumber(c.overdueRunning)} overdue now` : 'All metrics, all customers', icon: <CalendarClock className="h-4 w-4" /> },
             ]}
+            panels={
+              compliance.data && (
+                <>
+                  <Panel title="Compliance by metric" subtitle="Last 30 days · met vs breached per SLA metric">
+                    <BreakdownBar dense items={compliance.data.groups.map((g) => ({ label: titleCase(g.label), value: g.met + g.breached, secondary: g.breached, secondaryLabel: 'breached', color: g.compliancePct === null ? null : g.compliancePct >= 95 ? 'green' : g.compliancePct >= 85 ? 'amber' : 'red' }))} emptyText="No SLA clocks completed in the last 30 days" />
+                  </Panel>
+                  <Panel title="Overall compliance" subtitle="Share of SLA clocks met in the last 30 days">
+                    <div className="flex items-center justify-center py-2">
+                      <SlaGauge pct={c?.compliancePct ?? null} met={c?.met} breached={c?.breached} label="Compliance" />
+                    </div>
+                  </Panel>
+                </>
+              )
+            }
           />
 
           {items.length === 0 ? (
@@ -112,7 +124,7 @@ function PolicyCard({ policy: p, className }: { policy: SlaPolicy; className?: s
             <tbody>
               {rows.map((r) => (
                 <tr key={r.priorityLabel} className="border-t border-default">
-                  <td className="py-1.5 text-default font-medium">{r.priorityLabel}</td>
+                  <td className="py-1.5"><Badge color={PRIORITY_LEVEL_COLORS[r.priorityLevel ?? 0] ?? 'slate'}>{r.priorityLabel}</Badge></td>
                   <td className="py-1.5 text-right tnum text-secondary">{r.response !== null ? formatDuration(r.response) : '—'}</td>
                   <td className="py-1.5 text-right tnum text-secondary">{r.resolution !== null ? formatDuration(r.resolution) : '—'}</td>
                 </tr>

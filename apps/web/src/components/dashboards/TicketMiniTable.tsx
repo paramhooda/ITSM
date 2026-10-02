@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import { fmtDuration, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { TicketRow, SlaCompact } from './types';
+import { TICKET_CATEGORY_COLORS } from '@/lib/statusColors';
 
 export type TicketColumn = 'customer' | 'site' | 'priority' | 'severity' | 'status' | 'category' | 'ci' | 'sla' | 'assignee' | 'age' | 'resolved' | 'activity' | 'due' | 'visit';
 
@@ -65,7 +66,7 @@ export function TicketMiniTable({ rows, columns = ['customer', 'priority', 'stat
               {has('severity') && <td>{t.severity ? <Badge color={t.severity_color ?? undefined}>{t.severity}</Badge> : '—'}</td>}
               {has('category') && <td className="text-muted whitespace-nowrap">{t.category ?? '—'}</td>}
               {has('ci') && <td className="text-muted whitespace-nowrap max-w-[140px] truncate">{t.ci_id && !isCustomer ? <Link to={`/cmdb/${t.ci_id}`} className="hover:underline">{t.ci_name}</Link> : t.ci_name ?? '—'}</td>}
-              {has('status') && <td>{t.status ? <Badge color={t.status_color ?? undefined}>{t.status}</Badge> : '—'}</td>}
+              {has('status') && <td>{t.status ? <Badge color={t.status_color ?? TICKET_CATEGORY_COLORS[t.status_category ?? ''] ?? undefined} dot>{t.status}</Badge> : '—'}</td>}
               {has('sla') && <td className="whitespace-nowrap"><SlaCell sla={t.sla} /></td>}
               {has('due') && <td className="whitespace-nowrap text-muted">{t.due_at ? relativeTime(t.due_at) : '—'}</td>}
               {has('assignee') && <td className="text-muted whitespace-nowrap">{t.assignee ?? <span className="text-amber-600">Unassigned</span>}</td>}

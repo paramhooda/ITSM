@@ -238,6 +238,11 @@ textarea {
   .table tbody tr:last-child td {
     border-bottom: none;
   }
+  /* Attention rails: a 2px inset on the first cell, used only for breached / at-risk / missed rows. */
+  .table tbody tr.row-rail-bad td:first-child { box-shadow: inset 2px 0 0 #dc2626; }
+  .table tbody tr.row-rail-warn td:first-child { box-shadow: inset 2px 0 0 #f59e0b; }
+  .table tbody tr.row-rail-good td:first-child { box-shadow: inset 2px 0 0 #16a34a; }
+
 
   .prose-sm {
     color: var(--text-2);

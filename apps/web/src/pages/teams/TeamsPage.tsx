@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { UsersRound, Users, Ticket, AlertTriangle, Star, Mail, Phone, Settings2, Search } from 'lucide-react';
+import { UsersRound, Users, Ticket, AlertTriangle, Star, Mail, Phone, Settings2 } from 'lucide-react';
 import { get } from '@/api/client';
-import { Badge, Button, Card, ErrorBlock, EmptyState, Avatar, LoadingBlock } from '@/components/ui';
-import { KpiGrid } from '@/components/dashboards/KpiGrid';
-import { Segmented } from '@/components/dashboards/Panel';
+import { Badge, Button, Card, ErrorBlock, EmptyState, Avatar, LoadingBlock, PageHeader, SearchInput, FilterBar } from '@/components/ui';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { Panel, Segmented } from '@/components/dashboards/Panel';
+import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
+import { DOMAIN_COLORS } from '@/lib/statusColors';
 import { useAuthStore } from '@/stores/auth';
 import { useLookups } from '@/hooks/useLookups';
 import { fmtNumber, relativeTime } from '@/lib/format';
@@ -41,8 +43,6 @@ interface Directory {
   totals: { teams: number; people: number; multiTeam: number; open: number; unassigned: number; breached: number };
 }
 
-const TYPE_COLORS: Record<string, string> = { noc: 'blue', soc: 'red', field: 'amber', service_desk: 'teal', infrastructure: 'indigo', network: 'sky', security: 'rose', cloud: 'violet', general: 'slate' };
-
 /** Who works where: every team with its people and live workload; people can sit in several teams. */
 export default function TeamsPage() {
   const can = useAuthStore((s) => s.can);
@@ -66,33 +66,36 @@ export default function TeamsPage() {
   }, [teams, needle]);
 
   return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
-        <div className="min-w-0">
-          <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.025em]">Teams</h1>
-          <div className="text-[13.5px] text-muted mt-1">Who works in which team, who leads it, and how much open work each team carries.</div>
-        </div>
-        {can('admin:users') && <Button variant="outline" icon={<Settings2 className="h-4 w-4" />} onClick={() => (window.location.href = '/admin/teams')}>Manage teams</Button>}
-      </div>
+    <div className="flex flex-col gap-4">
+      <PageHeader title="Teams" subtitle="Who works in which team, who leads it, and how much open work each team carries." actions={can('admin:users') ? <Button variant="outline" icon={<Settings2 className="h-4 w-4" />} onClick={() => (window.location.href = '/admin/teams')}>Manage teams</Button> : undefined} />
       {dir.isError && <ErrorBlock error={dir.error} retry={() => dir.refetch()} />}
       {dir.isLoading && <LoadingBlock />}
       {dir.data && (
-        <div className="flex flex-col gap-6">
-          <KpiGrid
-            items={[
+        <div className="flex flex-col gap-4">
+          <FilterBar activeCount={needle ? 1 : 0} onClear={() => setQ('')} trailing={<Segmented size="sm" options={[{ value: 'teams', label: 'By team', count: teams.length }, { value: 'people', label: 'By person', count: people.length }]} value={view} onChange={setView} />}>
+            <SearchInput value={q} onChange={setQ} placeholder="Search teams or people…" className="w-72" />
+          </FilterBar>
+
+          <InsightBand
+            id="teams"
+            summary={`${fmtNumber(dir.data.totals.teams)} teams · ${fmtNumber(dir.data.totals.people)} people`}
+            kpis={[
               { label: 'Teams', value: fmtNumber(dir.data.totals.teams), hint: `${fmtNumber(dir.data.totals.people)} people · ${fmtNumber(dir.data.totals.multiTeam)} in more than one team`, icon: <UsersRound className="h-4 w-4" /> },
-              { label: 'Open work in teams', value: fmtNumber(dir.data.totals.open), hint: 'tickets assigned to a team', icon: <Ticket className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets?open=true') },
-              { label: 'Waiting for an owner', value: fmtNumber(dir.data.totals.unassigned), tone: dir.data.totals.unassigned > 0 ? 'warn' : 'good', hint: 'in a team queue, nobody assigned', icon: <Users className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets?open=true&unassigned=true') },
-              { label: 'Breached in teams', value: fmtNumber(dir.data.totals.breached), tone: dir.data.totals.breached > 0 ? 'bad' : 'good', hint: 'open tickets past an SLA target', icon: <AlertTriangle className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets?open=true&slaState=breached') },
+              { label: 'Open work in teams', value: fmtNumber(dir.data.totals.open), hint: 'tickets assigned to a team', icon: <Ticket className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets') },
+              { label: 'Waiting for an owner', value: fmtNumber(dir.data.totals.unassigned), tone: dir.data.totals.unassigned > 0 ? 'warn' : 'good', hint: 'in a team queue, nobody assigned', icon: <Users className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets?assignee=unassigned') },
+              { label: 'Breached in teams', value: fmtNumber(dir.data.totals.breached), tone: dir.data.totals.breached > 0 ? 'bad' : 'good', hint: 'open tickets past an SLA target', icon: <AlertTriangle className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets?slaState=breached') },
             ]}
+            panels={
+              <>
+                <Panel title="Open tickets by team" subtitle="Breached tickets in red · click a team to open its queue">
+                  <BreakdownBar dense items={[...teams].sort((a, b) => b.load.open - a.load.open).map((t) => ({ label: t.name, value: t.load.open, secondary: t.load.breached, secondaryLabel: 'breached', color: DOMAIN_COLORS[t.teamType] ?? null, href: `/tickets?teamId=${t.id}` }))} emptyText="No team queues" />
+                </Panel>
+                <Panel title="Largest teams" subtitle="People per team">
+                  <BreakdownBar dense items={[...teams].sort((a, b) => b.members.length - a.members.length).slice(0, 8).map((t) => ({ label: t.name, value: t.members.length }))} emptyText="No teams yet" />
+                </Panel>
+              </>
+            }
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <Segmented options={[{ value: 'teams', label: 'By team', count: teams.length }, { value: 'people', label: 'By person', count: people.length }]} value={view} onChange={setView} />
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-subtle pointer-events-none" />
-              <input className="input pl-9" placeholder="Search teams or people…" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-          </div>
 
           {view === 'teams' && (
             filteredTeams.length === 0 ? <Card><EmptyState icon={<UsersRound className="h-5 w-5" />} title="No teams match" /></Card> : (
@@ -103,7 +106,7 @@ export default function TeamsPage() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{t.name}</h2>
-                          <Badge color={TYPE_COLORS[t.teamType] ?? 'slate'}>{byKey('team_type', t.teamType)?.label ?? t.teamType}</Badge>
+                          <Badge color={DOMAIN_COLORS[t.teamType] ?? 'slate'}>{byKey('team_type', t.teamType)?.label ?? t.teamType}</Badge>
                           {t.members.some((m) => m.id === me?.id) && <Badge color="green">your team</Badge>}
                         </div>
                         <div className="text-[12.5px] text-muted mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -113,9 +116,9 @@ export default function TeamsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-4 shrink-0 text-[12.5px] tnum">
-                        <Stat label="Open" value={t.load.open} to={`/tickets?open=true&teamId=${t.id}`} />
-                        <Stat label="Unassigned" value={t.load.unassigned} tone={t.load.unassigned > 0 ? 'warn' : undefined} to={`/tickets?open=true&unassigned=true&teamId=${t.id}`} />
-                        <Stat label="Breached" value={t.load.breached} tone={t.load.breached > 0 ? 'bad' : undefined} to={`/tickets?open=true&slaState=breached&teamId=${t.id}`} />
+                        <Stat label="Open" value={t.load.open} to={`/tickets?teamId=${t.id}`} />
+                        <Stat label="Unassigned" value={t.load.unassigned} tone={t.load.unassigned > 0 ? 'warn' : undefined} to={`/tickets?assignee=unassigned&teamId=${t.id}`} />
+                        <Stat label="Breached" value={t.load.breached} tone={t.load.breached > 0 ? 'bad' : undefined} to={`/tickets?slaState=breached&teamId=${t.id}`} />
                       </div>
                     </div>
                     {t.members.length === 0 ? (

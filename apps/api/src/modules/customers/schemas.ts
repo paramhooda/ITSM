@@ -43,6 +43,10 @@ export const customerListQuery = z.object({
 });
 export type CustomerListQuery = z.infer<typeof customerListQuery>;
 
+/** GET /customers/summary: the list filters without paging/sort/projection. */
+export const customerSummaryQuery = customerListQuery.omit({ page: true, pageSize: true, sort: true, order: true, fields: true });
+export type CustomerSummaryQuery = z.infer<typeof customerSummaryQuery>;
+
 export const siteInput = z.object({
   code: z.string().min(1).max(32).regex(/^[A-Za-z0-9._-]+$/, 'Letters, digits, dot, dash and underscore only').optional(),
   name: z.string().min(1).max(200),

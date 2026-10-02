@@ -237,4 +237,39 @@ describe('contracts, scope and entitlements', () => {
       expect(history.items.map((h) => h.action)).toEqual(expect.arrayContaining(['create', 'renew']));
     });
   });
+
+  describe('summary', () => {
+    it('counts visible contracts by status/type and narrows by customer', async () => {
+      const all = await as((ctx) => contracts.contractSummary(ctx, {}));
+      const allList = await as((ctx) => contracts.listContracts(ctx, { page: 1, pageSize: 500 }));
+      expect(all.total).toBe(allList.total);
+      expect(Array.isArray(all.byStatus)).toBe(true);
+      expect(all.byStatus.reduce((n, s) => n + s.count, 0)).toBe(all.total);
+      expect(all.byType.reduce((n, s) => n + s.count, 0)).toBe(all.total);
+
+      // This customer by now: the renewed AMC, its draft successor, 'Expiring soon' (ends in 5 days) and 'Past' (expired).
+      const mine = await as((ctx) => contracts.contractSummary(ctx, { customerId: ids.customer }));
+      const mineList = await as((ctx) => contracts.listContracts(ctx, { page: 1, pageSize: 500, customerId: ids.customer }));
+      expect(mine.total).toBe(mineList.total);
+      expect(mine.total).toBe(4);
+      expect(mine.total).toBeLessThanOrEqual(all.total);
+      expect(mine.byStatus.map((s) => [s.key, s.count])).toEqual([
+        ['draft', 1],
+        ['expiring', 1],
+        ['expired', 1],
+        ['renewed', 1],
+      ]);
+      expect(mine.byStatus.find((s) => s.key === 'expired')?.label).toBe('Expired');
+      expect(mine.active).toBe(1);
+      expect(mine.expiring30).toBe(1);
+      expect(mine.expiring90).toBe(1);
+      expect(mine.expired).toBe(1);
+      expect(mine.byType).toEqual([{ id: null, key: null, label: 'Unset', count: 4 }]);
+      expect(mine.entitlementsOverThreshold).toBe(0);
+      expect(mine.entitlementsExhausted).toBe(0);
+
+      const none = await as((ctx) => contracts.contractSummary(ctx, { customerId: ids.customer2 }));
+      expect(none).toMatchObject({ total: 0, active: 0, expiring30: 0, expiring90: 0, expired: 0, byStatus: [], byType: [] });
+    });
+  });
 });

@@ -28,7 +28,7 @@ export default async function routes(app: FastifyInstance) {
 
   // ---- collection
   r.get('/tickets', { preHandler: read, schema: { tags, querystring: S.listQuerySchema } }, h((ctx, req) => list.listTickets(ctx, req.query as S.ListQuery)));
-  r.get('/tickets/stats', { preHandler: read, schema: { tags, querystring: S.statsQuerySchema } }, h((ctx, req) => list.ticketStats(ctx, req.query as z.infer<typeof S.statsQuerySchema>)));
+  r.get('/tickets/stats', { preHandler: read, schema: { tags, querystring: S.statsQuerySchema } }, h((ctx, req) => list.ticketStats(ctx, req.query as S.StatsQuery)));
   r.get('/tickets/lookup', { preHandler: read, schema: { tags, querystring: z.object({ q: z.string().max(100), customerId: z.string().uuid().optional(), excludeId: z.string().uuid().optional() }) } }, h((ctx, req) => {
     const q = req.query as { q: string; customerId?: string; excludeId?: string };
     return act.lookupTickets(ctx, q.q, q.customerId, q.excludeId);

@@ -67,7 +67,7 @@ export function ScopeTable({ groups, canManage, onEdit, onDelete, filterable = t
                     {i.categoryLabel ?? '—'}
                     {i.typeLabel && <span className="text-subtle"> · {i.typeLabel}</span>}
                   </td>
-                  <td className="text-[12.5px] text-muted">{i.statusLabel ?? '—'}</td>
+                  <td>{i.statusLabel ? <Badge color="slate" dot>{i.statusLabel}</Badge> : <span className="text-subtle">—</span>}</td>
                   {canManage && (
                     <td>
                       <div className="flex items-center justify-end gap-1">

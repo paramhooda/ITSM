@@ -11,10 +11,11 @@ import { ScopeTable } from '@/components/portal/ScopeTable';
 import { SlaTargetsTable } from '@/components/portal/SlaTargetsTable';
 import { EntitlementBars } from '@/components/portal/EntitlementBars';
 import { portalApi, pk, type PortalContract } from '@/components/portal/api';
+import { CONTRACT_STATUS_COLORS } from '@/lib/statusColors';
 
 type Tab = 'scope' | 'sla' | 'entitlements' | 'escalation' | 'documents';
 
-const STATUS_COLOR: Record<string, string> = { active: 'green', expiring: 'amber', expired: 'red', renewed: 'blue', terminated: 'gray', draft: 'slate' };
+const STATUS_COLOR = CONTRACT_STATUS_COLORS;
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
 function countdown(days: number) {

@@ -1,7 +1,8 @@
 import { Badge } from '@/components/ui';
 import type { Severity } from './types';
+import { SEVERITY_COLORS, EVENT_STATUS_COLORS } from '@/lib/statusColors';
 
-export const SEVERITY_COLORS: Record<string, string> = { critical: 'red', high: 'orange', medium: 'amber', low: 'blue', info: 'slate' };
+export { SEVERITY_COLORS };
 export const SEVERITY_LABELS: Record<string, string> = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info' };
 
 export function SeverityBadge({ severity, className }: { severity?: Severity | string | null; className?: string }) {
@@ -13,9 +14,9 @@ export function SeverityBadge({ severity, className }: { severity?: Severity | s
   );
 }
 
-const STATUS_COLORS: Record<string, string> = { open: 'red', resolved: 'green', acknowledged: 'purple', info: 'slate' };
+const STATUS_COLORS = EVENT_STATUS_COLORS;
 
-export function EventStatusBadge({ status }: { status?: string | null }) {
+export function EventStatusBadge({ status, className }: { status?: string | null; className?: string }) {
   if (!status) return <span className="text-subtle">—</span>;
-  return <Badge color={STATUS_COLORS[status] ?? 'slate'}>{status}</Badge>;
+  return <Badge color={STATUS_COLORS[status] ?? 'slate'} className={className}>{status}</Badge>;
 }

@@ -105,7 +105,7 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
 
 /** Hero row of at most four KPIs; the number is the chart, the sparkline is the context. */
 export function KpiGrid({ items, columns = 4 }: { items: KpiItem[]; columns?: 2 | 3 | 4 | 5 }) {
-  const cols = { 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 xl:grid-cols-4', 5: 'sm:grid-cols-2 xl:grid-cols-5' }[columns];
+  const cols = { 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 lg:grid-cols-4', 5: 'sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5' }[columns];
   return (
     <div className={cn('grid grid-cols-1 gap-4', cols)}>
       {items.map((k, i) => (

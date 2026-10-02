@@ -3,6 +3,7 @@ import { Eye, Globe, Lock, Building2 } from 'lucide-react';
 import { Badge } from '@/components/ui';
 import { relativeTime, titleCase } from '@/lib/format';
 import { truncate } from '@/lib/utils';
+import { KB_STATUS_COLORS, KB_VISIBILITY_COLORS } from '@/lib/statusColors';
 
 export interface ArticleSummary {
   id: string;
@@ -28,8 +29,8 @@ export interface ArticleSummary {
   expiresAt?: string | null;
 }
 
-export const STATUS_COLORS: Record<string, string> = { draft: 'amber', published: 'green', archived: 'slate' };
-export const VISIBILITY_COLORS: Record<string, string> = { internal: 'slate', customer: 'violet', public: 'green' };
+export const STATUS_COLORS = KB_STATUS_COLORS;
+export const VISIBILITY_COLORS = KB_VISIBILITY_COLORS;
 
 export function VisibilityBadge({ visibility, customerName }: { visibility: string; customerName?: string | null }) {
   const Icon = visibility === 'public' ? Globe : visibility === 'customer' ? Building2 : Lock;

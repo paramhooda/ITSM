@@ -1,21 +1,38 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, AlertTriangle, FileSignature } from 'lucide-react';
+import { Plus, AlertTriangle, FileSignature, CalendarClock, Gauge, Ban } from 'lucide-react';
 import { toast } from 'sonner';
-import { PageHeader, Button, DataTable, Pagination, SearchInput, Select, Badge, Drawer, Card, EmptyState, type Column } from '@/components/ui';
+import { PageHeader, Button, DataTable, Pagination, SearchInput, Select, Drawer, Card, EmptyState, FilterBar, FilterChip, type Column } from '@/components/ui';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { Panel } from '@/components/dashboards/Panel';
+import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
+import { ExpiringContracts, type ExpiringContract } from '@/components/dashboards/ExpiringContracts';
 import { get, post, ApiError } from '@/api/client';
 import { useListState } from '@/hooks/useListState';
 import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
-import { fmtDate } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { fmtDate, fmtNumber } from '@/lib/format';
+import { cn, dotClass } from '@/lib/utils';
+import { CONTRACT_STATUS_COLORS } from '@/lib/statusColors';
 import { ContractForm, type ContractPayload } from '@/components/contracts/ContractForm';
 import { ContractStatusBadge, ExpiryCountdown } from '@/components/contracts/ContractBits';
 import { CONTRACT_STATUSES, type ContractListItem, type ContractDetail, type Paginated } from '@/components/contracts/types';
 
+interface ContractSummary {
+  total: number;
+  active: number;
+  expiring30: number;
+  expiring90: number;
+  expired: number;
+  byStatus: { key: string; label: string; count: number }[];
+  byType: { key: string; label: string; count: number }[];
+  entitlementsOverThreshold: number;
+  entitlementsExhausted: number;
+}
+
 const DEFAULTS = { sort: 'endDate', order: 'asc' };
-const STATUS_COLORS: Record<string, string> = { draft: 'slate', active: 'green', expiring: 'amber', expired: 'red', renewed: 'blue', terminated: 'gray' };
+const FILTER_KEYS = ['q', 'customerId', 'status', 'typeId', 'expiringWithinDays', 'serviceId', 'ownerUserId'];
 
 export default function ContractListPage() {
   const navigate = useNavigate();
@@ -32,6 +49,9 @@ export default function ContractListPage() {
     queryFn: () => get<Paginated<ContractListItem>>('/contracts', { page, pageSize, sort: state.sort, order: state.order, q: state.q, customerId: state.customerId, status: state.status, typeId: state.typeId, expiringWithinDays: state.expiringWithinDays, serviceId: state.serviceId, ownerUserId: state.ownerUserId }),
     placeholderData: (prev) => prev,
   });
+  const summaryParams = useMemo(() => ({ customerId: state.customerId || undefined }), [state.customerId]);
+  const summary = useQuery({ queryKey: ['contracts', 'summary', summaryParams], queryFn: () => get<ContractSummary>('/contracts/summary', summaryParams), placeholderData: (prev) => prev, staleTime: 30_000 });
+  const expiring = useQuery({ queryKey: ['contracts', 'expiring', summaryParams], queryFn: () => get<{ items: ExpiringContract[]; total: number }>('/contracts/expiring', { days: 90, ...summaryParams }), staleTime: 30_000 });
 
   const create = useMutation({
     mutationFn: (body: ContractPayload) => post<ContractDetail>('/contracts', body),
@@ -45,6 +65,8 @@ export default function ContractListPage() {
   });
 
   const toggleStatus = (s: string) => set({ status: (statuses.includes(s) ? statuses.filter((x) => x !== s) : [...statuses, s]).join(',') });
+  const activeCount = FILTER_KEYS.filter((k) => state[k]).length;
+  const clear = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
 
   const columns: Column<ContractListItem>[] = [
     { key: 'number', header: 'Number', sortable: true, width: '140px', render: (r) => <span className="font-mono text-[12.5px]">{r.number}</span> },
@@ -70,35 +92,72 @@ export default function ContractListPage() {
     },
   ];
   const onSort = (key: string) => set({ sort: key, order: state.sort === key && state.order === 'asc' ? 'desc' : 'asc' });
+  const sm = summary.data;
+  const statusLabel = (s: string) => byKey('contract_status', s)?.label ?? sm?.byStatus.find((b) => b.key === s)?.label ?? s;
+  const statusColor = (s: string) => byKey('contract_status', s)?.color ?? CONTRACT_STATUS_COLORS[s] ?? 'slate';
 
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="Contracts & Scope"
-        subtitle={query.data ? `${query.data.total} contracts` : undefined}
+        subtitle={sm ? `${fmtNumber(sm.active)} active contracts · ${fmtNumber(sm.expiring90)} ending within 90 days` : 'Coverage, SLA policy, entitlements and scope per customer'}
         actions={can('contracts:manage') && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>New contract</Button>}
       />
-      <div className="flex flex-wrap items-center gap-2 mb-2">
+
+      <FilterBar
+        activeCount={activeCount}
+        onClear={clear}
+        chips={CONTRACT_STATUSES.map((s) => (
+          <FilterChip key={s} active={statuses.includes(s)} onClick={() => toggleStatus(s)} dot={dotClass(statusColor(s))} count={sm?.byStatus.find((b) => b.key === s)?.count ?? 0}>
+            {statusLabel(s)}
+          </FilterChip>
+        ))}
+      >
         <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search number or name…" className="w-60" />
-        <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} className="w-52" />
-        <Select value={state.typeId ?? ''} onChange={(e) => set({ typeId: e.target.value })} placeholder="Any type" options={options('contract_type').map((o) => ({ value: o.id, label: o.label }))} className="w-44" />
-        <Select value={state.expiringWithinDays ?? ''} onChange={(e) => set({ expiringWithinDays: e.target.value })} placeholder="Any expiry" options={[{ value: '30', label: 'Expiring in 30 days' }, { value: '60', label: 'Expiring in 60 days' }, { value: '90', label: 'Expiring in 90 days' }]} className="w-44" />
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 mb-3">
-        <span className="text-xs text-muted mr-1">Status:</span>
-        {CONTRACT_STATUSES.map((s) => {
-          const opt = byKey('contract_status', s);
-          const active = statuses.includes(s);
-          return (
-            <button key={s} onClick={() => toggleStatus(s)} className={cn('rounded-full border px-2.5 py-0.5 text-[12px] transition-colors', active ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default')}>
-              <Badge color={opt?.color ?? STATUS_COLORS[s]} className="px-0 py-0 bg-transparent">{opt?.label ?? s}</Badge>
-            </button>
-          );
-        })}
-        {statuses.length > 0 && <button className="text-xs text-subtle hover:text-default ml-1" onClick={() => set({ status: '' })}>clear</button>}
-      </div>
+        <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} className="w-48 h-8 py-0 text-[13px]" />
+        <Select value={state.typeId ?? ''} onChange={(e) => set({ typeId: e.target.value })} placeholder="Any type" options={options('contract_type').map((o) => ({ value: o.id, label: o.label }))} className="w-40 h-8 py-0 text-[13px]" />
+        <Select value={state.expiringWithinDays ?? ''} onChange={(e) => set({ expiringWithinDays: e.target.value })} placeholder="Any expiry" options={[{ value: '30', label: 'Expiring in 30 days' }, { value: '60', label: 'Expiring in 60 days' }, { value: '90', label: 'Expiring in 90 days' }]} className="w-44 h-8 py-0 text-[13px]" />
+      </FilterBar>
+
+      <InsightBand
+        id="contracts"
+        loading={summary.isLoading}
+        summary={sm ? `${fmtNumber(sm.total)} contracts${state.customerId ? ' for this customer' : ''}` : undefined}
+        kpis={
+          sm
+            ? [
+                { label: 'Active contracts', value: fmtNumber(sm.active), icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(sm.total)} in total · ${fmtNumber(sm.expired)} expired`, onClick: () => set({ status: 'active,expiring' }) },
+                { label: 'Expiring · 90d', value: fmtNumber(sm.expiring90), tone: sm.expiring90 > 0 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(sm.expiring30)} within 30 days`, onClick: () => set({ expiringWithinDays: state.expiringWithinDays === '90' ? undefined : '90' }) },
+                { label: 'Entitlements near limit', value: fmtNumber(sm.entitlementsOverThreshold), tone: sm.entitlementsOverThreshold > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: 'usage past the warning threshold' },
+                { label: 'Entitlements exhausted', value: fmtNumber(sm.entitlementsExhausted), tone: sm.entitlementsExhausted > 0 ? 'bad' : 'good', icon: <Ban className="h-4 w-4" />, hint: 'further usage is out of scope' },
+              ]
+            : []
+        }
+        panels={
+          sm && (
+            <>
+              <Panel title="Expiring soon" subtitle="Contracts ending within 90 days">
+                <ExpiringContracts items={(expiring.data?.items ?? []).slice(0, 6)} />
+              </Panel>
+              <Panel title="By status" subtitle="Click a status to filter">
+                <BreakdownBar dense items={sm.byStatus.map((b) => ({ label: statusLabel(b.key), value: b.count, color: statusColor(b.key), active: statuses.length === 1 && statuses[0] === b.key }))} onSelect={(i) => { const b = sm.byStatus.find((x) => statusLabel(x.key) === i.label); if (b) set({ status: statuses.length === 1 && statuses[0] === b.key ? '' : b.key }); }} />
+              </Panel>
+            </>
+          )
+        }
+      />
+
       <Card padded={false}>
-        <DataTable columns={columns} rows={query.data?.items ?? []} loading={query.isLoading} onRowClick={(r) => navigate(`/contracts/${r.id}`)} sort={{ key: state.sort, order: state.order as 'asc' | 'desc' }} onSort={onSort} empty={<EmptyState icon={<FileSignature className="h-5 w-5" />} title="No contracts" description="Contracts define covered services and sites, SLA policy, entitlements and scope." />} />
+        <DataTable
+          columns={columns}
+          rows={query.data?.items ?? []}
+          loading={query.isLoading}
+          onRowClick={(r) => navigate(`/contracts/${r.id}`)}
+          sort={{ key: state.sort, order: state.order as 'asc' | 'desc' }}
+          onSort={onSort}
+          rowClassName={(r) => (r.entitlements.anyExhausted || (r.daysToExpiry < 0 && !['terminated', 'renewed', 'draft'].includes(r.status)) ? 'row-rail-bad' : r.entitlements.anyOverThreshold || (r.daysToExpiry >= 0 && r.daysToExpiry <= 30 && !['terminated', 'renewed', 'draft'].includes(r.status)) ? 'row-rail-warn' : undefined)}
+          empty={<EmptyState icon={<FileSignature className="h-5 w-5" />} title="No contracts" description="Contracts define covered services and sites, SLA policy, entitlements and scope." />}
+        />
         <Pagination page={page} pageSize={pageSize} total={query.data?.total ?? 0} onPage={setPage} />
       </Card>
       <Drawer open={creating} onClose={() => { setCreating(false); if (state.new) set({ new: undefined }, false); }} title="New contract" width="max-w-3xl">

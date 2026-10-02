@@ -1,6 +1,8 @@
 import { Badge } from '@/components/ui';
 import { useLookups } from '@/hooks/useLookups';
 import { Server, Box, Layers, Network, Route, Shield, Radio, Wifi, Scale, HardDrive, GitBranch, Archive, ShieldCheck, Cloud, Cog, BatteryCharging, Laptop, Printer, Phone, Cpu, Briefcase, AppWindow, Database, type LucideIcon } from 'lucide-react';
+import { CI_STATUS_COLORS, CRITICALITY_COLORS } from '@/lib/statusColors';
+import { titleCase } from '@/lib/format';
 
 /** lucide icon per ci_types.icon value (seeded names). */
 export const CI_ICONS: Record<string, LucideIcon> = {
@@ -25,15 +27,14 @@ export function CiTypeBadge({ typeKey, name, color, icon, className }: { typeKey
   );
 }
 
-export const CI_STATUS_COLORS: Record<string, string> = { planned: 'blue', active: 'green', inactive: 'gray', maintenance: 'amber', retired: 'slate' };
-export const CRITICALITY_COLORS: Record<string, string> = { critical: 'red', high: 'orange', medium: 'amber', low: 'slate' };
+export { CI_STATUS_COLORS, CRITICALITY_COLORS };
 export const ENVIRONMENTS = ['production', 'staging', 'test', 'development', 'dr', 'other'];
 export const CRITICALITIES = ['critical', 'high', 'medium', 'low'];
 export const CI_STATUSES = ['planned', 'active', 'inactive', 'maintenance', 'retired'];
 
 export function CiStatusBadge({ status }: { status?: string | null }) {
-  return <Badge color={CI_STATUS_COLORS[status ?? ''] ?? 'slate'} dot>{status ?? '—'}</Badge>;
+  return <Badge color={CI_STATUS_COLORS[status ?? ''] ?? 'slate'} dot>{status ? titleCase(status) : '—'}</Badge>;
 }
 export function CriticalityBadge({ value }: { value?: string | null }) {
-  return <Badge color={CRITICALITY_COLORS[value ?? ''] ?? 'slate'}>{value ?? '—'}</Badge>;
+  return <Badge color={CRITICALITY_COLORS[value ?? ''] ?? 'slate'}>{value ? titleCase(value) : '—'}</Badge>;
 }

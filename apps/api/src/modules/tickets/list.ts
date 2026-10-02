@@ -7,7 +7,8 @@ import { ForbiddenError } from '@/core/errors';
 import { countRows, searchFts } from '@/core/query';
 import { slaSummariesFor, worstSla, slaStateFilterSql } from '@/modules/sla/engine';
 import { TYPE_LABEL, csv, isCustomerUser, loadTicket, optionMap, toLabel } from './common';
-import type { ListQuery } from './schemas';
+import type { ListQuery, StatsQuery } from './schemas';
+import { toDay, addDays, daysBetween } from '@/modules/reports/dates';
 
 const T = schema.tickets;
 const st = alias(schema.configOptions, 'st');
@@ -33,7 +34,7 @@ const statusIdsOfCategories = (categories: string[]) =>
 
 const OPEN_CATEGORIES = ['new', 'open', 'pending'];
 
-function buildWhere(ctx: Ctx, q: ListQuery): SQL | undefined {
+function buildWhere(ctx: Ctx, q: StatsQuery): SQL | undefined {
   const conds: SQL[] = visibilityConds(ctx);
   if (q.type) conds.push(eq(T.type, q.type));
   if (q.customerId) {
@@ -196,31 +197,52 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
 
 // ---------------------------------------------------------------- stats
 
-export async function ticketStats(ctx: Ctx, q: { customerId?: string; type?: TicketType }) {
-  const conds = visibilityConds(ctx);
-  if (q.customerId) {
-    ctx.requireCustomer(q.customerId);
-    conds.push(eq(T.customerId, q.customerId));
+const SERIES_DEFAULT_DAYS = 14;
+const SERIES_MAX_DAYS = 90;
+
+/** Day window of the opened/resolved series: the created range when both bounds are set and span <= 90 days, otherwise the last 14 days ending today. */
+function seriesWindow(q: StatsQuery): { from: string; to: string } {
+  if (q.createdFrom && q.createdTo) {
+    const from = new Date(q.createdFrom);
+    const to = new Date(q.createdTo);
+    if (!isNaN(from.getTime()) && !isNaN(to.getTime())) {
+      const f = toDay(from);
+      const t = toDay(to);
+      const span = daysBetween(f, t);
+      if (span >= 0 && span <= SERIES_MAX_DAYS) return { from: f, to: t };
+    }
   }
-  if (q.type) conds.push(eq(T.type, q.type));
-  const base = conds.length ? and(...conds) : undefined;
+  const today = toDay(new Date());
+  return { from: addDays(today, -(SERIES_DEFAULT_DAYS - 1)), to: today };
+}
+
+/**
+ * Aggregates for the ticket list header/dashboard under the same filters as
+ * the list. `byStatusCategory` ignores the status filters (so the category
+ * chips can show every bucket) and `byType` ignores the type filter; every
+ * other number is computed against the full filter set.
+ */
+export async function ticketStats(ctx: Ctx, q: StatsQuery) {
+  const base = buildWhere(ctx, q);
   const openCond = statusIdsOfCategories(OPEN_CATEGORIES);
+  const count = sql<number>`count(*)::int`;
   const byCategory = await ctx.tx
-    .select({ category: st.statusCategory, count: sql<number>`count(*)::int` })
+    .select({ category: st.statusCategory, count })
     .from(T)
     .leftJoin(st, eq(st.id, T.statusId))
-    .where(base)
+    .where(buildWhere(ctx, { ...q, statusCategory: undefined, statusId: undefined, open: undefined }))
     .groupBy(st.statusCategory);
   const byType = await ctx.tx
-    .select({ type: T.type, count: sql<number>`count(*)::int` })
+    .select({ type: T.type, count })
     .from(T)
-    .where(and(base, openCond))
+    .where(and(buildWhere(ctx, { ...q, type: undefined }), openCond))
     .groupBy(T.type);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayEnd = new Date(todayStart.getTime() + 86_400_000);
   const [agg] = await ctx.tx
     .select({
+      total: count,
       open: sql<number>`count(*) FILTER (WHERE ${openCond})::int`,
       breached: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${slaStateFilterSql.breached})::int`,
       atRisk: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${slaStateFilterSql.atRisk})::int`,
@@ -234,12 +256,49 @@ export async function ticketStats(ctx: Ctx, q: { customerId?: string; type?: Tic
     })
     .from(T)
     .where(base);
+  const byPriority = await ctx.tx
+    .select({ id: pr.id, label: pr.label, color: pr.color, level: pr.level, count })
+    .from(T)
+    .leftJoin(pr, eq(pr.id, T.priorityId))
+    .where(and(base, openCond))
+    .groupBy(pr.id, pr.label, pr.color, pr.level)
+    .orderBy(sql`${pr.level} ASC NULLS LAST`, pr.label);
+  const byStatus = await ctx.tx
+    .select({ id: st.id, label: st.label, color: st.color, category: st.statusCategory, count })
+    .from(T)
+    .innerJoin(st, eq(st.id, T.statusId))
+    .where(base)
+    .groupBy(st.id, st.label, st.color, st.statusCategory, st.sortOrder)
+    .orderBy(desc(count), st.sortOrder);
+  const byTeam = await ctx.tx
+    .select({ id: schema.teams.id, label: schema.teams.name, count, breached: sql<number>`count(*) FILTER (WHERE ${slaStateFilterSql.breached})::int` })
+    .from(T)
+    .leftJoin(schema.teams, eq(schema.teams.id, T.assignedTeamId))
+    .where(and(base, openCond))
+    .groupBy(schema.teams.id, schema.teams.name)
+    .orderBy(desc(count), schema.teams.name)
+    .limit(12);
+  // Opened / resolved per day: two grouped queries over the window, zero-filled in JS so every day is present.
+  const win = seriesWindow(q);
+  const inWindow = (col: typeof T.createdAt | typeof T.resolvedAt) => and(base, sql`${col} >= ${win.from}::date`, sql`${col} < ${win.to}::date + interval '1 day'`);
+  const openedDay = sql<string>`(${T.createdAt}::date)::text`;
+  const resolvedDay = sql<string>`(${T.resolvedAt}::date)::text`;
+  const opened = await ctx.tx.select({ day: openedDay, count }).from(T).where(inWindow(T.createdAt)).groupBy(openedDay);
+  const resolved = await ctx.tx.select({ day: resolvedDay, count }).from(T).where(inWindow(T.resolvedAt)).groupBy(resolvedDay);
+  const openedBy = new Map(opened.map((r) => [r.day, r.count]));
+  const resolvedBy = new Map(resolved.map((r) => [r.day, r.count]));
+  const series: { day: string; opened: number; resolved: number }[] = [];
+  for (let d = win.from; d <= win.to; d = addDays(d, 1)) series.push({ day: d, opened: openedBy.get(d) ?? 0, resolved: resolvedBy.get(d) ?? 0 });
   const [pending] = isCustomerUser(ctx)
     ? [{ count: 0 }]
     : await ctx.tx.select({ count: sql<number>`count(*)::int` }).from(schema.approvals).where(eq(schema.approvals.status, 'pending'));
   return {
     byStatusCategory: Object.fromEntries(byCategory.map((r) => [r.category ?? 'unknown', r.count])),
     byType: Object.fromEntries(byType.map((r) => [r.type, r.count])),
+    byPriority: byPriority.map((r) => ({ id: r.id, label: r.label ?? 'No priority', color: r.color, level: r.level, count: r.count })),
+    byStatus: byStatus.map((r) => ({ id: r.id, label: r.label, color: r.color, category: r.category, count: r.count })),
+    byTeam: byTeam.map((r) => ({ id: r.id, label: r.label ?? 'No team', count: r.count, breached: r.breached })),
+    series,
     ...agg,
     pendingApprovals: pending?.count ?? 0,
   };

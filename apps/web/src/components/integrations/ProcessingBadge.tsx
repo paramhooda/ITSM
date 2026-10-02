@@ -1,7 +1,8 @@
 import { Badge } from '@/components/ui';
 import type { ProcessingStatus } from './types';
+import { PROCESSING_COLORS } from '@/lib/statusColors';
 
-export const PROCESSING_COLORS: Record<string, string> = { received: 'blue', correlated: 'teal', ticket_created: 'green', deduplicated: 'purple', ignored: 'gray', error: 'red' };
+export { PROCESSING_COLORS };
 export const PROCESSING_LABELS: Record<string, string> = { received: 'Queued', correlated: 'Correlated', ticket_created: 'Ticket created', deduplicated: 'Deduplicated', ignored: 'Ignored', error: 'Needs attention' };
 
 export function ProcessingBadge({ status, title }: { status: ProcessingStatus | string; title?: string | null }) {

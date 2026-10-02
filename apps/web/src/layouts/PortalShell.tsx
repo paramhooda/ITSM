@@ -2,8 +2,6 @@ import { type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
-import { useUiStore } from '@/stores/ui';
-import { cn } from '@/lib/utils';
 import { PORTAL_NAV } from './nav';
 import { Sidebar, NotificationBell, UserMenu, MobileNav, BrandLogo } from './AppShell';
 import { GradyWidget } from '@/components/grady/GradyWidget';
@@ -16,6 +14,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
       <Sidebar items={PORTAL_NAV} label="Customer Portal" />
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 flex items-center gap-2 px-4 md:px-6 border-b border-default bg-surface shrink-0">
+          <BrandLogo className="md:hidden mr-1" />
           <div className="text-[13px] text-muted truncate">Managed services portal</div>
           <div className="flex-1" />
           {can('portal:tickets') && (
@@ -24,8 +23,6 @@ export function PortalShell({ children }: { children: ReactNode }) {
             </button>
           )}
           <NotificationBell />
-          <div className="hidden sm:block w-px h-6 mx-1" style={{ background: 'var(--border)' }} />
-          <BrandLogo className="hidden sm:inline-flex mx-1" />
           <UserMenu />
         </header>
         <div className="flex-1 flex min-h-0">

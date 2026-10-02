@@ -1,12 +1,13 @@
 import { type ReactNode, useEffect } from 'react';
 import { NavLink, useNavigate, Link } from 'react-router-dom';
-import { Bell, Search, LogOut, User, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react';
+import { Bell, Search, LogOut, User, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
 import { api, get } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { Avatar, Kbd } from '@/components/ui';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { MSP_NAV, visibleNav, type NavItem } from './nav';
 import { GlobalSearch } from '@/components/GlobalSearch';
 import { GradyWidget } from '@/components/grady/GradyWidget';
@@ -20,31 +21,34 @@ export function BrandLogo({ className }: { className?: string }) {
   );
 }
 
-export function SidebarNav({ items }: { items: NavItem[] }) {
+export function SidebarNav({ items, label }: { items: NavItem[]; label?: string }) {
   const can = useAuthStore((s) => s.can);
   const areas = useAuthStore((s) => s.user?.areas);
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const visible = visibleNav(items, can, areas);
   return (
-    <nav className="flex-1 overflow-y-auto px-3 py-3">
+    <nav className={cn('flex-1 overflow-y-auto py-3', collapsed ? 'px-2' : 'px-3')} aria-label={label}>
+      {label && !collapsed && <div className="px-2.5 pb-1.5 text-[11px] uppercase tracking-[0.08em] text-subtle font-medium">{label}</div>}
       {visible.map((item) => (
         <div key={item.to}>
-          {item.section && !collapsed && <div className="px-2.5 pt-5 pb-1.5 text-[11px] uppercase tracking-[0.08em] text-subtle font-medium">{item.section}</div>}
-          <NavLink
-            to={item.to}
-            end={item.to === '/'}
-            title={item.label}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2.5 rounded-lg px-2.5 h-8.5 text-[13.5px] my-0.5 transition-colors',
-                isActive ? 'bg-white text-default font-medium border border-default shadow-[0_1px_2px_rgba(9,9,11,0.05)]' : 'text-secondary border border-transparent hover:bg-white/70 hover:text-default',
-                collapsed && 'justify-center px-0',
-              )
-            }
-          >
-            <item.icon className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
-            {!collapsed && <span className="truncate">{item.label}</span>}
-          </NavLink>
+          {item.section && (collapsed ? <div className="my-2 mx-2 border-t border-default" aria-hidden /> : <div className="px-2.5 pt-5 pb-1.5 text-[11px] uppercase tracking-[0.08em] text-subtle font-medium">{item.section}</div>)}
+          <Tooltip label={collapsed ? item.label : undefined}>
+            <NavLink
+              to={item.to}
+              end={item.to === '/'}
+              aria-label={item.label}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-2.5 rounded-lg h-8.5 text-[13.5px] my-0.5 transition-colors',
+                  isActive ? 'bg-white text-default font-medium border border-default shadow-[0_1px_2px_rgba(9,9,11,0.05)]' : 'text-secondary border border-transparent hover:bg-white/70 hover:text-default',
+                  collapsed ? 'justify-center px-0' : 'px-2.5',
+                )
+              }
+            >
+              <item.icon className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
+              {!collapsed && <span className="truncate">{item.label}</span>}
+            </NavLink>
+          </Tooltip>
         </div>
       ))}
     </nav>
@@ -91,24 +95,49 @@ export function UserMenu() {
   );
 }
 
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const SIDEBAR_SHORTCUT = `${isMac ? '⌘' : 'Ctrl'}+B`;
+
+/** Left navigation: logo top-left, collapsible to an icon rail with a handle on its edge and ⌘B / Ctrl+B. */
 export function Sidebar({ items, label }: { items: NavItem[]; label: string }) {
   const { sidebarCollapsed, toggleSidebar } = useUiStore();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleSidebar]);
+  const tip = `${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar · ${SIDEBAR_SHORTCUT}`;
   return (
-    <aside className={cn('hidden md:flex flex-col border-r border-default bg-[#fafafa] shrink-0 transition-[width] duration-200', sidebarCollapsed ? 'w-[60px]' : 'w-60')}>
-      <div className={cn('flex items-center h-14 px-5 border-b border-default', sidebarCollapsed && 'justify-center px-0')}>
+    <aside className={cn('group/side relative hidden md:flex flex-col border-r border-default bg-[#fafafa] shrink-0 transition-[width] duration-200', sidebarCollapsed ? 'w-[60px]' : 'w-60')} data-collapsed={sidebarCollapsed || undefined}>
+      <div className={cn('flex items-center h-14 border-b border-default shrink-0', sidebarCollapsed ? 'justify-center px-0' : 'px-4')}>
         {sidebarCollapsed ? (
-          <img src="/favicon.svg" alt="" className="h-6 w-6 rounded-md" />
+          <Link to="/" aria-label="Progression home" className="inline-flex">
+            <img src="/favicon.svg" alt="" className="h-7 w-7 rounded-md" draggable={false} />
+          </Link>
         ) : (
-          <div className="min-w-0">
-            <div className="text-[13.5px] font-semibold text-default leading-tight truncate">{label}</div>
-            <div className="text-[11.5px] text-subtle leading-tight">Progression</div>
-          </div>
+          <BrandLogo />
         )}
       </div>
-      <SidebarNav items={items} />
-      <button onClick={toggleSidebar} className="h-11 border-t border-default text-subtle hover:text-default hover:bg-surface-2 flex items-center justify-center" title="Toggle sidebar">
-        {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-      </button>
+      <Tooltip label={tip} className="absolute -right-3 top-[18px] z-20">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-expanded={!sidebarCollapsed}
+          aria-label={tip}
+          className={cn(
+            'h-6 w-6 rounded-full border border-default bg-white text-muted shadow-[0_1px_3px_rgba(9,9,11,0.12)] flex items-center justify-center hover:text-default hover:border-strong hover:shadow-raised transition-[opacity,box-shadow,border-color] focus-visible:opacity-100 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-brand-500/30',
+            !sidebarCollapsed && 'opacity-0 group-hover/side:opacity-100',
+          )}
+        >
+          {sidebarCollapsed ? <ChevronRight className="h-3.5 w-3.5" strokeWidth={2.2} /> : <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2.2} />}
+        </button>
+      </Tooltip>
+      <SidebarNav items={items} label={label} />
     </aside>
   );
 }
@@ -134,6 +163,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sidebar items={MSP_NAV} label="Service Management" />
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 flex items-center gap-2 px-4 md:px-6 border-b border-default bg-surface shrink-0">
+          <BrandLogo className="md:hidden mr-1" />
           <button onClick={() => setSearchOpen(true)} className="flex items-center gap-2.5 h-9 px-3 rounded-lg bg-white border border-default hover:border-strong text-muted text-[13px] w-full max-w-md transition-colors shadow-[0_1px_2px_rgba(9,9,11,0.03)]">
             <Search className="h-4 w-4" />
             <span className="flex-1 text-left truncate">Search tickets, customers, assets, CIs…</span>
@@ -146,8 +176,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
           )}
           <NotificationBell />
-          <div className="hidden sm:block w-px h-6 bg-border mx-1" style={{ background: 'var(--border)' }} />
-          <BrandLogo className="hidden sm:inline-flex mx-1" />
           <UserMenu />
         </header>
         <div className="flex-1 flex min-h-0">

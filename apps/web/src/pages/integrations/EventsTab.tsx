@@ -1,17 +1,21 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Server, ShieldAlert, Webhook, AlertTriangle } from 'lucide-react';
+import { Server, ShieldAlert, Webhook, AlertTriangle, Activity, Ticket, Copy, Building2 } from 'lucide-react';
 import { get } from '@/api/client';
-import { Select, SearchInput, Input, DataTable, Pagination, Button, Badge, type Column } from '@/components/ui';
+import { Select, SearchInput, Input, DataTable, Pagination, Badge, FilterBar, FilterChip, type Column } from '@/components/ui';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { Panel } from '@/components/dashboards/Panel';
+import { TrendChart } from '@/components/dashboards/TrendChart';
+import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { useListState } from '@/hooks/useListState';
 import { useCustomersLookup } from '@/hooks/useLookups';
-import { fmtDateTime, relativeTime } from '@/lib/format';
-import { cn, truncate, colorClass } from '@/lib/utils';
-import { SeverityBadge, SEVERITY_COLORS, SEVERITY_LABELS } from '@/components/integrations/SeverityBadge';
+import { fmtDateTime, relativeTime, fmtNumber, fmtPct } from '@/lib/format';
+import { cn, truncate, dotClass } from '@/lib/utils';
+import { SeverityBadge, EventStatusBadge, SEVERITY_COLORS, SEVERITY_LABELS } from '@/components/integrations/SeverityBadge';
 import { ProcessingBadge, PROCESSING_LABELS } from '@/components/integrations/ProcessingBadge';
 import { EventDrawer } from '@/components/integrations/EventDrawer';
-import { SEVERITIES, PROCESSING_STATUSES, type EventListItem, type Integration } from '@/components/integrations/types';
+import { SEVERITIES, PROCESSING_STATUSES, type EventListItem, type Integration, type Stats } from '@/components/integrations/types';
 
 export function TypeIcon({ type, className }: { type: string; className?: string }) {
   const cls = cn('h-4 w-4', className);
@@ -41,6 +45,10 @@ export function EventsTab({ integrations }: { integrations: Integration[] }) {
     return { integrationId: state.integrationId, integrationType: state.integrationType, customerId: state.customerId, severity: state.severity, processingStatus: state.processingStatus, host: state.host, q: state.q, unresolvedOnly: state.unresolvedOnly, from, to, page, pageSize };
   }, [state, page, pageSize]);
   const q = useQuery({ queryKey: ['integrations', 'events', query], queryFn: () => get<{ items: EventListItem[]; total: number }>('/integrations/events', query), placeholderData: (p) => p, refetchInterval: 15_000 });
+  const statsDays = state.range === 'custom' ? 30 : Math.min(90, Math.max(1, Number(state.range ?? '7')));
+  const stats = useQuery({ queryKey: ['integrations', 'stats', statsDays, state.customerId ?? ''], queryFn: () => get<Stats>('/integrations/stats', { days: statsDays, customerId: state.customerId || undefined }), refetchInterval: 30_000, placeholderData: (p) => p });
+  const activeCount = ['q', 'host', 'integrationId', 'integrationType', 'customerId', 'processingStatus', 'severity', 'unresolvedOnly'].filter((k) => state[k]).length;
+  const clear = () => set({ q: undefined, host: undefined, integrationId: undefined, integrationType: undefined, customerId: undefined, processingStatus: undefined, severity: undefined, unresolvedOnly: undefined });
 
   const columns: Column<EventListItem>[] = [
     { key: 'receivedAt', header: 'Received', width: '120px', render: (r) => <span title={fmtDateTime(r.receivedAt)} className="text-muted whitespace-nowrap">{relativeTime(r.receivedAt)}</span> },
@@ -56,7 +64,7 @@ export function EventsTab({ integrations }: { integrations: Integration[] }) {
     { key: 'message', header: 'Message', render: (r) => (
       <div className="min-w-0 max-w-[360px]">
         <div className="truncate" title={r.message ?? ''}>{truncate(r.message, 90)}</div>
-        <div className="text-xs text-subtle truncate">{r.eventType}{r.status ? ` · ${r.status}` : ''}</div>
+        <div className="text-xs text-subtle truncate flex items-center gap-1.5">{r.eventType}{r.status && <EventStatusBadge status={r.status} className="py-0 text-[10.5px]" />}</div>
       </div>
     ) },
     { key: 'customer', header: 'Customer', render: (r) => (r.customerName ? <span className="truncate block max-w-[160px]">{r.customerName}</span> : <Badge color="amber">unresolved</Badge>) },
@@ -66,43 +74,69 @@ export function EventsTab({ integrations }: { integrations: Integration[] }) {
   ];
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="card p-3 flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search message, host, sensor, id…" className="w-64" />
-          <Input className="w-44" placeholder="Host or IP" value={state.host ?? ''} onChange={(e) => set({ host: e.target.value })} />
-          <Select className="w-44" value={state.integrationId ?? ''} onChange={(e) => set({ integrationId: e.target.value })} placeholder="All integrations" options={integrations.map((i) => ({ value: i.id, label: i.name }))} />
-          <Select className="w-36" value={state.integrationType ?? ''} onChange={(e) => set({ integrationType: e.target.value })} placeholder="All types" options={[{ value: 'prtg', label: 'PRTG' }, { value: 'fortisiem', label: 'FortiSIEM' }, { value: 'generic', label: 'Webhook' }]} />
-          <Select className="w-44" value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
-          <Select className="w-40" value={state.processingStatus ?? ''} onChange={(e) => set({ processingStatus: e.target.value })} placeholder="Any processing" options={PROCESSING_STATUSES.map((s) => ({ value: s, label: PROCESSING_LABELS[s] }))} />
-          <Select className="w-36" value={state.range ?? '7'} onChange={(e) => set({ range: e.target.value })} options={RANGES} />
-          {state.range === 'custom' && (
+    <div className="flex flex-col gap-4">
+      <FilterBar
+        activeCount={activeCount}
+        onClear={clear}
+        chips={
+          <>
+            {SEVERITIES.map((sv) => (
+              <FilterChip key={sv} active={severities.includes(sv)} onClick={() => toggleSeverity(sv)} dot={dotClass(SEVERITY_COLORS[sv])} count={stats.data?.bySeverity?.[sv] ?? 0}>
+                {SEVERITY_LABELS[sv]}
+              </FilterChip>
+            ))}
+            <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+            <FilterChip active={!!state.unresolvedOnly} onClick={() => set({ unresolvedOnly: state.unresolvedOnly ? undefined : 'true' })} dot={dotClass('amber')}>
+              <AlertTriangle className="h-3 w-3" /> Needs customer
+            </FilterChip>
+          </>
+        }
+      >
+        <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search message, host, sensor, id…" className="w-64" />
+        <Input className="w-40 h-8 py-0 text-[13px]" placeholder="Host or IP" value={state.host ?? ''} onChange={(e) => set({ host: e.target.value })} />
+        <Select className="w-44 h-8 py-0 text-[13px]" value={state.integrationId ?? ''} onChange={(e) => set({ integrationId: e.target.value })} placeholder="All integrations" options={integrations.map((i) => ({ value: i.id, label: i.name }))} />
+        <Select className="w-32 h-8 py-0 text-[13px]" value={state.integrationType ?? ''} onChange={(e) => set({ integrationType: e.target.value })} placeholder="All types" options={[{ value: 'prtg', label: 'PRTG' }, { value: 'fortisiem', label: 'FortiSIEM' }, { value: 'generic', label: 'Webhook' }]} />
+        <Select className="w-44 h-8 py-0 text-[13px]" value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
+        <Select className="w-40 h-8 py-0 text-[13px]" value={state.processingStatus ?? ''} onChange={(e) => set({ processingStatus: e.target.value })} placeholder="Any processing" options={PROCESSING_STATUSES.map((st) => ({ value: st, label: PROCESSING_LABELS[st] }))} />
+        <Select className="w-36 h-8 py-0 text-[13px]" value={state.range ?? '7'} onChange={(e) => set({ range: e.target.value })} options={RANGES} />
+        {state.range === 'custom' && (
+          <>
+            <Input type="date" className="w-36 h-8 py-0 text-[13px]" value={state.from ?? ''} onChange={(e) => set({ from: e.target.value })} aria-label="From" />
+            <Input type="date" className="w-36 h-8 py-0 text-[13px]" value={state.to ?? ''} onChange={(e) => set({ to: e.target.value })} aria-label="To" />
+          </>
+        )}
+      </FilterBar>
+
+      <InsightBand
+        id="events"
+        loading={stats.isLoading}
+        summary={stats.data ? `${fmtNumber(stats.data.total)} events in the last ${statsDays} day${statsDays === 1 ? '' : 's'}` : undefined}
+        kpis={
+          stats.data
+            ? [
+                { label: 'Events received', value: fmtNumber(stats.data.total), icon: <Activity className="h-4 w-4" />, hint: `${fmtNumber(stats.data.activeIntegrations)} active integrations`, spark: stats.data.byDay.map((d) => d.total), sparkLabel: 'Events per day' },
+                { label: 'Tickets created', value: fmtNumber(stats.data.ticketsCreated), icon: <Ticket className="h-4 w-4" />, hint: `${fmtNumber(stats.data.openTickets)} still open`, spark: stats.data.byDay.map((d) => d.ticketsCreated), sparkLabel: 'Tickets created per day' },
+                { label: 'Deduplicated', value: fmtNumber(stats.data.deduplicated), tone: 'good', icon: <Copy className="h-4 w-4" />, hint: `${fmtPct(stats.data.dedupRate, 0)} of events folded into existing tickets` },
+                { label: 'Needs attention', value: fmtNumber(stats.data.errors + stats.data.unresolvedCustomer), tone: stats.data.errors + stats.data.unresolvedCustomer > 0 ? 'warn' : 'good', icon: <Building2 className="h-4 w-4" />, hint: `${fmtNumber(stats.data.unresolvedCustomer)} without a customer · ${fmtNumber(stats.data.errors)} errors`, onClick: () => set({ unresolvedOnly: state.unresolvedOnly ? undefined : 'true' }) },
+              ]
+            : []
+        }
+        panels={
+          stats.data && (
             <>
-              <Input type="date" className="w-36" value={state.from ?? ''} onChange={(e) => set({ from: e.target.value })} />
-              <Input type="date" className="w-36" value={state.to ?? ''} onChange={(e) => set({ to: e.target.value })} />
+              <Panel title="Events per day" subtitle="Received events and tickets they created">
+                <TrendChart data={stats.data.byDay} x="day" series={[{ key: 'total', label: 'Events', color: '#2563eb' }, { key: 'ticketsCreated', label: 'Tickets created', color: '#f97316' }]} kind="area" height={180} />
+              </Panel>
+              <Panel title="By severity" subtitle="Click to filter">
+                <BreakdownBar dense items={SEVERITIES.map((sv) => ({ label: SEVERITY_LABELS[sv], value: stats.data?.bySeverity?.[sv] ?? 0, color: SEVERITY_COLORS[sv], active: severities.length === 1 && severities[0] === sv })).filter((i) => i.value > 0)} onSelect={(i) => { const sv = SEVERITIES.find((x) => SEVERITY_LABELS[x] === i.label); if (sv) set({ severity: severities.length === 1 && severities[0] === sv ? undefined : sv }); }} />
+              </Panel>
             </>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-subtle mr-1">Severity:</span>
-          {SEVERITIES.map((s) => (
-            <button key={s} type="button" onClick={() => toggleSeverity(s)} className={cn('rounded-md px-2 py-0.5 border transition-colors', severities.includes(s) ? cn(colorClass(SEVERITY_COLORS[s]), 'border-transparent') : 'border-default text-muted hover:bg-surface-2')}>
-              {SEVERITY_LABELS[s]}
-            </button>
-          ))}
-          <span className="mx-2 text-subtle">|</span>
-          <button type="button" onClick={() => set({ unresolvedOnly: state.unresolvedOnly ? undefined : 'true' })} className={cn('inline-flex items-center gap-1 rounded-md px-2 py-0.5 border transition-colors', state.unresolvedOnly ? 'bg-amber-100 text-amber-800 border-transparent' : 'border-default text-muted hover:bg-surface-2')}>
-            <AlertTriangle className="h-3 w-3" /> Needs customer
-          </button>
-          {(state.q || state.host || state.integrationId || state.integrationType || state.customerId || state.processingStatus || state.severity || state.unresolvedOnly) && (
-            <Button variant="ghost" size="sm" className="ml-auto" onClick={() => set({ q: undefined, host: undefined, integrationId: undefined, integrationType: undefined, customerId: undefined, processingStatus: undefined, severity: undefined, unresolvedOnly: undefined })}>
-              Clear filters
-            </Button>
-          )}
-        </div>
-      </div>
-      <div className="card">
-        <DataTable<EventListItem> columns={columns} rows={q.data?.items ?? []} loading={q.isLoading} onRowClick={(r) => setSelected(r.id)} dense empty={<div className="py-10 text-center text-muted text-[13px]">No events in this range. {integrations.length === 0 ? 'Create an integration and point PRTG / FortiSIEM at its webhook URL.' : ''}</div>} />
+          )
+        }
+      />
+
+      <div className="card overflow-hidden">
+        <DataTable<EventListItem> columns={columns} rows={q.data?.items ?? []} loading={q.isLoading} onRowClick={(r) => setSelected(r.id)} dense rowClassName={(r) => (r.processingStatus === 'error' ? 'row-rail-bad' : !r.customerName ? 'row-rail-warn' : undefined)} empty={<div className="py-10 text-center text-muted text-[13px]">No events in this range. {integrations.length === 0 ? 'Create an integration and point PRTG / FortiSIEM at its webhook URL.' : ''}</div>} />
         <Pagination page={page} pageSize={pageSize} total={q.data?.total ?? 0} onPage={setPage} />
       </div>
       <EventDrawer id={selected} onClose={() => setSelected(null)} />

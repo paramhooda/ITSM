@@ -7,6 +7,7 @@ import { useListState } from '@/hooks/useListState';
 import { useLookups } from '@/hooks/useLookups';
 import { fmtDate, titleCase } from '@/lib/format';
 import { portalApi, pk, type PortalAsset, type PortalCi, type Coverage } from '@/components/portal/api';
+import { CRITICALITY_COLORS, CI_STATUS_COLORS } from '@/lib/statusColors';
 
 type Tab = 'assets' | 'cis';
 const PAGE = 50;
@@ -18,8 +19,8 @@ function CoverageBadge({ c, end }: { c: Coverage; end: string | null }) {
   return <Badge color={color}>{text}</Badge>;
 }
 
-const CRIT_COLOR: Record<string, string> = { critical: 'red', high: 'orange', medium: 'amber', low: 'slate' };
-const CI_STATUS_COLOR: Record<string, string> = { active: 'green', maintenance: 'amber', inactive: 'slate', retired: 'gray', planned: 'blue' };
+const CRIT_COLOR = CRITICALITY_COLORS;
+const CI_STATUS_COLOR = CI_STATUS_COLORS;
 
 function toCsv(rows: Record<string, unknown>[], columns: { key: string; header: string }[]) {
   const esc = (v: unknown) => {

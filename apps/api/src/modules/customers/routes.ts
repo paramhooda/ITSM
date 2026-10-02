@@ -8,7 +8,7 @@ import * as contacts from './contacts';
 import { customerEntitlements } from '@/modules/contracts/entitlements';
 import { customerScope } from '@/modules/contracts/scope';
 import { listContracts } from '@/modules/contracts/service';
-import { customerCreate, customerPatch, customerListQuery, siteInput, contactInput, uuid } from './schemas';
+import { customerCreate, customerPatch, customerListQuery, customerSummaryQuery, siteInput, contactInput, uuid } from './schemas';
 
 const idParam = z.object({ id: z.string().uuid() });
 const tags = ['customers'];
@@ -18,8 +18,11 @@ const inactive = (q: unknown) => (q as { includeInactive?: string }).includeInac
 export default async function routes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
-  // The minimal picker (`fields=min`) is available to every operational role; the full list needs customers:read.
-  r.get('/customers', { preHandler: app.auth('customers:read', 'tickets:read', 'contracts:read', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'reports:run', 'admin:users'), schema: { tags, querystring: customerListQuery } }, h((ctx, req) => svc.listCustomers(ctx, req.query as z.infer<typeof customerListQuery>)));
+  // The minimal picker (`fields=min`) is available to every operational role; the full list (and the summary) need customers:read.
+  const listAuth = app.auth('customers:read', 'tickets:read', 'contracts:read', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'reports:run', 'admin:users');
+  r.get('/customers', { preHandler: listAuth, schema: { tags, querystring: customerListQuery } }, h((ctx, req) => svc.listCustomers(ctx, req.query as z.infer<typeof customerListQuery>)));
+  // Static path: registered before /customers/:id.
+  r.get('/customers/summary', { preHandler: listAuth, schema: { tags, querystring: customerSummaryQuery } }, h((ctx, req) => svc.customerSummary(ctx, req.query as z.infer<typeof customerSummaryQuery>)));
   r.post('/customers', { preHandler: app.auth('customers:manage'), schema: { tags, body: customerCreate } }, h((ctx, req) => svc.createCustomer(ctx, req.body as z.infer<typeof customerCreate>)));
 
   r.get('/customers/:id', { preHandler: app.auth('customers:read'), schema: { tags, params: idParam } }, h((ctx, req) => svc.getCustomer(ctx, (req.params as { id: string }).id)));

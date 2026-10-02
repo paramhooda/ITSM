@@ -30,9 +30,12 @@ interface Management {
 export function ManagementControls({ days, customerId, onDays, onCustomer }: { days: number; customerId: string; onDays: (d: number) => void; onCustomer: (id: string) => void }) {
   const customers = useCustomersLookup();
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Segmented options={[{ value: 7, label: '7 days' }, { value: 30, label: '30 days' }, { value: 90, label: '90 days' }]} value={days} onChange={onDays} />
-      <Select className="w-56" value={customerId} onChange={(e) => onCustomer(e.target.value)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
+    <div className="flex flex-wrap items-center gap-3 w-full">
+      <span className="text-[12.5px] text-subtle">Period and scope</span>
+      <div className="flex flex-wrap items-center gap-2 ml-auto">
+        <Segmented options={[{ value: 7, label: '7 days' }, { value: 30, label: '30 days' }, { value: 90, label: '90 days' }]} value={days} onChange={onDays} />
+        <Select className="w-56" value={customerId} onChange={(e) => onCustomer(e.target.value)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
+      </div>
     </div>
   );
 }

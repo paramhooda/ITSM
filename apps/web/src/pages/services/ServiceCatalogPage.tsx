@@ -3,13 +3,16 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Layers, Users, Ticket, Activity, Server, ShieldCheck, Wrench, Headset, Briefcase, Cloud, Network, Database, Settings2, FolderTree } from 'lucide-react';
 import { toast } from 'sonner';
-import { PageHeader, Button, Badge, Card, Drawer, ConfirmDialog, LoadingBlock, ErrorBlock, EmptyState, SearchInput, Select, Checkbox, Field, Input, Textarea, KeyValue } from '@/components/ui';
-import { KpiGrid } from '@/components/dashboards/KpiGrid';
+import { PageHeader, Button, Badge, Card, Drawer, ConfirmDialog, LoadingBlock, ErrorBlock, EmptyState, SearchInput, Select, Checkbox, Field, Input, Textarea, KeyValue, FilterBar } from '@/components/ui';
+import { InsightBand } from '@/components/dashboards/InsightBand';
+import { Panel } from '@/components/dashboards/Panel';
+import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { Stat } from '@/components/dashboards/Panel';
 import { get, post, patch, del, ApiError } from '@/api/client';
 import { useLookups, useEngineers } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
 import { cn, colorClass } from '@/lib/utils';
+import { DOMAIN_COLORS } from '@/lib/statusColors';
 import { fmtDate, fmtNumber } from '@/lib/format';
 import { ContractStatusBadge } from '@/components/contracts/ContractBits';
 import { DOMAINS } from '@itsm/shared';
@@ -62,7 +65,6 @@ interface ServicePayload {
   isActive: boolean;
 }
 const errMsg = (e: unknown) => (e as ApiError)?.message ?? 'Request failed';
-const DOMAIN_COLORS: Record<string, string> = { noc: 'blue', soc: 'red', amc: 'amber', service_desk: 'teal', general: 'slate' };
 const DOMAIN_LABEL: Record<string, string> = { noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk', general: 'General' };
 const ICONS: Record<string, ComponentType<{ className?: string; strokeWidth?: number }>> = { server: Server, 'shield-check': ShieldCheck, wrench: Wrench, headset: Headset, briefcase: Briefcase, cloud: Cloud, network: Network, database: Database, layers: Layers };
 const categoryCount = (c: Category) => c.services.length + c.subcategories.reduce((n, s) => n + s.services.length, 0);
@@ -98,7 +100,7 @@ export default function ServiceCatalogPage() {
   const filtering = !!(q || domain);
 
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="Service catalog"
         subtitle="Everything we deliver, organised by service line and offering. Contracts reference these for coverage, SLA and scope."
@@ -109,23 +111,34 @@ export default function ServiceCatalogPage() {
           </>
         }
       />
-      {data && (
-        <div className="mb-6">
-          <KpiGrid
-            items={[
-              { label: 'Service offerings', value: fmtNumber(data.totals.services), hint: `${fmtNumber(categories.length)} service lines`, icon: <Layers className="h-4 w-4" /> },
-              { label: 'Subscribed customers', value: fmtNumber(data.totals.subscribedCustomers), hint: 'customers with an active contract', icon: <Users className="h-4 w-4" />, onClick: () => (window.location.href = '/contracts') },
-              { label: 'Open tickets', value: fmtNumber(data.totals.openTickets), hint: 'across all services', icon: <Ticket className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets?open=true') },
-              { label: 'Incidents · 30 days', value: fmtNumber(data.totals.incidents30d), tone: data.totals.incidents30d > 0 ? 'warn' : 'default', hint: 'incidents raised against a service', icon: <Activity className="h-4 w-4" /> },
-            ]}
-          />
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-2 mb-5">
+      <FilterBar activeCount={(q ? 1 : 0) + (domain ? 1 : 0) + (showInactive ? 1 : 0)} onClear={() => { setQ(''); setDomain(''); setShowInactive(false); }}>
         <SearchInput value={q} onChange={setQ} placeholder="Search services…" className="w-64" />
-        <Select value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="All domains" options={DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABEL[d] ?? d }))} className="w-44" />
+        <Select value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="All domains" options={DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABEL[d] ?? d }))} className="w-40 h-8 py-0 text-[13px]" />
         <Checkbox label="Show inactive" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-      </div>
+      </FilterBar>
+
+      {data && (
+        <InsightBand
+          id="catalog"
+          summary={`${fmtNumber(data.totals.services)} offerings in ${fmtNumber(categories.length)} service lines`}
+          kpis={[
+            { label: 'Service offerings', value: fmtNumber(data.totals.services), hint: `${fmtNumber(categories.length)} service lines`, icon: <Layers className="h-4 w-4" /> },
+            { label: 'Subscribed customers', value: fmtNumber(data.totals.subscribedCustomers), hint: 'customers with an active contract', icon: <Users className="h-4 w-4" />, onClick: () => (window.location.href = '/contracts') },
+            { label: 'Open tickets', value: fmtNumber(data.totals.openTickets), hint: 'across all services', icon: <Ticket className="h-4 w-4" />, onClick: () => (window.location.href = '/tickets') },
+            { label: 'Incidents · 30 days', value: fmtNumber(data.totals.incidents30d), tone: data.totals.incidents30d > 0 ? 'warn' : 'default', hint: 'incidents raised against a service', icon: <Activity className="h-4 w-4" /> },
+          ]}
+          panels={
+            <>
+              <Panel title="Offerings by service line" subtitle="Where the catalog is deepest">
+                <BreakdownBar dense items={[...categories].sort((a, b) => categoryCount(b) - categoryCount(a)).map((c) => ({ label: c.label, value: categoryCount(c), color: c.color ?? null, href: `#cat-${c.key}` }))} emptyText="No service lines" />
+              </Panel>
+              <Panel title="By domain" subtitle="Click to filter">
+                <BreakdownBar dense items={DOMAINS.map((d) => ({ label: DOMAIN_LABEL[d] ?? d, value: [...categories.flatMap((c) => [...c.services, ...c.subcategories.flatMap((sc) => sc.services)]), ...data.uncategorised].filter((sv) => sv.domain === d).length, color: DOMAIN_COLORS[d] ?? null, active: domain === d })).filter((i) => i.value > 0)} onSelect={(i) => { const d = DOMAINS.find((x) => (DOMAIN_LABEL[x] ?? x) === i.label); if (d) setDomain(domain === d ? '' : d); }} />
+              </Panel>
+            </>
+          }
+        />
+      )}
       {catalog.isLoading && <LoadingBlock />}
       {catalog.isError && <ErrorBlock error={catalog.error} retry={() => catalog.refetch()} />}
       {data && categories.length === 0 && data.uncategorised.length === 0 && (

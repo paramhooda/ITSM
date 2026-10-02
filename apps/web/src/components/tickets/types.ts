@@ -1,3 +1,4 @@
+import { TICKET_TYPE_COLORS } from '@/lib/statusColors';
 /** API shapes of the tickets module (kept in sync with apps/api/src/modules/tickets). */
 export type TicketType = 'incident' | 'request' | 'problem' | 'change';
 export type ScopeStatus = 'in_scope' | 'out_of_scope' | 'unknown';
@@ -81,6 +82,13 @@ export interface TicketListRow {
 export interface TicketStats {
   byStatusCategory: Record<string, number>;
   byType: Record<string, number>;
+  /** Rows matching the current filters. */
+  total: number;
+  byPriority: { id: string | null; label: string; color: string | null; level: number | null; count: number }[];
+  byStatus: { id: string | null; label: string; color: string | null; category: string | null; count: number }[];
+  byTeam: { id: string | null; label: string; count: number; breached: number }[];
+  /** Daily opened / resolved for the filtered set (last 14 days, or the created range). */
+  series: { day: string; opened: number; resolved: number }[];
   open: number;
   breached: number;
   atRisk: number;
@@ -364,5 +372,5 @@ export interface CatalogField {
 }
 
 export const TYPE_LABELS: Record<TicketType, string> = { incident: 'Incident', request: 'Request', problem: 'Problem', change: 'Change' };
-export const TYPE_COLORS: Record<TicketType, string> = { incident: 'red', request: 'blue', problem: 'orange', change: 'purple' };
+export const TYPE_COLORS: Record<TicketType, string> = TICKET_TYPE_COLORS as Record<TicketType, string>;
 export const LINK_TYPE_LABELS: Record<string, string> = { related: 'Related to', duplicate_of: 'Duplicate of', caused_by: 'Caused by', blocks: 'Blocks', child_of: 'Child of', problem_of: 'Problem', change_for: 'Change for', resolved_by: 'Resolved by' };

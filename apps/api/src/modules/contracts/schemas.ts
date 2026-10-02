@@ -141,3 +141,7 @@ export const contractListQuery = z.object({
   includeInactive: boolQuery.optional(),
 });
 export type ContractListQuery = z.infer<typeof contractListQuery>;
+
+/** GET /contracts/summary: every visible customer, or one. */
+export const contractSummaryQuery = z.object({ customerId: uuid.optional() });
+export type ContractSummaryQuery = z.infer<typeof contractSummaryQuery>;

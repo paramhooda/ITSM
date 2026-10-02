@@ -81,7 +81,7 @@ export function ChangeImpactCard({ ticketId, canManage }: { ticketId: string; ca
                     <li key={t.number} className="flex items-center gap-2 text-[12px]">
                       <Link to={t.link} className="font-mono text-brand-700 hover:underline">{t.number}</Link>
                       <span className="truncate" title={t.title}>{t.title}</span>
-                      <span className="ml-auto text-subtle shrink-0">{t.status}</span>
+                      <Badge color="slate" className="ml-auto shrink-0 py-0">{t.status}</Badge>
                     </li>
                   ))}
                 </ul>

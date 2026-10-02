@@ -9,7 +9,8 @@ import { invalidatePrincipal } from '@/core/principal';
 import { contractStatusOptions, statusDisplay, daysToExpiry, optionLabels, userNames, todayStr, addDays, sequential } from '@/modules/contracts/common';
 import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 import { customerEntitlements } from '@/modules/contracts/entitlements';
-import type { CustomerCreate, CustomerPatch, CustomerListQuery } from './schemas';
+import { slaStateFilterSql } from '@/modules/sla/engine';
+import type { CustomerCreate, CustomerPatch, CustomerListQuery, CustomerSummaryQuery } from './schemas';
 
 const cu = schema.customers;
 export type CustomerRow = typeof cu.$inferSelect;
@@ -53,7 +54,8 @@ function values(input: Partial<CustomerCreate>): Partial<typeof cu.$inferInsert>
 
 // ---------------------------------------------------------------- list
 
-export async function listCustomers(ctx: Ctx, q: CustomerListQuery) {
+/** Filter conditions shared by the list and its summary (tenant visibility comes from RLS on the transaction). */
+function listWhere(q: CustomerSummaryQuery): SQL | undefined {
   const conds: SQL[] = [];
   const active = q.isActive ?? 'true';
   if (active !== 'all') conds.push(eq(cu.isActive, active === 'true'));
@@ -64,7 +66,11 @@ export async function listCustomers(ctx: Ctx, q: CustomerListQuery) {
   if (q.tag) conds.push(arrayContains(cu.tags, [q.tag]));
   const search = searchFts(q.q, cu.searchVector, cu.name, cu.code);
   if (search) conds.push(search);
-  const where = conds.length ? and(...conds) : undefined;
+  return conds.length ? and(...conds) : undefined;
+}
+
+export async function listCustomers(ctx: Ctx, q: CustomerListQuery) {
+  const where = listWhere(q);
 
   const [{ count }] = await ctx.tx.select({ count: sql<number>`count(*)::int` }).from(cu).where(where);
   if (q.fields === 'min') {
@@ -115,6 +121,50 @@ export async function listCustomers(ctx: Ctx, q: CustomerListQuery) {
     accountManagerName: r.accountManagerId ? managers.get(r.accountManagerId)?.name ?? null : null,
   }));
   return { items, total: count, page: q.page, pageSize: q.pageSize };
+}
+
+// ---------------------------------------------------------------- summary
+
+const OPEN_TICKET_STATUSES = sql`(select id from config_options where type = 'ticket_status' and status_category in ('new','open','pending'))`;
+
+/** Headline numbers for the customers page: counts of the customers matching the list filters plus their open/breached tickets and contracts ending within 60 days. */
+export async function customerSummary(ctx: Ctx, q: CustomerSummaryQuery) {
+  ctx.require('customers:read');
+  const where = listWhere(q);
+  const count = sql<number>`count(*)::int`;
+  const matching = ctx.tx.select({ id: cu.id }).from(cu).where(where);
+  const t = schema.tickets;
+  const k = schema.contracts;
+  const today = todayStr();
+  const [totals, byTypeRows, byStatusRows, tickets, contracts] = await sequential([
+    () => ctx.tx.select({ total: count, active: sql<number>`count(*) filter (where ${cu.isActive})::int`, inactive: sql<number>`count(*) filter (where not ${cu.isActive})::int` }).from(cu).where(where),
+    () => ctx.tx.select({ id: cu.typeId, count }).from(cu).where(where).groupBy(cu.typeId).orderBy(desc(count)),
+    () => ctx.tx.select({ id: cu.statusId, count }).from(cu).where(where).groupBy(cu.statusId).orderBy(desc(count)),
+    () => ctx.tx
+      .select({
+        openTickets: sql<number>`count(*) filter (where ${t.statusId} in ${OPEN_TICKET_STATUSES})::int`,
+        breachedTickets: sql<number>`count(*) filter (where ${t.statusId} in ${OPEN_TICKET_STATUSES} and ${slaStateFilterSql.breached})::int`,
+      })
+      .from(t)
+      .where(inArray(t.customerId, matching)),
+    () => ctx.tx.select({ count }).from(k).where(and(inArray(k.customerId, matching), inArray(k.status, COVERING_STATUSES), sql`${k.endDate} >= ${today}::date`, sql`${k.endDate} <= ${addDays(today, 60)}::date`)),
+  ]);
+  const labels = await optionLabels(ctx.tx, [...byTypeRows.map((r) => r.id), ...byStatusRows.map((r) => r.id)]);
+  const bucket = (rows: { id: string | null; count: number }[]) =>
+    rows.map((r) => {
+      const opt = r.id ? labels.get(r.id) : undefined;
+      return { id: r.id, key: opt?.key ?? null, label: opt?.label ?? 'Unset', color: opt?.color ?? null, count: r.count };
+    });
+  return {
+    total: totals[0]?.total ?? 0,
+    active: totals[0]?.active ?? 0,
+    inactive: totals[0]?.inactive ?? 0,
+    byType: bucket(byTypeRows),
+    byStatus: bucket(byStatusRows),
+    openTickets: tickets[0]?.openTickets ?? 0,
+    breachedTickets: tickets[0]?.breachedTickets ?? 0,
+    contractsExpiring60: contracts[0]?.count ?? 0,
+  };
 }
 
 // ---------------------------------------------------------------- get

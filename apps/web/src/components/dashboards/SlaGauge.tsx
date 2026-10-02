@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 const LIGHTER: Record<string, string> = { [STATUS_COLORS.good]: '#4ade80', [STATUS_COLORS.warning]: '#fcd34d', [STATUS_COLORS.critical]: '#f87171' };
 
 /** Compliance ring: a single hero number with met/breached beneath. */
-export function SlaGauge({ pct, met, breached, label = 'SLA compliance', size = 128, target = 95, stroke = 11 }: { pct: number | null | undefined; met?: number; breached?: number; label?: string; size?: number; target?: number; stroke?: number }) {
+export function SlaGauge({ pct, met, breached, label = 'SLA compliance', size = 128, target = 95, stroke = 11, metLabel = 'met', breachedLabel = 'breached' }: { pct: number | null | undefined; met?: number; breached?: number; label?: string; size?: number; target?: number; stroke?: number; metLabel?: string; breachedLabel?: string }) {
   const t = useChartTheme();
   const id = useId().replace(/:/g, '');
   const r = (size - stroke - 2) / 2;
@@ -31,8 +31,8 @@ export function SlaGauge({ pct, met, breached, label = 'SLA compliance', size = 
         <div className="font-medium text-default">{label}</div>
         {met !== undefined && (
           <div className="mt-1.5 flex flex-col gap-1 tnum">
-            <span className="inline-flex items-center gap-1.5 text-secondary"><span className="h-2 w-2 rounded-full" style={{ background: STATUS_COLORS.good }} />{met} met</span>
-            <span className={cn('inline-flex items-center gap-1.5', (breached ?? 0) > 0 ? 'text-red-700' : 'text-secondary')}><span className="h-2 w-2 rounded-full" style={{ background: STATUS_COLORS.critical }} />{breached ?? 0} breached</span>
+            <span className="inline-flex items-center gap-1.5 text-secondary"><span className="h-2 w-2 rounded-full" style={{ background: STATUS_COLORS.good }} />{met} {metLabel}</span>
+            <span className={cn('inline-flex items-center gap-1.5', (breached ?? 0) > 0 ? 'text-red-700' : 'text-secondary')}><span className="h-2 w-2 rounded-full" style={{ background: STATUS_COLORS.critical }} />{breached ?? 0} {breachedLabel}</span>
           </div>
         )}
       </div>

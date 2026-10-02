@@ -1,6 +1,6 @@
 import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes, type ReactNode, useEffect, useId, useRef, useState, type HTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, Search, ChevronLeft, ChevronRight, Inbox, AlertTriangle, Check } from 'lucide-react';
+import { X, Loader2, Search, ChevronLeft, ChevronRight, Inbox, AlertTriangle, Check, SlidersHorizontal } from 'lucide-react';
 import { cn, colorClass } from '@/lib/utils';
 
 // ------------------------------------------------------------------ Button
@@ -120,13 +120,50 @@ export function Card({ className, children, title, actions, padded = true, ...pr
 export function PageHeader({ title, subtitle, actions, breadcrumb }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; breadcrumb?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
-      <div className="min-w-0">
+      <div className="flex-1 min-w-0">
         {breadcrumb && <div className="text-[12.5px] text-subtle mb-1.5">{breadcrumb}</div>}
         <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.025em] truncate">{title}</h1>
         {subtitle && <div className="text-[13.5px] text-muted mt-1">{subtitle}</div>}
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && <div className="flex items-center gap-2 shrink-0 ml-auto">{actions}</div>}
     </div>
+  );
+}
+
+// ------------------------------------------------------------------ Filter bar
+/**
+ * The filter strip that heads every module page: controls on the first row, optional
+ * chips/secondary row, an active-filter count and a Clear action. Sits above the insights.
+ */
+export function FilterBar({ children, chips, trailing, activeCount = 0, onClear, className }: { children: ReactNode; chips?: ReactNode; trailing?: ReactNode; activeCount?: number; onClear?: () => void; className?: string }) {
+  return (
+    <div className={cn('card p-2.5 flex flex-col gap-2', className)} role="search">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 pl-1 pr-1.5 text-[12.5px] font-medium text-muted select-none" title="Filters">
+          <SlidersHorizontal className="h-3.5 w-3.5 text-subtle" />
+          {activeCount > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[10.5px] font-semibold text-white tnum">{activeCount}</span>}
+        </span>
+        {children}
+        {activeCount > 0 && onClear && (
+          <Button variant="ghost" size="sm" onClick={onClear} icon={<X className="h-3.5 w-3.5" />}>
+            Clear
+          </Button>
+        )}
+        {trailing && <div className="ml-auto flex items-center gap-2">{trailing}</div>}
+      </div>
+      {chips && <div className="flex flex-wrap items-center gap-1.5 pl-1">{chips}</div>}
+    </div>
+  );
+}
+
+/** Pill used for quick status/category filters; shows the state colour as a dot. */
+export function FilterChip({ active, onClick, dot, count, children, className }: { active: boolean; onClick: () => void; dot?: string | null; count?: number | null; children: ReactNode; className?: string }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active} className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', active ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default hover:border-strong', className)}>
+      {dot && <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />}
+      {children}
+      {count !== undefined && count !== null && <span className={cn('tnum', active ? 'text-brand-700/70' : 'text-subtle')}>{count}</span>}
+    </button>
   );
 }
 
@@ -276,7 +313,7 @@ export interface Column<T> {
   sortable?: boolean;
 }
 
-export function DataTable<T extends { id?: string }>({ columns, rows, onRowClick, loading, empty, rowKey, sort, onSort, dense }: { columns: Column<T>[]; rows: T[]; onRowClick?: (row: T) => void; loading?: boolean; empty?: ReactNode; rowKey?: (row: T) => string; sort?: { key: string; order: 'asc' | 'desc' }; onSort?: (key: string) => void; dense?: boolean }) {
+export function DataTable<T extends { id?: string }>({ columns, rows, onRowClick, loading, empty, rowKey, sort, onSort, dense, rowClassName }: { columns: Column<T>[]; rows: T[]; onRowClick?: (row: T) => void; loading?: boolean; empty?: ReactNode; rowKey?: (row: T) => string; sort?: { key: string; order: 'asc' | 'desc' }; onSort?: (key: string) => void; dense?: boolean; /** Per-row accent (e.g. a left rail for breached rows). */ rowClassName?: (row: T) => string | undefined }) {
   return (
     <div className="overflow-auto">
       <table className={cn('table', dense && '[&_td]:py-1.5 [&_th]:py-1.5')}>
@@ -304,7 +341,7 @@ export function DataTable<T extends { id?: string }>({ columns, rows, onRowClick
             </tr>
           )}
           {rows.map((row, i) => (
-            <tr key={rowKey ? rowKey(row) : row.id ?? i} className={cn(onRowClick && 'clickable')} onClick={() => onRowClick?.(row)}>
+            <tr key={rowKey ? rowKey(row) : row.id ?? i} className={cn(onRowClick && 'clickable', rowClassName?.(row))} onClick={() => onRowClick?.(row)}>
               {columns.map((c) => (
                 <td key={c.key} className={c.className}>
                   {c.render ? c.render(row) : ((row as Record<string, unknown>)[c.key] as ReactNode) ?? '—'}
