@@ -42,7 +42,7 @@ x-app-env: &app-env
   SMTP_SECURE: ${SMTP_SECURE:-false}
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-  SMTP_FROM: ${SMTP_FROM:-MSP Service Desk <servicedesk@msp.local>}
+  SMTP_FROM: ${SMTP_FROM:-Progression Service Desk <servicedesk@msp.local>}
   AI_PROVIDER: ${AI_PROVIDER:-none}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}

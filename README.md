@@ -1,4 +1,4 @@
-# MSP Service Management Platform
+# Progression — MSP Service Management Platform
 
 Enterprise ITSM, helpdesk, asset management and CMDB platform for Managed Services Providers running mission-critical customer environments. ITIL 4 aligned, multi-customer by design, deployable on-premise with one command.
 
