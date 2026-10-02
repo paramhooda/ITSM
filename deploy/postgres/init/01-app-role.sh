@@ -1,0 +1,19 @@
+#!/bin/bash
+# Creates the non-superuser application role. The application connects with this
+# role at runtime so that PostgreSQL row-level security (tenant isolation) is
+# always enforced. Migrations run as the schema owner ($POSTGRES_USER).
+set -e
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+  DO \$\$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_DB_USER}') THEN
+      CREATE ROLE "${APP_DB_USER}" LOGIN PASSWORD '${APP_DB_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
+  END
+  \$\$;
+  GRANT CONNECT ON DATABASE "${POSTGRES_DB}" TO "${APP_DB_USER}";
+  GRANT USAGE ON SCHEMA public TO "${APP_DB_USER}";
+  ALTER DEFAULT PRIVILEGES FOR ROLE "${POSTGRES_USER}" IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${APP_DB_USER}";
+  ALTER DEFAULT PRIVILEGES FOR ROLE "${POSTGRES_USER}" IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "${APP_DB_USER}";
+  ALTER DEFAULT PRIVILEGES FOR ROLE "${POSTGRES_USER}" IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO "${APP_DB_USER}";
+EOSQL

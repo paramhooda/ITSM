@@ -1,0 +1,79 @@
+import { useEffect, lazy, Suspense, type ReactNode } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useAuthStore } from '@/stores/auth';
+import { LoadingBlock } from '@/components/ui';
+import { AppShell } from '@/layouts/AppShell';
+import { PortalShell } from '@/layouts/PortalShell';
+import LoginPage from '@/pages/auth/LoginPage';
+import type { Permission } from '@itsm/shared';
+import { routes as appRoutes } from '@/routes';
+
+const ResetPasswordPage = lazy(() => import('@/pages/auth/ResetPasswordPage'));
+
+function Guard({ perm, children }: { perm?: Permission[]; children: ReactNode }) {
+  const can = useAuthStore((s) => s.can);
+  if (perm && perm.length && !can(...perm)) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+export default function App() {
+  const { user, ready, setSession, setReady } = useAuthStore();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (ready) return;
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setSession(data.accessToken, data.user);
+          return;
+        }
+      } catch {
+        /* offline */
+      }
+      setReady();
+    })();
+  }, [ready, setSession, setReady]);
+
+  if (!ready) return <div className="h-full flex items-center justify-center"><LoadingBlock label="Starting…" /></div>;
+
+  if (!user) {
+    return (
+      <Suspense fallback={<LoadingBlock />}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="*" element={<Navigate to="/login" state={{ from: location.pathname }} replace />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
+  const isCustomer = user.userType === 'customer';
+  const Shell = isCustomer ? PortalShell : AppShell;
+  const visible = appRoutes.filter((r) => (isCustomer ? r.portal : !r.portal || r.shared));
+
+  return (
+    <Shell>
+      <Suspense fallback={<LoadingBlock />}>
+        <Routes>
+          {visible.map((r) => (
+            <Route
+              key={r.path}
+              path={r.path}
+              element={
+                <Guard perm={r.perm}>
+                  <r.component />
+                </Guard>
+              }
+            />
+          ))}
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    </Shell>
+  );
+}

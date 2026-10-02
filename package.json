@@ -1,0 +1,28 @@
+{
+  "name": "msp-itsm-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise MSP Service Management Platform: ITSM, Helpdesk, Asset Management, CMDB",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/shared",
+    "apps/api",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w apps/web && npm run build -w apps/api",
+    "dev": "concurrently -n api,web,worker -c blue,green,magenta \"npm run dev -w apps/api\" \"npm run dev -w apps/web\" \"npm run dev:worker -w apps/api\"",
+    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "test": "npm run test -w apps/api",
+    "db:generate": "npm run db:generate -w apps/api",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.9.3"
+  }
+}

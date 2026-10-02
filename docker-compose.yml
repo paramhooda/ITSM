@@ -1,0 +1,133 @@
+# Enterprise MSP Service Management Platform
+#
+#   docker compose up -d
+#
+# Everything (dependencies, build toolchain, web bundle) is downloaded and built
+# inside Docker. First start creates the schema, seeds sensible defaults and the
+# initial administrator account (see .env / environment below).
+#
+# Services:
+#   postgres  - PostgreSQL 16 (system of record, row-level security for tenant isolation)
+#   redis     - Redis 7 (job queues, SLA timers, rate limiting)
+#   app       - API + web UI (http://localhost:8080)
+#   worker    - background workers (SLA monitoring, notifications, reports, discovery, maintenance)
+#   mailhog   - local SMTP sink for notification emails (http://localhost:8025) - optional, profile "dev"
+
+name: msp-itsm
+
+x-app-env: &app-env
+  NODE_ENV: production
+  PORT: 8080
+  APP_URL: ${APP_URL:-http://localhost:8080}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgres://${APP_DB_USER:-itsm_app}:${APP_DB_PASSWORD:-change-me-app-db}@postgres:5432/${POSTGRES_DB:-itsm}
+  DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-itsm}:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/${POSTGRES_DB:-itsm}
+  APP_DB_USER: ${APP_DB_USER:-itsm_app}
+  APP_DB_PASSWORD: ${APP_DB_PASSWORD:-change-me-app-db}
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-jwt-secret-please-change-0123456789abcdef}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-only-insecure-encryption-key-please-change-0123456789}
+  ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+  REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-14}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@msp.local}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@12345}
+  ADMIN_NAME: ${ADMIN_NAME:-Platform Administrator}
+  SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+  STORAGE_DRIVER: local
+  STORAGE_LOCAL_PATH: /data/storage
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+  SMTP_HOST: ${SMTP_HOST:-mailhog}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_SECURE: ${SMTP_SECURE:-false}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-MSP Service Desk <servicedesk@msp.local>}
+  AI_PROVIDER: ${AI_PROVIDER:-none}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  AI_MODEL: ${AI_MODEL:-claude-sonnet-5-5}
+  OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL:-}
+  OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-itsm}
+      POSTGRES_USER: ${POSTGRES_USER:-itsm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+      APP_DB_USER: ${APP_DB_USER:-itsm_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-change-me-app-db}
+    command: >
+      postgres -c shared_buffers=512MB -c effective_cache_size=1536MB
+               -c work_mem=16MB -c maintenance_work_mem=128MB
+               -c max_connections=200 -c wal_level=replica
+               -c log_min_duration_statement=2000
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-itsm} -d ${POSTGRES_DB:-itsm}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: msp-itsm/platform:latest
+    restart: unless-stopped
+    command: ["server"]
+    environment:
+      <<: *app-env
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - storage-data:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    image: msp-itsm/platform:latest
+    restart: unless-stopped
+    command: ["worker"]
+    environment:
+      <<: *app-env
+    volumes:
+      - storage-data:/data/storage
+    depends_on:
+      app:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+    profiles: ["dev"]
+
+volumes:
+  postgres-data:
+  redis-data:
+  storage-data:
