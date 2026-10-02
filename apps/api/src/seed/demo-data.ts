@@ -13,7 +13,7 @@ import { seedInventory } from './demo/inventory';
 import { seedTickets } from './demo/tickets';
 import { seedFieldService } from './demo/field';
 import { seedKnowledge } from './demo/knowledge';
-import { seedIntegrations } from './demo/integrations';
+import { seedIntegrationRows, seedIntegrationEvents } from './demo/integrations';
 import { seedExtras, cleanupNotifications } from './demo/extras';
 
 /**
@@ -68,6 +68,7 @@ export async function loadDemoData() {
       await seedCustomers(state, tx, passwordHash);
       await seedServices(state, tx);
       await seedContracts(state, tx);
+      await seedIntegrationRows(state, tx);
     }),
   );
   // Principals for every demo actor (visibility is computed from the committed role/team/access rows).
@@ -91,7 +92,7 @@ export async function loadDemoData() {
   await phase('tickets', () => seedTickets(state));
   await phase('field service (visits, PM)', () => withSystem((tx) => seedFieldService(state, tx)));
   await phase('knowledge', () => withSystem((tx) => seedKnowledge(state, tx)));
-  await phase('integrations, discovery', () => withSystem((tx) => seedIntegrations(state, tx)));
+  await phase('integration events, discovery', () => withSystem((tx) => seedIntegrationEvents(state, tx)));
   await phase('reports, notifications, saved views', () =>
     withSystem(async (tx) => {
       await cleanupNotifications(state, tx);
