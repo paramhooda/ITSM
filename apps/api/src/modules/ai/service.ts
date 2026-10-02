@@ -113,7 +113,7 @@ const own = (ctx: Ctx, id: string) => and(eq(schema.aiConversations.id, id), eq(
 
 export async function listConversations(ctx: Ctx, limit = 20) {
   const rows = await ctx.tx
-    .select({ id: schema.aiConversations.id, title: schema.aiConversations.title, context: schema.aiConversations.context, createdAt: schema.aiConversations.createdAt, updatedAt: schema.aiConversations.updatedAt, messageCount: sql<number>`(select count(*)::int from ai_messages m where m.conversation_id = ${schema.aiConversations.id})` })
+    .select({ id: schema.aiConversations.id, title: schema.aiConversations.title, context: schema.aiConversations.context, createdAt: schema.aiConversations.createdAt, updatedAt: schema.aiConversations.updatedAt, messageCount: sql<number>`(select count(*)::int from ai_messages m where m.conversation_id = ai_conversations.id)` })
     .from(schema.aiConversations)
     .where(eq(schema.aiConversations.userId, ctx.user.id))
     .orderBy(desc(schema.aiConversations.updatedAt))

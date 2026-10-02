@@ -15,6 +15,7 @@ import { ScopeBadge } from '@/components/tickets/ScopeBadge';
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import type { TicketType, CatalogItem, ScopeStatus } from '@/components/tickets/types';
+import { ClassifyDraftButton } from '@/components/ai/ClassifyDraftButton';
 
 const TYPES: { key: TicketType; label: string; hint: string }[] = [
   { key: 'incident', label: 'Incident', hint: 'Something is broken or degraded' },
@@ -222,7 +223,7 @@ export default function TicketCreatePage() {
             </div>
           </Card>
 
-          <Card title="Classification">
+          <Card title="Classification" actions={<ClassifyDraftButton title={f.title} description={f.description} customerId={f.customerId || undefined} type={f.type} onApply={(r) => patch({ categoryId: r.categoryId ?? '', subcategoryId: r.subcategoryId ?? '', impactId: r.impactId ?? '', urgencyId: r.urgencyId ?? '', priorityId: !isCustomer && r.priorityId ? r.priorityId : f.priorityId })} />}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Category">
                 <Select value={f.categoryId} onChange={(e) => patch({ categoryId: e.target.value, subcategoryId: '' })} placeholder="Select…" options={options('ticket_category').map((o) => ({ value: o.id, label: `${o.label}${o.domain !== 'general' ? ` · ${o.domain.toUpperCase()}` : ''}` }))} />

@@ -326,6 +326,7 @@ describe('tool loop with a fake provider', () => {
       expect(conv.title!.length).toBeLessThanOrEqual(60);
       const mine = await asAdmin((ctx) => ai.listConversations(ctx));
       expect(mine.items.some((c) => c.id === res.conversationId)).toBe(true);
+      expect(mine.items.find((c) => c.id === res.conversationId)!.messageCount).toBe(2);
       // the conversation is private to its owner
       await expect(asCustomer((ctx) => ai.getConversation(ctx, res.conversationId))).rejects.toBeInstanceOf(AppError);
       // the action happened through the service layer with source = ai

@@ -75,10 +75,10 @@ export function AssistantPanel() {
 
   const send = useMutation({
     mutationFn: (text: string) => aiApi.chat({ conversationId, message: text, context: useContext && assistantContext ? assistantContext : undefined }),
-    onSuccess: (res) => {
+    onSuccess: (res, text) => {
       setConversationId(res.conversationId);
       qc.setQueryData(aiQk.conversation(res.conversationId), (old: { id: string; title: string | null; messages: AiMessage[] } | undefined) => {
-        const pending: AiMessage = { id: `local-${Date.now()}`, role: 'user', content: send.variables ?? '', toolCalls: [], createdAt: new Date().toISOString() };
+        const pending: AiMessage = { id: `local-${Date.now()}`, role: 'user', content: text, toolCalls: [], createdAt: new Date().toISOString() };
         return { id: res.conversationId, title: old?.title ?? null, messages: [...(old?.messages ?? []), pending, res.message] };
       });
       qc.invalidateQueries({ queryKey: aiQk.conversation(res.conversationId) });

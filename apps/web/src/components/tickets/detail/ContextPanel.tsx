@@ -15,6 +15,8 @@ import { SlaCard } from '../SlaCard';
 import { TicketStatusBadge, TypeBadge } from '../TicketStatusBadge';
 import { AttachmentsSection } from '../AttachmentsSection';
 import type { TicketDetail } from '../types';
+import { TicketAiPanel } from '@/components/ai/TicketAiPanel';
+import { ChangeImpactCard } from '@/components/ai/ChangeImpactCard';
 
 function InlineSelect({ label, value, options, onChange, disabled, placeholder = '—' }: { label: string; value: string | null | undefined; options: { value: string; label: string }[]; onChange: (v: string | null) => void; disabled?: boolean; placeholder?: string }) {
   return (
@@ -73,6 +75,10 @@ export function ContextPanel({ ticket }: { ticket: TicketDetail }) {
       </Panel>
 
       <SlaCard slas={ticket.slas} policyName={ticket.slaPolicy?.name} />
+
+      {/* AI assistance (proposals only; applied through the normal ticket endpoints) */}
+      <TicketAiPanel ticket={ticket} />
+      {ticket.type === 'change' && !isCustomer && <ChangeImpactCard ticketId={ticket.id} canManage={p.change} />}
 
       {/* assignment */}
       {!isCustomer && (
