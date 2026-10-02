@@ -28,7 +28,8 @@ RUN npm run build
 
 # ---- prune to production dependencies -------------------------------------
 FROM build AS prune
-RUN npm prune --omit=dev --no-audit --no-fund
+RUN npm prune --omit=dev --no-audit --no-fund \
+ && mkdir -p packages/shared/node_modules apps/api/node_modules
 
 # ---- runtime --------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime

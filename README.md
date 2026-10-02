@@ -15,6 +15,25 @@ Open http://localhost:8080 and sign in with `admin@msp.local` / `Admin@12345` (c
 
 Everything is downloaded and built inside Docker: no local Node.js, database or build tooling is required.
 
+### Demo accounts
+
+When the demo dataset is loaded (`SEED_DEMO_DATA=true`), these accounts exist in addition to the administrator. Password for all demo users: `Demo@12345`.
+
+| Role | Account |
+| --- | --- |
+| Service manager | `ananya.krishnan@msp.local` |
+| Account manager | `vikram.mehta@msp.local` |
+| NOC manager / NOC engineer | `rajesh.kumar@msp.local` / `priya.sharma@msp.local` |
+| SOC manager / SOC analyst | `sneha.iyer@msp.local` / `fatima.siddiqui@msp.local` |
+| Service desk | `meera.pillai@msp.local` |
+| Field engineer (scoped to assigned customers) | `suresh.reddy@msp.local` |
+| CMDB / contract administrators | `daniel.fernandes@msp.local` / `lakshmi.narayanan@msp.local` |
+| Management / auditor | `sarah.thompson@msp.local` / `nikhil.bose@msp.local` |
+| Customer portal administrator (ABC Manufacturing) | `manish.agarwal@abc-manufacturing.example` |
+| Customer portal user (Meridian Bank) | `imran.shaikh@meridianbank.example` |
+
+The dataset contains 10 customers, 22 contracts with entitlements and scope, ~290 configuration items with relationships, ~450 tickets with 120 days of SLA history, field visits, maintenance programs, knowledge articles and monitoring/SIEM events. Set `SEED_DEMO_DATA=false` for a clean production start.
+
 * API documentation: http://localhost:8080/api/docs
 * Health: http://localhost:8080/api/health
 * Local email sink (dev profile): `docker compose --profile dev up -d` then http://localhost:8025
