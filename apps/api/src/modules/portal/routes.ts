@@ -55,7 +55,8 @@ export default async function routes(app: FastifyInstance) {
   r.get('/portal/services', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => svc.portalServices(ctx, q(req).customerId)));
   r.get('/portal/sla', { preHandler: read, schema: { tags, querystring: S.slaQuery } }, h((ctx, req) => svc.portalSla(ctx, req.query as { customerId?: string; days: number })));
 
-  // ---- assets & CIs
+  // ---- assets & CIs (static /portal/assets/overview first, ahead of any future /portal/assets/:id)
+  r.get('/portal/assets/overview', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => svc.portalAssetsOverview(ctx, q(req).customerId)));
   r.get('/portal/assets', { preHandler: read, schema: { tags, querystring: S.assetListQuery } }, h((ctx, req) => svc.portalAssets(ctx, req.query as S.AssetListQuery)));
   r.get('/portal/cis', { preHandler: read, schema: { tags, querystring: S.ciListQuery } }, h((ctx, req) => svc.portalCis(ctx, req.query as S.CiListQuery)));
 

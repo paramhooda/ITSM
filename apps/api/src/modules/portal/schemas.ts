@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ASSET_LIFECYCLE } from '@itsm/shared';
 import { paginationSchema } from '@/core/pagination';
 import { boolQ } from '@/modules/tickets/schemas';
 
@@ -48,11 +49,16 @@ export const decideBody = z.object({ decision: z.enum(['approved', 'rejected']),
 
 export const slaQuery = previewQuery.extend({ days: z.coerce.number().int().min(1).max(365).default(30) });
 
+export const PORTAL_ASSET_EXPIRING = ['warranty30', 'warranty90', 'amc30', 'amc90', 'expired'] as const;
+
 export const assetListQuery = paginationSchema.extend({
   customerId: uuid.optional(),
   q: z.string().max(200).optional(),
   siteId: uuid.optional(),
   categoryId: uuid.optional(),
+  lifecycleStage: z.enum(ASSET_LIFECYCLE).optional(),
+  /** Coverage chips of the portal assets page: ends within 30 / 90 days, or already lapsed (warranty or AMC). */
+  expiring: z.enum(PORTAL_ASSET_EXPIRING).optional(),
   sort: z.enum(['tag', 'name', 'warrantyEnd', 'amcEnd', 'createdAt', 'updatedAt']).optional(),
   order: z.enum(['asc', 'desc']).optional(),
 });

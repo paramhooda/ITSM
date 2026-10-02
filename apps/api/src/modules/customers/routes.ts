@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { h } from '@/core/context';
 import * as svc from './service';
+import { customersOverview } from './overview';
 import * as sites from './sites';
 import * as contacts from './contacts';
 import { customerEntitlements } from '@/modules/contracts/entitlements';
@@ -23,6 +24,7 @@ export default async function routes(app: FastifyInstance) {
   r.get('/customers', { preHandler: listAuth, schema: { tags, querystring: customerListQuery } }, h((ctx, req) => svc.listCustomers(ctx, req.query as z.infer<typeof customerListQuery>)));
   // Static path: registered before /customers/:id.
   r.get('/customers/summary', { preHandler: listAuth, schema: { tags, querystring: customerSummaryQuery } }, h((ctx, req) => svc.customerSummary(ctx, req.query as z.infer<typeof customerSummaryQuery>)));
+  r.get('/customers/overview', { preHandler: app.auth('customers:read'), schema: { tags } }, h((ctx) => customersOverview(ctx)));
   r.post('/customers', { preHandler: app.auth('customers:manage'), schema: { tags, body: customerCreate } }, h((ctx, req) => svc.createCustomer(ctx, req.body as z.infer<typeof customerCreate>)));
 
   r.get('/customers/:id', { preHandler: app.auth('customers:read'), schema: { tags, params: idParam } }, h((ctx, req) => svc.getCustomer(ctx, (req.params as { id: string }).id)));

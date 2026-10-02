@@ -238,7 +238,7 @@ export type VisitListRow = VisitRow & VisitLabels & { acknowledged: boolean };
 
 // ---------------------------------------------------------------- list / calendar
 
-function visibilityConds(ctx: Ctx, customerId?: string): SQL[] {
+export function visibilityConds(ctx: Ctx, customerId?: string): SQL[] {
   const conds: SQL[] = [];
   if (isCustomerUser(ctx)) {
     if (!ctx.can('portal:access')) throw new ForbiddenError('Missing permission: portal:access');

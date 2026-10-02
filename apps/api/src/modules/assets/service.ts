@@ -95,6 +95,9 @@ function buildAssetWhere(ctx: Ctx, q: AssetListQuery) {
   if (q.hasCi === false) conds.push(isNull(assets.ciId));
   if (q.warrantyExpiringDays !== undefined) conds.push(and(isNotNull(assets.warrantyEnd), gte(assets.warrantyEnd, todayStr()), lte(assets.warrantyEnd, addDays(q.warrantyExpiringDays))));
   if (q.amcExpiringDays !== undefined) conds.push(and(isNotNull(assets.amcEnd), gte(assets.amcEnd, todayStr()), lte(assets.amcEnd, addDays(q.amcExpiringDays))));
+  if (q.expired === 'warranty') conds.push(sql`${assets.warrantyEnd} < ${todayStr()}::date`);
+  if (q.expired === 'amc') conds.push(sql`${assets.amcEnd} < ${todayStr()}::date`);
+  if (q.expired === 'any') conds.push(or(sql`${assets.warrantyEnd} < ${todayStr()}::date`, sql`${assets.amcEnd} < ${todayStr()}::date`));
   if (q.q) conds.push(searchFts(q.q, assets.searchVector, assets.tag, assets.serialNumber, assets.name));
   const where = and(...conds.filter((c): c is SQL => !!c));
   const sortable = { tag: assets.tag, name: assets.name, warrantyEnd: assets.warrantyEnd, amcEnd: assets.amcEnd, createdAt: assets.createdAt, updatedAt: assets.updatedAt, customer: customers.name };

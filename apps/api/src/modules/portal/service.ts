@@ -17,6 +17,7 @@ import { customerScope } from '@/modules/contracts/scope';
 import { daysToExpiry, optionLabels, todayStr, addDays } from '@/modules/contracts/common';
 import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 import { listAssetsFull } from '@/modules/assets/service';
+import { assetsOverviewCore } from '@/modules/assets/overview';
 import { listCisFull } from '@/modules/cmdb/service';
 import { slaCompliance } from '@/modules/sla/policies';
 import * as iam from '@/modules/iam/service';
@@ -565,12 +566,35 @@ export async function portalSla(ctx: Ctx, q: { customerId?: string; days: number
 
 export async function portalAssets(ctx: Ctx, q: AssetListQuery) {
   const scope = resolvePortalCustomer(ctx, 'portal:assets', q.customerId);
-  const res = await listAssetsFull(ctx, { page: q.page, pageSize: q.pageSize, customerId: scope.customerId, siteId: q.siteId, categoryId: q.categoryId, q: q.q, sort: q.sort ?? 'tag', order: q.order ?? 'asc' });
+  const coverage: Partial<Parameters<typeof listAssetsFull>[1]> =
+    q.expiring === 'warranty30' ? { warrantyExpiringDays: 30 }
+    : q.expiring === 'warranty90' ? { warrantyExpiringDays: 90 }
+    : q.expiring === 'amc30' ? { amcExpiringDays: 30 }
+    : q.expiring === 'amc90' ? { amcExpiringDays: 90 }
+    : q.expiring === 'expired' ? { expired: 'any' }
+    : {};
+  const res = await listAssetsFull(ctx, { page: q.page, pageSize: q.pageSize, customerId: scope.customerId, siteId: q.siteId, categoryId: q.categoryId, lifecycleStage: q.lifecycleStage, q: q.q, sort: q.sort ?? 'tag', order: q.order ?? 'asc', ...coverage });
   return {
     items: res.items.map((a) => ({ id: a.id, tag: a.tag, name: a.name, categoryLabel: a.categoryLabel, siteId: a.siteId, siteName: a.siteName, manufacturer: a.manufacturer, model: a.model, serialNumber: a.serialNumber, location: a.location, statusLabel: a.statusLabel, statusColor: a.statusColor, lifecycleStage: a.lifecycleStage, warrantyEnd: a.warrantyEnd, warranty: a.warranty, amcEnd: a.amcEnd, amc: a.amc, ciName: a.ciName })),
     total: res.total,
     page: res.page,
     pageSize: res.pageSize,
+  };
+}
+
+/** GET /portal/assets/overview: the customer's own fleet (never another customer's) for the portal assets page. */
+export async function portalAssetsOverview(ctx: Ctx, requested?: string | null) {
+  const scope = resolvePortalCustomer(ctx, 'portal:assets', requested);
+  const o = await assetsOverviewCore(ctx, eq(schema.assets.customerId, scope.customerId));
+  return {
+    total: o.total,
+    byCategory: o.byCategory,
+    byLifecycle: o.byLifecycle,
+    bySite: o.bySite,
+    warranty: o.warranty,
+    amc: o.amc,
+    expiringSoon: o.expiringSoon.map(({ customerName: _c, ...e }) => e),
+    preview: scope.preview,
   };
 }
 

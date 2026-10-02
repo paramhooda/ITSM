@@ -137,3 +137,13 @@ export type ContractListQuery = z.infer<typeof contractListQuery>;
 /** GET /contracts/summary: every visible customer, or one. */
 export const contractSummaryQuery = z.object({ customerId: uuid.optional() });
 export type ContractSummaryQuery = z.infer<typeof contractSummaryQuery>;
+
+/** GET /contracts/entitlements: paged utilisation across the visible covering contracts. */
+export const entitlementListQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(500).default(50),
+  customerId: uuid.optional(),
+  status: z.enum(['ok', 'over_threshold', 'exhausted']).optional(),
+  q: z.string().max(200).optional(),
+});
+export type EntitlementListQuery = z.infer<typeof entitlementListQuery>;

@@ -16,6 +16,8 @@ export const assetListQuery = paginationSchema.extend({
   manufacturer: z.string().max(120).optional(),
   warrantyExpiringDays: z.coerce.number().int().min(0).max(3650).optional(),
   amcExpiringDays: z.coerce.number().int().min(0).max(3650).optional(),
+  /** Coverage already lapsed: warranty, AMC or either. */
+  expired: z.enum(['warranty', 'amc', 'any']).optional(),
   hasCi: z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean().optional()),
   tag: z.string().max(100).optional(),
   amcContractId: z.string().uuid().optional(),

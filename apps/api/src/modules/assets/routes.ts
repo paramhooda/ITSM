@@ -5,6 +5,7 @@ import { stringify } from 'csv-stringify';
 import { h } from '@/core/context';
 import { ValidationError } from '@/core/errors';
 import * as svc from './service';
+import { assetsOverview } from './overview';
 import { assetListQuery, assetCreateBody, assetPatchBody, lifecycleBody, expiringQuery, summaryQuery, ASSET_IMPORT_COLUMNS, type AssetListQuery } from './schemas';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -29,6 +30,7 @@ export default async function routes(app: FastifyInstance) {
 
   r.get('/assets', { preHandler: read, schema: { tags: ['assets'], querystring: assetListQuery } }, h((ctx, req) => svc.listAssets(ctx, req.query as AssetListQuery)));
   r.get('/assets/summary', { preHandler: read, schema: { tags: ['assets'], querystring: summaryQuery } }, h((ctx, req) => svc.assetSummary(ctx, (req.query as { customerId?: string }).customerId)));
+  r.get('/assets/overview', { preHandler: read, schema: { tags: ['assets'], querystring: summaryQuery } }, h((ctx, req) => assetsOverview(ctx, (req.query as { customerId?: string }).customerId)));
   r.get('/assets/expiring', { preHandler: read, schema: { tags: ['assets'], querystring: expiringQuery } }, h((ctx, req) => svc.expiringAssets(ctx, req.query as z.infer<typeof expiringQuery>)));
 
   r.get('/assets/export.csv', { preHandler: read, schema: { tags: ['assets'], querystring: assetListQuery } }, h(async (ctx, req, reply) => {

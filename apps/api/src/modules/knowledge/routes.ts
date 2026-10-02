@@ -5,6 +5,7 @@ import { KB_VISIBILITY, DOMAINS } from '@itsm/shared';
 import { h } from '@/core/context';
 import { listQuerySchema } from '@/core/pagination';
 import * as svc from './service';
+import { knowledgeOverview } from './overview';
 
 const idParam = z.object({ id: z.string().uuid() });
 const uuidOrNull = z.string().uuid().nullable();
@@ -77,6 +78,7 @@ export default async function routes(app: FastifyInstance) {
   }, h((ctx, req) => svc.suggest(ctx, req.query as svc.SuggestInput)));
 
   r.get('/knowledge/stats', { preHandler: app.auth('kb:read', 'kb:manage'), schema: { tags: ['knowledge'] } }, h((ctx) => svc.stats(ctx)));
+  r.get('/knowledge/overview', { preHandler: app.auth('kb:read', 'kb:manage'), schema: { tags: ['knowledge'] } }, h((ctx) => knowledgeOverview(ctx)));
 
   r.post('/knowledge', { preHandler: manage, schema: { tags: ['knowledge'], body: articleBody } }, h((ctx, req) => svc.createArticle(ctx, toInput(req.body as z.infer<typeof articleBody>) as svc.ArticleInput)));
 

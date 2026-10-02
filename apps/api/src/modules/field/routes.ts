@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { h } from '@/core/context';
 import * as svc from './service';
+import { fieldOverview } from './overview';
 import { visitReportHtml, generateVisitReport } from './report';
 import * as S from './schemas';
 
@@ -31,6 +32,7 @@ export default async function routes(app: FastifyInstance) {
   r.get('/field/visits', { preHandler: read, schema: { tags, querystring: S.visitListQuery } }, h((ctx, req) => svc.listVisits(ctx, req.query as S.VisitListQuery)));
   r.get('/field/visits/calendar', { preHandler: read, schema: { tags, querystring: S.calendarQuery } }, h((ctx, req) => svc.calendarVisits(ctx, req.query as S.CalendarQuery)));
   r.get('/field/summary', { preHandler: read, schema: { tags, querystring: S.summaryQuery } }, h((ctx, req) => svc.visitSummary(ctx, req.query as S.SummaryQuery)));
+  r.get('/field/overview', { preHandler: app.auth('field:read', 'field:manage'), schema: { tags, querystring: z.object({ customerId: S.uuid.optional() }) } }, h((ctx, req) => fieldOverview(ctx, (req.query as { customerId?: string }).customerId)));
   r.get('/field/engineers/workload', { preHandler: app.auth('field:read', 'field:manage'), schema: { tags, querystring: S.workloadQuery } }, h((ctx, req) => svc.engineerWorkload(ctx, req.query as S.WorkloadQuery)));
   r.post('/field/visits', { preHandler: manage, schema: { tags, body: S.createVisitSchema } }, h(async (ctx, req, reply) => {
     const v = await svc.createVisit(ctx, req.body as S.CreateVisitInput);
