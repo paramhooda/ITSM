@@ -21,12 +21,37 @@ export const ciListQuery = paginationSchema.extend({
   hasAsset: bool,
   serviceId: z.string().uuid().optional(),
   tag: z.string().max(50).optional(),
+  /** discovery_source not null AND (last_seen_at null OR older than 30 days) — same predicate as the summary/overview. */
   stale: bool,
+  /** discovery_source not null (true) / null (false). */
+  discovered: bool,
+  /** No relationship in either direction (true) / at least one (false). */
+  withoutRelationships: bool,
+  /** owner_team_id null (true) / set (false). */
+  unowned: bool,
   sort: z.enum(['name', 'hostname', 'ipAddress', 'typeName', 'updatedAt', 'lastSeenAt', 'createdAt', 'customer', 'criticality']).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   fields: z.enum(['min', 'full']).optional(),
 });
 export type CiListQuery = z.infer<typeof ciListQuery>;
+
+export const CI_BULK_ACTIONS = ['status', 'criticality', 'environment', 'ownerTeam', 'retire', 'addTag'] as const;
+export const ciBulkBody = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+  action: z.enum(CI_BULK_ACTIONS),
+  payload: z
+    .object({
+      status: z.enum(CI_STATUSES).optional(),
+      criticality: z.enum(CI_CRITICALITIES).optional(),
+      environment: z.enum(CI_ENVIRONMENTS).optional(),
+      ownerTeamId: z.string().uuid().nullable().optional(),
+      tag: z.string().trim().min(1).max(50).optional(),
+    })
+    .default({}),
+});
+export type CiBulkInput = z.infer<typeof ciBulkBody>;
+
+export const serviceMapQuery = z.object({ depth: z.coerce.number().int().min(1).max(10).default(6) });
 
 export const ciCreateBody = z.object({
   customerId: z.string().uuid(),

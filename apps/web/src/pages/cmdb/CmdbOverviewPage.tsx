@@ -54,7 +54,7 @@ export default function CmdbOverviewPage() {
                 { label: 'Configuration items', value: fmtNumber(d.totals.total), icon: <Server className="h-4 w-4" />, hint: `${fmtNumber(d.totals.active)} active · ${fmtNumber(d.totals.retired)} retired`, onClick: () => toCis('') },
                 { label: 'Critical', value: fmtNumber(d.totals.critical), tone: d.totals.critical ? 'bad' : 'good', icon: <AlertOctagon className="h-4 w-4" />, hint: `${fmtNumber(d.totals.openIncidents)} open tickets on CIs`, onClick: () => toCis('criticality=critical') },
                 { label: 'Stale', value: fmtNumber(d.totals.stale), tone: d.totals.stale ? 'warn' : 'good', icon: <EyeOff className="h-4 w-4" />, hint: 'discovered, not seen for 30 days', onClick: () => toCis('stale=true') },
-                { label: 'Without relationships', value: fmtNumber(d.totals.withoutRelationships), tone: d.totals.withoutRelationships ? 'warn' : 'good', icon: <Link2 className="h-4 w-4" />, hint: 'active CIs no map can reach', onClick: () => toCis('withoutRelationships=true') },
+                { label: 'Without relationships', value: fmtNumber(d.totals.withoutRelationships), tone: d.totals.withoutRelationships ? 'warn' : 'good', icon: <Link2 className="h-4 w-4" />, hint: 'active CIs no map can reach', onClick: () => toCis('withoutRelationships=true&status=active') },
                 { label: 'Findings to review', value: fmtNumber(d.discovery.pendingFindings), tone: d.discovery.pendingFindings ? 'warn' : 'good', icon: <Radar className="h-4 w-4" />, hint: `${fmtNumber(d.discovery.newFindings)} new devices · ${fmtNumber(d.discovery.activeSources)} active sources`, onClick: () => navigate('/cmdb/discovery/findings') },
               ]
             : []
@@ -66,12 +66,12 @@ export default function CmdbOverviewPage() {
                 <BreakdownBar dense items={d.byType.slice(0, 12).map((t) => ({ label: t.name, value: t.count, color: t.color, href: `/cmdb/cis?typeKey=${t.key}${cust}` }))} emptyText="No configuration items yet" />
               </Panel>
               <Panel title="Data health" subtitle="How trustworthy the CMDB is right now">
-                <div className="flex items-center gap-5">
+                <div className="flex flex-wrap items-center gap-5">
                   <SlaGauge pct={d.health.completenessPct} label="Completeness" target={90} size={112} stroke={10} />
-                  <div className="grid grid-cols-1 gap-3 min-w-0">
-                    <Stat label="Freshness · discovered CIs seen in 30d" value={fmtPct(d.health.freshnessPct, 0)} tone={tone(d.health.freshnessPct, 90, 75)} />
-                    <Stat label="Relationship coverage" value={fmtPct(d.health.relationshipCoveragePct, 0)} tone={tone(d.health.relationshipCoveragePct, 80, 60)} />
-                    <Stat label="Unowned · no site" value={`${fmtNumber(d.totals.unowned)} · ${fmtNumber(d.totals.noSite)}`} tone={d.totals.unowned + d.totals.noSite > 0 ? 'warn' : 'good'} />
+                  <div className="grid grid-cols-1 gap-3 min-w-[150px] flex-1">
+                    <Stat label="Freshness" value={fmtPct(d.health.freshnessPct, 0)} tone={tone(d.health.freshnessPct, 90, 75)} />
+                    <Stat label="Relationships" value={fmtPct(d.health.relationshipCoveragePct, 0)} tone={tone(d.health.relationshipCoveragePct, 80, 60)} />
+                    <Stat label="No owner · no site" value={`${fmtNumber(d.totals.unowned)} · ${fmtNumber(d.totals.noSite)}`} tone={d.totals.unowned + d.totals.noSite > 0 ? 'warn' : 'good'} />
                   </div>
                 </div>
               </Panel>

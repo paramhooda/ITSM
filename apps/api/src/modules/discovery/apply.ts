@@ -11,7 +11,7 @@ import { findCiByReference, normaliseMac } from '@/modules/cmdb/match';
 import { ensureRelationship, replaceInterfaces, typeByKey } from '@/modules/cmdb/service';
 import type { RawFinding } from './providers/types';
 
-const { cis, discoveryFindings, ciRelationshipTypes } = schema;
+const { cis, discoveryFindings, discoverySources, ciRelationshipTypes } = schema;
 
 export type FindingRow = typeof discoveryFindings.$inferSelect;
 export type DiffStatus = 'new' | 'changed' | 'unchanged';
@@ -82,6 +82,8 @@ export async function applyFinding(tx: Tx, finding: FindingRow, actor: AuditActo
   if (!existing) existing = await findCiByReference(tx, { customerId: finding.customerId, ipAddress: finding.ipAddress, serialNumber: finding.serialNumber, macAddress: finding.macAddress, hostname: finding.hostname ?? finding.fqdn });
 
   const snmpAttrs = { sysObjectId: finding.sysObjectId ?? null, sysDescr: finding.sysDescr ?? null, sysLocation: (raw.sysLocation as string | null) ?? null, sysContact: (raw.sysContact as string | null) ?? null, sysName: (raw.sysName as string | null) ?? null };
+  const [sourceRow] = await tx.select({ sourceType: discoverySources.sourceType }).from(discoverySources).where(eq(discoverySources.id, finding.sourceId)).limit(1);
+  const discoverySource = sourceRow?.sourceType || 'network_scan';
   const now = new Date();
   const fill = {
     ...(finding.hostname ? { hostname: finding.hostname.toLowerCase() } : {}),
@@ -93,7 +95,7 @@ export async function applyFinding(tx: Tx, finding: FindingRow, actor: AuditActo
     ...(finding.model ? { model: finding.model } : {}),
     ...(raw.osName ? { osName: String(raw.osName) } : {}),
     ...(raw.osVersion ? { osVersion: String(raw.osVersion) } : {}),
-    discoverySource: 'network_scan',
+    discoverySource,
     lastSeenAt: now,
   };
 

@@ -14,6 +14,8 @@ export async function one<T = Record<string, unknown>>(ctx: Ctx, query: SQL): Pr
 
 export const EMPTY = sql``;
 export const num = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
+/** Timestamps in raw `execute` rows arrive as pg text ('2026-10-02 17:58:28.119+00'); normalise to a Date (or null). */
+export const asDate = (v: unknown): Date | null => (v === null || v === undefined ? null : v instanceof Date ? v : new Date(String(v).replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00')));
 export const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : null);
 export const isCustomerUser = (ctx: Ctx) => ctx.user.userType === 'customer';
 

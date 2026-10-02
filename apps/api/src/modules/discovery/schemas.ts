@@ -60,3 +60,16 @@ export const findingsQuery = paginationSchema.extend({
 });
 export type FindingsQuery = z.infer<typeof findingsQuery>;
 export const bulkBody = z.object({ ids: z.array(z.string().uuid()).min(1).max(500), action: z.enum(['apply', 'ignore']) });
+
+export const RUN_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
+export const overviewQuery = z.object({ customerId: z.string().uuid().optional() });
+export const runsListQuery = paginationSchema.extend({
+  customerId: z.string().uuid().optional(),
+  sourceId: z.string().uuid().optional(),
+  status: z.enum(RUN_STATUSES).optional(),
+  sort: z.enum(['createdAt', 'startedAt', 'finishedAt', 'status', 'sourceName', 'customerName', 'durationSec']).optional(),
+  order: z.enum(['asc', 'desc']).optional(),
+});
+export type RunsListQuery = z.infer<typeof runsListQuery>;
+export const findingStatsQuery = z.object({ customerId: z.string().uuid().optional(), sourceId: z.string().uuid().optional(), runId: z.string().uuid().optional() });
+export type FindingStatsQuery = z.infer<typeof findingStatsQuery>;

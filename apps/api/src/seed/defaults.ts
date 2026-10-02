@@ -186,7 +186,13 @@ async function seedCiTypes(tx: Tx) {
 }
 
 async function seedRelationshipTypes(tx: Tx) {
-  for (const r of RELATIONSHIP_TYPE_SEEDS) await tx.insert(schema.ciRelationshipTypes).values({ ...r, isSystem: true }).onConflictDoNothing();
+  for (const r of RELATIONSHIP_TYPE_SEEDS) {
+    await tx.insert(schema.ciRelationshipTypes).values({ ...r, isSystem: true }).onConflictDoNothing();
+    // Impact metadata introduced by an upgrade: fill it in for known keys still at the 'none' default, never overwrite an administrator's choice.
+    if (r.impactDirection !== 'none') {
+      await tx.update(schema.ciRelationshipTypes).set({ impactDirection: r.impactDirection }).where(and(eq(schema.ciRelationshipTypes.key, r.key), eq(schema.ciRelationshipTypes.impactDirection, 'none')));
+    }
+  }
 }
 
 async function seedKbCategories(tx: Tx) {

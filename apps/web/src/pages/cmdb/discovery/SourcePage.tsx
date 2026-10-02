@@ -10,9 +10,9 @@ import { useAuthStore } from '@/stores/auth';
 import { fmtDateTime, fmtNumber, relativeTime, titleCase } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { SourceDrawer } from '@/components/cmdb/SourceDrawer';
-import { RunStatusBadge, runSummary, runDurationText } from '@/components/cmdb/DiscoveryBits';
+import { RunStatusBadge, runSummary, runDurationText, cronLabel } from '@/components/cmdb/DiscoveryBits';
 import { FindingsTable } from './FindingsTable';
-import { errorMessage, CRON_PRESETS } from '@/components/cmdb/hooks';
+import { errorMessage } from '@/components/cmdb/hooks';
 import { discoveryApi, discoveryKeys, type DiscoveryRun } from '@/components/cmdb/api';
 
 /** One discovery source as a record: scope and credentials on the form, its runs and findings as related lists. */
@@ -28,6 +28,7 @@ export default function SourcePage() {
   const runsParams = useMemo(() => ({ page, pageSize: 25 }), [page]);
   const runs = useQuery({ queryKey: discoveryKeys.runs({ sourceId: id, ...runsParams }), queryFn: () => discoveryApi.sourceRuns(id, runsParams), enabled: !!id, refetchInterval: (q) => (q.state.data?.items.some((r) => r.status === 'queued' || r.status === 'running') ? 3000 : 15_000) });
   const audit = useAuditStream('discovery_source', id);
+  const stats = useQuery({ queryKey: discoveryKeys.findingStats({ sourceId: id }), queryFn: () => discoveryApi.findingStats({ sourceId: id }), enabled: !!id, staleTime: 30_000 });
   const [edit, setEdit] = useState(false);
   const [del, setDel] = useState(false);
   const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof discoveryApi.test>> | null>(null);
@@ -43,7 +44,8 @@ export default function SourcePage() {
   const s = src.data;
   const cfg = s.config;
   const providerLabel = providers.data?.items.find((p) => p.type === s.sourceType)?.label ?? titleCase(s.sourceType.replace(/_/g, ' '));
-  const schedule = s.scheduleCron ? CRON_PRESETS.find((p) => p.value === s.scheduleCron)?.label ?? s.scheduleCron : 'Manual only';
+  const schedule = cronLabel(s.scheduleCron);
+  const pending = s.pendingFindings ?? stats.data?.byStatus.pending ?? 0;
   const lastRun = runs.data?.items[0];
   const running = runs.data?.items.find((r) => r.status === 'running' || r.status === 'queued');
 
@@ -119,9 +121,9 @@ export default function SourcePage() {
             <RecordRibbon
               columns={5}
               items={[
-                { label: 'To review', value: fmtNumber(s.pendingFindings), tone: s.pendingFindings ? 'warn' : 'good' },
+                { label: 'To review', value: fmtNumber(pending), tone: pending ? 'warn' : 'good' },
                 { label: 'Targets', value: fmtNumber(cfg.subnets.length) },
-                { label: 'Schedule', value: s.scheduleCron ? schedule : 'manual' },
+                { label: 'Schedule', value: s.scheduleCron ? schedule.replace(' UTC', '') : 'manual' },
                 { label: 'Last run', value: lastRun ? runDurationText(lastRun) : '—', hint: lastRun ? runSummary(lastRun) : undefined },
                 { label: 'Runs', value: fmtNumber(runs.data?.total ?? 0) },
               ]}
@@ -133,7 +135,7 @@ export default function SourcePage() {
             <RecordForm sections={sections} />
             <RelatedTabs
               tabs={[
-                { key: 'findings', label: 'Findings', count: s.pendingFindings || undefined, content: <FindingsTable sourceId={s.id} customerId={s.customerId} /> },
+                { key: 'findings', label: 'Findings', count: pending || undefined, content: <FindingsTable sourceId={s.id} customerId={s.customerId} /> },
                 {
                   key: 'runs',
                   label: 'Runs',

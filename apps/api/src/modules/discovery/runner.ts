@@ -60,8 +60,17 @@ export class RunNotFoundError extends Error {
   }
 }
 
-/** Executes one queued run. Throws RunNotFoundError when the row does not exist yet so the queue retries with backoff. */
-export async function executeRun(runId: string, signal?: AbortSignal) {
+export interface ExecuteRunOptions {
+  /** How often (ms) progress is flushed and the run row re-read for cancellation. Default 5s. */
+  pollMs?: number;
+}
+
+/**
+ * Executes one queued run. Throws RunNotFoundError when the row does not exist yet so the queue retries with backoff.
+ * Progress is flushed every `pollMs`; at each flush the run status is re-read and the scan is aborted (provider
+ * signal) when it has been cancelled via the API. Findings reconciled before the abort are kept.
+ */
+export async function executeRun(runId: string, signal?: AbortSignal, opts: ExecuteRunOptions = {}) {
   const loaded = await withSystem(async (tx) => {
     const [run] = await tx.select().from(discoveryRuns).where(eq(discoveryRuns.id, runId)).limit(1);
     if (!run) return null;
@@ -81,11 +90,36 @@ export async function executeRun(runId: string, signal?: AbortSignal) {
 
   const log = new RunLog();
   const stats: Record<string, number> = { hostsScanned: 0, responsive: 0, snmp: 0, findings: 0, newCis: 0, changed: 0, unchanged: 0, applied: 0, errors: 0 };
+  const pollMs = Math.max(50, opts.pollMs ?? 5000);
+
+  // Cancellation: the provider gets one signal that fires on worker shutdown (external signal) or when the run row turns 'cancelled'.
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+
   let lastFlush = Date.now();
-  const flush = async (patch: Partial<typeof discoveryRuns.$inferInsert> = {}) => {
+  let chain: Promise<void> = Promise.resolve();
+  /** Flushes are serialised so a periodic progress write can never land after (and clobber) the final status write. */
+  const flush = (patch: Partial<typeof discoveryRuns.$inferInsert> = {}) => {
     lastFlush = Date.now();
-    await withSystem((tx) => tx.update(discoveryRuns).set({ stats, log: log.toString(), ...patch }).where(eq(discoveryRuns.id, runId))).catch((err) => logger.warn({ err, runId }, 'discovery run flush failed'));
+    chain = chain.then(() => withSystem((tx) => tx.update(discoveryRuns).set({ stats, log: log.toString(), ...patch }).where(eq(discoveryRuns.id, runId))).then(() => undefined, (err) => logger.warn({ err, runId }, 'discovery run flush failed')));
+    return chain;
   };
+  const checkCancelled = async () => {
+    if (controller.signal.aborted) return;
+    const [row] = await withSystem((tx) => tx.select({ status: discoveryRuns.status }).from(discoveryRuns).where(eq(discoveryRuns.id, runId)).limit(1)).catch(() => [] as { status: string }[]);
+    if (row?.status === 'cancelled') {
+      log.add('Cancellation requested; stopping the scan (findings reconciled so far are kept)');
+      abort();
+    }
+  };
+  const tick = async () => {
+    await flush();
+    await checkCancelled();
+  };
+  const timer = setInterval(() => void tick(), pollMs);
+  timer.unref?.();
 
   await withSystem((tx) => tx.update(discoveryRuns).set({ status: 'running', startedAt: new Date(), error: null }).where(eq(discoveryRuns.id, runId)));
   log.add(`Run started for source "${source.name}" (${source.sourceType})`);
@@ -116,13 +150,14 @@ export async function executeRun(runId: string, signal?: AbortSignal) {
         stats.errors++;
         log.add(`${raw.ipAddress}: failed to store finding: ${(err as Error).message}`);
       }
-      if (Date.now() - lastFlush > 5000) await flush();
+      if (Date.now() - lastFlush > pollMs) await tick();
     };
 
-    const providerStats = await provider.discover(target, { log: (l) => log.add(l), onFinding, signal });
+    const providerStats = await provider.discover(target, { log: (l) => log.add(l), onFinding, signal: controller.signal });
     Object.assign(stats, { hostsScanned: providerStats.hostsScanned, responsive: providerStats.responsive, snmp: providerStats.snmp });
-    log.add(`Completed: ${stats.hostsScanned} scanned, ${stats.responsive} responsive, ${stats.snmp} via SNMP, ${stats.findings} findings (${stats.newCis} new, ${stats.changed} changed, ${stats.unchanged} unchanged${source.autoApply ? `, ${stats.applied} auto-applied` : ''})`);
-    await flush({ status: signal?.aborted ? 'cancelled' : 'completed', finishedAt: new Date() });
+    const cancelled = controller.signal.aborted;
+    log.add(`${cancelled ? 'Cancelled' : 'Completed'}: ${stats.hostsScanned} scanned, ${stats.responsive} responsive, ${stats.snmp} via SNMP, ${stats.findings} findings (${stats.newCis} new, ${stats.changed} changed, ${stats.unchanged} unchanged${source.autoApply ? `, ${stats.applied} auto-applied` : ''})`);
+    await flush({ status: cancelled ? 'cancelled' : 'completed', finishedAt: new Date() });
     await withSystem((tx) => tx.update(discoverySources).set({ lastRunAt: new Date() }).where(eq(discoverySources.id, source.id)));
   } catch (err) {
     const message = (err as Error).message?.slice(0, 2000) ?? 'Unknown error';
@@ -130,6 +165,10 @@ export async function executeRun(runId: string, signal?: AbortSignal) {
     logger.error({ err, runId }, 'discovery run failed');
     await flush({ status: 'failed', error: message, finishedAt: new Date() });
     await withSystem((tx) => tx.update(discoverySources).set({ lastRunAt: new Date() }).where(eq(discoverySources.id, source.id)));
+  } finally {
+    clearInterval(timer);
+    signal?.removeEventListener('abort', abort);
+    await chain.catch(() => undefined);
   }
 }
 

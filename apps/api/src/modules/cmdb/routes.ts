@@ -6,7 +6,7 @@ import { h } from '@/core/context';
 import { ValidationError } from '@/core/errors';
 import { readCsvUpload } from '@/modules/assets/routes';
 import * as svc from './service';
-import { ciListQuery, ciCreateBody, ciPatchBody, relationshipBody, servicesBody, interfacesBody, graphQuery, summaryQuery, CI_IMPORT_COLUMNS, type CiListQuery } from './schemas';
+import { ciListQuery, ciCreateBody, ciPatchBody, ciBulkBody, relationshipBody, servicesBody, interfacesBody, graphQuery, summaryQuery, serviceMapQuery, CI_IMPORT_COLUMNS, type CiBulkInput, type CiListQuery } from './schemas';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -17,7 +17,12 @@ export default async function routes(app: FastifyInstance) {
 
   r.get('/cmdb/types', { preHandler: app.auth(), schema: { tags: ['cmdb'] } }, h((ctx) => svc.listTypes(ctx)));
   r.get('/cmdb/summary', { preHandler: read, schema: { tags: ['cmdb'], querystring: summaryQuery } }, h((ctx, req) => svc.ciSummary(ctx, (req.query as { customerId?: string }).customerId)));
+  r.get('/cmdb/overview', { preHandler: read, schema: { tags: ['cmdb'], querystring: summaryQuery } }, h((ctx, req) => svc.cmdbOverview(ctx, (req.query as { customerId?: string }).customerId)));
+  r.get('/cmdb/services', { preHandler: read, schema: { tags: ['cmdb'], querystring: summaryQuery } }, h((ctx, req) => svc.listBusinessServices(ctx, (req.query as { customerId?: string }).customerId)));
+  r.get('/cmdb/services/:id/map', { preHandler: read, schema: { tags: ['cmdb'], params: idParam, querystring: serviceMapQuery } }, h((ctx, req) => svc.serviceMap(ctx, (req.params as { id: string }).id, (req.query as { depth: number }).depth)));
   r.get('/cmdb/cis', { preHandler: read, schema: { tags: ['cmdb'], querystring: ciListQuery } }, h((ctx, req) => svc.listCis(ctx, req.query as CiListQuery)));
+  // Static path registered ahead of /cmdb/cis/:id so it can never be read as an id.
+  r.post('/cmdb/cis/bulk', { preHandler: manage, schema: { tags: ['cmdb'], body: ciBulkBody } }, h((ctx, req) => svc.bulkUpdateCis(ctx, req.body as CiBulkInput)));
 
   r.get('/cmdb/export.csv', { preHandler: read, schema: { tags: ['cmdb'], querystring: ciListQuery } }, h(async (ctx, req, reply) => {
     const rows = await svc.exportCis(ctx, req.query as CiListQuery);

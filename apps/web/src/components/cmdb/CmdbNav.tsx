@@ -18,7 +18,8 @@ export function CmdbNav({ className }: { className?: string }) {
   return (
     <nav className={cn('flex items-center gap-1 border-b border-default overflow-x-auto -mt-2 mb-4', className)} aria-label="Configuration modules">
       {MODULES.filter((m) => !m.perm || can(...m.perm)).map((m) => {
-        const active = m.end ? pathname === m.to : pathname === m.to || pathname.startsWith(m.to + '/');
+        const isServiceMap = /^\/cmdb\/services\/[^/]+$/.test(pathname);
+        const active = m.to === '/cmdb/map' ? pathname === '/cmdb/map' || isServiceMap : m.to === '/cmdb/services' ? pathname === '/cmdb/services' : m.end ? pathname === m.to : pathname === m.to || pathname.startsWith(m.to + '/');
         return (
           <NavLink key={m.to} to={m.to} end={m.end} className={cn('px-3 py-2 text-[13px] font-medium border-b-2 -mb-px whitespace-nowrap transition-colors', active ? 'border-brand-600 text-default' : 'border-transparent text-muted hover:text-default')}>
             {m.label}

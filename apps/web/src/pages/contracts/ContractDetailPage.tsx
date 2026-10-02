@@ -1,37 +1,44 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Ban, Layers, History, Ticket, Gauge, CalendarClock, Banknote } from 'lucide-react';
-import { KpiGrid } from '@/components/dashboards/KpiGrid';
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Ban, Layers, MessageSquare, Info, ShieldCheck, GitBranch, FileCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import { PageHeader, Button, Badge, Tabs, Card, Dialog, Drawer, ConfirmDialog, LoadingBlock, ErrorBlock, EmptyState, DataTable, Checkbox, KeyValue, Field, Input, type Column } from '@/components/ui';
+import { Button, Badge, Card, Dialog, Drawer, ConfirmDialog, LoadingBlock, ErrorBlock, EmptyState, DataTable, Checkbox, Field, Input, type Column } from '@/components/ui';
 import { get, post, patch, put, del, ApiError } from '@/api/client';
+import type { MenuItem } from '@/components/Menu';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, useAuditStream, RailTabs, RailCard, RailRows, type FormSection, type StreamEntry } from '@/components/record';
+import { humanizeAction } from '@/components/audit/AuditTrail';
+import { useListState } from '@/hooks/useListState';
 import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
-import { fmtDate, fmtDateTime, fmtDuration, fmtMoney, fmtNumber, relativeTime, titleCase } from '@/lib/format';
+import { fmtDate, fmtDateTime, fmtDuration, fmtMoney, fmtNumber, titleCase } from '@/lib/format';
 import { ContractForm, ServiceCoverageEditor, SiteMultiSelect, type ContractPayload } from '@/components/contracts/ContractForm';
 import { ContractStatusBadge, ExpiryCountdown, DocTick, PERIOD_LABELS } from '@/components/contracts/ContractBits';
 import { EntitlementBar } from '@/components/contracts/EntitlementBar';
 import { EntitlementForm, ConsumptionForm, type EntitlementPayload, type ConsumptionPayload } from '@/components/contracts/EntitlementForms';
 import { ScopeTable, ScopeItemForm, BulkScopeForm, type ScopeItemPayload } from '@/components/contracts/ScopeTable';
 import { EscalationMatrixEditor } from '@/components/contracts/EscalationMatrixEditor';
-import { OptionalAttachmentList, OptionalAuditTrail } from '@/components/customers/OptionalModules';
+import { OptionalAttachmentList } from '@/components/customers/OptionalModules';
 import type { ContractDetail, Entitlement, Consumption, ScopeItem, ServiceCoverageInput, EscalationLevel } from '@/components/contracts/types';
 import type { Contact, Site } from '@/components/customers/types';
 import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
 
-type TabKey = 'overview' | 'services' | 'entitlements' | 'scope' | 'sla' | 'documents' | 'history';
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'services', label: 'Services & Sites' },
-  { key: 'entitlements', label: 'Entitlements' },
-  { key: 'scope', label: 'Scope' },
-  { key: 'sla', label: 'SLA' },
-  { key: 'documents', label: 'Documents' },
-  { key: 'history', label: 'History' },
-];
 const errMsg = (e: unknown) => (e as ApiError)?.message ?? 'Request failed';
 const DOC_TYPES = [{ value: 'agreement', label: 'Signed agreement' }, { value: 'po', label: 'Purchase order' }, { value: 'sow', label: 'Statement of work' }, { value: 'report', label: 'Report' }, { value: 'other', label: 'Other' }];
+
+interface HistoryRow { id: string; occurredAt: string; userName: string | null; entityType: string; entityId: string | null; entityLabel: string | null; action: string; changes: Record<string, { old: unknown; new: unknown }>; source: string }
+
+/** Entitlement, consumption and scope changes from `/contracts/:id/history`, in stream shape. */
+const fromHistory = (r: HistoryRow): StreamEntry => ({
+  id: r.id,
+  at: r.occurredAt,
+  actor: r.userName ?? (r.source && r.source !== 'ui' ? titleCase(r.source) : 'System'),
+  kind: 'event',
+  title: `${humanizeAction(r.action)} · ${titleCase(r.entityType)}${r.entityLabel ? ` ${r.entityLabel}` : ''}`,
+  changes: r.changes && Object.keys(r.changes).length ? r.changes : undefined,
+  icon: /delete|remove/.test(r.action) ? 'escalation' : /create|consume/.test(r.action) ? 'created' : 'update',
+  tone: /delete|remove/.test(r.action) ? 'bad' : undefined,
+});
 
 export default function ContractDetailPage() {
   const { id = '' } = useParams();
@@ -39,9 +46,7 @@ export default function ContractDetailPage() {
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
   const setAssistantContext = useUiStore((s) => s.setAssistantContext);
-  const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as TabKey) || 'overview';
-  const setTab = (t: TabKey) => setParams((p) => { p.set('tab', t); return p; }, { replace: true });
+  const { set: setParams } = useListState();
   const [editing, setEditing] = useState(false);
   const [renewing, setRenewing] = useState(false);
   const [terminating, setTerminating] = useState(false);
@@ -55,7 +60,16 @@ export default function ContractDetailPage() {
     return () => setAssistantContext(null);
   }, [c, id, setAssistantContext]);
 
-  const invalidate = () => { qc.invalidateQueries({ queryKey: ['contracts'] }); if (c) qc.invalidateQueries({ queryKey: ['customers', c.customerId] }); };
+  // Activity: the contract's own audit rows, plus child-entity rows (entitlements, consumption, scope) from the history endpoint.
+  const audit = useAuditStream('contract', id);
+  const history = useQuery({ queryKey: ['contracts', id, 'history'], queryFn: () => get<{ items: HistoryRow[] }>(`/contracts/${id}/history`), enabled: !!id, staleTime: 30_000 });
+  const entries = useMemo<StreamEntry[]>(() => {
+    const seen = new Set(audit.entries.map((e) => e.id));
+    const extra = (history.data?.items ?? []).filter((r) => !seen.has(r.id) && (audit.isError || r.entityType !== 'contract')).map(fromHistory);
+    return [...audit.entries, ...extra];
+  }, [audit.entries, audit.isError, history.data]);
+
+  const invalidate = () => { qc.invalidateQueries({ queryKey: ['contracts'] }); qc.invalidateQueries({ queryKey: ['audit', 'entity', 'contract', id] }); if (c) qc.invalidateQueries({ queryKey: ['customers', c.customerId] }); };
   const update = useMutation({
     mutationFn: (body: Partial<ContractPayload>) => patch<ContractDetail>(`/contracts/${id}`, body),
     onSuccess: () => { invalidate(); setEditing(false); toast.success('Contract updated'); },
@@ -75,33 +89,156 @@ export default function ContractDetailPage() {
   const canActivate = ['draft', 'expired', 'terminated'].includes(c.status);
   const canRenew = ['active', 'expiring', 'expired'].includes(c.status);
   const canTerminate = !['terminated', 'renewed'].includes(c.status);
+  const goTo = (tab: string) => setParams({ tab }, false);
+
+  // ---- header: two primary actions, the rest in the overflow menu
+  const primary = canManage ? (
+    <>
+      {canActivate ? (
+        <Button size="sm" icon={<Play className="h-3.5 w-3.5" />} onClick={() => activate.mutate()} loading={activate.isPending}>Activate</Button>
+      ) : canRenew ? (
+        <Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => setRenewing(true)}>Renew</Button>
+      ) : null}
+      <Button size="sm" variant="outline" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEditing(true)}>Edit</Button>
+    </>
+  ) : undefined;
+  const menu: MenuItem[] = canManage
+    ? [
+        ...(canActivate && canRenew ? [{ label: 'Renew…', icon: <RefreshCw className="h-4 w-4" />, onClick: () => setRenewing(true) }] : []),
+        ...(canTerminate ? [{ label: 'Terminate contract…', icon: <Ban className="h-4 w-4" />, onClick: () => setTerminating(true), danger: true }] : []),
+        ...(c.status === 'draft' ? [{ label: 'Delete draft', icon: <Trash2 className="h-4 w-4" />, onClick: () => setDeleting(true), danger: true }] : []),
+      ]
+    : [];
+
+  // ---- form
+  const hasCommitments = !!(c.responseCommitment || c.resolutionCommitment || c.exclusions);
+  const sections: FormSection[] = [
+    {
+      key: 'contract',
+      title: 'Contract',
+      fields: [
+        { label: 'Customer', value: c.customer ? <Link to={`/customers/${c.customer.id}`} className="hover:underline">{c.customer.name}</Link> : null },
+        { label: 'Owner', value: c.ownerName },
+        { label: 'Start', value: fmtDate(c.startDate) },
+        { label: 'End', value: <ExpiryCountdown days={c.daysToExpiry} endDate={c.endDate} status={c.status} /> },
+        { label: 'Renewal date', value: c.renewalDate ? fmtDate(c.renewalDate) : null },
+        { label: 'Notice period', value: c.noticePeriodDays != null ? `${c.noticePeriodDays} days` : null },
+        { label: 'Auto-renew', value: c.autoRenew ? 'Yes' : 'No' },
+        { label: 'SLA policy', value: c.slaPolicyId ? <Link to={`/sla/${c.slaPolicyId}`} className="hover:underline">{c.slaPolicyName}</Link> : <span className="text-subtle">Platform default</span> },
+        { label: 'Support hours', value: c.supportHoursCalendarName ?? <span className="text-subtle">Policy calendar</span> },
+        { label: 'Holiday calendar', value: c.holidayCalendarName },
+        { label: 'Description', value: c.description ?? '', kind: 'prose', span: 2, hidden: !c.description },
+      ],
+    },
+    {
+      key: 'commercial',
+      title: 'Commercial',
+      hidden: !c.canViewCommercial,
+      fields: [
+        { label: 'Value', value: c.value != null ? fmtMoney(c.value, c.currency ?? 'INR') : null },
+        { label: 'Currency', value: c.currency },
+        { label: 'Billing cycle', value: c.billingCycle ? titleCase(c.billingCycle) : null },
+        { label: 'PO number', value: c.poNumber, kind: 'mono' },
+        { label: 'Signed on', value: c.signedAt ? fmtDate(c.signedAt) : null },
+      ],
+    },
+    {
+      key: 'commitments',
+      title: 'Commitments',
+      columns: 1,
+      hidden: !hasCommitments,
+      fields: [
+        { label: 'Response', value: c.responseCommitment ?? '', kind: 'prose' },
+        { label: 'Resolution', value: c.resolutionCommitment ?? '', kind: 'prose' },
+        { label: 'Exclusions', value: c.exclusions ?? '', kind: 'prose' },
+      ],
+    },
+  ];
+
+  // ---- related lists (keys kept so ?tab=services / ?tab=entitlements deep links still land)
+  const tabs = [
+    { key: 'services', label: 'Services & Sites', count: c.services.length, content: <ServicesTab c={c} canManage={canManage} /> },
+    { key: 'entitlements', label: 'Entitlements', count: c.entitlements.filter((e) => e.isActive).length, content: <EntitlementsTab c={c} canManage={canManage} canConsume={canManage || can('field:execute')} /> },
+    { key: 'scope', label: 'Scope', count: c.scopeItems.length, content: <ScopeTab c={c} canManage={canManage} /> },
+    { key: 'sla', label: 'SLA', content: <SlaTab c={c} /> },
+    { key: 'escalation', label: 'Escalation matrix', count: c.escalationMatrix.length, content: <EscalationTab c={c} canManage={canManage} onSave={(m) => update.mutate({ escalationMatrix: m } as Partial<ContractPayload>)} saving={update.isPending} /> },
+    { key: 'documents', label: 'Documents', count: c.documents.count, content: <Card><OptionalAttachmentList entityType="contract" entityId={c.id} customerId={c.customerId} canUpload={canManage} canDelete={canManage} showVisibility docTypes={DOC_TYPES} fallback={<DocumentsFallback c={c} />} /></Card> },
+  ];
+
+  // ---- rail: SLA, renewal lineage, document checklist
+  const overrides = c.services.filter((s) => s.slaPolicyId);
+  const lineage = (x: { id: string; number: string; name: string; status: string; startDate: string; endDate: string }) => (
+    <span className="inline-flex flex-col items-end">
+      <Link to={`/contracts/${x.id}`} className="font-mono text-[12.5px] hover:underline">{x.number}</Link>
+      <span className="text-[11.5px] text-subtle">{fmtDate(x.startDate)} – {fmtDate(x.endDate)}</span>
+    </span>
+  );
+  const details = (
+    <>
+      <RailCard title={<><ShieldCheck className="h-3.5 w-3.5 text-subtle" /> SLA policy</>} action={<button type="button" onClick={() => goTo('sla')} className="text-[12px] text-brand-700 hover:underline">Targets</button>}>
+        <RailRows
+          rows={[
+            { label: 'Policy', value: c.slaPolicyId ? <Link to={`/sla/${c.slaPolicyId}`} className="hover:underline">{c.slaPolicyName}</Link> : <span className="text-subtle">Platform default</span> },
+            { label: 'Support hours', value: c.supportHoursCalendarName ?? <span className="text-subtle">Policy calendar</span> },
+            { label: 'Holidays', value: c.holidayCalendarName },
+            { label: 'Service overrides', value: overrides.length ? overrides.map((s) => <span key={s.serviceId} className="block">{s.serviceName} → {s.slaPolicyName}</span>) : <span className="text-subtle">None</span> },
+          ]}
+        />
+      </RailCard>
+      {(c.parent || c.children.length > 0) && (
+        <RailCard title={<><GitBranch className="h-3.5 w-3.5 text-subtle" /> Renewal lineage</>}>
+          <RailRows
+            rows={[
+              { label: 'Renewal of', value: c.parent ? lineage(c.parent) : null, hidden: !c.parent },
+              ...c.children.map((ch, i) => ({ label: i === 0 ? 'Renewed by' : '', value: lineage(ch) })),
+            ]}
+          />
+        </RailCard>
+      )}
+      <RailCard title={<><FileCheck className="h-3.5 w-3.5 text-subtle" /> Documents</>} action={<button type="button" onClick={() => goTo('documents')} className="text-[12px] text-brand-700 hover:underline">Manage</button>}>
+        <div className="flex flex-col gap-1.5">
+          <DocTick ok={c.documents.signedAgreement} label="Signed agreement" />
+          <DocTick ok={c.documents.purchaseOrder} label="Purchase order" />
+          <DocTick ok={c.documents.sow} label="Statement of work" />
+          {!c.documents.signedAgreement && ['active', 'expiring'].includes(c.status) && <Badge color="amber" className="self-start mt-1">Active without signed agreement</Badge>}
+        </div>
+      </RailCard>
+    </>
+  );
 
   return (
-    <div>
-      <PageHeader
-        breadcrumb={<span><Link to="/contracts" className="hover:underline">Contracts</Link> {c.customer && <>/ <Link to={`/customers/${c.customer.id}`} className="hover:underline">{c.customer.name}</Link></>}</span>}
-        title={<span className="flex items-center gap-2 flex-wrap"><span className="font-mono text-[15px]">{c.number}</span><span>{c.name}</span><ContractStatusBadge status={c.status} label={c.statusLabel} color={c.statusColor} /></span>}
-        subtitle={<span className="flex items-center gap-2 flex-wrap">{c.typeLabel && <span>{c.typeLabel} ·</span>}<span>{fmtDate(c.startDate)} →</span><ExpiryCountdown days={c.daysToExpiry} endDate={c.endDate} status={c.status} />{c.ownerName && <span>· Owner: {c.ownerName}</span>}{c.parent && <span>· Renewal of <Link to={`/contracts/${c.parent.id}`} className="hover:underline">{c.parent.number}</Link></span>}{c.children.length > 0 && <span>· Renewed by {c.children.map((ch) => <Link key={ch.id} to={`/contracts/${ch.id}`} className="hover:underline mr-1">{ch.number}</Link>)}</span>}</span>}
-        actions={canManage && (
+    <>
+      <RecordLayout
+        header={
+          <RecordHeader
+            crumbs={[{ label: 'Contracts', to: '/contracts' }, ...(c.customer ? [{ label: c.customer.name, to: `/customers/${c.customer.id}` }] : []), { label: c.number }]}
+            number={c.number}
+            title={c.name}
+            badges={c.typeLabel ? <Badge color="slate">{c.typeLabel}</Badge> : undefined}
+            controls={<ContractStatusBadge status={c.status} label={c.statusLabel} color={c.statusColor} />}
+            primary={primary}
+            menu={menu}
+            createdAt={c.createdAt}
+            updatedAt={c.updatedAt}
+          >
+            <RecordRibbon items={glance(c)} columns={c.canViewCommercial && c.value != null ? 5 : 4} />
+          </RecordHeader>
+        }
+        main={
           <>
-            {canActivate && <Button variant="primary" icon={<Play className="h-4 w-4" />} onClick={() => activate.mutate()} loading={activate.isPending}>Activate</Button>}
-            {canRenew && <Button variant="outline" icon={<RefreshCw className="h-4 w-4" />} onClick={() => setRenewing(true)}>Renew</Button>}
-            {canTerminate && <Button variant="outline" icon={<Ban className="h-4 w-4" />} onClick={() => setTerminating(true)}>Terminate</Button>}
-            <Button variant="outline" icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit</Button>
-            {c.status === 'draft' && <Button variant="ghost" size="icon" title="Delete draft" onClick={() => setDeleting(true)}><Trash2 className="h-4 w-4 text-red-500" /></Button>}
+            <RecordForm sections={sections} />
+            <RelatedTabs tabs={tabs} />
           </>
-        )}
+        }
+        aside={
+          <RailTabs
+            tabs={[
+              { key: 'activity', label: 'Activity', icon: MessageSquare, badge: entries.length, content: <ActivityStream entries={entries} loading={audit.isLoading || history.isLoading} maxHeight="calc(100vh - 220px)" /> },
+              { key: 'details', label: 'Details', icon: Info, content: details },
+            ]}
+          />
+        }
       />
-      <ContractStats c={c} />
-      <Tabs tabs={TABS.map((t) => ({ ...t, count: t.key === 'services' ? c.services.length : t.key === 'entitlements' ? c.entitlements.filter((e) => e.isActive).length : t.key === 'scope' ? c.scopeItems.length : t.key === 'documents' ? c.documents.count : undefined }))} value={tab} onChange={setTab} className="mb-4" />
-
-      {tab === 'overview' && <OverviewTab c={c} canManage={canManage} onSaveMatrix={(m) => update.mutate({ escalationMatrix: m } as Partial<ContractPayload>)} saving={update.isPending} goTo={setTab} />}
-      {tab === 'services' && <ServicesTab c={c} canManage={canManage} />}
-      {tab === 'entitlements' && <EntitlementsTab c={c} canManage={canManage} canConsume={canManage || can('field:execute')} />}
-      {tab === 'scope' && <ScopeTab c={c} canManage={canManage} />}
-      {tab === 'sla' && <SlaTab c={c} />}
-      {tab === 'documents' && <Card title="Documents"><div className="flex flex-wrap gap-4 mb-3"><DocTick ok={c.documents.signedAgreement} label="Signed agreement" /><DocTick ok={c.documents.purchaseOrder} label="Purchase order" /><DocTick ok={c.documents.sow} label="Statement of work" /></div><OptionalAttachmentList entityType="contract" entityId={c.id} customerId={c.customerId} canUpload={canManage} canDelete={canManage} showVisibility docTypes={DOC_TYPES} fallback={<DocumentsFallback c={c} />} /></Card>}
-      {tab === 'history' && <HistoryTab c={c} />}
 
       <Drawer open={editing} onClose={() => setEditing(false)} title={`Edit ${c.number}`} width="max-w-3xl">
         {editing && <ContractForm mode="edit" initial={c} onSubmit={(b) => update.mutate(b)} onCancel={() => setEditing(false)} submitting={update.isPending} />}
@@ -113,64 +250,7 @@ export default function ContractDetailPage() {
         {terminating && <TerminateForm onSubmit={(r) => terminate.mutate(r)} onCancel={() => setTerminating(false)} submitting={terminate.isPending} />}
       </Dialog>
       <ConfirmDialog open={deleting} onClose={() => setDeleting(false)} onConfirm={() => remove.mutate()} loading={remove.isPending} danger title="Delete draft contract?" confirmLabel="Delete" description="The draft and its coverage, entitlements and scope items are removed permanently." />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- overview
-
-function OverviewTab({ c, canManage, onSaveMatrix, saving, goTo }: { c: ContractDetail; canManage: boolean; onSaveMatrix: (m: EscalationLevel[]) => void; saving: boolean; goTo: (t: TabKey) => void }) {
-  const contacts = useQuery({ queryKey: ['customers', c.customerId, 'contacts', false], queryFn: () => get<Contact[]>(`/customers/${c.customerId}/contacts`) });
-  return (
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-      <Card title="Contract" className="xl:col-span-2">
-        <KeyValue
-          columns={3}
-          items={[
-            { label: 'Customer', value: c.customer ? <Link to={`/customers/${c.customer.id}`} className="hover:underline">{c.customer.name}</Link> : '—' },
-            { label: 'Type', value: c.typeLabel ?? '—' },
-            { label: 'Owner', value: c.ownerName ?? '—' },
-            { label: 'Start', value: fmtDate(c.startDate) },
-            { label: 'End', value: <ExpiryCountdown days={c.daysToExpiry} endDate={c.endDate} status={c.status} /> },
-            { label: 'Renewal date', value: c.renewalDate ? fmtDate(c.renewalDate) : '—' },
-            { label: 'Notice period', value: c.noticePeriodDays != null ? `${c.noticePeriodDays} days` : '—' },
-            { label: 'Auto-renew', value: c.autoRenew ? 'Yes' : 'No' },
-            { label: 'SLA policy', value: c.slaPolicyId ? <Link to={`/sla/${c.slaPolicyId}`} className="hover:underline">{c.slaPolicyName}</Link> : <span className="text-subtle">Platform default</span> },
-            { label: 'Support hours', value: c.supportHoursCalendarName ?? <span className="text-subtle">Policy calendar</span> },
-            { label: 'Holiday calendar', value: c.holidayCalendarName ?? '—' },
-            { label: 'Tickets', value: <span>{c.tickets.open} open · {c.tickets.total} total</span> },
-            { label: 'Response commitment', value: c.responseCommitment ?? '—', span: 3 },
-            { label: 'Resolution commitment', value: c.resolutionCommitment ?? '—', span: 3 },
-            { label: 'Exclusions', value: c.exclusions ? <span className="whitespace-pre-wrap">{c.exclusions}</span> : '—', span: 3 },
-            { label: 'Description', value: c.description ? <span className="whitespace-pre-wrap">{c.description}</span> : '—', span: 3 },
-          ]}
-        />
-      </Card>
-      <div className="space-y-4">
-        {c.canViewCommercial && (
-          <Card title="Commercial">
-            <KeyValue columns={2} items={[
-              { label: 'Value', value: c.value != null ? fmtMoney(c.value, c.currency ?? 'INR') : '—' },
-              { label: 'Currency', value: c.currency ?? '—' },
-              { label: 'Billing cycle', value: c.billingCycle ? titleCase(c.billingCycle) : '—' },
-              { label: 'PO number', value: c.poNumber ?? '—' },
-              { label: 'Signed on', value: c.signedAt ? fmtDate(c.signedAt) : '—' },
-            ]} />
-          </Card>
-        )}
-        <Card title="Documents" actions={<button className="text-xs text-brand-600 hover:underline" onClick={() => goTo('documents')}>Manage</button>}>
-          <div className="flex flex-col gap-2">
-            <DocTick ok={c.documents.signedAgreement} label="Signed agreement" />
-            <DocTick ok={c.documents.purchaseOrder} label="Purchase order" />
-            <DocTick ok={c.documents.sow} label="Statement of work" />
-          </div>
-          {!c.documents.signedAgreement && ['active', 'expiring'].includes(c.status) && <div className="text-xs text-amber-600 mt-2">Active contract without a signed agreement on file.</div>}
-        </Card>
-      </div>
-      <Card title="Escalation matrix" className="xl:col-span-3">
-        <EscalationMatrixEditor value={c.escalationMatrix} contacts={contacts.data ?? []} canEdit={canManage} onSave={onSaveMatrix} saving={saving} />
-      </Card>
-    </div>
+    </>
   );
 }
 
@@ -193,12 +273,14 @@ function ServicesTab({ c, canManage }: { c: ContractDetail; canManage: boolean }
     { key: 'notes', header: 'Notes', render: (s) => <span className="text-muted">{s.notes ?? '—'}</span> },
   ];
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
       <Card padded={false} className="xl:col-span-2" title="Covered services" actions={canManage && <Button size="sm" variant="outline" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => { setServices(c.services.map((s) => ({ serviceId: s.serviceId, slaPolicyId: s.slaPolicyId, teamId: s.teamId, supportHoursCalendarId: s.supportHoursCalendarId, notes: s.notes }))); setEditServices(true); }}>Edit coverage</Button>}>
-        <DataTable columns={columns} rows={c.services.map((s) => ({ ...s, id: s.serviceId }))} dense empty={<EmptyState icon={<Layers className="h-5 w-5" />} title="No services covered" description="Tickets for this customer will be classified out of scope until services are added." />} />
+        <DataTable columns={columns} rows={c.services.map((s) => ({ ...s, id: s.serviceId }))} dense empty={<EmptyState icon={<Layers className="h-5 w-5" />} title="No services covered" description="Tickets stay out of scope until a service is added." />} />
       </Card>
       <Card title="Covered sites" actions={canManage && <Button size="sm" variant="outline" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => { setSiteIds(c.sites.map((s) => s.id)); setEditSites(true); }}>Edit</Button>}>
-        {c.allSites ? <div className="text-[13px] text-muted">All sites of the customer are covered.</div> : (
+        {c.allSites ? (
+          <Badge color="slate">All customer sites</Badge>
+        ) : (
           <ul className="space-y-1 text-[13px]">
             {c.sites.map((s) => <li key={s.id} className="flex items-center gap-2"><span className="font-mono text-[11.5px] text-subtle">{s.code}</span>{s.name}{s.isPrimary && <Badge color="blue">Primary</Badge>}{!s.isActive && <Badge color="gray">Inactive</Badge>}</li>)}
           </ul>
@@ -242,8 +324,8 @@ function EntitlementsTab({ c, canManage, canConsume }: { c: ContractDetail; canM
   const rows = c.entitlements.filter((e) => showInactive || e.isActive);
   const serviceIds = c.services.map((s) => s.serviceId);
   return (
-    <Card padded={false} title="Entitlements" actions={<><Checkbox label="Show inactive" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />{canManage && <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setEditing('new')}>Add entitlement</Button>}</>}>
-      {rows.length === 0 ? <EmptyState title="No entitlements" description="Entitlements track consumable allowances such as site visits, engineering hours or incidents per period." /> : (
+    <Card padded={false} actions={<><Checkbox label="Show inactive" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />{canManage && <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setEditing('new')}>Add entitlement</Button>}</>}>
+      {rows.length === 0 ? <EmptyState title="No entitlements" description="Consumable allowances per period: visits, hours, incidents." /> : (
         <table className="table">
           <thead>
             <tr>
@@ -310,7 +392,7 @@ function ConsumptionHistory({ entitlement, canManage }: { entitlement: Entitleme
   const remove = useMutation({ mutationFn: (id: string) => del(`/entitlement-consumptions/${id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['entitlements'] }); qc.invalidateQueries({ queryKey: ['contracts', entitlement.contractId] }); toast.success('Consumption removed'); }, onError: (e) => toast.error(errMsg(e)) });
   if (q.isLoading) return <LoadingBlock label="Loading history…" />;
   const rows = q.data ?? [];
-  if (!rows.length) return <div className="text-[13px] text-muted py-1">No consumption recorded.</div>;
+  if (!rows.length) return <div className="text-[12.5px] text-subtle py-1">No consumption recorded.</div>;
   return (
     <table className="table [&_td]:py-1 [&_th]:py-1">
       <thead><tr><th>When</th><th>Quantity</th><th>Source</th><th>Ticket</th><th>By</th><th>Notes</th>{canManage && <th></th>}</tr></thead>
@@ -377,89 +459,63 @@ function SlaTab({ c }: { c: ContractDetail }) {
   const q = useQuery({ queryKey: ['sla', 'policies', policyId], queryFn: () => get<SlaPolicy>(`/sla/policies/${policyId}`), enabled: !!policyId, retry: false });
   const overrides = c.services.filter((s) => s.slaPolicyId);
   return (
-    <div className="space-y-4">
-      <Card title={<span>Contract SLA policy: {c.slaPolicyId ? <Link to={`/sla/${c.slaPolicyId}`} className="hover:underline">{c.slaPolicyName}</Link> : 'platform default'}</span>} padded={!q.data}>
-        {!policyId && <div className="text-[13px] text-muted">No contract-level SLA policy. Tickets use the service default or the platform default policy.</div>}
+    <div className="flex flex-col gap-3">
+      <Card padded={false} title={c.slaPolicyId ? <Link to={`/sla/${c.slaPolicyId}`} className="hover:underline">{c.slaPolicyName}</Link> : 'Contract SLA policy'}>
+        {!policyId && <EmptyState icon={<ShieldCheck className="h-5 w-5" />} title="No contract-level SLA policy" description="Tickets use the service default or the platform default." />}
         {policyId && q.isLoading && <LoadingBlock />}
-        {policyId && q.isError && <div className="text-[13px] text-muted">{(q.error as ApiError)?.status === 404 ? 'SLA policy details are not available (policy not found or the SLA module is not deployed).' : errMsg(q.error)}</div>}
+        {policyId && q.isError && <EmptyState title="SLA policy details unavailable" description={(q.error as ApiError)?.status === 404 ? 'Policy not found or the SLA module is not deployed.' : errMsg(q.error)} />}
         {q.data && (
           <>
-            <div className="px-4 py-2 text-[13px] text-muted border-b border-default">{q.data.description ?? ''} Calendar: {q.data.calendarName ?? 'default'}{q.data.calendarIs24x7 && ' (24x7)'}{q.data.holidayCalendarName && ` · Holidays: ${q.data.holidayCalendarName}`}</div>
-            <table className="table [&_td]:py-1.5 [&_th]:py-1.5">
-              <thead><tr><th>Ticket type</th><th>Priority</th><th>Metric</th><th>Target</th><th>Warn at</th><th>Clock</th></tr></thead>
-              <tbody>
-                {q.data.targets.map((t) => (
-                  <tr key={t.id}><td>{titleCase(t.ticketType)}</td><td>{t.priorityLabel ? <Badge color={PRIORITY_LEVEL_COLORS[t.priorityLevel ?? 0] ?? 'slate'}>{t.priorityLabel}</Badge> : <span className="text-muted">Any</span>}</td><td>{titleCase(t.metric)}</td><td className="tabular-nums">{fmtDuration(t.minutes)}</td><td className="tabular-nums">{t.warnPct}%</td><td className="text-muted">{t.calendarTime ? '24x7 elapsed' : 'Business hours'}</td></tr>
-                ))}
-                {q.data.targets.length === 0 && <tr><td colSpan={6} className="text-muted">No targets defined.</td></tr>}
-              </tbody>
-            </table>
+            <div className="px-4 py-2 border-b border-default">
+              <RailRows
+                rows={[
+                  { label: 'Description', value: q.data.description, hidden: !q.data.description },
+                  { label: 'Calendar', value: `${q.data.calendarName ?? 'default'}${q.data.calendarIs24x7 ? ' (24x7)' : ''}` },
+                  { label: 'Holidays', value: q.data.holidayCalendarName, hidden: !q.data.holidayCalendarName },
+                ]}
+              />
+            </div>
+            {q.data.targets.length === 0 ? (
+              <EmptyState title="No targets defined" />
+            ) : (
+              <table className="table [&_td]:py-1.5 [&_th]:py-1.5">
+                <thead><tr><th>Ticket type</th><th>Priority</th><th>Metric</th><th>Target</th><th>Warn at</th><th>Clock</th></tr></thead>
+                <tbody>
+                  {q.data.targets.map((t) => (
+                    <tr key={t.id}><td>{titleCase(t.ticketType)}</td><td>{t.priorityLabel ? <Badge color={PRIORITY_LEVEL_COLORS[t.priorityLevel ?? 0] ?? 'slate'}>{t.priorityLabel}</Badge> : <span className="text-muted">Any</span>}</td><td>{titleCase(t.metric)}</td><td className="tabular-nums">{fmtDuration(t.minutes)}</td><td className="tabular-nums">{t.warnPct}%</td><td className="text-muted">{t.calendarTime ? '24x7 elapsed' : 'Business hours'}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </>
         )}
       </Card>
       {overrides.length > 0 && (
         <Card title="Per-service overrides">
-          <ul className="space-y-1 text-[13px]">
-            {overrides.map((s) => <li key={s.serviceId}><span className="font-medium">{s.serviceName}</span> → {s.slaPolicyName}{s.supportHoursCalendarName && <span className="text-muted"> · {s.supportHoursCalendarName}</span>}</li>)}
-          </ul>
+          <RailRows rows={overrides.map((s) => ({ label: s.serviceName, value: <span>{s.slaPolicyName}{s.supportHoursCalendarName && <span className="text-muted"> · {s.supportHoursCalendarName}</span>}</span> }))} />
         </Card>
       )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------- documents fallback / history
+// ---------------------------------------------------------------- escalation matrix / documents fallback
+
+function EscalationTab({ c, canManage, onSave, saving }: { c: ContractDetail; canManage: boolean; onSave: (m: EscalationLevel[]) => void; saving: boolean }) {
+  const contacts = useQuery({ queryKey: ['customers', c.customerId, 'contacts', false], queryFn: () => get<Contact[]>(`/customers/${c.customerId}/contacts`) });
+  return (
+    <Card>
+      <EscalationMatrixEditor value={c.escalationMatrix} contacts={contacts.data ?? []} canEdit={canManage} onSave={onSave} saving={saving} />
+    </Card>
+  );
+}
 
 function DocumentsFallback({ c }: { c: ContractDetail }) {
-  if (!c.documents.items.length) return <EmptyState title="No documents" description="Upload the signed agreement, purchase order and SOW through the attachments module." />;
+  if (!c.documents.items.length) return <EmptyState title="No documents" description="Signed agreement, purchase order and SOW go here." />;
   return (
     <ul className="divide-y divide-[var(--border)] text-[13px]">
       {c.documents.items.map((d) => <li key={d.id} className="py-1.5 flex items-center gap-2"><Badge color="slate">{titleCase(d.docType)}</Badge><span className="font-medium">{d.title ?? d.filename}</span><span className="text-subtle ml-auto">{fmtDateTime(d.createdAt)}</span></li>)}
     </ul>
-  );
-}
-
-interface HistoryRow { id: string; occurredAt: string; userName: string | null; entityType: string; entityId: string | null; entityLabel: string | null; action: string; changes: Record<string, { old: unknown; new: unknown }>; source: string }
-
-function HistoryList({ c, exclude }: { c: ContractDetail; exclude?: string[] }) {
-  const q = useQuery({ queryKey: ['contracts', c.id, 'history'], queryFn: () => get<{ items: HistoryRow[] }>(`/contracts/${c.id}/history`) });
-  if (q.isLoading) return <LoadingBlock />;
-  if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
-  const rows = (q.data?.items ?? []).filter((r) => !exclude?.includes(r.entityType));
-  if (!rows.length) return <EmptyState icon={<History className="h-5 w-5" />} title="No history" />;
-  const fmt = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
-  return (
-    <ul className="divide-y divide-[var(--border)]">
-      {rows.map((r) => (
-        <li key={r.id} className="py-2 text-[13px]">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-subtle w-28 shrink-0" title={fmtDateTime(r.occurredAt)}>{relativeTime(r.occurredAt)}</span>
-            <span className="font-medium">{r.userName ?? 'system'}</span>
-            <span className="text-muted">{titleCase(r.action)}</span>
-            <Badge color="slate">{titleCase(r.entityType)}</Badge>
-            {r.entityLabel && <span className="truncate">{r.entityLabel}</span>}
-          </div>
-          {Object.keys(r.changes ?? {}).length > 0 && (
-            <div className="ml-30 pl-[7.5rem] mt-1 text-xs text-muted space-y-0.5">
-              {Object.entries(r.changes).slice(0, 8).map(([k, v]) => <div key={k}><span className="text-subtle">{titleCase(k)}:</span> {fmt(v.old)} → <span className="text-default">{fmt(v.new)}</span></div>)}
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function HistoryTab({ c }: { c: ContractDetail }) {
-  return (
-    <div className="space-y-4">
-      <Card title="Contract audit trail">
-        <OptionalAuditTrail entityType="contract" entityId={c.id} fallback={<HistoryList c={c} exclude={['contract_entitlement', 'scope_item', 'entitlement_consumption']} />} />
-      </Card>
-      <Card title="Entitlement, consumption and scope changes">
-        <HistoryList c={c} exclude={['contract']} />
-      </Card>
-    </div>
   );
 }
 
@@ -499,24 +555,26 @@ function TerminateForm({ onSubmit, onCancel, submitting }: { onSubmit: (reason: 
   );
 }
 
-// ---------------------------------------------------------------- stats strip
+// ---------------------------------------------------------------- at a glance
 
-/** The numbers a manager wants before reading the tabs: work, service levels, consumption, time left and value. */
-function ContractStats({ c }: { c: ContractDetail }) {
+/** The numbers a manager wants before reading the related lists: time left, work, coverage, consumption and value. */
+function glance(c: ContractDetail): { label: string; value: ReactNode; tone?: 'good' | 'warn' | 'bad'; hint?: string }[] {
   const active = c.entitlements.filter((e) => e.isActive);
   const hot = active.filter((e) => e.utilization.overThreshold || e.utilization.exhausted);
   const exhausted = active.filter((e) => e.utilization.exhausted).length;
-  const expiryTone = c.status === 'expired' || c.status === 'terminated' ? 'bad' : c.daysToExpiry <= 30 ? 'bad' : c.daysToExpiry <= 90 ? 'warn' : 'default';
-  const items = [
-    { label: 'Open tickets', value: fmtNumber(c.tickets.open), hint: `${fmtNumber(c.tickets.total)} raised under this contract`, icon: <Ticket className="h-4 w-4" />, onClick: () => (window.location.href = `/tickets?contractId=${c.id}&open=true`) },
-    { label: 'Covered services', value: fmtNumber(c.services.length), hint: c.slaPolicyName ? `SLA: ${c.slaPolicyName}` : 'Platform default SLA', icon: <Layers className="h-4 w-4" /> },
-    { label: 'Entitlements near limit', value: fmtNumber(hot.length), tone: exhausted > 0 ? 'bad' : hot.length > 0 ? 'warn' : 'good', hint: `${fmtNumber(active.length)} active · ${fmtNumber(exhausted)} exhausted`, icon: <Gauge className="h-4 w-4" /> },
-    { label: c.status === 'expired' ? 'Expired' : 'Days to expiry', value: c.status === 'expired' ? `${fmtNumber(Math.abs(c.daysToExpiry))}d ago` : fmtNumber(Math.max(0, c.daysToExpiry)), tone: expiryTone, hint: `${fmtDate(c.startDate)} → ${fmtDate(c.endDate)}${c.autoRenew ? ' · auto-renews' : ''}`, icon: <CalendarClock className="h-4 w-4" /> },
-  ] as const;
-  const commercial = c.canViewCommercial && c.value != null ? { label: 'Contract value', value: fmtMoney(c.value, c.currency ?? 'INR'), hint: c.typeLabel ?? 'Annual', icon: <Banknote className="h-4 w-4" /> } : null;
-  return (
-    <div className="mb-5">
-      <KpiGrid items={commercial ? [...items, commercial] : [...items]} columns={commercial ? 5 : 4} />
-    </div>
-  );
+  const ended = ['terminated', 'renewed'].includes(c.status);
+  const expiry =
+    c.status === 'expired'
+      ? { label: 'Expired', value: `${fmtNumber(Math.abs(c.daysToExpiry))}d ago`, tone: 'bad' as const }
+      : ended
+        ? { label: titleCase(c.status), value: fmtDate(c.endDate), tone: undefined }
+        : { label: 'Days to expiry', value: fmtNumber(Math.max(0, c.daysToExpiry)), tone: c.daysToExpiry <= 30 ? ('bad' as const) : c.daysToExpiry <= 90 ? ('warn' as const) : ('good' as const) };
+  const items: { label: string; value: ReactNode; tone?: 'good' | 'warn' | 'bad'; hint?: string }[] = [
+    { ...expiry, hint: `${fmtDate(c.startDate)} → ${fmtDate(c.endDate)}${c.autoRenew ? ' · auto-renews' : ''}` },
+    { label: 'Open tickets', value: <Link to={`/tickets?contractId=${c.id}&open=true`} className="hover:underline">{fmtNumber(c.tickets.open)}</Link>, hint: `${fmtNumber(c.tickets.total)} raised under this contract` },
+    { label: 'Covered services', value: fmtNumber(c.services.length), hint: c.slaPolicyName ? `SLA: ${c.slaPolicyName}` : 'Platform default SLA' },
+    { label: 'Entitlements near limit', value: fmtNumber(hot.length), tone: exhausted > 0 ? 'bad' : hot.length > 0 ? 'warn' : active.length > 0 ? 'good' : undefined, hint: `${fmtNumber(active.length)} active · ${fmtNumber(exhausted)} exhausted` },
+  ];
+  if (c.canViewCommercial && c.value != null) items.push({ label: 'Contract value', value: fmtMoney(c.value, c.currency ?? 'INR'), hint: c.billingCycle ? titleCase(c.billingCycle) : c.typeLabel ?? undefined });
+  return items;
 }

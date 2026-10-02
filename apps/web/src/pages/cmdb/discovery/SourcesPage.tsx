@@ -11,8 +11,8 @@ import { relativeTime, fmtNumber } from '@/lib/format';
 import { dotClass } from '@/lib/utils';
 import { CmdbNav, DiscoveryNav } from '@/components/cmdb/CmdbNav';
 import { SourceDrawer } from '@/components/cmdb/SourceDrawer';
-import { RunStatusBadge } from '@/components/cmdb/DiscoveryBits';
-import { errorMessage, CRON_PRESETS } from '@/components/cmdb/hooks';
+import { RunStatusBadge, cronLabel } from '@/components/cmdb/DiscoveryBits';
+import { errorMessage } from '@/components/cmdb/hooks';
 import { discoveryApi, discoveryKeys, type DiscoverySource } from '@/components/cmdb/api';
 
 /** Discovery sources: one per customer network segment, with its schedule and review backlog. */
@@ -33,7 +33,7 @@ export default function SourcesPage() {
   }, [q.data, state.q, state.active, state.backlog]);
   const all = q.data?.items ?? [];
   const label = (type: string) => providers.data?.items.find((p) => p.type === type)?.label ?? type;
-  const schedule = (cron: string | null | undefined) => (cron ? CRON_PRESETS.find((p) => p.value === cron)?.label ?? cron : 'Manual');
+  const schedule = (cron: string | null | undefined) => cronLabel(cron).replace(' UTC', '');
 
   const columns: Column<DiscoverySource>[] = [
     { key: 'name', header: 'Source', render: (s) => <div className="min-w-0"><div className="font-medium flex items-center gap-2">{s.name}{!s.isActive && <Badge color="gray">inactive</Badge>}</div><div className="text-[11.5px] text-muted truncate">{s.customerName}{s.siteName ? ` · ${s.siteName}` : ''} · {label(s.sourceType)}</div></div> },

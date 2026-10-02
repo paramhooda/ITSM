@@ -29,3 +29,24 @@ export const RunLink = ({ run }: { run: Pick<DiscoveryRun, 'id' | 'status' | 'st
     {run.id.slice(0, 8)}
   </Link>
 );
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const hhmm = (h: string, m: string) => `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+
+/** Plain-language label for the cron patterns the scheduler accepts; falls back to the expression. */
+export function cronLabel(cron: string | null | undefined): string {
+  if (!cron) return 'Manual only';
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return cron;
+  const [m, h, dom, mon, dow] = parts as [string, string, string, string, string];
+  const everyN = (f: string) => (/^\*\/\d+$/.test(f) ? Number(f.slice(2)) : null);
+  if (everyN(m) && h === '*' && dom === '*' && mon === '*' && dow === '*') return `Every ${everyN(m)} minutes`;
+  if (m === '0' && everyN(h) && dom === '*' && mon === '*' && dow === '*') return `Every ${everyN(h)} hours`;
+  if (/^\d+$/.test(m) && /^\d+$/.test(h)) {
+    if (dom === '*' && mon === '*' && dow === '*') return `Daily at ${hhmm(h, m)} UTC`;
+    if (dom === '*' && mon === '*' && /^\d$/.test(dow)) return `Weekly on ${DAYS[Number(dow)] ?? dow} at ${hhmm(h, m)} UTC`;
+    if (dom === '*' && mon === '*' && dow === '1-5') return `Weekdays at ${hhmm(h, m)} UTC`;
+    if (/^\d+$/.test(dom) && mon === '*' && dow === '*') return `Monthly on day ${dom} at ${hhmm(h, m)} UTC`;
+  }
+  return cron;
+}

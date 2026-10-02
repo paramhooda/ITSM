@@ -1,5 +1,5 @@
 import { eq, and, asc, sql, inArray } from 'drizzle-orm';
-import { OPTION_TYPES, OPTION_PARENT_TYPES, type OptionType } from '@itsm/shared';
+import { OPTION_TYPES, OPTION_PARENT_TYPES, IMPACT_DIRECTIONS, type OptionType } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { schema } from '@/db/client';
 import { NotFoundError, ValidationError } from '@/core/errors';
@@ -12,7 +12,7 @@ export async function lookups(ctx: Ctx) {
     ctx.tx.select().from(schema.configOptions).orderBy(asc(schema.configOptions.type), asc(schema.configOptions.sortOrder), asc(schema.configOptions.label)),
     ctx.tx.select({ id: schema.teams.id, key: schema.teams.key, name: schema.teams.name, teamType: schema.teams.teamType, isActive: schema.teams.isActive }).from(schema.teams).where(eq(schema.teams.isActive, true)).orderBy(asc(schema.teams.name)),
     ctx.tx.select({ id: schema.ciTypes.id, key: schema.ciTypes.key, name: schema.ciTypes.name, icon: schema.ciTypes.icon, color: schema.ciTypes.color, attributeSchema: schema.ciTypes.attributeSchema, parentKey: schema.ciTypes.parentKey }).from(schema.ciTypes).where(eq(schema.ciTypes.isActive, true)).orderBy(asc(schema.ciTypes.sortOrder)),
-    ctx.tx.select({ id: schema.ciRelationshipTypes.id, key: schema.ciRelationshipTypes.key, name: schema.ciRelationshipTypes.name, inverseName: schema.ciRelationshipTypes.inverseName }).from(schema.ciRelationshipTypes).where(eq(schema.ciRelationshipTypes.isActive, true)).orderBy(asc(schema.ciRelationshipTypes.name)),
+    ctx.tx.select({ id: schema.ciRelationshipTypes.id, key: schema.ciRelationshipTypes.key, name: schema.ciRelationshipTypes.name, inverseName: schema.ciRelationshipTypes.inverseName, impactDirection: schema.ciRelationshipTypes.impactDirection }).from(schema.ciRelationshipTypes).where(eq(schema.ciRelationshipTypes.isActive, true)).orderBy(asc(schema.ciRelationshipTypes.name)),
     ctx.tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name, isDefault: schema.slaPolicies.isDefault }).from(schema.slaPolicies).where(eq(schema.slaPolicies.isActive, true)).orderBy(asc(schema.slaPolicies.name)),
     ctx.tx.select({ id: schema.businessCalendars.id, name: schema.businessCalendars.name, timezone: schema.businessCalendars.timezone, is24x7: schema.businessCalendars.is24x7 }).from(schema.businessCalendars).orderBy(asc(schema.businessCalendars.name)),
     ctx.tx.select({ id: schema.services.id, key: schema.services.key, name: schema.services.name, domain: schema.services.domain, categoryId: schema.services.categoryId, subcategoryId: schema.services.subcategoryId, isActive: schema.services.isActive }).from(schema.services).where(eq(schema.services.isActive, true)).orderBy(asc(schema.services.name)),
@@ -124,6 +124,13 @@ function tableOf(kind: string) {
   return def;
 }
 
+/** Field-level validation for config kinds whose columns carry enumerated values. */
+function validateConfigInput(kind: string, input: Record<string, unknown>) {
+  if (kind === 'relationship-types' && input.impactDirection !== undefined && !(IMPACT_DIRECTIONS as readonly unknown[]).includes(input.impactDirection)) {
+    throw new ValidationError(`impactDirection must be one of: ${IMPACT_DIRECTIONS.join(', ')}`);
+  }
+}
+
 export async function listConfig(ctx: Ctx, kind: string) {
   const def = tableOf(kind);
   const t = def.table as typeof schema.businessCalendars;
@@ -133,6 +140,7 @@ export async function listConfig(ctx: Ctx, kind: string) {
 
 export async function createConfig(ctx: Ctx, kind: string, input: Record<string, unknown>) {
   const def = tableOf(kind);
+  validateConfigInput(kind, input);
   const [row] = await ctx.tx.insert(def.table as typeof schema.businessCalendars).values(input as never).returning();
   await ctx.audit({ entityType: def.label, entityId: (row as { id: string }).id, entityLabel: String((row as { name?: string }).name ?? ''), action: 'create' });
   return row;
@@ -144,6 +152,7 @@ export async function updateConfig(ctx: Ctx, kind: string, id: string, patch: Re
   const [before] = await ctx.tx.select().from(t).where(eq(t.id, id)).limit(1);
   if (!before) throw new NotFoundError(def.label);
   const { id: _id, createdAt: _c, isSystem: _s, ...rest } = patch;
+  validateConfigInput(kind, rest);
   if (kind === 'calendars' && patch.isDefault) await ctx.tx.update(schema.businessCalendars).set({ isDefault: false });
   const [after] = await ctx.tx.update(t).set({ ...(rest as object), updatedAt: new Date() } as never).where(eq(t.id, id)).returning();
   await ctx.audit({ entityType: def.label, entityId: id, entityLabel: String((after as { name?: string }).name ?? ''), action: 'update', changes: diffChanges(before as Record<string, unknown>, rest) });

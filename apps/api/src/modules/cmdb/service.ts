@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, isNull, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, isNull, isNotNull, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { CI_STATUSES } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
@@ -7,10 +7,11 @@ import { ConflictError, NotFoundError, ValidationError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { searchFts, orderBy, limitOffset } from '@/core/query';
 import { parseCsv, headerIndex, rowValue, CSV_LIMITS } from '@/modules/assets/csv';
+import { q as rawRows, one as rawOne, num, pct, asDate } from '@/modules/dashboards/common';
 import { validateAttributes } from './attributes';
-import { buildGraph, buildImpact } from './graph';
+import { buildGraph, buildImpact, buildDependencyMap, openTicketSummary } from './graph';
 import { normaliseMac } from './match';
-import { CI_CRITICALITIES, CI_ENVIRONMENTS, CI_IMPORT_COLUMNS, type CiCreateInput, type CiListQuery, type CiPatchInput, type InterfaceInput } from './schemas';
+import { CI_CRITICALITIES, CI_ENVIRONMENTS, CI_IMPORT_COLUMNS, type CiBulkInput, type CiCreateInput, type CiListQuery, type CiPatchInput, type InterfaceInput } from './schemas';
 
 const { cis, ciTypes, ciRelationships, ciRelationshipTypes, ciInterfaces, ciServices, customers, sites, teams, assets, services, tickets, ticketCis, configOptions, auditLog } = schema;
 
@@ -45,6 +46,10 @@ async function loadCi(ctx: Ctx, id: string) {
 // ---------------------------------------------------------------- list
 
 const relCount = sql<number>`(select count(*)::int from ${ciRelationships} r where r.source_ci_id = ${cis.id} or r.target_ci_id = ${cis.id})`;
+const relExists = sql`exists (select 1 from ${ciRelationships} r where r.source_ci_id = ${cis.id} or r.target_ci_id = ${cis.id})`;
+export const STALE_DAYS = 30;
+/** A discovered CI not seen for STALE_DAYS (or never): the single definition used by list filters, summary and overview. */
+const staleCond = () => sql`(${cis.discoverySource} is not null and (${cis.lastSeenAt} is null or ${cis.lastSeenAt} < now() - make_interval(days => ${STALE_DAYS})))`;
 
 export async function listCis(ctx: Ctx, q: CiListQuery) {
   return q.fields === 'min' ? listCisMin(ctx, q) : listCisFull(ctx, q);
@@ -67,7 +72,14 @@ function buildCiWhere(ctx: Ctx, q: CiListQuery) {
   if (q.hasAsset === false) conds.push(isNull(cis.assetId));
   if (q.serviceId) conds.push(inArray(cis.id, ctx.tx.select({ id: ciServices.ciId }).from(ciServices).where(eq(ciServices.serviceId, q.serviceId))));
   if (q.tag) conds.push(sql`${q.tag} = any(${cis.tags})`);
-  if (q.stale) conds.push(or(isNull(cis.lastSeenAt), lt(cis.lastSeenAt, new Date(Date.now() - 30 * 86_400_000))));
+  if (q.stale === true) conds.push(staleCond());
+  if (q.stale === false) conds.push(sql`not (${staleCond()})`);
+  if (q.discovered === true) conds.push(isNotNull(cis.discoverySource));
+  if (q.discovered === false) conds.push(isNull(cis.discoverySource));
+  if (q.withoutRelationships === true) conds.push(sql`not ${relExists}`);
+  if (q.withoutRelationships === false) conds.push(relExists);
+  if (q.unowned === true) conds.push(isNull(cis.ownerTeamId));
+  if (q.unowned === false) conds.push(isNotNull(cis.ownerTeamId));
   if (q.q) conds.push(searchFts(q.q, cis.searchVector, cis.hostname, cis.ipAddress, cis.name, cis.serialNumber));
   const where = and(...conds.filter((c): c is SQL => !!c));
   const critOrder = sql`case ${cis.criticality} when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end`;
@@ -158,6 +170,7 @@ export async function listRelationships(tx: Tx, ciId: string) {
     typeKey: ciRelationshipTypes.key,
     typeName: ciRelationshipTypes.name,
     inverseName: ciRelationshipTypes.inverseName,
+    impactDirection: ciRelationshipTypes.impactDirection,
     description: ciRelationships.description,
     source: ciRelationships.source,
     createdAt: ciRelationships.createdAt,
@@ -445,7 +458,6 @@ export async function ciSummary(ctx: Ctx, customerId?: string) {
     conds.push(eq(cis.customerId, customerId));
   }
   const where = conds.length ? and(...conds) : undefined;
-  const staleBefore = new Date(Date.now() - 30 * 86_400_000);
   const [byType, byStatus, byEnvironment, byCriticality, [totals]] = await Promise.all([
     ctx.tx.select({ typeId: cis.typeId, key: ciTypes.key, name: ciTypes.name, color: ciTypes.color, icon: ciTypes.icon, count: sql<number>`count(*)::int` }).from(cis).innerJoin(ciTypes, eq(ciTypes.id, cis.typeId)).where(where).groupBy(cis.typeId, ciTypes.key, ciTypes.name, ciTypes.color, ciTypes.icon).orderBy(desc(sql`count(*)`)),
     ctx.tx.select({ status: cis.status, count: sql<number>`count(*)::int` }).from(cis).where(where).groupBy(cis.status),
@@ -455,7 +467,7 @@ export async function ciSummary(ctx: Ctx, customerId?: string) {
       .select({
         total: sql<number>`count(*)::int`,
         active: sql<number>`count(*) filter (where ${cis.status} = 'active')::int`,
-        stale: sql<number>`count(*) filter (where ${cis.discoverySource} is not null and (${cis.lastSeenAt} is null or ${cis.lastSeenAt} < ${staleBefore}))::int`,
+        stale: sql<number>`count(*) filter (where ${staleCond()})::int`,
         discovered: sql<number>`count(*) filter (where ${cis.discoverySource} is not null)::int`,
         withAsset: sql<number>`count(*) filter (where ${cis.assetId} is not null)::int`,
         critical: sql<number>`count(*) filter (where ${cis.criticality} = 'critical')::int`,
@@ -560,5 +572,184 @@ export async function importCis(ctx: Ctx, customerId: string, csv: Buffer): Prom
     }
   }
   await ctx.audit({ entityType: 'ci', action: 'import', customerId, metadata: { created: result.created, updated: result.updated, errors: result.errors.length } });
+  return result;
+}
+
+// ---------------------------------------------------------------- overview
+
+const OPEN_STATUS_IDS = sql`(select id from config_options where type = 'ticket_status' and status_category in ('new', 'open', 'pending'))`;
+
+type OverviewTotals = { total: number; active: number; retired: number; stale: number; discovered: number; withAsset: number; critical: number; unowned: number; noSite: number; withoutRelationships: number; nonRetired: number; complete: number; fresh: number; withRelationships: number };
+
+/** One-call payload for the CMDB landing page: totals, breakdowns, data-health ratios, discovery state, recent changes and the most ticketed CIs. */
+export async function cmdbOverview(ctx: Ctx, customerId?: string) {
+  if (customerId) ctx.requireCustomer(customerId);
+  const cc = (col: SQL) => (customerId ? sql`and ${col} = ${customerId}::uuid` : sql``);
+  const stale = sql`c.discovery_source is not null and (c.last_seen_at is null or c.last_seen_at < now() - make_interval(days => ${STALE_DAYS}))`;
+  const rel = sql`exists (select 1 from ci_relationships r where r.source_ci_id = c.id or r.target_ci_id = c.id)`;
+  const [t, inc, byType, byStatus, byEnvironment, byCriticality, disc, findings, lastRun, recentChanges, topImpacted] = await Promise.all([
+    rawOne<OverviewTotals>(ctx, sql`
+      select count(*)::int as total,
+        count(*) filter (where c.status = 'active')::int as active,
+        count(*) filter (where c.status = 'retired')::int as retired,
+        count(*) filter (where ${stale})::int as stale,
+        count(*) filter (where c.discovery_source is not null)::int as discovered,
+        count(*) filter (where c.asset_id is not null)::int as "withAsset",
+        count(*) filter (where c.criticality = 'critical')::int as critical,
+        count(*) filter (where c.owner_team_id is null and c.status <> 'retired')::int as unowned,
+        count(*) filter (where c.site_id is null and c.status <> 'retired')::int as "noSite",
+        count(*) filter (where c.status = 'active' and not ${rel})::int as "withoutRelationships",
+        count(*) filter (where c.status <> 'retired')::int as "nonRetired",
+        count(*) filter (where c.status <> 'retired' and c.site_id is not null and c.owner_team_id is not null and (c.serial_number is not null or c.hostname is not null))::int as complete,
+        count(*) filter (where c.discovery_source is not null and c.last_seen_at >= now() - make_interval(days => ${STALE_DAYS}))::int as fresh,
+        count(*) filter (where c.status = 'active' and ${rel})::int as "withRelationships"
+      from cis c where true ${cc(sql`c.customer_id`)}`),
+    rawOne<{ count: number }>(ctx, sql`
+      select count(distinct t.id)::int as count from tickets t
+      where t.status_id in ${OPEN_STATUS_IDS}
+        and (exists (select 1 from cis c where c.id = t.primary_ci_id ${cc(sql`c.customer_id`)})
+          or exists (select 1 from ticket_cis tc join cis c on c.id = tc.ci_id where tc.ticket_id = t.id ${cc(sql`c.customer_id`)}))`),
+    rawRows<{ key: string; name: string; color: string | null; icon: string | null; parentKey: string | null; count: number }>(ctx, sql`
+      select ty.key, ty.name, ty.color, ty.icon, ty.parent_key as "parentKey", count(*)::int as count
+      from cis c join ci_types ty on ty.id = c.type_id where true ${cc(sql`c.customer_id`)}
+      group by ty.id, ty.key, ty.name, ty.color, ty.icon, ty.parent_key order by count(*) desc, ty.name`),
+    rawRows<{ status: string; count: number }>(ctx, sql`select c.status, count(*)::int as count from cis c where true ${cc(sql`c.customer_id`)} group by c.status order by count(*) desc`),
+    rawRows<{ environment: string; count: number }>(ctx, sql`select c.environment, count(*)::int as count from cis c where true ${cc(sql`c.customer_id`)} group by c.environment order by count(*) desc`),
+    rawRows<{ criticality: string; count: number }>(ctx, sql`select c.criticality, count(*)::int as count from cis c where true ${cc(sql`c.customer_id`)} group by c.criticality order by count(*) desc`),
+    rawOne<{ sources: number; activeSources: number }>(ctx, sql`select count(*)::int as sources, count(*) filter (where s.is_active)::int as "activeSources" from discovery_sources s where true ${cc(sql`s.customer_id`)}`),
+    rawOne<{ pendingFindings: number; newFindings: number }>(ctx, sql`select count(*) filter (where f.status = 'pending')::int as "pendingFindings", count(*) filter (where f.status = 'pending' and f.diff_status = 'new')::int as "newFindings" from discovery_findings f where true ${cc(sql`f.customer_id`)}`),
+    rawRows<{ id: string; sourceId: string; sourceName: string | null; status: string; finishedAt: Date | null; startedAt: Date | null }>(ctx, sql`
+      select r.id, r.source_id as "sourceId", s.name as "sourceName", r.status, r.finished_at as "finishedAt", r.started_at as "startedAt"
+      from discovery_runs r left join discovery_sources s on s.id = r.source_id where true ${cc(sql`r.customer_id`)} order by r.created_at desc limit 1`),
+    rawRows<{ id: string; entityId: string; ciName: string | null; action: string; at: Date; actorName: string | null }>(ctx, sql`
+      select a.id, a.entity_id as "entityId", coalesce(c.name, a.entity_label) as "ciName", a.action, a.occurred_at as "at", a.user_name as "actorName"
+      from audit_log a left join cis c on c.id = a.entity_id
+      where a.entity_type = 'ci' and a.entity_id is not null ${cc(sql`a.customer_id`)} order by a.occurred_at desc limit 10`),
+    rawRows<{ id: string; name: string; typeName: string; openTickets: number }>(ctx, sql`
+      with linked as (
+        select t.primary_ci_id as ci_id, t.id as ticket_id from tickets t where t.status_id in ${OPEN_STATUS_IDS} and t.primary_ci_id is not null
+        union
+        select tc.ci_id, tc.ticket_id from ticket_cis tc join tickets t on t.id = tc.ticket_id where t.status_id in ${OPEN_STATUS_IDS})
+      select c.id, c.name, ty.name as "typeName", count(distinct l.ticket_id)::int as "openTickets"
+      from linked l join cis c on c.id = l.ci_id join ci_types ty on ty.id = c.type_id where true ${cc(sql`c.customer_id`)}
+      group by c.id, c.name, ty.name order by count(distinct l.ticket_id) desc, c.name limit 5`),
+  ]);
+  return {
+    totals: {
+      total: num(t.total), active: num(t.active), retired: num(t.retired), stale: num(t.stale), discovered: num(t.discovered), withAsset: num(t.withAsset), critical: num(t.critical),
+      unowned: num(t.unowned), noSite: num(t.noSite), withoutRelationships: num(t.withoutRelationships), openIncidents: num(inc.count),
+    },
+    byType: byType.map((r) => ({ ...r, count: num(r.count) })),
+    byStatus: byStatus.map((r) => ({ ...r, count: num(r.count) })),
+    byEnvironment: byEnvironment.map((r) => ({ ...r, count: num(r.count) })),
+    byCriticality: byCriticality.map((r) => ({ ...r, count: num(r.count) })),
+    health: {
+      completenessPct: pct(num(t.complete), num(t.nonRetired)),
+      freshnessPct: pct(num(t.fresh), num(t.discovered)),
+      relationshipCoveragePct: pct(num(t.withRelationships), num(t.active)),
+    },
+    discovery: {
+      sources: num(disc.sources), activeSources: num(disc.activeSources), pendingFindings: num(findings.pendingFindings), newFindings: num(findings.newFindings),
+      lastRun: lastRun[0] ? { ...lastRun[0], startedAt: asDate(lastRun[0].startedAt), finishedAt: asDate(lastRun[0].finishedAt) } : null,
+    },
+    recentChanges: recentChanges.map((r) => ({ ...r, at: asDate(r.at) as Date })),
+    topImpacted: topImpacted.map((r) => ({ ...r, openTickets: num(r.openTickets) })),
+  };
+}
+
+// ---------------------------------------------------------------- business services
+
+export type ServiceHealth = 'good' | 'warning' | 'critical';
+
+/** Business services (CIs of type `business_service`) with their dependency footprint and open-ticket health. */
+export async function listBusinessServices(ctx: Ctx, customerId?: string) {
+  if (customerId) ctx.requireCustomer(customerId);
+  const rows = await ctx.tx
+    .select({ id: cis.id, name: cis.name, customerId: cis.customerId, customerName: customers.name, status: cis.status, criticality: cis.criticality, attributes: cis.attributes })
+    .from(cis)
+    .innerJoin(ciTypes, eq(ciTypes.id, cis.typeId))
+    .leftJoin(customers, eq(customers.id, cis.customerId))
+    .where(and(eq(ciTypes.key, 'business_service'), customerId ? eq(cis.customerId, customerId) : undefined))
+    .orderBy(asc(customers.name), asc(cis.name));
+  const items = [];
+  for (const r of rows) {
+    const map = await buildDependencyMap(ctx.tx, r.id, 6, 200);
+    const ids = map ? map.nodes.map((n) => n.id) : [r.id];
+    const open = await openTicketSummary(ctx.tx, ids);
+    const attrs = (r.attributes ?? {}) as Record<string, unknown>;
+    const health: ServiceHealth = open.critical > 0 ? 'critical' : open.count > 0 ? 'warning' : 'good';
+    items.push({
+      id: r.id, name: r.name, customerId: r.customerId, customerName: r.customerName, status: r.status, criticality: r.criticality,
+      tier: typeof attrs.tier === 'string' ? attrs.tier : null, owner: typeof attrs.owner === 'string' ? attrs.owner : null,
+      dependencies: ids.length - 1, openIncidents: open.count, health,
+    });
+  }
+  return { items };
+}
+
+/** Layered dependency map (what the CI relies on) from any CI; see `buildDependencyMap`. */
+export async function serviceMap(ctx: Ctx, id: string, depth = 6) {
+  await loadCi(ctx, id);
+  const res = await buildDependencyMap(ctx.tx, id, depth, 200);
+  if (!res) throw new NotFoundError('Configuration item');
+  return res;
+}
+
+// ---------------------------------------------------------------- bulk update
+
+export interface BulkResult { succeeded: number; failed: number; errors: { id: string; message: string }[] }
+
+/** Applies one action to many CIs; each row runs in its own savepoint and gets its own audit entry, so one failure never blocks the rest. */
+export async function bulkUpdateCis(ctx: Ctx, input: CiBulkInput): Promise<BulkResult> {
+  const { action, payload } = input;
+  const ids = [...new Set(input.ids)];
+  let patch: Record<string, unknown> = {};
+  switch (action) {
+    case 'status':
+      if (!payload.status) throw new ValidationError('payload.status is required');
+      patch = { status: payload.status };
+      break;
+    case 'retire':
+      patch = { status: 'retired' };
+      break;
+    case 'criticality':
+      if (!payload.criticality) throw new ValidationError('payload.criticality is required');
+      patch = { criticality: payload.criticality };
+      break;
+    case 'environment':
+      if (!payload.environment) throw new ValidationError('payload.environment is required');
+      patch = { environment: payload.environment };
+      break;
+    case 'ownerTeam': {
+      if (payload.ownerTeamId === undefined) throw new ValidationError('payload.ownerTeamId is required (null clears the owner)');
+      if (payload.ownerTeamId) {
+        const [t] = await ctx.tx.select({ id: teams.id }).from(teams).where(eq(teams.id, payload.ownerTeamId)).limit(1);
+        if (!t) throw new ValidationError('Unknown owner team');
+      }
+      patch = { ownerTeamId: payload.ownerTeamId };
+      break;
+    }
+    case 'addTag':
+      if (!payload.tag) throw new ValidationError('payload.tag is required');
+      break;
+  }
+  const result: BulkResult = { succeeded: 0, failed: 0, errors: [] };
+  for (const id of ids) {
+    await ctx.tx.execute(sql`savepoint bulk_ci`);
+    try {
+      const before = await loadCi(ctx, id);
+      ctx.require('cmdb:manage', before.customerId);
+      const set = action === 'addTag' ? { tags: [...new Set([...(before.tags ?? []), payload.tag!])] } : patch;
+      const [after] = await ctx.tx.update(cis).set({ ...set, updatedAt: new Date() } as never).where(eq(cis.id, id)).returning();
+      const changes = diffChanges(before as Record<string, unknown>, set);
+      if (Object.keys(changes).length) await ctx.audit({ entityType: 'ci', entityId: id, entityLabel: after.name, action: 'update', customerId: after.customerId, changes, metadata: { bulk: true, bulkAction: action } });
+      await ctx.tx.execute(sql`release savepoint bulk_ci`);
+      result.succeeded++;
+    } catch (err) {
+      await ctx.tx.execute(sql`rollback to savepoint bulk_ci`);
+      result.failed++;
+      result.errors.push({ id, message: (err as Error).message });
+    }
+  }
   return result;
 }

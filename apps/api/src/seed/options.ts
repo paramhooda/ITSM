@@ -435,19 +435,23 @@ export const CI_TYPE_SEEDS = [
   { key: 'other', name: 'Other', icon: 'box', color: 'gray' },
 ];
 
+/**
+ * impactDirection: 'downstream' = the SOURCE is impacted when the TARGET fails,
+ * 'upstream' = the TARGET is impacted when the SOURCE fails, 'none' = no propagation.
+ */
 export const RELATIONSHIP_TYPE_SEEDS = [
-  { key: 'depends_on', name: 'Depends on', inverseName: 'Is dependency of' },
-  { key: 'runs_on', name: 'Runs on', inverseName: 'Runs' },
-  { key: 'hosted_on', name: 'Hosted on', inverseName: 'Hosts' },
-  { key: 'connected_to', name: 'Connected to', inverseName: 'Connected to' },
-  { key: 'supports', name: 'Supports', inverseName: 'Supported by' },
-  { key: 'protected_by', name: 'Protected by', inverseName: 'Protects' },
-  { key: 'backed_up_by', name: 'Backed up by', inverseName: 'Backs up' },
-  { key: 'located_at', name: 'Located at', inverseName: 'Location of' },
-  { key: 'uses', name: 'Uses', inverseName: 'Used by' },
-  { key: 'member_of', name: 'Member of', inverseName: 'Contains' },
-  { key: 'manages', name: 'Manages', inverseName: 'Managed by' },
-  { key: 'monitored_by', name: 'Monitored by', inverseName: 'Monitors' },
+  { key: 'depends_on', name: 'Depends on', inverseName: 'Is dependency of', impactDirection: 'downstream' },
+  { key: 'runs_on', name: 'Runs on', inverseName: 'Runs', impactDirection: 'downstream' },
+  { key: 'hosted_on', name: 'Hosted on', inverseName: 'Hosts', impactDirection: 'downstream' },
+  { key: 'connected_to', name: 'Connected to', inverseName: 'Connected to', impactDirection: 'none' },
+  { key: 'supports', name: 'Supports', inverseName: 'Supported by', impactDirection: 'upstream' },
+  { key: 'protected_by', name: 'Protected by', inverseName: 'Protects', impactDirection: 'downstream' },
+  { key: 'backed_up_by', name: 'Backed up by', inverseName: 'Backs up', impactDirection: 'downstream' },
+  { key: 'located_at', name: 'Located at', inverseName: 'Location of', impactDirection: 'none' },
+  { key: 'uses', name: 'Uses', inverseName: 'Used by', impactDirection: 'downstream' },
+  { key: 'member_of', name: 'Member of', inverseName: 'Contains', impactDirection: 'downstream' },
+  { key: 'manages', name: 'Manages', inverseName: 'Managed by', impactDirection: 'upstream' },
+  { key: 'monitored_by', name: 'Monitored by', inverseName: 'Monitors', impactDirection: 'none' },
 ];
 
 export const KB_CATEGORY_SEEDS = [

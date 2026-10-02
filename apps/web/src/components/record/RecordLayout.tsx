@@ -11,7 +11,8 @@ export function RecordLayout({ header, main, aside, asideWidth = 380, className 
   return (
     <div className={cn('flex flex-col gap-3 max-w-[1560px]', className)}>
       {header}
-      <div className="grid grid-cols-1 gap-3 items-start" style={aside ? { gridTemplateColumns: `minmax(0, 1fr) min(${asideWidth}px, 100%)` } : undefined}>
+      {/* Below xl the rail stacks under the form so the two-column field grid keeps room to breathe. */}
+      <div className={cn('grid grid-cols-1 gap-3 items-start', aside && 'xl:grid-cols-[minmax(0,1fr)_var(--aside)]')} style={aside ? ({ '--aside': `${asideWidth}px` } as React.CSSProperties) : undefined}>
         <div className="min-w-0 flex flex-col gap-3">{main}</div>
         {aside && <aside className="min-w-0 xl:sticky xl:top-4 flex flex-col gap-3">{aside}</aside>}
       </div>

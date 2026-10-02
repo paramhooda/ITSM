@@ -1,0 +1,1 @@
+ALTER TABLE "ci_relationship_types" ADD COLUMN "impact_direction" text DEFAULT 'none' NOT NULL;

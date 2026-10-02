@@ -27,6 +27,8 @@ export const ciRelationshipTypes = pgTable('ci_relationship_types', {
   name: text('name').notNull(),
   inverseName: text('inverse_name').notNull(),
   description: text('description'),
+  /** downstream | upstream | none — see IMPACT_DIRECTIONS in @itsm/shared. */
+  impactDirection: text('impact_direction').notNull().default('none'),
   isSystem: boolean('is_system').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   ...timestamps,

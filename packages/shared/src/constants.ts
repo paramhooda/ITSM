@@ -81,6 +81,14 @@ export const ENTITLEMENT_PERIODS = ['contract', 'yearly', 'half_yearly', 'quarte
 export const PM_STATUSES = ['planned', 'scheduled', 'completed', 'missed', 'rescheduled', 'cancelled'] as const;
 export const FIELD_VISIT_STATUSES = ['requested', 'scheduled', 'in_progress', 'completed', 'cancelled'] as const;
 export const CI_STATUSES = ['planned', 'active', 'inactive', 'maintenance', 'retired'] as const;
+/**
+ * How a failure travels along a CI relationship (source → target):
+ * downstream = the SOURCE is impacted when the TARGET fails (depends_on, runs_on, ...),
+ * upstream   = the TARGET is impacted when the SOURCE fails (supports, manages),
+ * none       = no impact propagation (connected_to, located_at, ...).
+ */
+export const IMPACT_DIRECTIONS = ['downstream', 'upstream', 'none'] as const;
+export type ImpactDirection = (typeof IMPACT_DIRECTIONS)[number];
 export const ASSET_LIFECYCLE = ['ordered', 'in_stock', 'deployed', 'in_repair', 'retired', 'disposed'] as const;
 export const KB_VISIBILITY = ['internal', 'customer', 'public'] as const;
 export const NOTIFICATION_EVENTS = [
