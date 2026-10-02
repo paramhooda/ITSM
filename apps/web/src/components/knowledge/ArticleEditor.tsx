@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { Eye, PenLine, Columns2 } from 'lucide-react';
 import { get, post, patch, ApiError } from '@/api/client';
@@ -264,7 +265,7 @@ export function ArticleEditor({ open, onClose, article, defaults, onSaved }: { o
           {mode !== 'preview' && <Textarea className="min-h-[360px] font-mono text-[12.5px] leading-relaxed" value={form.body} onChange={(e) => set('body', e.target.value)} placeholder={'# Purpose\n\n## Steps\n1. ...\n\n## Verification\n...'} />}
           {mode !== 'edit' && (
             <div className="min-h-[360px] rounded-lg border border-default p-3 prose-sm text-[13px] overflow-auto bg-surface-2/30">
-              {form.body.trim() ? <ReactMarkdown>{form.body}</ReactMarkdown> : <span className="text-subtle">Preview appears here.</span>}
+              {form.body.trim() ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{form.body}</ReactMarkdown> : <span className="text-subtle">Preview appears here.</span>}
             </div>
           )}
         </div>

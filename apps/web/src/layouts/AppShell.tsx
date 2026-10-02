@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect } from 'react';
 import { NavLink, useNavigate, Link } from 'react-router-dom';
-import { Bell, Search, Sparkles, LogOut, User, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react';
+import { Bell, Search, LogOut, User, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { Avatar, Kbd } from '@/components/ui';
 import { MSP_NAV, visibleNav, type NavItem } from './nav';
 import { GlobalSearch } from '@/components/GlobalSearch';
-import { AssistantPanel } from '@/components/AssistantPanel';
+import { GradyWidget } from '@/components/grady/GradyWidget';
 import { Menu } from '@/components/Menu';
 
 export function BrandLogo({ className }: { className?: string }) {
@@ -114,7 +114,7 @@ export function Sidebar({ items, label }: { items: NavItem[]; label: string }) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { setSearchOpen, setAssistantOpen, assistantOpen } = useUiStore();
+  const { setSearchOpen } = useUiStore();
   const can = useAuthStore((s) => s.can);
   const navigate = useNavigate();
 
@@ -145,11 +145,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Plus className="h-4 w-4" /> New ticket
             </button>
           )}
-          {can('ai:use') && (
-            <button onClick={() => setAssistantOpen(!assistantOpen)} className={cn('h-9 w-9 rounded-lg flex items-center justify-center text-muted hover:bg-surface-2 hover:text-default', assistantOpen && 'bg-surface-2 text-default')} title="AI assistant">
-              <Sparkles className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
-          )}
           <NotificationBell />
           <div className="hidden sm:block w-px h-6 bg-border mx-1" style={{ background: 'var(--border)' }} />
           <BrandLogo className="hidden sm:inline-flex mx-1" />
@@ -159,11 +154,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           <main className="flex-1 overflow-y-auto">
             <div className="p-5 md:p-7 max-w-[1500px] mx-auto">{children}</div>
           </main>
-          {assistantOpen && <AssistantPanel />}
         </div>
         <MobileNav items={MSP_NAV} />
       </div>
       <GlobalSearch />
+      <GradyWidget />
     </div>
   );
 }

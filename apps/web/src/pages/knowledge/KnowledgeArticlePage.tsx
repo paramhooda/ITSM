@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { ArrowLeft, PenLine, Send, Archive, ArchiveRestore, Trash2, ThumbsUp, ThumbsDown, Eye, RotateCcw, Tag, Ticket as TicketIcon } from 'lucide-react';
 import { get, post, del, ApiError } from '@/api/client';
@@ -192,7 +193,7 @@ export default function KnowledgeArticlePage() {
         <div className="min-w-0 space-y-4">
           <Card>
             {a.summary && <p className="text-[13.5px] text-muted border-l-2 border-brand-500/50 pl-3 mb-4">{a.summary}</p>}
-            <div className="prose-sm text-[13.5px] leading-relaxed">{a.body.trim() ? <ReactMarkdown>{a.body}</ReactMarkdown> : <span className="text-subtle">This article has no content yet.</span>}</div>
+            <div className="prose-sm text-[13.5px] leading-relaxed">{a.body.trim() ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{a.body}</ReactMarkdown> : <span className="text-subtle">This article has no content yet.</span>}</div>
             <div className="mt-6 pt-4 border-t border-default flex flex-wrap items-center gap-3">
               <span className="text-[13px] text-muted">Was this article helpful?</span>
               <Button size="sm" variant={voted === 'up' ? 'primary' : 'outline'} icon={<ThumbsUp className="h-3.5 w-3.5" />} disabled={!!voted || feedback.isPending} onClick={() => feedback.mutate(true)}>
@@ -328,7 +329,7 @@ export default function KnowledgeArticlePage() {
             <div className="font-semibold mb-1">{version.data.title}</div>
             {version.data.summary && <p className="text-[13px] text-muted mb-3">{version.data.summary}</p>}
             <div className="prose-sm text-[13px]">
-              <ReactMarkdown>{version.data.body}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{version.data.body}</ReactMarkdown>
             </div>
           </div>
         )}
