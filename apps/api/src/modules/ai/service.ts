@@ -8,7 +8,7 @@ import { loadTicket } from '@/modules/tickets/common';
 import { listTickets } from '@/modules/tickets/list';
 import { availableTools, toolDefinitions, toolByName, toolAvailable, stripSecrets, isCustomerUser, listQuery } from './tools';
 import { buildSystemPrompt, describeScope } from './prompts';
-import { fenceToolResult, type TenantFence } from './fence';
+import { fenceToolResult, fenceAnswer, collectSeen, type TenantFence } from './fence';
 import { logger } from '@/core/logger';
 import type { ChatContext } from './schemas';
 
@@ -375,6 +375,16 @@ export async function chat(ctx: Ctx, input: ChatInput) {
     }
   }
   if (!text.trim()) text = records.length ? 'Done. ' + records.map((r) => r.summary).join('; ') : 'I could not produce an answer. Please rephrase the question.';
+  if (org) {
+    // Customer users: the answer may only cite what this conversation has shown them (earlier messages, this turn's tool results).
+    const seen = collectSeen([...rows.map((m) => m.content), ...messages.filter((m) => m.role === 'tool').map((m) => (m as { content: string }).content)]);
+    const fenced = fenceAnswer(text, seen);
+    if (fenced.removed > 0) {
+      logger.warn({ removed: fenced.removed, userId: ctx.user.id, customerId: org.customerId, requestId: ctx.requestId }, 'ai answer fence removed references the user was never shown');
+      await ctx.audit({ entityType: 'ai_answer', entityId: conv!.id, entityLabel: 'chat', action: 'ai.answer_fence', customerId: org.customerId, metadata: { removed: fenced.removed } });
+      text = fenced.text;
+    }
+  }
 
   const [assistant] = await ctx.tx
     .insert(schema.aiMessages)

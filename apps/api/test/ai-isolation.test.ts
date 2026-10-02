@@ -21,7 +21,7 @@ import type { AiProvider, ChatOptions, ChatResponse } from '../src/lib/ai';
 import { z } from 'zod';
 import { availableTools, toolByName, ALL_TOOLS, type AiTool } from '../src/modules/ai/tools';
 import { buildSystemPrompt, describeScope } from '../src/modules/ai/prompts';
-import { fenceToolResult, belongsElsewhere } from '../src/modules/ai/fence';
+import { fenceToolResult, belongsElsewhere, fenceAnswer, collectSeen, ANSWER_FENCE_NOTE } from '../src/modules/ai/fence';
 import * as ai from '../src/modules/ai/service';
 
 const S = Math.random().toString(36).slice(2, 8);
@@ -335,6 +335,45 @@ describe('prompt and conversations', () => {
       expect(listed.items.map((c) => c.id)).not.toContain(res.conversationId);
       const own = await asAlpha((ctx) => ai.listConversations(ctx));
       expect(own.items.map((c) => c.id)).toContain(res.conversationId);
+    } finally {
+      ai.setProviderForTests(null);
+    }
+  });
+
+  it('answer fence: references the conversation never showed are removed, cited ones stay', () => {
+    const seen = collectSeen(['{"items":[{"number":"INC-000123","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}]}']);
+    const clean = fenceAnswer('[INC-000123](/portal/tickets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa) is in progress.', seen);
+    expect(clean.removed).toBe(0);
+    expect(clean.text).toContain('INC-000123');
+    const dirty = fenceAnswer('**2 open**: [INC-000123](/portal/tickets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa) and [INC-009999](/portal/tickets/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb) (also see REQ-007777).', seen);
+    expect(dirty.removed).toBe(3);
+    expect(dirty.text).toContain('INC-000123');
+    expect(dirty.text).not.toContain('INC-009999');
+    expect(dirty.text).not.toContain('bbbbbbbb');
+    expect(dirty.text).not.toContain('REQ-007777');
+    expect(dirty.text).toContain(ANSWER_FENCE_NOTE);
+  });
+
+  it('a chat reply that cites a ticket the tools never returned is scrubbed before it is stored', async () => {
+    ai.setProviderForTests({
+      name: 'fake',
+      model: 'x',
+      chat: async (opts: ChatOptions) => {
+        const last = opts.messages[opts.messages.length - 1]!;
+        if (last.role === 'user') return { text: '', toolCalls: [{ id: 't1', name: 'list_tickets', input: { openOnly: false, q: `Firewall failover failed ${S}` } }], stopReason: 'tool_use', usage: { inputTokens: 1, outputTokens: 1 } };
+        return { text: `Open for you: [${numbers.a1}](/portal/tickets/${ticketIds[0]}). Also [${numbers.b1}](/portal/tickets/${ticketIds[2]}) for ${BETA}.`, toolCalls: [], stopReason: 'end', usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    });
+    try {
+      const res = await asAlpha((ctx) => ai.chat(ctx, { message: 'What is open?' }));
+      expect(res.message.content).toContain(numbers.a1);
+      expect(res.message.content).not.toContain(numbers.b1);
+      expect(res.message.content).not.toContain(ticketIds[2]);
+      expect(res.message.content).toContain(ANSWER_FENCE_NOTE);
+      const stored = await asAlpha((ctx) => ai.getConversation(ctx, res.conversationId));
+      expect(stored.messages[1]!.content).not.toContain(numbers.b1);
+      const audits = await withSystem((tx) => tx.select({ action: schema.auditLog.action }).from(schema.auditLog).where(eq(schema.auditLog.requestId, meta.requestId)));
+      expect(audits.some((a) => a.action === 'ai.answer_fence')).toBe(true);
     } finally {
       ai.setProviderForTests(null);
     }
