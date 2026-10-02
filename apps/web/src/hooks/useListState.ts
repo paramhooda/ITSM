@@ -4,11 +4,15 @@ import { useSearchParams } from 'react-router-dom';
 /** Keeps list filters, page and sort in the URL so views are shareable and survive refresh. */
 export function useListState(defaults: Record<string, string> = {}) {
   const [params, setParams] = useSearchParams();
+  // Callers usually pass an inline object; key the memo on its content so the
+  // derived state (and any query keys built from it) stays referentially stable.
+  const defaultsKey = JSON.stringify(defaults);
   const state = useMemo(() => {
-    const obj: Record<string, string> = { ...defaults };
+    const obj: Record<string, string> = { ...(JSON.parse(defaultsKey) as Record<string, string>) };
     params.forEach((v, k) => (obj[k] = v));
     return obj;
-  }, [params, defaults]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, defaultsKey]);
   const set = useCallback(
     (patch: Record<string, string | number | undefined | null>, resetPage = true) => {
       const next = new URLSearchParams(params);

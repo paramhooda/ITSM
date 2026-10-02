@@ -38,7 +38,7 @@ const schema = z.object({
   OPENAI_COMPATIBLE_BASE_URL: z.string().optional(),
   OPENAI_COMPATIBLE_API_KEY: z.string().optional(),
   WEB_DIST_PATH: z.string().optional(),
-  RATE_LIMIT_MAX: z.coerce.number().default(600),
+  RATE_LIMIT_MAX: z.coerce.number().default(1500),
 });
 
 export type Config = z.infer<typeof schema>;

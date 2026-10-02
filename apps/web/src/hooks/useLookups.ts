@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { get } from '@/api/client';
+import { useAuthStore } from '@/stores/auth';
 
 export interface ConfigOption {
   id: string;
@@ -66,5 +67,7 @@ export function useEngineers() {
 }
 
 export function useCustomersLookup() {
-  return useQuery({ queryKey: ['customers', 'lookup'], queryFn: () => get<{ items: { id: string; code: string; name: string }[] }>('/customers', { pageSize: 500, sort: 'name', order: 'asc', fields: 'min' }), staleTime: 60_000 });
+  // Customer (portal) users never need the MSP-wide customer picker.
+  const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
+  return useQuery({ queryKey: ['customers', 'lookup'], queryFn: () => get<{ items: { id: string; code: string; name: string }[] }>('/customers', { pageSize: 500, sort: 'name', order: 'asc', fields: 'min' }), staleTime: 60_000, enabled: !isCustomer });
 }

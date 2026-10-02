@@ -53,7 +53,6 @@ export async function buildApp() {
   await app.register(cors, { origin: isProd ? false : true, credentials: true });
   await app.register(cookie, { secret: config.JWT_SECRET });
   await app.register(multipart, { limits: { fileSize: config.MAX_UPLOAD_MB * 1024 * 1024, files: 10 } });
-  await app.register(rateLimit, { max: config.RATE_LIMIT_MAX, timeWindow: '1 minute', allowList: (req) => !req.url.startsWith('/api/') });
   await app.register(swagger, {
     openapi: {
       info: { title: 'MSP Service Management Platform API', version: '1.0.0', description: 'ITSM, Helpdesk, Asset Management & CMDB platform for Managed Services Providers.' },
@@ -64,6 +63,14 @@ export async function buildApp() {
   });
   await app.register(swaggerUi, { routePrefix: '/api/docs' });
   await app.register(authPlugin);
+  // Rate limit API traffic per authenticated principal (falls back to IP for anonymous
+  // requests) so that many users behind one corporate NAT do not share a single bucket.
+  await app.register(rateLimit, {
+    max: config.RATE_LIMIT_MAX,
+    timeWindow: '1 minute',
+    allowList: (req) => !req.url.startsWith('/api/'),
+    keyGenerator: (req) => (req.principal ? `u:${req.principal.id}` : `ip:${req.ip}`),
+  });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof AppError) {

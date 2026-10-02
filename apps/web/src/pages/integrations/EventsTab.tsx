@@ -34,7 +34,7 @@ export function EventsTab({ integrations }: { integrations: Integration[] }) {
   const severities = state.severity ? state.severity.split(',') : [];
   const toggleSeverity = (s: string) => set({ severity: (severities.includes(s) ? severities.filter((x) => x !== s) : [...severities, s]).join(',') || undefined });
   const query = useMemo(() => {
-    const now = Date.now();
+    const now = Math.floor(Date.now() / 60_000) * 60_000; // minute precision keeps the query key stable across renders
     const range = state.range ?? '7';
     const from = range === 'custom' ? (state.from ? new Date(state.from).toISOString() : undefined) : new Date(now - Number(range) * 86_400_000).toISOString();
     const to = range === 'custom' && state.to ? new Date(`${state.to}T23:59:59`).toISOString() : undefined;
