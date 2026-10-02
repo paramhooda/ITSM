@@ -17,7 +17,6 @@ export const customers = pgTable('customers', {
   email: text('email'),
   address: jsonb('address').$type<Record<string, string>>().notNull().default({}),
   timezone: text('timezone').notNull().default('UTC'),
-  commercial: jsonb('commercial').$type<Record<string, unknown>>().notNull().default({}),
   notes: text('notes'),
   tags: text('tags').array().notNull().default([]),
   customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),

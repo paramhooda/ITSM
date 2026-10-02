@@ -31,7 +31,6 @@ export const entitlementInput = z.object({
   period: z.enum(ENTITLEMENT_PERIODS).optional(),
   warnThresholdPct: z.coerce.number().int().min(1).max(100).optional(),
   overageAllowed: z.boolean().optional(),
-  overageRate: z.coerce.number().min(0).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   isActive: z.boolean().optional(),
 });
@@ -76,8 +75,6 @@ export const escalationLevel = z.object({
   notes: z.string().max(500).nullable().optional(),
 });
 
-export const commercialFields = ['value', 'currency', 'billingCycle', 'commercial', 'poNumber', 'signedAt'] as const;
-
 export const contractCreate = z.object({
   customerId: uuid,
   number: z.string().min(1).max(64).optional(),
@@ -97,11 +94,6 @@ export const contractCreate = z.object({
   resolutionCommitment: z.string().max(2000).nullable().optional(),
   exclusions: z.string().max(8000).nullable().optional(),
   description: z.string().max(8000).nullable().optional(),
-  value: z.coerce.number().min(0).nullable().optional(),
-  currency: z.string().max(8).nullable().optional(),
-  billingCycle: z.string().max(32).nullable().optional(),
-  commercial: z.record(z.string(), z.unknown()).optional(),
-  poNumber: z.string().max(100).nullable().optional(),
   signedAt: dateStr.nullable().optional(),
   ownerUserId: uuid.nullable().optional(),
   customFields: z.record(z.string(), z.unknown()).optional(),

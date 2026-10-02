@@ -34,7 +34,7 @@ Rows with `customer_id IS NULL` are *shared* (global knowledge articles, platfor
 
 ## 3. Authorization model
 
-* **Permissions** are flat strings (`tickets:resolve`, `contracts:commercial`, `portal:approve`...), catalogued in `packages/shared/src/permissions.ts`.
+* **Permissions** are flat strings (`tickets:resolve`, `contracts:manage`, `portal:approve`...), catalogued in `packages/shared/src/permissions.ts`.
 * **Roles** bundle permissions. Sixteen system roles ship by default (Administrator, NOC Engineer, SOC Analyst, Service Manager, Account Manager, CMDB Administrator, Contract Administrator, Management, Auditor, Customer Administrator, Customer User...). Administrators can create more.
 * **Role assignments** are global or scoped to one customer. A user may be *Engineer* globally and *Service Manager* for one strategic customer.
 * **Visibility** (which customers) is separate from **capability** (which actions). `tenant:all` grants MSP-wide visibility; otherwise visibility is the union of scoped assignments, explicit grants and team assignments.

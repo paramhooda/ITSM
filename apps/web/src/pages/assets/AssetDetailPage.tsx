@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import { get, post, del } from '@/api/client';
 import { Button, Card, Badge, LoadingBlock, ErrorBlock, Dialog, Field, Select, ConfirmDialog, EmptyState, Textarea } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, useAuditStream, RailTabs, RailCard, RailRows, type FormSection } from '@/components/record';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, useAuditStream, RailTabs, RailCard, RailRows, type FormSection } from '@/components/record';
+import { assetAttention } from '@/components/record/attention';
 import { useAuthStore } from '@/stores/auth';
 import { useLookups } from '@/hooks/useLookups';
 import { fmtDate, fmtMoney, relativeTime } from '@/lib/format';
@@ -27,6 +28,8 @@ interface AssetDetail extends AssetRecord {
   categoryLabel?: string | null;
   statusLabel?: string | null;
   statusColor?: string | null;
+  /** Config-option key of the status (`in_use`, `in_stock`, `retired`, …). */
+  statusKey?: string | null;
   ownerContactName?: string | null;
   assignedContactName?: string | null;
   ciId?: string | null;
@@ -49,6 +52,7 @@ export default function AssetDetailPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
+  const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
   const { lookups } = useLookups();
   const { data: a, isLoading, error, refetch } = useQuery({ queryKey: ['assets', id], queryFn: () => get<AssetDetail>(`/assets/${id}`) });
   const audit = useAuditStream('asset', id);
@@ -79,6 +83,8 @@ export default function AssetDetailPage() {
 
   const transitions = TRANSITIONS[a.lifecycleStage] ?? [...ASSET_LIFECYCLE];
   const mono = (v?: string | null) => (v ? <span className="font-mono text-[12.5px]">{v}</span> : null);
+  // What needs attention (MSP staff only): coverage running out, lifecycle/status mismatch, no CI.
+  const attention = isCustomer ? [] : assetAttention(a, { onLinkCi: canManage ? () => setLinkOpen(true) : undefined });
 
   // ---- header: state controls under the title, one primary action, the rest in the menu
   const controls = (
@@ -261,6 +267,7 @@ export default function AssetDetailPage() {
         }
         main={
           <>
+            {!isCustomer && <RecordAttention items={attention} />}
             <RecordForm sections={sections} />
             <RelatedTabs tabs={tabs} />
           </>

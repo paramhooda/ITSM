@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X } from 'lucide-react';
 import { Button, Badge, LoadingBlock, ErrorBlock, Textarea, Select, Input } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, RailTabs, fromTimeline, type FormSection } from '@/components/record';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, fromTimeline, type FormSection } from '@/components/record';
+import { ticketAttention } from '@/components/record/attention';
 import { useUiStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useLookups, useEngineers } from '@/hooks/useLookups';
@@ -90,6 +91,9 @@ export default function TicketDetailPage() {
   const [editDesc, setEditDesc] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
   const entries = useMemo(() => (timelineQ.data?.items ?? []).map(fromTimeline), [timelineQ.data]);
+  // "Nudge customer" lands the cursor in the reply composer, which lives in the Activity rail tab.
+  const railRef = useRef<HTMLDivElement>(null);
+  const focusComposer = () => railRef.current?.querySelector('textarea')?.focus();
 
   if (ticketQ.isLoading) return <LoadingBlock label="Loading ticket…" />;
   if (ticketQ.isError || !ticket) return <ErrorBlock error={ticketQ.error} retry={() => ticketQ.refetch()} />;
@@ -107,6 +111,16 @@ export default function TicketDetailPage() {
   const isSoc = ticket.domain === 'soc' || ticket.category?.domain === 'soc';
   const teamEngineers = (engineers.data ?? []).filter((e) => !ticket.assignedTeamId || e.teamIds.includes(ticket.assignedTeamId) || e.id === ticket.assigneeId);
   const opt = (type: string) => options(type).map((o) => ({ value: o.id, label: o.label }));
+
+  // ---- what needs attention (MSP staff only): breached clocks, no assignee, waiting on the customer…
+  const attention = isCustomer
+    ? []
+    : ticketAttention(ticket, Date.now(), {
+        onAssignMe: p.assign && isOpen && ticket.assigneeId !== user.id ? () => assignMe.mutate(undefined) : undefined,
+        onEscalate: p.escalate && isOpen ? () => setDialog('escalate') : undefined,
+        onNudge: p.comment ? focusComposer : undefined,
+        onScope: p.update ? () => setDialog('scope') : undefined,
+      });
 
   // ---- header actions: two primary, the rest in the overflow menu
   const primary = (
@@ -256,18 +270,21 @@ export default function TicketDetailPage() {
         }
         main={
           <>
+            {!isCustomer && <RecordAttention items={attention} />}
             <RecordForm sections={sections} />
             <RelatedTabs tabs={tabs} />
           </>
         }
         aside={
-          <RailTabs
-            tabs={[
-              { key: 'activity', label: 'Activity', icon: MessageSquare, badge: entries.length, content: <ActivityStream entries={entries} loading={timelineQ.isLoading} maxHeight="calc(100vh - 220px)" composer={{ canComment: p.comment, canWorkNote: p.workNote, canTime: p.time, submitting: comment.isPending, onSubmit: (v) => comment.mutateAsync(v) }} /> },
-              { key: 'details', label: 'Details', icon: Info, content: <TicketDetailsRail ticket={ticket} /> },
-              { key: 'assist', label: 'Assist', icon: Sparkles, hidden: isCustomer, content: <TicketAssistRail ticket={ticket} /> },
-            ]}
-          />
+          <div ref={railRef} className="contents">
+            <RailTabs
+              tabs={[
+                { key: 'activity', label: 'Activity', icon: MessageSquare, badge: entries.length, content: <ActivityStream entries={entries} loading={timelineQ.isLoading} maxHeight="calc(100vh - 220px)" composer={{ canComment: p.comment, canWorkNote: p.workNote, canTime: p.time, submitting: comment.isPending, onSubmit: (v) => comment.mutateAsync(v) }} /> },
+                { key: 'details', label: 'Details', icon: Info, content: <TicketDetailsRail ticket={ticket} /> },
+                { key: 'assist', label: 'Assist', icon: Sparkles, hidden: isCustomer, content: <TicketAssistRail ticket={ticket} /> },
+              ]}
+            />
+          </div>
         }
       />
 

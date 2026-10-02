@@ -75,6 +75,35 @@ describe('contracts, scope and entitlements', () => {
     await closeDb();
   });
 
+  describe('no commercial terms', () => {
+    const MONEY_KEYS = ['value', 'currency', 'billingCycle', 'commercial', 'poNumber', 'canViewCommercial'];
+
+    it('list items and the detail view carry no money fields', async () => {
+      const list = await as((ctx) => contracts.listContracts(ctx, { page: 1, pageSize: 500, customerId: ids.customer }));
+      const item = list.items.find((c) => c.id === ids.contract)!;
+      expect(item).toBeTruthy();
+      for (const k of MONEY_KEYS) expect(Object.keys(item)).not.toContain(k);
+      const detail = await as((ctx) => contracts.getContract(ctx, ids.contract));
+      for (const k of MONEY_KEYS) expect(Object.keys(detail)).not.toContain(k);
+      expect(Object.keys(detail.documents)).not.toContain('purchaseOrder');
+      expect(detail).toHaveProperty('signedAt');
+    });
+
+    it('entitlements carry no overage rate', async () => {
+      const detail = await as((ctx) => contracts.getContract(ctx, ids.contract));
+      expect(detail.entitlements.length).toBeGreaterThan(0);
+      for (const e of detail.entitlements) expect(Object.keys(e)).not.toContain('overageRate');
+      const list = await as((ctx) => contracts.listContracts(ctx, { page: 1, pageSize: 500, customerId: ids.customer }));
+      expect(list.items.find((c) => c.id === ids.contract)!.entitlements.count).toBeGreaterThan(0);
+    });
+
+    it('the customer view carries no commercial block', async () => {
+      const cust = await as((ctx) => customers.getCustomer(ctx, ids.customer));
+      expect(Object.keys(cust)).not.toContain('commercial');
+      expect(Object.keys(cust)).not.toContain('canViewCommercial');
+    });
+  });
+
   describe('evaluateScope', () => {
     it('service A at covered site 1 is in scope via the explicit scope item', async () => {
       const r = await withSystem((tx) => evaluateScope(tx, { customerId: ids.customer, serviceId: ids.serviceA, siteId: ids.site1 }));

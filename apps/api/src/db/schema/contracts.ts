@@ -26,11 +26,6 @@ export const contracts = pgTable('contracts', {
   resolutionCommitment: text('resolution_commitment'),
   exclusions: text('exclusions'),
   description: text('description'),
-  value: numeric('value', { precision: 14, scale: 2 }),
-  currency: text('currency').default('INR'),
-  billingCycle: text('billing_cycle'),
-  commercial: jsonb('commercial').$type<Record<string, unknown>>().notNull().default({}),
-  poNumber: text('po_number'),
   signedAt: date('signed_at'),
   parentContractId: uuid('parent_contract_id'),
   ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
@@ -73,7 +68,6 @@ export const contractEntitlements = pgTable('contract_entitlements', {
   /** When consumption exceeds this percentage a notification is raised. */
   warnThresholdPct: integer('warn_threshold_pct').notNull().default(80),
   overageAllowed: boolean('overage_allowed').notNull().default(true),
-  overageRate: numeric('overage_rate', { precision: 12, scale: 2 }),
   notes: text('notes'),
   isActive: boolean('is_active').notNull().default(true),
   ...timestamps,
@@ -104,7 +98,7 @@ export const contractNotifications = pgTable('contract_notifications', {
 
 /**
  * Scope definitions: what a contract covers (or explicitly excludes) for a
- * service. Scope informs commercial governance; it never blocks operations.
+ * service. Scope informs coverage governance; it never blocks operations.
  */
 export const scopeItems = pgTable('scope_items', {
   id: id(),

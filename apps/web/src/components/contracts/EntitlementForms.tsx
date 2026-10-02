@@ -14,7 +14,6 @@ export interface EntitlementPayload {
   period: string;
   warnThresholdPct: number;
   overageAllowed: boolean;
-  overageRate: number | null;
   notes: string | null;
 }
 
@@ -30,7 +29,6 @@ export function EntitlementForm({ initial, contractServiceIds, onSubmit, onCance
     period: initial?.period ?? 'contract',
     warnThresholdPct: String(initial?.warnThresholdPct ?? Number(lookups?.settings?.['entitlements.default_warn_pct'] ?? 80)),
     overageAllowed: initial?.overageAllowed ?? true,
-    overageRate: initial?.overageRate != null ? String(initial.overageRate) : '',
     notes: initial?.notes ?? '',
   });
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((s) => ({ ...s, [k]: v }));
@@ -51,7 +49,6 @@ export function EntitlementForm({ initial, contractServiceIds, onSubmit, onCance
       period: f.period,
       warnThresholdPct: Math.min(100, Math.max(1, Number(f.warnThresholdPct) || 80)),
       overageAllowed: f.overageAllowed,
-      overageRate: f.overageRate.trim() === '' ? null : Number(f.overageRate),
       notes: f.notes.trim() || null,
     });
   }
@@ -78,9 +75,6 @@ export function EntitlementForm({ initial, contractServiceIds, onSubmit, onCance
         </Field>
         <Field label="Warn at (%)">
           <Input type="number" min={1} max={100} value={f.warnThresholdPct} onChange={(e) => set('warnThresholdPct', e.target.value)} />
-        </Field>
-        <Field label="Overage rate" hint="Per unit beyond the quantity">
-          <Input type="number" min={0} step="0.01" value={f.overageRate} onChange={(e) => set('overageRate', e.target.value)} disabled={!f.overageAllowed} />
         </Field>
       </div>
       <Checkbox label="Allow consumption beyond the quantity (overage)" checked={f.overageAllowed} onChange={(e) => set('overageAllowed', e.target.checked)} />

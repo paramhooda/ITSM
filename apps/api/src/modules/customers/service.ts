@@ -44,7 +44,7 @@ async function defaultOption(tx: Tx, type: string) {
 
 function values(input: Partial<CustomerCreate>): Partial<typeof cu.$inferInsert> {
   const v: Partial<typeof cu.$inferInsert> = {};
-  (['code', 'name', 'legalName', 'industryId', 'typeId', 'statusId', 'accountManagerId', 'website', 'phone', 'email', 'address', 'timezone', 'commercial', 'notes', 'tags', 'customFields', 'isActive'] as const).forEach((k) => {
+  (['code', 'name', 'legalName', 'industryId', 'typeId', 'statusId', 'accountManagerId', 'website', 'phone', 'email', 'address', 'timezone', 'notes', 'tags', 'customFields', 'isActive'] as const).forEach((k) => {
     if (input[k] !== undefined) (v as Record<string, unknown>)[k] = input[k];
   });
   if (v.code) v.code = v.code.toUpperCase();
@@ -196,11 +196,8 @@ export async function getCustomer(ctx: Ctx, id: string) {
     () => customerCounts(ctx.tx, id),
     () => getCustomerTeams(ctx, id),
   ]);
-  const commercialAllowed = ctx.can('contracts:commercial', id);
   return {
     ...row,
-    commercial: commercialAllowed ? row.commercial : undefined,
-    canViewCommercial: commercialAllowed,
     industryLabel: row.industryId ? labels.get(row.industryId)?.label ?? null : null,
     typeLabel: row.typeId ? labels.get(row.typeId)?.label ?? null : null,
     statusLabel: row.statusId ? labels.get(row.statusId)?.label ?? null : null,
@@ -216,7 +213,6 @@ export async function getCustomer(ctx: Ctx, id: string) {
 
 export async function createCustomer(ctx: Ctx, input: CustomerCreate) {
   ctx.require('customers:manage');
-  if (input.commercial !== undefined) ctx.require('contracts:commercial');
   const code = (input.code?.trim() || (await nextCustomerCode(ctx.tx))).toUpperCase();
   const [dup] = await ctx.tx.select({ id: cu.id }).from(cu).where(eq(cu.code, code)).limit(1);
   if (dup) throw new ConflictError(`Customer code ${code} already exists`);
@@ -242,7 +238,6 @@ export async function createCustomer(ctx: Ctx, input: CustomerCreate) {
 export async function updateCustomer(ctx: Ctx, id: string, patch: CustomerPatch) {
   const before = await loadCustomer(ctx, id);
   ctx.require('customers:manage', id);
-  if (patch.commercial !== undefined) ctx.require('contracts:commercial', id);
   const v = { ...values(patch), updatedAt: new Date() };
   if (v.code && v.code !== before.code) {
     const [dup] = await ctx.tx.select({ id: cu.id }).from(cu).where(eq(cu.code, v.code)).limit(1);

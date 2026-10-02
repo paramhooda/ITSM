@@ -21,7 +21,6 @@ export const PERMISSIONS = {
   // Contracts, entitlements, scope
   'contracts:read': 'View contracts, entitlements and scope',
   'contracts:manage': 'Create and edit contracts, entitlements and scope',
-  'contracts:commercial': 'View commercial/financial contract information',
 
   // Services
   'services:read': 'View the service catalog',
@@ -103,7 +102,7 @@ export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 export const PERMISSION_MODULES: Record<string, Permission[]> = {
   Visibility: ['tenant:all'],
   Customers: ['customers:read', 'customers:manage'],
-  Contracts: ['contracts:read', 'contracts:manage', 'contracts:commercial'],
+  Contracts: ['contracts:read', 'contracts:manage'],
   Services: ['services:read', 'services:manage'],
   Tickets: [
     'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve',
@@ -157,13 +156,13 @@ export const SYSTEM_ROLES: Record<string, { name: string; description: string; u
     name: 'Service Manager',
     description: 'Manages service delivery, SLAs and customer relationships.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'contracts:commercial', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:scope', 'tickets:escalate', 'problems:manage', 'changes:manage', 'changes:approve', 'requests:approve', 'assets:read', 'cmdb:read', 'field:read', 'field:manage', 'pm:read', 'pm:manage', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:amc', 'reports:manage', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'soc:read', 'ai:use', 'ai:act'],
+    permissions: ['tenant:all', 'customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:scope', 'tickets:escalate', 'problems:manage', 'changes:manage', 'changes:approve', 'requests:approve', 'assets:read', 'cmdb:read', 'field:read', 'field:manage', 'pm:read', 'pm:manage', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:amc', 'reports:manage', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'soc:read', 'ai:use', 'ai:act'],
   },
   account_manager: {
     name: 'Account Manager',
-    description: 'Commercial ownership of customers and contracts.',
+    description: 'Account ownership of customers and contracts.',
     userType: 'msp',
-    permissions: ['customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'contracts:commercial', 'services:read', 'tickets:read', 'tickets:comment', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'ai:use'],
+    permissions: ['customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:comment', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'ai:use'],
   },
   engineer: {
     name: 'Engineer',
@@ -211,13 +210,13 @@ export const SYSTEM_ROLES: Record<string, { name: string; description: string; u
     name: 'Contract Administrator',
     description: 'Maintains contracts, entitlements and scope definitions.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'contracts:commercial', 'services:read', 'tickets:read', 'tickets:scope', 'field:read', 'pm:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'ai:use'],
+    permissions: ['tenant:all', 'customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:scope', 'field:read', 'pm:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'ai:use'],
   },
   management: {
     name: 'Management',
     description: 'Read-only management visibility across the business.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'contracts:commercial', 'services:read', 'tickets:read', 'soc:read', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'ai:use'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'soc:read', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'ai:use'],
   },
   auditor: {
     name: 'Auditor',

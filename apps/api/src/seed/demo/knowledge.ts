@@ -517,7 +517,7 @@ Your contract page in the portal lists the entitlements included (for example *1
 - **Support hours** are consumed by time logged on your tickets; the engineer records the minutes and the work type.
 - **Hardware replacements** are consumed per replaced part under the AMC.
 
-The balance is shown per period (yearly / quarterly) with a warning when 80% is used; your account manager is notified at the same time. Consumption beyond the entitlement is billed at the overage rate in the contract unless overage is disabled.`,
+The balance is shown per period (yearly / quarterly) with a warning when 80% is used; your account manager is notified at the same time. Consumption beyond the entitlement is raised with the account manager as out-of-scope work unless overage is disabled.`,
   },
   {
     key: 'sla_pause_rules', title: 'FAQ: Which statuses pause the SLA clock', summary: 'Explains the statuses that pause SLA clocks and how pauses affect the due date.', categoryKey: 'faq', type: 'faq', domain: 'general', visibility: 'internal', authorKey: 'ananya', reviewerKey: 'ananya', tags: ['sla', 'status'], ageDays: 205,

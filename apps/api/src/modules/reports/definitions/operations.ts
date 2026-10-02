@@ -198,7 +198,7 @@ registerReport({
 registerReport({
   key: 'out_of_scope_activity',
   name: 'Out-of-scope activity',
-  description: 'Tickets classified out of scope (and optionally unknown) by customer, service and category with time spent, for commercial follow-up.',
+  description: 'Tickets classified out of scope (and optionally unknown) by customer, service and category with time spent, for account-manager follow-up.',
   category: 'scope',
   permissions: ['reports:run', 'contracts:read'],
   portal: false,

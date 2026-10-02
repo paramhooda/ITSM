@@ -17,7 +17,6 @@ export const customerCreate = z.object({
   email: z.string().max(200).nullable().optional(),
   address: addr.optional(),
   timezone: tz.optional(),
-  commercial: z.record(z.string(), z.unknown()).optional(),
   notes: z.string().max(8000).nullable().optional(),
   tags: z.array(z.string().max(50)).max(50).optional(),
   customFields: z.record(z.string(), z.unknown()).optional(),

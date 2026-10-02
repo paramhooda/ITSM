@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import { Button, Badge, Card, Dialog, Drawer, ConfirmDialog, LoadingBlock, ErrorBlock, EmptyState, DataTable, Checkbox, StatTile, Avatar, type Column } from '@/components/ui';
 import { get, post, patch, put, del, ApiError } from '@/api/client';
 import type { MenuItem } from '@/components/Menu';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, useAuditStream, RailTabs, RailCard, RailRows, type FormSection, type FieldDef } from '@/components/record';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, useAuditStream, RailTabs, RailCard, RailRows, type FormSection, type FieldDef } from '@/components/record';
+import { customerAttention } from '@/components/record/attention';
 import { formatValue } from '@/components/audit/AuditTrail';
 import { useListState } from '@/hooks/useListState';
 import { useLookups } from '@/hooks/useLookups';
@@ -26,7 +27,7 @@ import type { ContractListItem, ContractDetail, ContractService, ScopeGroup, Pag
 
 const errMsg = (e: unknown) => (e as ApiError)?.message ?? 'Request failed';
 
-/** Free-form JSON (custom fields, commercial terms) as label/value rows. */
+/** Free-form JSON (custom fields) as label/value rows. */
 const recordFields = (rec?: Record<string, unknown> | null): FieldDef[] => Object.entries(rec ?? {}).filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => ({ label: titleCase(k), value: formatValue(v) }));
 
 export default function CustomerDetailPage() {
@@ -34,6 +35,7 @@ export default function CustomerDetailPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
+  const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
   const setAssistantContext = useUiStore((s) => s.setAssistantContext);
   const { set: setParams } = useListState();
   const [editing, setEditing] = useState(false);
@@ -73,6 +75,8 @@ export default function CustomerDetailPage() {
   if (customer.isError || !customer.data) return <ErrorBlock error={customer.error} retry={() => customer.refetch()} />;
   const c = customer.data;
   const goTo = (tab: string) => setParams({ tab }, false);
+  // What needs attention (MSP staff only): open P1s, contracts running out, hot entitlements, SLA breaches, gaps in the account setup.
+  const attention = isCustomer ? [] : customerAttention(c, overview.data, sites.data, contacts.data);
 
   // ---- header: one primary action, lifecycle in the overflow menu
   const primary = canManage ? <Button size="sm" variant="outline" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEditing(true)}>Edit</Button> : undefined;
@@ -115,7 +119,6 @@ export default function CustomerDetailPage() {
       ],
     },
     { key: 'custom', title: 'Custom fields', collapsible: true, fields: recordFields(c.customFields), hidden: recordFields(c.customFields).length === 0 },
-    { key: 'commercial', title: 'Commercial', collapsible: true, fields: recordFields(c.commercial), hidden: !c.canViewCommercial || recordFields(c.commercial).length === 0 },
   ];
 
   // ---- related lists (keys unchanged so ?tab= deep links keep working)
@@ -200,6 +203,7 @@ export default function CustomerDetailPage() {
         }
         main={
           <>
+            {!isCustomer && <RecordAttention items={attention} />}
             <RecordForm sections={sections} />
             <RelatedTabs tabs={tabs} />
           </>
@@ -480,7 +484,7 @@ interface DocRow { id: string; filename: string; title: string | null; docType: 
 function DocumentsTab({ id, canManage }: { id: string; canManage: boolean }) {
   return (
     <Card>
-      <OptionalAttachmentList entityType="customer" entityId={id} customerId={id} canUpload={canManage} canDelete={canManage} showVisibility fallback={<DocumentsFallback id={id} />} docTypes={[{ value: 'agreement', label: 'Agreement' }, { value: 'po', label: 'Purchase order' }, { value: 'sow', label: 'Statement of work' }, { value: 'report', label: 'Report' }, { value: 'other', label: 'Other' }]} />
+      <OptionalAttachmentList entityType="customer" entityId={id} customerId={id} canUpload={canManage} canDelete={canManage} showVisibility fallback={<DocumentsFallback id={id} />} docTypes={[{ value: 'agreement', label: 'Agreement' }, { value: 'sow', label: 'Statement of work' }, { value: 'report', label: 'Report' }, { value: 'other', label: 'Other' }]} />
     </Card>
   );
 }

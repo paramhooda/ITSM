@@ -5,7 +5,9 @@ import { toast } from 'sonner';
 import { CalendarClock, Play, CheckCircle2, Ban, RefreshCw, PenLine, FileText, ExternalLink, Pencil, UserCog, MessageSquare, Info, Ticket, Wrench, Gauge, ClipboardList } from 'lucide-react';
 import { Button, Badge, LoadingBlock, ErrorBlock, Dialog, Field, Input, Textarea, Select, Avatar, ProgressBar, EmptyState, Checkbox } from '@/components/ui';
 import type { MenuItem } from '@/components/Menu';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, RailTabs, RailCard, RailRows, useAuditStream, type FormSection, type StreamEntry } from '@/components/record';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, RailCard, RailRows, useAuditStream, type FormSection, type StreamEntry } from '@/components/record';
+import { visitAttention } from '@/components/record/attention';
+import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
 import { useEngineers, useLookups } from '@/hooks/useLookups';
 import { errorMessage } from '@/components/cmdb/hooks';
@@ -45,6 +47,7 @@ const fromNote = (n: VisitNote): StreamEntry => ({ id: n.id, at: n.createdAt, ac
 export default function FieldVisitDetailPage() {
   const { id = '' } = useParams();
   const qc = useQueryClient();
+  const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
   const setAssistantContext = useUiStore((s) => s.setAssistantContext);
   const { data: visit, isLoading, error, refetch } = useQuery({ queryKey: fieldKeys.detail(id), queryFn: () => fieldApi.get(id), enabled: !!id });
   const audit = useAuditStream('field_visit', id);
@@ -77,6 +80,14 @@ export default function FieldVisitDetailPage() {
   const canExec = p.canExecute || p.canManage;
   const st = visit.status;
   const canOpenReport = st === 'completed' || st === 'in_progress';
+  // What needs attention (MSP staff only): missed start, nobody assigned, long on site, unsigned.
+  const attention = isCustomer
+    ? []
+    : visitAttention(visit, Date.now(), {
+        onAssign: p.canSchedule ? () => setDialog('schedule') : undefined,
+        onReschedule: p.canReschedule ? () => setDialog('reschedule') : undefined,
+        onAcknowledge: p.canAcknowledge ? () => setDialog('acknowledge') : undefined,
+      });
 
   // ---- header actions: the next step(s) for this state up front, everything else in the overflow menu
   const stateActions: Action[] = [
@@ -257,6 +268,7 @@ export default function FieldVisitDetailPage() {
         }
         main={
           <>
+            {!isCustomer && <RecordAttention items={attention} />}
             <RecordForm sections={sections} />
             <RelatedTabs tabs={tabs} />
           </>

@@ -63,10 +63,8 @@ registerReport({
   async run(ctx, p): Promise<ReportResult> {
     const days = numParam(p, 'days', 90, 0, 3650);
     const includeExpired = boolParam(p, 'includeExpired');
-    const commercial = ctx.user.userType === 'msp' && ctx.can('contracts:commercial', p.customerId);
     const list = await rows<Record<string, unknown>>(ctx, sql`
       SELECT c.id, c.number, c.name, cu.name AS customer, ty.label AS type, c.status, c.start_date, c.end_date, (c.end_date - current_date)::int AS days_to_expiry, c.renewal_date, c.auto_renew, c.notice_period_days, u.name AS owner,
-        ${commercial ? sql`c.value, c.currency` : sql`NULL::numeric AS value, NULL::text AS currency`},
         (SELECT string_agg(s.name, ', ' ORDER BY s.name) FROM contract_services cs JOIN services s ON s.id = cs.service_id WHERE cs.contract_id = c.id) AS services,
         (SELECT count(*)::int FROM contract_entitlements e WHERE e.contract_id = c.id AND e.is_active) AS entitlements
       FROM contracts c JOIN customers cu ON cu.id = c.customer_id LEFT JOIN config_options ty ON ty.id = c.type_id LEFT JOIN users u ON u.id = c.owner_user_id
@@ -80,14 +78,13 @@ registerReport({
     }
     const expiring = list.filter((r) => r.status !== 'expired');
     return {
-      columns: [col('number', 'Number'), col('name', 'Contract'), col('customer', 'Customer'), col('type', 'Type'), col('status', 'Status'), col('start_date', 'Start', 'date'), col('end_date', 'End', 'date'), col('days_to_expiry', 'Days left', 'number'), col('renewal_date', 'Renewal date', 'date'), col('auto_renew', 'Auto-renew', 'boolean'), col('owner', 'Owner'), col('services', 'Services'), col('entitlements', 'Entitlements', 'number'), ...(commercial ? [col('value', 'Value', 'number'), col('currency', 'Currency')] : [])],
+      columns: [col('number', 'Number'), col('name', 'Contract'), col('customer', 'Customer'), col('type', 'Type'), col('status', 'Status'), col('start_date', 'Start', 'date'), col('end_date', 'End', 'date'), col('days_to_expiry', 'Days left', 'number'), col('renewal_date', 'Renewal date', 'date'), col('auto_renew', 'Auto-renew', 'boolean'), col('owner', 'Owner'), col('services', 'Services'), col('entitlements', 'Entitlements', 'number')],
       rows: list,
       summary: [
         { label: `Expiring within ${days} days`, value: expiring.length },
         { label: 'Expiring within 30 days', value: expiring.filter((r) => num(r.days_to_expiry) <= 30).length },
         { label: 'Auto-renew', value: expiring.filter((r) => r.auto_renew).length },
         { label: 'Expired (90 days)', value: list.filter((r) => r.status === 'expired').length },
-        ...(commercial ? [{ label: 'Value at risk', value: Math.round(expiring.reduce((s, r) => s + num(r.value), 0)) }] : []),
       ],
       charts: [{ type: 'bar', title: 'Contracts ending per month', data: [...months].sort().map(([label, count]) => ({ label, count })), x: 'label', y: 'count' }],
     };

@@ -7,7 +7,7 @@ import { diffChanges } from '@/core/audit';
 import { orderBy, searchLike } from '@/core/query';
 import { getSetting } from '@/modules/config/service';
 import { loadContract, todayStr, addDays, daysToExpiry, contractStatusOptions, statusDisplay, optionLabels, userNames, type ContractRow, sequential } from './common';
-import { COVERING_STATUSES, CONTRACT_STATUSES, commercialFields, type ContractCreate, type ContractPatch, type ContractListQuery, type ContractSummaryQuery, type ContractServiceInput, type RenewInput, type EntitlementInput, type ScopeItemInput } from './schemas';
+import { COVERING_STATUSES, CONTRACT_STATUSES, type ContractCreate, type ContractPatch, type ContractListQuery, type ContractSummaryQuery, type ContractServiceInput, type RenewInput, type EntitlementInput, type ScopeItemInput } from './schemas';
 import { utilizationBatch, decorateEntitlements, entitlementSummary } from './entitlements';
 import { listScopeItems } from './scope';
 
@@ -26,21 +26,6 @@ export async function nextContractNumber(tx: Tx, year = new Date().getUTCFullYea
 const isUniqueViolation = (err: unknown) => (err as { code?: string })?.code === '23505';
 
 // ---------------------------------------------------------------- helpers
-
-type CommercialField = (typeof commercialFields)[number];
-/** A contract row with the commercial columns optional (absent unless the caller holds contracts:commercial). */
-export type PublicContract = Omit<ContractRow, CommercialField> & Partial<Pick<ContractRow, CommercialField>>;
-
-function stripCommercial(row: ContractRow, allowed: boolean): PublicContract {
-  if (allowed) return row;
-  const copy: Record<string, unknown> = { ...row };
-  for (const f of commercialFields) delete copy[f];
-  return copy as PublicContract;
-}
-
-function hasCommercialInput(input: Record<string, unknown>) {
-  return commercialFields.some((f) => input[f] !== undefined);
-}
 
 function validateDates(startDate: string, endDate: string, renewalDate?: string | null) {
   if (endDate < startDate) throw new ValidationError('End date must be on or after the start date');
@@ -106,7 +91,6 @@ async function insertEntitlements(tx: Tx, contract: ContractRow, items: Entitlem
         period: i.period ?? 'contract',
         warnThresholdPct: i.warnThresholdPct ?? 80,
         overageAllowed: i.overageAllowed ?? true,
-        overageRate: i.overageRate === null || i.overageRate === undefined ? null : String(i.overageRate),
         notes: i.notes ?? null,
         isActive: i.isActive ?? true,
       })),
@@ -147,9 +131,8 @@ function contractValues(input: Partial<ContractCreate>): Partial<typeof c.$infer
   const copy = <K extends keyof typeof v & keyof ContractCreate>(k: K) => {
     if (input[k] !== undefined) (v as Record<string, unknown>)[k] = input[k];
   };
-  (['number', 'name', 'typeId', 'startDate', 'endDate', 'renewalDate', 'noticePeriodDays', 'autoRenew', 'supportHoursCalendarId', 'holidayCalendarId', 'slaPolicyId', 'responseCommitment', 'resolutionCommitment', 'exclusions', 'description', 'currency', 'billingCycle', 'commercial', 'poNumber', 'signedAt', 'ownerUserId', 'customFields'] as const).forEach(copy);
+  (['number', 'name', 'typeId', 'startDate', 'endDate', 'renewalDate', 'noticePeriodDays', 'autoRenew', 'supportHoursCalendarId', 'holidayCalendarId', 'slaPolicyId', 'responseCommitment', 'resolutionCommitment', 'exclusions', 'description', 'signedAt', 'ownerUserId', 'customFields'] as const).forEach(copy);
   if (input.escalationMatrix !== undefined) v.escalationMatrix = input.escalationMatrix as Record<string, unknown>[];
-  if (input.value !== undefined) v.value = input.value === null ? null : String(input.value);
   return v;
 }
 
@@ -204,10 +187,8 @@ export async function listContracts(ctx: Ctx, q: ContractListQuery) {
   const items = rows.map((r) => {
     const myEnts = ents.filter((e) => e.contractId === r.contract.id);
     const utils = myEnts.map((e) => util.get(e.id)!).filter(Boolean);
-    const allowed = ctx.can('contracts:commercial', r.contract.customerId);
     return {
-      ...stripCommercial(r.contract, allowed),
-      value: allowed ? (r.contract.value === null ? null : Number(r.contract.value)) : undefined,
+      ...r.contract,
       customerName: r.customerName,
       customerCode: r.customerCode,
       typeLabel: r.typeLabel,
@@ -298,7 +279,6 @@ export async function contractSummary(ctx: Ctx, q: ContractSummaryQuery) {
 
 export async function getContract(ctx: Ctx, id: string) {
   const contract = await loadContract(ctx, id);
-  const allowed = ctx.can('contracts:commercial', contract.customerId);
   const [customer] = await ctx.tx.select({ id: schema.customers.id, code: schema.customers.code, name: schema.customers.name, accountManagerId: schema.customers.accountManagerId }).from(schema.customers).where(eq(schema.customers.id, contract.customerId)).limit(1);
 
   const [serviceRows, siteRows, entRows, scope, children, parent, docs, statusMap, labels, policies, calendars, holidayCals, ticketCounts] = await sequential([
@@ -348,9 +328,7 @@ export async function getContract(ctx: Ctx, id: string) {
   const docTypes = new Set(docs.map((d) => d.docType));
 
   return {
-    ...stripCommercial(contract, allowed),
-    value: allowed ? (contract.value === null ? null : Number(contract.value)) : undefined,
-    canViewCommercial: allowed,
+    ...contract,
     ...statusDisplay(contract.status, statusMap),
     daysToExpiry: daysToExpiry(contract.endDate),
     typeLabel: contract.typeId ? labels.get(contract.typeId)?.label ?? null : null,
@@ -388,7 +366,7 @@ export async function getContract(ctx: Ctx, id: string) {
       userName: m.userId ? users.get(m.userId)?.name ?? null : null,
       userEmail: m.userId ? users.get(m.userId)?.email ?? null : null,
     })),
-    documents: { signedAgreement: docTypes.has('agreement'), purchaseOrder: docTypes.has('po'), sow: docTypes.has('sow'), count: docs.length, items: docs },
+    documents: { signedAgreement: docTypes.has('agreement'), sow: docTypes.has('sow'), count: docs.length, items: docs },
     parent: parent[0] ?? null,
     children,
     tickets: { open: ticketCounts[0]?.open ?? 0, total: ticketCounts[0]?.total ?? 0 },
@@ -402,7 +380,6 @@ export type ContractView = Awaited<ReturnType<typeof getContract>>;
 export async function createContract(ctx: Ctx, input: ContractCreate) {
   ctx.requireCustomer(input.customerId);
   ctx.require('contracts:manage', input.customerId);
-  if (hasCommercialInput(input)) ctx.require('contracts:commercial', input.customerId);
   validateDates(input.startDate, input.endDate, input.renewalDate);
   const [customer] = await ctx.tx.select({ id: schema.customers.id, name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, input.customerId)).limit(1);
   if (!customer) throw new NotFoundError('Customer');
@@ -438,7 +415,6 @@ export async function createContract(ctx: Ctx, input: ContractCreate) {
 export async function updateContract(ctx: Ctx, id: string, patch: ContractPatch) {
   const before = await loadContract(ctx, id);
   ctx.require('contracts:manage', before.customerId);
-  if (hasCommercialInput(patch)) ctx.require('contracts:commercial', before.customerId);
   const startDate = patch.startDate ?? before.startDate;
   const endDate = patch.endDate ?? before.endDate;
   validateDates(startDate, endDate, patch.renewalDate === undefined ? before.renewalDate : patch.renewalDate);
@@ -448,7 +424,7 @@ export async function updateContract(ctx: Ctx, id: string, patch: ContractPatch)
     if (dup) throw new ConflictError(`Contract number ${values.number} already exists`);
   }
   const [after] = await ctx.tx.update(c).set(values).where(eq(c.id, id)).returning();
-  const comparable = { ...before, value: before.value === null ? null : String(before.value) } as Record<string, unknown>;
+  const comparable = { ...before } as Record<string, unknown>;
   await ctx.audit({ entityType: 'contract', entityId: id, entityLabel: `${after.number} ${after.name}`, action: 'update', customerId: after.customerId, changes: diffChanges(comparable, values as Record<string, unknown>), metadata: { contractId: id } });
   return getContract(ctx, id);
 }
@@ -540,7 +516,7 @@ export async function renewContract(ctx: Ctx, id: string, input: RenewInput) {
   if (scope.length) await ctx.tx.insert(schema.scopeItems).values(scope.map(({ id: _x, contractId: _y, createdAt: _z, updatedAt: _w, ...s }) => ({ ...s, contractId: next.id })));
   let carried = 0;
   if (input.carryEntitlements !== false && ents.length) {
-    await ctx.tx.insert(schema.contractEntitlements).values(ents.map(({ id: _x, contractId: _y, createdAt: _z, updatedAt: _w, ...e }) => ({ ...e, quantity: String(e.quantity), overageRate: e.overageRate === null ? null : String(e.overageRate), contractId: next.id })));
+    await ctx.tx.insert(schema.contractEntitlements).values(ents.map(({ id: _x, contractId: _y, createdAt: _z, updatedAt: _w, ...e }) => ({ ...e, quantity: String(e.quantity), contractId: next.id })));
     carried = ents.length;
   }
   await ctx.tx.update(c).set({ status: 'renewed', updatedAt: new Date() }).where(eq(c.id, old.id));

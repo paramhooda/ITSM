@@ -16,7 +16,7 @@ export interface Schedule {
 }
 export interface Paginated<T> { items: T[]; total: number; page: number; pageSize: number }
 
-export const CATEGORY_LABELS: Record<string, string> = { tickets: 'Tickets', sla: 'Service levels', customers: 'Customers', contracts: 'Contracts', amc: 'AMC & entitlements', assets: 'Assets', cmdb: 'CMDB', field: 'Field service', pm: 'Preventive maintenance', noc: 'NOC', soc: 'SOC', scope: 'Scope & commercial', audit: 'Audit' };
+export const CATEGORY_LABELS: Record<string, string> = { tickets: 'Tickets', sla: 'Service levels', customers: 'Customers', contracts: 'Contracts', amc: 'AMC & entitlements', assets: 'Assets', cmdb: 'CMDB', field: 'Field service', pm: 'Preventive maintenance', noc: 'NOC', soc: 'SOC', scope: 'Scope & coverage', audit: 'Audit' };
 export const DATE_PRESETS: { value: string; label: string }[] = [
   { value: 'last_day', label: 'Yesterday' }, { value: 'last_7_days', label: 'Last 7 days' }, { value: 'last_30_days', label: 'Last 30 days' }, { value: 'last_90_days', label: 'Last 90 days' }, { value: 'month_to_date', label: 'Month to date' },
   { value: 'last_month', label: 'Last month' }, { value: 'quarter_to_date', label: 'Quarter to date' }, { value: 'last_quarter', label: 'Last quarter' }, { value: 'year_to_date', label: 'Year to date' }, { value: 'custom', label: 'Custom range' },

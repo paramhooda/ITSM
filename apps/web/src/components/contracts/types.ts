@@ -30,7 +30,6 @@ export interface Entitlement {
   period: string;
   warnThresholdPct: number;
   overageAllowed: boolean;
-  overageRate: number | null;
   notes: string | null;
   isActive: boolean;
   contractNumber: string | null;
@@ -144,14 +143,11 @@ export interface ContractListItem {
   services: { id: string; name: string }[];
   serviceNames: string[];
   entitlements: { count: number; anyOverThreshold: boolean; anyExhausted: boolean; maxPct: number };
-  value?: number | null;
-  currency?: string | null;
   createdAt: string;
 }
 
 export interface ContractDetail extends Omit<ContractListItem, 'services' | 'entitlements'> {
   customer: { id: string; code: string; name: string; accountManagerId: string | null; accountManagerName: string | null } | null;
-  canViewCommercial: boolean;
   supportHoursCalendarId: string | null;
   supportHoursCalendarName: string | null;
   holidayCalendarId: string | null;
@@ -163,10 +159,7 @@ export interface ContractDetail extends Omit<ContractListItem, 'services' | 'ent
   resolutionCommitment: string | null;
   exclusions: string | null;
   description: string | null;
-  billingCycle?: string | null;
-  commercial?: Record<string, unknown>;
-  poNumber?: string | null;
-  signedAt?: string | null;
+  signedAt: string | null;
   parentContractId: string | null;
   customFields: Record<string, unknown>;
   services: ContractService[];
@@ -175,7 +168,7 @@ export interface ContractDetail extends Omit<ContractListItem, 'services' | 'ent
   entitlements: Entitlement[];
   scopeItems: ScopeItem[];
   scopeGroups: ScopeGroup[];
-  documents: { signedAgreement: boolean; purchaseOrder: boolean; sow: boolean; count: number; items: { id: string; docType: string; filename: string; title: string | null; createdAt: string }[] };
+  documents: { signedAgreement: boolean; sow: boolean; count: number; items: { id: string; docType: string; filename: string; title: string | null; createdAt: string }[] };
   parent: { id: string; number: string; name: string; status: string; startDate: string; endDate: string } | null;
   children: { id: string; number: string; name: string; status: string; startDate: string; endDate: string }[];
   tickets: { open: number; total: number };

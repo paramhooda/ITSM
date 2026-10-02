@@ -6,12 +6,13 @@ import { toast } from 'sonner';
 import { Button, Badge, Card, Dialog, Drawer, ConfirmDialog, LoadingBlock, ErrorBlock, EmptyState, DataTable, Checkbox, Field, Input, type Column } from '@/components/ui';
 import { get, post, patch, put, del, ApiError } from '@/api/client';
 import type { MenuItem } from '@/components/Menu';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, useAuditStream, RailTabs, RailCard, RailRows, type FormSection, type StreamEntry } from '@/components/record';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, useAuditStream, RailTabs, RailCard, RailRows, type FormSection, type StreamEntry } from '@/components/record';
+import { contractAttention } from '@/components/record/attention';
 import { humanizeAction } from '@/components/audit/AuditTrail';
 import { useListState } from '@/hooks/useListState';
 import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
-import { fmtDate, fmtDateTime, fmtDuration, fmtMoney, fmtNumber, titleCase } from '@/lib/format';
+import { fmtDate, fmtDateTime, fmtDuration, fmtNumber, titleCase } from '@/lib/format';
 import { ContractForm, ServiceCoverageEditor, SiteMultiSelect, type ContractPayload } from '@/components/contracts/ContractForm';
 import { ContractStatusBadge, ExpiryCountdown, DocTick, PERIOD_LABELS } from '@/components/contracts/ContractBits';
 import { EntitlementBar } from '@/components/contracts/EntitlementBar';
@@ -24,7 +25,7 @@ import type { Contact, Site } from '@/components/customers/types';
 import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
 
 const errMsg = (e: unknown) => (e as ApiError)?.message ?? 'Request failed';
-const DOC_TYPES = [{ value: 'agreement', label: 'Signed agreement' }, { value: 'po', label: 'Purchase order' }, { value: 'sow', label: 'Statement of work' }, { value: 'report', label: 'Report' }, { value: 'other', label: 'Other' }];
+const DOC_TYPES = [{ value: 'agreement', label: 'Signed agreement' }, { value: 'sow', label: 'Statement of work' }, { value: 'report', label: 'Report' }, { value: 'other', label: 'Other' }];
 
 interface HistoryRow { id: string; occurredAt: string; userName: string | null; entityType: string; entityId: string | null; entityLabel: string | null; action: string; changes: Record<string, { old: unknown; new: unknown }>; source: string }
 
@@ -45,6 +46,7 @@ export default function ContractDetailPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
+  const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
   const setAssistantContext = useUiStore((s) => s.setAssistantContext);
   const { set: setParams } = useListState();
   const [editing, setEditing] = useState(false);
@@ -90,6 +92,8 @@ export default function ContractDetailPage() {
   const canRenew = ['active', 'expiring', 'expired'].includes(c.status);
   const canTerminate = !['terminated', 'renewed'].includes(c.status);
   const goTo = (tab: string) => setParams({ tab }, false);
+  // What needs attention (MSP staff only): running out, no SLA policy, nothing covered, unsigned, entitlements used up.
+  const attention = isCustomer ? [] : contractAttention(c, { onRenew: canManage && canRenew ? () => setRenewing(true) : undefined, onEdit: canManage ? () => setEditing(true) : undefined });
 
   // ---- header: two primary actions, the rest in the overflow menu
   const primary = canManage ? (
@@ -123,23 +127,12 @@ export default function ContractDetailPage() {
         { label: 'End', value: <ExpiryCountdown days={c.daysToExpiry} endDate={c.endDate} status={c.status} /> },
         { label: 'Renewal date', value: c.renewalDate ? fmtDate(c.renewalDate) : null },
         { label: 'Notice period', value: c.noticePeriodDays != null ? `${c.noticePeriodDays} days` : null },
+        { label: 'Signed on', value: c.signedAt ? fmtDate(c.signedAt) : null },
         { label: 'Auto-renew', value: c.autoRenew ? 'Yes' : 'No' },
         { label: 'SLA policy', value: c.slaPolicyId ? <Link to={`/sla/${c.slaPolicyId}`} className="hover:underline">{c.slaPolicyName}</Link> : <span className="text-subtle">Platform default</span> },
         { label: 'Support hours', value: c.supportHoursCalendarName ?? <span className="text-subtle">Policy calendar</span> },
         { label: 'Holiday calendar', value: c.holidayCalendarName },
         { label: 'Description', value: c.description ?? '', kind: 'prose', span: 2, hidden: !c.description },
-      ],
-    },
-    {
-      key: 'commercial',
-      title: 'Commercial',
-      hidden: !c.canViewCommercial,
-      fields: [
-        { label: 'Value', value: c.value != null ? fmtMoney(c.value, c.currency ?? 'INR') : null },
-        { label: 'Currency', value: c.currency },
-        { label: 'Billing cycle', value: c.billingCycle ? titleCase(c.billingCycle) : null },
-        { label: 'PO number', value: c.poNumber, kind: 'mono' },
-        { label: 'Signed on', value: c.signedAt ? fmtDate(c.signedAt) : null },
       ],
     },
     {
@@ -198,7 +191,6 @@ export default function ContractDetailPage() {
       <RailCard title={<><FileCheck className="h-3.5 w-3.5 text-subtle" /> Documents</>} action={<button type="button" onClick={() => goTo('documents')} className="text-[12px] text-brand-700 hover:underline">Manage</button>}>
         <div className="flex flex-col gap-1.5">
           <DocTick ok={c.documents.signedAgreement} label="Signed agreement" />
-          <DocTick ok={c.documents.purchaseOrder} label="Purchase order" />
           <DocTick ok={c.documents.sow} label="Statement of work" />
           {!c.documents.signedAgreement && ['active', 'expiring'].includes(c.status) && <Badge color="amber" className="self-start mt-1">Active without signed agreement</Badge>}
         </div>
@@ -221,11 +213,12 @@ export default function ContractDetailPage() {
             createdAt={c.createdAt}
             updatedAt={c.updatedAt}
           >
-            <RecordRibbon items={glance(c)} columns={c.canViewCommercial && c.value != null ? 5 : 4} />
+            <RecordRibbon items={glance(c)} columns={4} />
           </RecordHeader>
         }
         main={
           <>
+            {!isCustomer && <RecordAttention items={attention} />}
             <RecordForm sections={sections} />
             <RelatedTabs tabs={tabs} />
           </>
@@ -367,7 +360,7 @@ function EntitlementRow({ e, open, onToggle, canManage, canConsume, onConsume, o
         </td>
         <td><EntitlementBar entitlement={{ ...e, name: '' }} compact /><div className="text-[11px] text-subtle mt-0.5">{fmtNumber(u.remaining, 2)} {e.unit} remaining{u.exhausted && ' · exhausted'}</div></td>
         <td className="text-[12.5px]"><div>{PERIOD_LABELS[e.period] ?? e.period}</div><div className="text-xs text-muted whitespace-nowrap">{fmtDate(u.periodStart)} – {fmtDate(u.periodEnd)}</div></td>
-        <td className="text-[12.5px] text-muted">Warn at {e.warnThresholdPct}%<br />{e.overageAllowed ? `Overage allowed${e.overageRate != null ? ` @ ${e.overageRate}/${e.unit}` : ''}` : 'No overage'}</td>
+        <td className="text-[12.5px] text-muted">Warn at {e.warnThresholdPct}%<br />{e.overageAllowed ? 'Overage allowed' : 'No overage'}</td>
         <td onClick={(ev) => ev.stopPropagation()}>
           <div className="flex items-center justify-end gap-1">
             {canConsume && e.isActive && <Button size="sm" variant="outline" onClick={onConsume}>Record</Button>}
@@ -511,7 +504,7 @@ function EscalationTab({ c, canManage, onSave, saving }: { c: ContractDetail; ca
 }
 
 function DocumentsFallback({ c }: { c: ContractDetail }) {
-  if (!c.documents.items.length) return <EmptyState title="No documents" description="Signed agreement, purchase order and SOW go here." />;
+  if (!c.documents.items.length) return <EmptyState title="No documents" description="Signed agreement and SOW go here." />;
   return (
     <ul className="divide-y divide-[var(--border)] text-[13px]">
       {c.documents.items.map((d) => <li key={d.id} className="py-1.5 flex items-center gap-2"><Badge color="slate">{titleCase(d.docType)}</Badge><span className="font-medium">{d.title ?? d.filename}</span><span className="text-subtle ml-auto">{fmtDateTime(d.createdAt)}</span></li>)}
@@ -557,7 +550,7 @@ function TerminateForm({ onSubmit, onCancel, submitting }: { onSubmit: (reason: 
 
 // ---------------------------------------------------------------- at a glance
 
-/** The numbers a manager wants before reading the related lists: time left, work, coverage, consumption and value. */
+/** The numbers a manager wants before reading the related lists: time left, work, coverage and consumption. */
 function glance(c: ContractDetail): { label: string; value: ReactNode; tone?: 'good' | 'warn' | 'bad'; hint?: string }[] {
   const active = c.entitlements.filter((e) => e.isActive);
   const hot = active.filter((e) => e.utilization.overThreshold || e.utilization.exhausted);
@@ -575,6 +568,5 @@ function glance(c: ContractDetail): { label: string; value: ReactNode; tone?: 'g
     { label: 'Covered services', value: fmtNumber(c.services.length), hint: c.slaPolicyName ? `SLA: ${c.slaPolicyName}` : 'Platform default SLA' },
     { label: 'Entitlements near limit', value: fmtNumber(hot.length), tone: exhausted > 0 ? 'bad' : hot.length > 0 ? 'warn' : active.length > 0 ? 'good' : undefined, hint: `${fmtNumber(active.length)} active · ${fmtNumber(exhausted)} exhausted` },
   ];
-  if (c.canViewCommercial && c.value != null) items.push({ label: 'Contract value', value: fmtMoney(c.value, c.currency ?? 'INR'), hint: c.billingCycle ? titleCase(c.billingCycle) : c.typeLabel ?? undefined });
   return items;
 }

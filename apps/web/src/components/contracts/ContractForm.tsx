@@ -1,9 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Checkbox, Field, Input, Select, Textarea, Card } from '@/components/ui';
+import { Button, Checkbox, Field, Input, Select, Textarea } from '@/components/ui';
 import { get } from '@/api/client';
 import { useLookups, useEngineers, useCustomersLookup } from '@/hooks/useLookups';
-import { useAuthStore } from '@/stores/auth';
 import type { ContractDetail, ServiceCoverageInput } from './types';
 import type { Site } from '@/components/customers/types';
 
@@ -28,11 +27,7 @@ export interface ContractPayload {
   responseCommitment: string | null;
   resolutionCommitment: string | null;
   exclusions: string | null;
-  value?: number | null;
-  currency?: string | null;
-  billingCycle?: string | null;
-  poNumber?: string | null;
-  signedAt?: string | null;
+  signedAt: string | null;
   services?: ServiceCoverageInput[];
   siteIds?: string[];
 }
@@ -91,8 +86,6 @@ export function ContractForm({ initial, customerId, onSubmit, onCancel, submitti
   const { options, lookups } = useLookups();
   const engineers = useEngineers();
   const customers = useCustomersLookup();
-  const can = useAuthStore((s) => s.can);
-  const canCommercial = can('contracts:commercial') && (mode === 'create' || initial?.canViewCommercial !== false);
   const [f, setF] = useState({
     customerId: initial?.customerId ?? customerId ?? '',
     name: initial?.name ?? '',
@@ -111,10 +104,6 @@ export function ContractForm({ initial, customerId, onSubmit, onCancel, submitti
     responseCommitment: initial?.responseCommitment ?? '',
     resolutionCommitment: initial?.resolutionCommitment ?? '',
     exclusions: initial?.exclusions ?? '',
-    value: initial?.value != null ? String(initial.value) : '',
-    currency: initial?.currency ?? 'INR',
-    billingCycle: initial?.billingCycle ?? '',
-    poNumber: initial?.poNumber ?? '',
     signedAt: initial?.signedAt ?? '',
     services: (initial?.services ?? []).map((s) => ({ serviceId: s.serviceId, slaPolicyId: s.slaPolicyId, teamId: s.teamId, supportHoursCalendarId: s.supportHoursCalendarId })) as ServiceCoverageInput[],
     siteIds: (initial?.sites ?? []).map((s) => s.id),
@@ -143,8 +132,8 @@ export function ContractForm({ initial, customerId, onSubmit, onCancel, submitti
       responseCommitment: nz(f.responseCommitment),
       resolutionCommitment: nz(f.resolutionCommitment),
       exclusions: nz(f.exclusions),
+      signedAt: f.signedAt || null,
     };
-    if (canCommercial) Object.assign(body, { value: num(f.value), currency: nz(f.currency), billingCycle: nz(f.billingCycle), poNumber: nz(f.poNumber), signedAt: f.signedAt || null });
     if (mode === 'create') Object.assign(body, { services: f.services, siteIds: f.siteIds });
     onSubmit(body);
   }
@@ -180,6 +169,9 @@ export function ContractForm({ initial, customerId, onSubmit, onCancel, submitti
         <Field label="Notice period (days)">
           <Input type="number" min={0} value={f.noticePeriodDays} onChange={(e) => set('noticePeriodDays', e.target.value)} placeholder="60" />
         </Field>
+        <Field label="Signed on">
+          <Input type="date" value={f.signedAt} onChange={(e) => set('signedAt', e.target.value)} />
+        </Field>
         <Field label="SLA policy">
           <Select value={f.slaPolicyId} onChange={(e) => set('slaPolicyId', e.target.value)} placeholder="Platform default" options={(lookups?.slaPolicies ?? []).map((p) => ({ value: p.id, label: p.name }))} />
         </Field>
@@ -203,28 +195,6 @@ export function ContractForm({ initial, customerId, onSubmit, onCancel, submitti
             <SiteMultiSelect customerId={f.customerId || null} value={f.siteIds} onChange={(v) => set('siteIds', v)} />
           </Field>
         </>
-      )}
-
-      {canCommercial && (
-        <Card title="Commercial" className="bg-surface-2/40">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <Field label="Contract value">
-              <Input type="number" min={0} step="0.01" value={f.value} onChange={(e) => set('value', e.target.value)} />
-            </Field>
-            <Field label="Currency">
-              <Input value={f.currency} onChange={(e) => set('currency', e.target.value.toUpperCase())} maxLength={8} />
-            </Field>
-            <Field label="Billing cycle">
-              <Select value={f.billingCycle} onChange={(e) => set('billingCycle', e.target.value)} placeholder="—" options={['monthly', 'quarterly', 'half_yearly', 'yearly', 'one_time'].map((v) => ({ value: v, label: v.replace('_', ' ') }))} />
-            </Field>
-            <Field label="PO number">
-              <Input value={f.poNumber} onChange={(e) => set('poNumber', e.target.value)} />
-            </Field>
-            <Field label="Signed on">
-              <Input type="date" value={f.signedAt} onChange={(e) => set('signedAt', e.target.value)} />
-            </Field>
-          </div>
-        </Card>
       )}
 
       <button type="button" className="text-xs text-brand-600 hover:underline" onClick={() => setShowCommitments((v) => !v)}>

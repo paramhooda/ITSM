@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import { get, post, put, patch, del } from '@/api/client';
 import { Button, Badge, LoadingBlock, ErrorBlock, Dialog, Field, ConfirmDialog, EmptyState, Checkbox, DataTable, type Column } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, RailTabs, RailCard, RailRows, fromAudit, type FormSection } from '@/components/record';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, RailCard, RailRows, fromAudit, type FormSection } from '@/components/record';
+import { ciAttention } from '@/components/record/attention';
 import { Panel } from '@/components/dashboards/Panel';
 import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
@@ -56,6 +57,7 @@ export default function CiDetailPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
+  const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
   const setAssistantContext = useUiStore((s) => s.setAssistantContext);
   const { lookups } = useLookups();
   const { data: ci, isLoading, error, refetch } = useQuery({ queryKey: ['cmdb', id], queryFn: () => get<CiDetail>(`/cmdb/cis/${id}`) });
@@ -252,6 +254,8 @@ export default function CiDetailPage() {
   ];
 
   const stale = !!ci.discoverySource && (!ci.lastSeenAt || Date.now() - new Date(ci.lastSeenAt).getTime() > 30 * 86_400_000);
+  // What needs attention (MSP staff only): parked item with open work, no owner, stale discovery, unmapped.
+  const attention = isCustomer ? [] : ciAttention(ci, Date.now(), { onEdit: canManage ? () => setEditOpen(true) : undefined });
 
   return (
     <>
@@ -294,6 +298,7 @@ export default function CiDetailPage() {
         }
         main={
           <>
+            {!isCustomer && <RecordAttention items={attention} />}
             <RecordForm sections={sections} />
             <RelatedTabs tabs={tabs} />
           </>

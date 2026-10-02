@@ -206,7 +206,6 @@ export async function decorateEntitlements(tx: Tx, ents: EntitlementRow[], contr
     return {
       ...e,
       quantity: Number(e.quantity),
-      overageRate: e.overageRate === null ? null : Number(e.overageRate),
       typeLabel: e.typeId ? labels.get(e.typeId)?.label ?? null : null,
       serviceName: e.serviceId ? svc.get(e.serviceId) ?? null : null,
       contractNumber: c?.number ?? null,
@@ -262,7 +261,6 @@ export async function createEntitlement(ctx: Ctx, contractId: string, input: Ent
       period: input.period ?? 'contract',
       warnThresholdPct: input.warnThresholdPct ?? 80,
       overageAllowed: input.overageAllowed ?? true,
-      overageRate: input.overageRate === null || input.overageRate === undefined ? null : String(input.overageRate),
       notes: input.notes ?? null,
       isActive: input.isActive ?? true,
     })
@@ -286,11 +284,10 @@ export async function updateEntitlement(ctx: Ctx, id: string, patch: Partial<Ent
   if (patch.period !== undefined) values.period = patch.period;
   if (patch.warnThresholdPct !== undefined) values.warnThresholdPct = patch.warnThresholdPct;
   if (patch.overageAllowed !== undefined) values.overageAllowed = patch.overageAllowed;
-  if (patch.overageRate !== undefined) values.overageRate = patch.overageRate === null ? null : String(patch.overageRate);
   if (patch.notes !== undefined) values.notes = patch.notes;
   if (patch.isActive !== undefined) values.isActive = patch.isActive;
   const [after] = await ctx.tx.update(schema.contractEntitlements).set(values).where(eq(schema.contractEntitlements.id, id)).returning();
-  const comparable = { ...before, quantity: String(before.quantity), overageRate: before.overageRate === null ? null : String(before.overageRate) } as Record<string, unknown>;
+  const comparable = { ...before, quantity: String(before.quantity) } as Record<string, unknown>;
   await ctx.audit({ entityType: 'contract_entitlement', entityId: id, entityLabel: after.name, action: 'update', customerId: contract.customerId, changes: diffChanges(comparable, values as Record<string, unknown>), metadata: { contractId: contract.id, contractNumber: contract.number } });
   const [view] = await decorateEntitlements(ctx.tx, [after], new Map([[contract.id, contract]]));
   return view;

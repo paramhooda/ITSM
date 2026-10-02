@@ -42,8 +42,6 @@ export interface CustomerCounts {
 export interface CustomerDetail extends Omit<CustomerListItem, 'openTickets' | 'activeContracts' | 'sites'> {
   notes: string | null;
   customFields: Record<string, unknown>;
-  commercial?: Record<string, unknown>;
-  canViewCommercial: boolean;
   accountManagerEmail: string | null;
   counts: CustomerCounts;
   teams: TeamRef[];

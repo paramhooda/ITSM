@@ -435,7 +435,7 @@ export const READ_TOOLS: AiTool[] = [
       const res = await listContracts(ctx, { page: 1, pageSize: input.limit ?? 20, sort: 'endDate', order: 'asc', customerId, status: input.status ? [input.status] : undefined, expiringWithinDays: input.expiringWithinDays, q: input.q });
       return {
         total: res.total,
-        items: res.items.map((c) => ({ id: c.id, number: c.number, name: c.name, customer: c.customerName, status: c.status, type: c.typeLabel, startDate: c.startDate, endDate: c.endDate, renewalDate: c.renewalDate, daysToExpiry: c.daysToExpiry, autoRenew: c.autoRenew, services: c.serviceNames, entitlements: c.entitlements, value: c.value ?? undefined, currency: c.value !== undefined ? c.currency : undefined, link: `/contracts/${c.id}` })),
+        items: res.items.map((c) => ({ id: c.id, number: c.number, name: c.name, customer: c.customerName, status: c.status, type: c.typeLabel, startDate: c.startDate, endDate: c.endDate, renewalDate: c.renewalDate, daysToExpiry: c.daysToExpiry, autoRenew: c.autoRenew, services: c.serviceNames, entitlements: c.entitlements, link: `/contracts/${c.id}` })),
       };
     },
     summary: (input, result) => `Listed ${(result as { items: unknown[] }).items.length} contracts${input.expiringWithinDays !== undefined ? ` expiring within ${input.expiringWithinDays} days` : ''}`,

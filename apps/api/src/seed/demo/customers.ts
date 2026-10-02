@@ -47,7 +47,6 @@ interface CustomerSeed {
   contacts: ContactSeed[];
   fieldEngineerKeys: string[];
   teamKeys: string[];
-  commercial: Record<string, unknown>;
 }
 
 const IN = (city: string, state: string, line1: string, pin: string) => ({ line1, city, state, postalCode: pin, country: 'India' });
@@ -71,7 +70,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Harish Menon', title: 'Finance Controller', department: 'Finance', siteKey: 'hq' },
     ],
     fieldEngineerKeys: ['suresh', 'neha'], teamKeys: ['noc', 'service_desk', 'field'],
-    commercial: { billingEntity: 'ABC Manufacturing Industries Pvt. Ltd.', gstin: '06AABCA1234F1Z5', paymentTermsDays: 45 },
   },
   {
     key: 'meridian', code: 'MERIDIAN', name: 'Meridian Bank', legalName: 'Meridian Bank Limited', short: 'mrd', emailDomain: 'meridianbank.example', industryKey: 'bfsi', typeKey: 'strategic', timezone: 'Asia/Kolkata', website: 'https://www.meridianbank.example', phone: '+91 22 6789 1000',
@@ -91,7 +89,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Kavita Joshi', title: 'DR Site Coordinator', department: 'Technology', portal: 'customer_user', siteKey: 'dr' },
     ],
     fieldEngineerKeys: ['neha'], teamKeys: ['noc', 'service_desk', 'soc'],
-    commercial: { billingEntity: 'Meridian Bank Limited', gstin: '27AABCM9876K1ZP', paymentTermsDays: 30, invoicing: 'quarterly in advance' },
   },
   {
     key: 'northwind', code: 'NWP', name: 'Northwind Pharma', legalName: 'Northwind Pharmaceuticals Ltd.', short: 'nwp', emailDomain: 'northwindpharma.example', industryKey: 'pharma', typeKey: 'mid_market', timezone: 'Asia/Kolkata', website: 'https://www.northwindpharma.example', phone: '+91 40 2345 6700',
@@ -107,7 +104,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Srinivas Kolli', title: 'System Administrator', department: 'Information Technology', portal: 'customer_user', siteKey: 'rnd' },
     ],
     fieldEngineerKeys: ['suresh', 'neha'], teamKeys: ['noc', 'service_desk', 'field'],
-    commercial: { billingEntity: 'Northwind Pharmaceuticals Ltd.', gstin: '36AABCN4567Q1ZR', paymentTermsDays: 30 },
   },
   {
     key: 'apex', code: 'APEX', name: 'Apex Retail', legalName: 'Apex Retail Ventures Pvt. Ltd.', short: 'apx', emailDomain: 'apexretail.example', industryKey: 'retail', typeKey: 'enterprise', timezone: 'Asia/Kolkata', website: 'https://www.apexretail.example', phone: '+91 80 4567 8900',
@@ -128,7 +124,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Mohan Das', title: 'Store Manager', department: 'Retail Operations', siteKey: 'kor' },
     ],
     fieldEngineerKeys: ['amit'], teamKeys: ['noc', 'service_desk'],
-    commercial: { billingEntity: 'Apex Retail Ventures Pvt. Ltd.', gstin: '29AABCA7788R1ZT', paymentTermsDays: 60 },
   },
   {
     key: 'helios', code: 'HELIOS', name: 'Helios Energy', legalName: 'Helios Energy Corporation Ltd.', short: 'hel', emailDomain: 'heliosenergy.example', industryKey: 'energy', typeKey: 'government', timezone: 'Asia/Kolkata', website: 'https://www.heliosenergy.example', phone: '+91 120 456 7800',
@@ -145,7 +140,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Rajendra Singh', title: 'Site In-charge', department: 'Operations', siteKey: 'jsm' },
     ],
     fieldEngineerKeys: ['suresh'], teamKeys: ['noc', 'service_desk', 'field'],
-    commercial: { billingEntity: 'Helios Energy Corporation Ltd.', gstin: '09AAACH1122L1ZE', paymentTermsDays: 90, tender: 'HEC/IT/2026/014' },
   },
   {
     key: 'sterling', code: 'STERLING', name: 'Sterling Hospitals', legalName: 'Sterling Healthcare Pvt. Ltd.', short: 'stl', emailDomain: 'sterlinghospitals.example', industryKey: 'healthcare', typeKey: 'enterprise', timezone: 'Asia/Kolkata', website: 'https://www.sterlinghospitals.example', phone: '+91 44 2811 9000',
@@ -162,7 +156,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Arun Prasad', title: 'Clinic Administrator', department: 'Administration', siteKey: 'adyar' },
     ],
     fieldEngineerKeys: ['neha', 'suresh'], teamKeys: ['noc', 'service_desk', 'soc', 'field'],
-    commercial: { billingEntity: 'Sterling Healthcare Pvt. Ltd.', gstin: '33AABCS3344M1ZH', paymentTermsDays: 30 },
   },
   {
     key: 'orbital', code: 'ORBITAL', name: 'Orbital Logistics', legalName: 'Orbital Logistics & Freight Pvt. Ltd.', short: 'orb', emailDomain: 'orbitallogistics.example', industryKey: 'logistics', typeKey: 'mid_market', timezone: 'Asia/Kolkata', website: 'https://www.orbitallogistics.example', phone: '+91 22 4000 5500',
@@ -179,7 +172,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Vinod Tiwari', title: 'Warehouse Supervisor', department: 'Operations', portal: 'customer_user', siteKey: 'bhi' },
     ],
     fieldEngineerKeys: ['amit'], teamKeys: ['noc', 'service_desk', 'field', 'cloud'],
-    commercial: { billingEntity: 'Orbital Logistics & Freight Pvt. Ltd.', gstin: '27AABCO5566N1ZK', paymentTermsDays: 45 },
   },
   {
     key: 'quantum', code: 'QUANTUM', name: 'Quantum IT Services', legalName: 'Quantum IT Services Pvt. Ltd.', short: 'qit', emailDomain: 'quantumit.example', industryKey: 'it_services', typeKey: 'mid_market', timezone: 'Asia/Kolkata', website: 'https://www.quantumit.example', phone: '+91 80 6789 1200',
@@ -195,7 +187,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Abhishek Sen', title: 'Security Engineer', department: 'Information Security', portal: 'customer_user', siteKey: 'blr' },
     ],
     fieldEngineerKeys: ['neha'], teamKeys: ['noc', 'service_desk', 'soc', 'cloud'],
-    commercial: { billingEntity: 'Quantum IT Services Pvt. Ltd.', gstin: '29AABCQ8899P1ZV', paymentTermsDays: 30 },
   },
   {
     key: 'riverside', code: 'RIVERSIDE', name: 'Riverside University', legalName: 'Riverside University Trust', short: 'rvu', emailDomain: 'riverside-univ.example', industryKey: 'education', typeKey: 'smb', timezone: 'Asia/Kolkata', website: 'https://www.riverside-univ.example', phone: '+91 141 270 3300',
@@ -212,7 +203,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Rahul Meena', title: 'Help Desk Coordinator', department: 'Information Technology', portal: 'customer_user', siteKey: 'campus' },
     ],
     fieldEngineerKeys: ['amit'], teamKeys: ['noc', 'service_desk'],
-    commercial: { billingEntity: 'Riverside University Trust', paymentTermsDays: 60 },
   },
   {
     key: 'crestline', code: 'CRESTLINE', name: 'Crestline Hotels', legalName: 'Crestline Hotels Group Ltd.', short: 'crl', emailDomain: 'crestlinehotels.example', industryKey: 'other', typeKey: 'mid_market', timezone: 'Europe/London', website: 'https://www.crestlinehotels.example', phone: '+44 20 7946 0200',
@@ -229,7 +219,6 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Oliver Grant', title: 'Hotel Manager', department: 'Operations', siteKey: 'edi' },
     ],
     fieldEngineerKeys: [], teamKeys: ['noc', 'service_desk'],
-    commercial: { billingEntity: 'Crestline Hotels Group Ltd.', vat: 'GB123456789', currency: 'GBP', paymentTermsDays: 30 },
   },
 ];
 
@@ -260,7 +249,6 @@ export async function seedCustomers(state: DemoState, tx: Tx, passwordHash: stri
       email: `it.helpdesk@${seed.emailDomain}`,
       address: addr,
       timezone: seed.timezone,
-      commercial: seed.commercial,
       notes: seed.notes,
       tags: seed.tags,
       customFields: { serviceReviewCadence: seed.typeKey === 'strategic' ? 'monthly' : 'quarterly', onboardedOn: '2025-01-15' },

@@ -20,7 +20,7 @@ import { isCustomerUser } from '@/core/authz';
 export const ATTACHMENT_ENTITY_TYPES = ['ticket', 'customer', 'contract', 'asset', 'ci', 'field_visit', 'kb_article', 'pm_occurrence', 'report_run', 'user'] as const;
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number];
 
-export const DOC_TYPES = ['agreement', 'po', 'sow', 'report', 'photo', 'signature', 'other'] as const;
+export const DOC_TYPES = ['agreement', 'sow', 'report', 'photo', 'signature', 'other'] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 
 const DANGEROUS_EXTENSIONS = new Set(['.exe', '.bat', '.cmd', '.ps1', '.sh', '.js', '.vbs', '.msi', '.dll', '.scr', '.jar', '.com', '.pif', '.cpl', '.hta', '.jse', '.wsf', '.wsh', '.msp', '.reg']);
