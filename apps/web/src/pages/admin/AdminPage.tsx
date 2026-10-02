@@ -1,10 +1,79 @@
-import { PageHeader, EmptyState } from '@/components/ui';
+import { lazy, Suspense, type ComponentType } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import type { Permission } from '@itsm/shared';
+import { LoadingBlock } from '@/components/ui';
+import { useAuthStore } from '@/stores/auth';
+import { AdminLayout, NotAllowed } from '@/components/admin/AdminLayout';
 
-export default function Page() {
+const page = (loader: () => Promise<{ default: ComponentType }>) => lazy(loader);
+
+const OverviewPage = page(() => import('./OverviewPage'));
+const OptionsPage = page(() => import('./OptionsPage'));
+const PriorityMatrixPage = page(() => import('./PriorityMatrixPage'));
+const CustomFieldsPage = page(() => import('./CustomFieldsPage'));
+const SlaPoliciesPage = page(() => import('./SlaPoliciesPage'));
+const SlaPolicyEditorPage = page(() => import('./SlaPolicyEditorPage'));
+const CalendarsPage = page(() => import('./CalendarsPage'));
+const HolidaysPage = page(() => import('./HolidaysPage'));
+const AssignmentRulesPage = page(() => import('./AssignmentRulesPage'));
+const EscalationRulesPage = page(() => import('./EscalationRulesPage'));
+const NotificationTemplatesPage = page(() => import('./NotificationTemplatesPage'));
+const NotificationRulesPage = page(() => import('./NotificationRulesPage'));
+const ApprovalsPage = page(() => import('./ApprovalsPage'));
+const CatalogPage = page(() => import('./CatalogPage'));
+const CiTypesPage = page(() => import('./CiTypesPage'));
+const RelationshipTypesPage = page(() => import('./RelationshipTypesPage'));
+const UsersPage = page(() => import('./UsersPage'));
+const RolesPage = page(() => import('./RolesPage'));
+const TeamsPage = page(() => import('./TeamsPage'));
+const ApiKeysPage = page(() => import('./ApiKeysPage'));
+const SettingsPage = page(() => import('./SettingsPage'));
+const OutboxPage = page(() => import('./OutboxPage'));
+const AuditPage = page(() => import('./AuditPage'));
+const IntegrationsPage = page(() => import('./IntegrationsPage'));
+
+const CONFIG: Permission[] = ['admin:config'];
+const USERS: Permission[] = ['admin:users'];
+
+function Guarded({ perm, children }: { perm?: Permission[]; children: React.ReactNode }) {
+  const can = useAuthStore((s) => s.can);
+  if (perm && !can(...perm)) return <NotAllowed />;
+  return <>{children}</>;
+}
+
+/** Administration area: left sub-navigation + routed content pane. */
+export default function AdminPage() {
   return (
-    <div>
-      <PageHeader title="Administration" />
-      <EmptyState title="Administration" description="This area is being built." />
-    </div>
+    <AdminLayout>
+      <Suspense fallback={<LoadingBlock />}>
+        <Routes>
+          <Route index element={<OverviewPage />} />
+          <Route path="options/:type?" element={<Guarded perm={CONFIG}><OptionsPage /></Guarded>} />
+          <Route path="priority-matrix" element={<Guarded perm={CONFIG}><PriorityMatrixPage /></Guarded>} />
+          <Route path="custom-fields" element={<Guarded perm={CONFIG}><CustomFieldsPage /></Guarded>} />
+          <Route path="sla" element={<Guarded perm={CONFIG}><SlaPoliciesPage /></Guarded>} />
+          <Route path="sla/:id" element={<Guarded perm={CONFIG}><SlaPolicyEditorPage /></Guarded>} />
+          <Route path="calendars" element={<Guarded perm={CONFIG}><CalendarsPage /></Guarded>} />
+          <Route path="holidays" element={<Guarded perm={CONFIG}><HolidaysPage /></Guarded>} />
+          <Route path="assignment-rules" element={<Guarded perm={CONFIG}><AssignmentRulesPage /></Guarded>} />
+          <Route path="escalation-rules" element={<Guarded perm={CONFIG}><EscalationRulesPage /></Guarded>} />
+          <Route path="notifications/templates" element={<Guarded perm={CONFIG}><NotificationTemplatesPage /></Guarded>} />
+          <Route path="notifications/rules" element={<Guarded perm={CONFIG}><NotificationRulesPage /></Guarded>} />
+          <Route path="approvals" element={<Guarded perm={CONFIG}><ApprovalsPage /></Guarded>} />
+          <Route path="catalog" element={<Guarded perm={CONFIG}><CatalogPage /></Guarded>} />
+          <Route path="ci-types" element={<Guarded perm={CONFIG}><CiTypesPage /></Guarded>} />
+          <Route path="relationship-types" element={<Guarded perm={CONFIG}><RelationshipTypesPage /></Guarded>} />
+          <Route path="users" element={<Guarded perm={USERS}><UsersPage /></Guarded>} />
+          <Route path="roles" element={<Guarded perm={USERS}><RolesPage /></Guarded>} />
+          <Route path="teams" element={<Guarded perm={USERS}><TeamsPage /></Guarded>} />
+          <Route path="api-keys" element={<Guarded perm={['integrations:manage']}><ApiKeysPage /></Guarded>} />
+          <Route path="settings" element={<Guarded perm={['admin:system', 'admin:config']}><SettingsPage /></Guarded>} />
+          <Route path="outbox" element={<Guarded perm={['admin:system', 'admin:config']}><OutboxPage /></Guarded>} />
+          <Route path="audit" element={<Guarded perm={['admin:audit']}><AuditPage /></Guarded>} />
+          <Route path="integrations" element={<Guarded perm={['integrations:manage']}><IntegrationsPage /></Guarded>} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </Routes>
+      </Suspense>
+    </AdminLayout>
   );
 }

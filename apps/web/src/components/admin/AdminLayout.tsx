@@ -1,0 +1,148 @@
+import { type ReactNode } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import type { Permission } from '@itsm/shared';
+import { useAuthStore } from '@/stores/auth';
+import { cn } from '@/lib/utils';
+import { Select } from '@/components/ui';
+
+export interface AdminNavItem {
+  to: string;
+  label: string;
+  perm?: Permission[];
+  /** Matches nested routes (e.g. /admin/sla/:id). */
+  prefix?: boolean;
+}
+
+export interface AdminNavGroup {
+  label: string;
+  items: AdminNavItem[];
+}
+
+const CONFIG: Permission[] = ['admin:config'];
+const USERS: Permission[] = ['admin:users'];
+
+export const ADMIN_NAV: AdminNavGroup[] = [
+  { label: 'Overview', items: [{ to: '/admin', label: 'Overview' }] },
+  {
+    label: 'Operating model',
+    items: [
+      { to: '/admin/options', label: 'Option lists', perm: CONFIG, prefix: true },
+      { to: '/admin/priority-matrix', label: 'Priority matrix', perm: CONFIG },
+      { to: '/admin/custom-fields', label: 'Custom fields', perm: CONFIG },
+    ],
+  },
+  {
+    label: 'SLA & time',
+    items: [
+      { to: '/admin/sla', label: 'SLA policies', perm: CONFIG, prefix: true },
+      { to: '/admin/calendars', label: 'Business calendars', perm: CONFIG },
+      { to: '/admin/holidays', label: 'Holiday calendars', perm: CONFIG },
+    ],
+  },
+  {
+    label: 'Automation',
+    items: [
+      { to: '/admin/assignment-rules', label: 'Assignment rules', perm: CONFIG },
+      { to: '/admin/escalation-rules', label: 'Escalation rules', perm: CONFIG },
+      { to: '/admin/notifications/templates', label: 'Notification templates', perm: CONFIG },
+      { to: '/admin/notifications/rules', label: 'Notification rules', perm: CONFIG },
+      { to: '/admin/approvals', label: 'Approval workflows', perm: CONFIG },
+      { to: '/admin/catalog', label: 'Request catalog', perm: CONFIG, prefix: true },
+    ],
+  },
+  {
+    label: 'CMDB model',
+    items: [
+      { to: '/admin/ci-types', label: 'CI types', perm: CONFIG },
+      { to: '/admin/relationship-types', label: 'Relationship types', perm: CONFIG },
+    ],
+  },
+  {
+    label: 'Access',
+    items: [
+      { to: '/admin/users', label: 'Users', perm: USERS },
+      { to: '/admin/roles', label: 'Roles', perm: USERS },
+      { to: '/admin/teams', label: 'Teams', perm: USERS },
+      { to: '/admin/api-keys', label: 'API keys', perm: ['integrations:manage'] },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { to: '/admin/settings', label: 'Settings', perm: ['admin:system', 'admin:config'] },
+      { to: '/admin/outbox', label: 'Notification outbox', perm: ['admin:system', 'admin:config'] },
+      { to: '/admin/audit', label: 'Audit log', perm: ['admin:audit'] },
+      { to: '/admin/integrations', label: 'Integrations', perm: ['integrations:manage'] },
+    ],
+  },
+];
+
+export function useAdminNav() {
+  const can = useAuthStore((s) => s.can);
+  return ADMIN_NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.perm || can(...i.perm)) })).filter((g) => g.items.length);
+}
+
+/** Left sub-navigation + plain content pane for the administration area. */
+export function AdminLayout({ children }: { children: ReactNode }) {
+  const groups = useAdminNav();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const current = groups.flatMap((g) => g.items).find((i) => (i.prefix ? location.pathname.startsWith(i.to) : location.pathname === i.to))?.to ?? '/admin';
+  return (
+    <div className="flex gap-6 min-h-full">
+      <aside className="hidden lg:block w-48 shrink-0">
+        <div className="sticky top-0">
+          <div className="text-[15px] font-semibold px-2 pb-2">Administration</div>
+          {groups.map((g) => (
+            <div key={g.label} className="mb-3">
+              {g.label !== 'Overview' && <div className="px-2 pt-2 pb-1 text-[10.5px] uppercase tracking-wider text-subtle font-semibold">{g.label}</div>}
+              {g.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={!item.prefix}
+                  className={({ isActive }) => cn('block rounded-md px-2 py-1 text-[13px] my-0.5 transition-colors', isActive || (item.prefix && location.pathname.startsWith(item.to + '/')) ? 'bg-brand-600/10 text-brand-700 dark:text-brand-300 font-medium' : 'text-muted hover:bg-surface-2 hover:text-default')}
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+          ))}
+        </div>
+      </aside>
+      <div className="flex-1 min-w-0">
+        <div className="lg:hidden mb-3">
+          <Select value={current} onChange={(e) => navigate(e.target.value)}>
+            {groups.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.items.map((i) => (
+                  <option key={i.to} value={i.to}>
+                    {i.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </Select>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Compact page title used by every admin screen. */
+export function SectionHeader({ title, description, actions }: { title: ReactNode; description?: ReactNode; actions?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div className="min-w-0">
+        <h1 className="text-[17px] font-semibold leading-tight">{title}</h1>
+        {description && <div className="text-[13px] text-muted mt-0.5 max-w-2xl">{description}</div>}
+      </div>
+      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+    </div>
+  );
+}
+
+export function NotAllowed() {
+  return <div className="card p-8 text-center text-muted text-[13px]">You do not have permission to view this area.</div>;
+}
