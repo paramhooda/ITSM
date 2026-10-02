@@ -16,22 +16,22 @@ export interface KpiItem {
 }
 
 export function DeltaBadge({ delta, lowerIsBetter }: { delta?: Delta | null; lowerIsBetter?: boolean }) {
-  if (!delta || delta.deltaPct === null) return <span className="text-subtle inline-flex items-center gap-0.5"><Minus className="h-3 w-3" /> vs prev.</span>;
+  if (!delta || delta.deltaPct === null) return <span className="text-subtle inline-flex items-center gap-0.5"><Minus className="h-3 w-3" /> vs previous period</span>;
   const up = delta.deltaPct > 0;
   const good = lowerIsBetter ? !up : up;
   const Icon = up ? ArrowUpRight : ArrowDownRight;
   return (
-    <span className={cn('inline-flex items-center gap-0.5 tabular-nums', delta.deltaPct === 0 ? 'text-subtle' : good ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')} title={`Previous period: ${delta.previous ?? '—'}`}>
-      <Icon className="h-3 w-3" /> {Math.abs(delta.deltaPct)}% vs prev.
+    <span className={cn('inline-flex items-center gap-0.5 tnum', delta.deltaPct === 0 ? 'text-subtle' : good ? 'text-emerald-600' : 'text-red-600')} title={`Previous period: ${delta.previous ?? '—'}`}>
+      <Icon className="h-3 w-3" /> {Math.abs(delta.deltaPct)}% vs previous
     </span>
   );
 }
 
-/** Dense grid of stat tiles; the number is the chart. */
-export function KpiGrid({ items, columns = 6 }: { items: KpiItem[]; columns?: 3 | 4 | 5 | 6 }) {
-  const cols = { 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 lg:grid-cols-4', 5: 'sm:grid-cols-3 lg:grid-cols-5', 6: 'sm:grid-cols-3 lg:grid-cols-6' }[columns];
+/** Hero row of at most four KPIs; the number is the chart. */
+export function KpiGrid({ items, columns = 4 }: { items: KpiItem[]; columns?: 2 | 3 | 4 }) {
+  const cols = { 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 lg:grid-cols-4' }[columns];
   return (
-    <div className={cn('grid grid-cols-2 gap-3', cols)}>
+    <div className={cn('grid grid-cols-2 gap-4', cols)}>
       {items.map((k, i) => (
         <StatTile key={i} label={k.label} value={k.value} tone={k.tone} onClick={k.onClick} hint={k.delta !== undefined ? <DeltaBadge delta={k.delta} lowerIsBetter={k.lowerIsBetter} /> : k.hint} />
       ))}

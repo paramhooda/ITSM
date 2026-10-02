@@ -18,7 +18,7 @@ export function SlaGauge({ pct, met, breached, label = 'SLA compliance', size = 
       <div className="text-[12.5px]">
         <div className="font-medium">{label}</div>
         <div className="text-muted mt-1">Target {target}%</div>
-        {met !== undefined && <div className={cn('mt-1 tabular-nums')}><span className="text-emerald-600 dark:text-emerald-400">{met} met</span> · <span className="text-red-600 dark:text-red-400">{breached ?? 0} breached</span></div>}
+        {met !== undefined && <div className={cn('mt-1 tabular-nums')}><span className="text-emerald-600">{met} met</span> · <span className="text-red-600">{breached ?? 0} breached</span></div>}
       </div>
     </div>
   );

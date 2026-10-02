@@ -1,16 +1,15 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Card, Select, LoadingBlock, ErrorBlock, Badge } from '@/components/ui';
+import { Badge, ErrorBlock, Select } from '@/components/ui';
 import { get } from '@/api/client';
 import { useCustomersLookup } from '@/hooks/useLookups';
 import { fmtDuration, fmtNumber, fmtPct } from '@/lib/format';
-import { cn } from '@/lib/utils';
 import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
-import { SlaGauge } from './SlaGauge';
 import { EntitlementAlerts, type EntitlementAlert } from './EntitlementAlerts';
 import { ExpiringContracts, type ExpiringContract } from './ExpiringContracts';
+import { Panel, Skeleton, KpiSkeleton, Stat, Segmented, RowList } from './Panel';
 import { STATUS_COLORS } from './chartTheme';
 import type { Delta } from './types';
 
@@ -27,93 +26,80 @@ interface Management {
   trends: Record<string, Delta>;
 }
 
-export function ManagementDashboard({ days, customerId, onDays, onCustomer }: { days: number; customerId: string; onDays: (d: number) => void; onCustomer: (id: string) => void }) {
+export function ManagementControls({ days, customerId, onDays, onCustomer }: { days: number; customerId: string; onDays: (d: number) => void; onCustomer: (id: string) => void }) {
   const customers = useCustomersLookup();
-  const q = useQuery({ queryKey: ['dashboards', 'management', days, customerId], queryFn: () => get<Management>('/dashboards/management', { days, customerId: customerId || undefined }), placeholderData: (p) => p, staleTime: 30_000 });
-  const d = q.data;
-  const k = d?.kpis ?? {};
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-default overflow-hidden">
-          {[7, 30, 90].map((n) => (
-            <button key={n} onClick={() => onDays(n)} className={cn('px-3 py-1.5 text-[12.5px] font-medium', days === n ? 'bg-brand-600 text-white' : 'bg-surface text-muted hover:bg-surface-2')}>
-              {n} days
-            </button>
-          ))}
-        </div>
-        <Select className="w-64" value={customerId} onChange={(e) => onCustomer(e.target.value)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: `${c.name} (${c.code})` }))} />
-        {d && <span className="text-[12px] text-subtle">{d.period.from} to {d.period.to}{q.isFetching ? ' · refreshing…' : ''}</span>}
-      </div>
-      {q.isError && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
-      {!d && q.isPending && <LoadingBlock />}
-      {d && (
-        <>
-          <KpiGrid
-            items={[
-              { label: 'Open now', value: fmtNumber(k.openNow), hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedToday)} resolved`, tone: (k.breachedOpen ?? 0) > 0 ? 'warn' : 'default' },
-              { label: 'Opened', value: fmtNumber(k.ticketsOpened), delta: d.trends.opened, lowerIsBetter: true },
-              { label: 'Resolved', value: fmtNumber(k.ticketsResolved), delta: d.trends.resolved },
-              { label: 'SLA compliance', value: fmtPct(k.slaCompliancePct, 1), delta: d.trends.slaCompliancePct, tone: k.slaCompliancePct === null ? 'default' : (k.slaCompliancePct ?? 0) >= 95 ? 'good' : (k.slaCompliancePct ?? 0) >= 85 ? 'warn' : 'bad' },
-              { label: 'SLA breaches', value: fmtNumber(k.slaBreaches), delta: d.trends.breaches, lowerIsBetter: true, tone: (k.slaBreaches ?? 0) > 0 ? 'bad' : 'good' },
-              { label: 'MTTR', value: fmtDuration(k.mttrMinutes), delta: d.trends.mttrMinutes, lowerIsBetter: true },
-              { label: 'First response', value: fmtDuration(k.firstResponseMinutes), hint: 'average' },
-              { label: 'Major incidents', value: fmtNumber(k.majorIncidents), delta: d.trends.majorIncidents, lowerIsBetter: true, tone: (k.majorOpen ?? 0) > 0 ? 'bad' : 'default' },
-              { label: 'Out of scope', value: fmtNumber(k.outOfScopeCount), delta: d.trends.outOfScope, lowerIsBetter: true },
-              { label: 'AMC utilization', value: fmtPct(k.amcUtilizationPct), hint: `${fmtNumber(k.entitlementsOverThreshold)} over threshold · ${fmtNumber(k.entitlementsExhausted)} exhausted`, tone: (k.entitlementsExhausted ?? 0) > 0 ? 'warn' : 'default' },
-              { label: 'PM on time', value: fmtPct(k.pmOnTimePct), hint: `${fmtNumber(k.pmMissed)} missed · ${fmtNumber(k.pmOverdue)} overdue`, tone: (k.pmMissed ?? 0) > 0 ? 'warn' : 'default' },
-              { label: 'Contracts', value: fmtNumber(k.contractsActive), hint: `${fmtNumber(k.customersActive)} customers · ${fmtNumber(k.contractsExpiring90d)} expiring in 90d`, tone: (k.contractsExpiring90d ?? 0) > 0 ? 'warn' : 'default' },
-            ]}
-          />
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <Card title="Opened, resolved and SLA breaches per day" className="xl:col-span-2">
-              <TrendChart data={d.series} x="day" kind={days <= 30 ? 'bar' : 'line'} series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved' }, { key: 'breaches', label: 'SLA breaches', color: STATUS_COLORS.critical }]} height={240} />
-            </Card>
-            <Card title="Resolution SLA">
-              <SlaGauge pct={k.slaCompliancePct} met={k.resolutionMet ?? 0} breached={k.resolutionBreached ?? 0} label="Resolution compliance" />
-              <div className="mt-4">
-                <TrendChart data={d.series} x="day" kind="line" series={[{ key: 'mttrMinutes', label: 'MTTR (min)' }]} height={120} valueFormatter={(v) => fmtDuration(v)} title="Mean time to resolve" />
-              </div>
-            </Card>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-            <Card title="Top services" actions={<span className="text-[11px] text-subtle">tickets (breaches)</span>}>
-              <BreakdownBar items={d.byService.map((s) => ({ label: s.name, value: s.tickets, secondary: s.breaches, href: s.id ? `/tickets?serviceId=${s.id}` : undefined }))} />
-            </Card>
-            <Card title="Top customers by volume" padded={false}>
-              <table className="table [&_td]:py-1.5 [&_th]:py-1.5">
-                <thead><tr><th>Customer</th><th className="text-right">Tickets</th><th className="text-right">Major</th><th className="text-right">SLA</th></tr></thead>
-                <tbody>
-                  {d.byCustomer.length === 0 && <tr><td colSpan={4} className="text-center text-subtle py-4">No tickets in this period</td></tr>}
-                  {d.byCustomer.map((c) => (
-                    <tr key={c.id}>
-                      <td><Link to={`/customers/${c.id}`} className="hover:underline">{c.name}</Link> <span className="text-subtle font-mono text-[11px]">{c.code}</span></td>
-                      <td className="text-right tabular-nums">{c.tickets}</td>
-                      <td className="text-right tabular-nums">{c.major || '—'}</td>
-                      <td className="text-right">{c.compliancePct === null ? <span className="text-subtle">—</span> : <Badge color={c.compliancePct >= 95 ? 'green' : c.compliancePct >= 85 ? 'amber' : 'red'}>{c.compliancePct}%</Badge>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-            <Card title="Out-of-scope activity by customer" actions={<Link to="/reports?tab=run&report=out_of_scope_activity" className="text-[11.5px] text-brand-700 dark:text-brand-300 hover:underline">Report</Link>}>
-              <BreakdownBar items={d.outOfScopeByCustomer.map((c) => ({ label: c.name, value: c.out_of_scope, secondary: c.unknown_scope, secondaryLabel: 'unknown scope', href: `/customers/${c.id}` }))} emptyText="No out-of-scope tickets" />
-            </Card>
-            <Card title="Entitlement alerts" actions={<Link to="/reports?tab=run&report=amc_utilization" className="text-[11.5px] text-brand-700 dark:text-brand-300 hover:underline">Utilization report</Link>}>
-              <EntitlementAlerts items={d.entitlementAlerts} />
-            </Card>
-            <Card title={`Contracts expiring in 90 days (${d.expiringContractsTotal})`} actions={<Link to="/contracts?expiringWithinDays=90" className="text-[11.5px] text-brand-700 dark:text-brand-300 hover:underline">All</Link>}>
-              <ExpiringContracts items={d.expiringContracts} />
-            </Card>
-            <Card title="Delivery effort">
-              <KpiGrid columns={3} items={[{ label: 'Site visits', value: fmtNumber(k.visitsCompleted) }, { label: 'Engineering hours', value: fmtNumber(k.engineeringHours, 1) }, { label: 'Closed', value: fmtNumber(k.ticketsClosed) }]} />
-              <div className="mt-3">
-                <TrendChart data={d.series} x="day" kind="bar" series={[{ key: 'outOfScope', label: 'Out of scope' }]} height={110} title="Out-of-scope tickets per day" />
-              </div>
-            </Card>
-          </div>
-        </>
-      )}
+    <div className="flex flex-wrap items-center gap-2">
+      <Segmented options={[{ value: 7, label: '7 days' }, { value: 30, label: '30 days' }, { value: 90, label: '90 days' }]} value={days} onChange={onDays} />
+      <Select className="w-56 h-9" value={customerId} onChange={(e) => onCustomer(e.target.value)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
     </div>
   );
 }
+
+export function ManagementDashboard({ days, customerId }: { days: number; customerId: string }) {
+  const q = useQuery({ queryKey: ['dashboards', 'management', days, customerId], queryFn: () => get<Management>('/dashboards/management', { days, customerId: customerId || undefined }), placeholderData: (p) => p, staleTime: 30_000 });
+  const d = q.data;
+  const k = d?.kpis ?? {};
+  if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
+  if (!d) return <KpiSkeleton />;
+  const compliance = k.slaCompliancePct;
+  const needsAttention = [...d.byCustomer].filter((c) => c.slaBreached > 0 || c.out_of_scope > 0 || c.major > 0).sort((a, b) => b.slaBreached - a.slaBreached || b.major - a.major || b.out_of_scope - a.out_of_scope).slice(0, 5);
+  const custQ = customerId ? `&customerId=${customerId}` : '';
+  return (
+    <div className="flex flex-col gap-6">
+      <KpiGrid
+        items={[
+          { label: 'Open tickets', value: fmtNumber(k.openNow), hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedToday)} resolved`, onClick: () => (window.location.href = `/tickets?open=true${custQ}`) },
+          { label: `SLA compliance · ${days}d`, value: fmtPct(compliance, 1), delta: d.trends.slaCompliancePct, tone: compliance === null ? 'default' : (compliance ?? 0) >= 95 ? 'good' : (compliance ?? 0) >= 85 ? 'warn' : 'bad' },
+          { label: 'Breached SLAs · open now', value: fmtNumber(k.breachedOpen), tone: (k.breachedOpen ?? 0) > 0 ? 'bad' : 'good', hint: `${fmtNumber(k.slaBreaches)} breaches in period`, onClick: () => (window.location.href = `/tickets?open=true&slaState=breached${custQ}`) },
+          { label: 'Contracts expiring · 90 days', value: fmtNumber(k.contractsExpiring90d), tone: (k.contractsExpiring90d ?? 0) > 0 ? 'warn' : 'default', hint: `${fmtNumber(k.contractsActive)} active · ${fmtNumber(k.customersActive)} customers`, onClick: () => (window.location.href = '/contracts?expiringWithinDays=90') },
+        ]}
+      />
+
+      <Panel title="Opened vs resolved" subtitle={`Tickets per day, ${d.period.from} to ${d.period.to}`} to={`/reports?tab=run&report=ticket_volume`} toLabel="Ticket volume report">
+        <TrendChart data={d.series} x="day" kind={days <= 30 ? 'bar' : 'line'} series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved' }, { key: 'breaches', label: 'SLA breaches', color: STATUS_COLORS.critical }]} height={230} />
+        <div className="mt-5 pt-4 border-t border-default grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          <Stat label="Mean time to resolve" value={fmtDuration(k.mttrMinutes)} />
+          <Stat label="First response" value={fmtDuration(k.firstResponseMinutes)} />
+          <Stat label="Major incidents" value={fmtNumber(k.majorIncidents)} tone={(k.majorOpen ?? 0) > 0 ? 'bad' : 'default'} />
+          <Stat label="Out of scope" value={fmtNumber(k.outOfScopeCount)} tone={(k.outOfScopeCount ?? 0) > 0 ? 'warn' : 'default'} />
+          <Stat label="AMC utilization" value={fmtPct(k.amcUtilizationPct)} />
+          <Stat label="PM on time" value={fmtPct(k.pmOnTimePct)} tone={(k.pmMissed ?? 0) > 0 ? 'warn' : 'default'} />
+        </div>
+      </Panel>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <Panel title="Needs attention" subtitle="Customers with breaches, major incidents or out-of-scope work" to={`/reports?tab=run&report=sla_performance`} toLabel="SLA report" padded>
+          <RowList
+            empty="No customer needs attention right now"
+            items={needsAttention.map((c) => ({
+              key: c.id,
+              href: `/customers/${c.id}`,
+              primary: c.name,
+              secondary: `${fmtNumber(c.tickets)} tickets · ${fmtNumber(c.major)} major · ${fmtNumber(c.out_of_scope)} out of scope`,
+              right: (
+                <span className="inline-flex items-center gap-2">
+                  {c.slaBreached > 0 && <span className="text-red-600 font-medium">{c.slaBreached} breached</span>}
+                  {c.compliancePct !== null && <Badge color={c.compliancePct >= 95 ? 'green' : c.compliancePct >= 85 ? 'amber' : 'red'}>{c.compliancePct}%</Badge>}
+                </span>
+              ),
+            }))}
+          />
+        </Panel>
+        <Panel title="Service health" subtitle="Incidents by service in the period, breaches in red" to="/services" toLabel="Service catalog">
+          <BreakdownBar items={d.byService.slice(0, 6).map((s) => ({ label: s.name, value: s.tickets, secondary: s.breaches, href: s.id ? `/tickets?serviceId=${s.id}` : undefined }))} emptyText="No tickets in this period" />
+        </Panel>
+        <Panel title="Entitlements near limit" subtitle="AMC visits and hours over their warning threshold" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report">
+          <EntitlementAlerts items={d.entitlementAlerts.slice(0, 5)} />
+        </Panel>
+        <Panel title="Expiring contracts" subtitle={`${fmtNumber(d.expiringContractsTotal)} ending within 90 days`} to="/contracts?expiringWithinDays=90">
+          <ExpiringContracts items={d.expiringContracts.slice(0, 5)} />
+        </Panel>
+      </div>
+      <div className="text-[12px] text-subtle">
+        Looking for more? <Link to="/reports" className="text-brand-700 hover:underline">Reports</Link> cover incidents, SLA, AMC utilization, out-of-scope activity and more.
+      </div>
+    </div>
+  );
+}
+export { Skeleton as ManagementSkeleton };

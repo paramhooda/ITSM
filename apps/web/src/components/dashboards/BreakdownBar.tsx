@@ -28,7 +28,7 @@ export function BreakdownBar({ items, emptyText = 'Nothing to show', max, dense 
               <span className="truncate min-w-0">{i.label}</span>
               <span className="tabular-nums text-muted shrink-0">
                 {fmtNumber(i.value)}
-                {i.secondary !== undefined && i.secondary !== null && i.secondary > 0 && <span className="ml-1.5 text-red-600 dark:text-red-400" title={i.secondaryLabel ?? 'breached'}>({i.secondary})</span>}
+                {i.secondary !== undefined && i.secondary !== null && i.secondary > 0 && <span className="ml-1.5 text-red-600" title={i.secondaryLabel ?? 'breached'}>({i.secondary})</span>}
               </span>
             </div>
             <div className="h-1.5 w-full rounded-full bg-surface-2 overflow-hidden mt-0.5">

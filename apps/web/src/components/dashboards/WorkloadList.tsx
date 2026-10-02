@@ -30,8 +30,8 @@ export function WorkloadList({ items, emptyText = 'No engineers with open ticket
                 </span>
                 <span className="tabular-nums text-muted shrink-0">
                   {i.open}
-                  {!!i.critical && <span className="ml-1.5 text-orange-600 dark:text-orange-400" title="P1/P2">{i.critical} crit</span>}
-                  {!!i.breached && <span className="ml-1.5 text-red-600 dark:text-red-400" title="SLA breached">{i.breached} breached</span>}
+                  {!!i.critical && <span className="ml-1.5 text-orange-600" title="P1/P2">{i.critical} crit</span>}
+                  {!!i.breached && <span className="ml-1.5 text-red-600" title="SLA breached">{i.breached} breached</span>}
                   {!!i.stale && <span className="ml-1.5 text-subtle" title="No update in 24h">{i.stale} stale</span>}
                 </span>
               </div>

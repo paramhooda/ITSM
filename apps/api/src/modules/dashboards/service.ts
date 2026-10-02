@@ -335,7 +335,7 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null } = 
   const reports = await q<Row>(ctx, sql`
     SELECT r.id, r.name, r.report_key, r.format, r.created_at, r.attachment_id, a.filename, a.size, r.parameters->>'period' AS period FROM report_runs r LEFT JOIN attachments a ON a.id = r.attachment_id
     WHERE r.customer_id = ${customerId}::uuid AND r.portal_visible AND r.status = 'completed' ORDER BY r.created_at DESC LIMIT 5`);
-  const recent = await q<Row>(ctx, sql`SELECT ${TICKET_LIST_COLS} FROM tickets t ${TICKET_LIST_JOINS} WHERE ${cust} ORDER BY t.last_activity_at DESC LIMIT 10`);
+  const recent = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`SELECT ${TICKET_LIST_COLS} FROM tickets t ${TICKET_LIST_JOINS} WHERE ${cust} ORDER BY t.last_activity_at DESC LIMIT 10`));
   const teams = await q<Row>(ctx, sql`
     SELECT te.id, te.name, te.team_type, te.email, m.name AS manager_name FROM teams te LEFT JOIN users m ON m.id = te.manager_user_id
     WHERE te.is_active AND (te.id IN (SELECT ct.team_id FROM customer_teams ct WHERE ct.customer_id = ${customerId}::uuid) OR te.team_type = 'service_desk') ORDER BY (te.team_type = 'service_desk') DESC, te.name LIMIT 10`);
@@ -392,5 +392,66 @@ export async function trends(ctx: Ctx, opts: { customerId?: string | null; from?
     metric,
     series: metric ? series.map((d) => ({ day: d.day, value: d[metric] })) : series,
     totals: Object.fromEntries(METRIC_KEYS.filter((k) => k !== 'mttrMinutes' && k !== 'firstResponseMinutes').map((k) => [k, sumOf(series, k)])),
+  };
+}
+
+// ---------------------------------------------------------------- AMC / field service (ticket management view)
+
+export async function amc(ctx: Ctx) {
+  ctx.require('dashboards:amc');
+  const base = sql`t.domain = 'amc'`;
+  const totals = await one<Row>(ctx, sql`
+    SELECT count(*)::int AS open, count(*) FILTER (WHERE t.assignee_id IS NULL)::int AS unassigned, count(*) FILTER (WHERE ${BREACHED})::int AS breached,
+      count(*) FILTER (WHERE ${AT_RISK})::int AS at_risk, count(*) FILTER (WHERE t.due_at >= current_date AND t.due_at < current_date + 1)::int AS due_today,
+      count(*) FILTER (WHERE st.key = 'pending_customer')::int AS awaiting_customer, count(*) FILTER (WHERE t.created_at >= current_date)::int AS opened_today
+    FROM tickets t JOIN config_options st ON st.id = t.status_id WHERE ${base} AND ${openCond()}`);
+  const resolved = await one<Row>(ctx, sql`SELECT count(*) FILTER (WHERE t.resolved_at >= date_trunc('week', now()))::int AS week, count(*) FILTER (WHERE t.resolved_at >= current_date)::int AS today FROM tickets t WHERE ${base} AND t.resolved_at IS NOT NULL AND t.resolved_at >= date_trunc('week', now())`);
+  const queue = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`
+    SELECT ${TICKET_LIST_COLS}, st.key AS status_key, si.name AS site_name, t.due_at, (t.due_at >= current_date AND t.due_at < current_date + 1) AS due_today,
+      v.number AS visit_number, v.id AS visit_id
+    FROM tickets t ${TICKET_LIST_JOINS} LEFT JOIN sites si ON si.id = t.site_id
+    LEFT JOIN LATERAL (SELECT fv.id, fv.number FROM field_visits fv WHERE fv.ticket_id = t.id ORDER BY fv.created_at DESC LIMIT 1) v ON true
+    WHERE ${base} AND ${openCond()} ORDER BY pr.level NULLS LAST, t.created_at LIMIT 200`));
+  const visitsWeek = await one<Row>(ctx, sql`
+    SELECT count(*)::int AS n FROM field_visits v WHERE v.status IN ('scheduled', 'in_progress') AND v.scheduled_start >= date_trunc('week', now()) AND v.scheduled_start < date_trunc('week', now()) + interval '7 days'`);
+  const visits = await q<Row>(ctx, sql`
+    SELECT v.id, v.number, v.title, v.status, v.scheduled_start, v.scheduled_end, cu.name AS customer_name, si.name AS site_name, u.name AS engineer, t.number AS ticket_number, t.id AS ticket_id
+    FROM field_visits v LEFT JOIN customers cu ON cu.id = v.customer_id LEFT JOIN sites si ON si.id = v.site_id LEFT JOIN users u ON u.id = v.engineer_id LEFT JOIN tickets t ON t.id = v.ticket_id
+    WHERE v.status IN ('requested', 'scheduled', 'in_progress') AND coalesce(v.scheduled_start, now()) >= now() - interval '1 day' AND coalesce(v.scheduled_start, now()) < date_trunc('week', now()) + interval '14 days'
+    ORDER BY (v.status = 'in_progress') DESC, v.scheduled_start NULLS LAST LIMIT 12`);
+  const maintenance = await q<Row>(ctx, sql`
+    SELECT o.id, p.name AS program, cu.name AS customer_name, si.name AS site, coalesce(o.scheduled_date, o.planned_date) AS due_date, o.status,
+      (coalesce(o.scheduled_date, o.planned_date) < current_date) AS overdue, u.name AS engineer
+    FROM pm_occurrences o JOIN pm_programs p ON p.id = o.program_id LEFT JOIN customers cu ON cu.id = o.customer_id LEFT JOIN sites si ON si.id = p.site_id LEFT JOIN users u ON u.id = coalesce(o.engineer_id, p.assigned_engineer_id)
+    WHERE o.status IN ('planned', 'scheduled', 'rescheduled') AND coalesce(o.scheduled_date, o.planned_date) <= current_date + 14 ORDER BY coalesce(o.scheduled_date, o.planned_date) LIMIT 10`);
+  const ents = ctx.can('contracts:read') ? await entitlementSummary(ctx, undefined, 500) : { total: 0, overThreshold: 0, exhausted: 0, items: [] };
+  const entitlements = ents.items.filter((i) => (i.unit === 'visits' || i.unit === 'hours') && (i.utilization.pct >= 80 || i.utilization.exhausted)).slice(0, 6);
+  return {
+    generatedAt: new Date(),
+    kpis: {
+      open: num(totals.open),
+      unassigned: num(totals.unassigned),
+      breached: num(totals.breached),
+      atRisk: num(totals.at_risk),
+      dueToday: num(totals.due_today),
+      awaitingCustomer: num(totals.awaiting_customer),
+      openedToday: num(totals.opened_today),
+      resolvedThisWeek: num(resolved.week),
+      resolvedToday: num(resolved.today),
+      visitsThisWeek: num(visitsWeek.n),
+    },
+    queue: {
+      items: queue,
+      counts: {
+        all: queue.length,
+        unassigned: queue.filter((t) => !t.assignee_id).length,
+        dueToday: queue.filter((t) => t.due_today === true).length,
+        breached: queue.filter((t) => t.sla?.breached).length,
+        awaitingCustomer: queue.filter((t) => t.status_key === 'pending_customer').length,
+      },
+    },
+    visits,
+    maintenance,
+    entitlements,
   };
 }

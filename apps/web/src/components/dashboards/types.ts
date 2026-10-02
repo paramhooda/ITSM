@@ -39,6 +39,11 @@ export interface TicketRow {
   severity_color?: string | null;
   due_at?: string | null;
   mttr_minutes?: number | null;
+  site_name?: string | null;
+  status_key?: string | null;
+  visit_number?: string | null;
+  visit_id?: string | null;
+  due_today?: boolean;
 }
 
 export interface Delta {

@@ -1,13 +1,13 @@
-import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Card, LoadingBlock, ErrorBlock } from '@/components/ui';
+import { ErrorBlock } from '@/components/ui';
 import { get } from '@/api/client';
-import { fmtDuration, fmtNumber, relativeTime } from '@/lib/format';
+import { fmtNumber } from '@/lib/format';
 import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
 import { TicketMiniTable } from './TicketMiniTable';
 import { WorkloadList, type WorkloadItem } from './WorkloadList';
+import { Panel, KpiSkeleton, Stat, Updated } from './Panel';
 import type { TicketRow, Breakdown } from './types';
 
 interface Noc {
@@ -28,60 +28,52 @@ export function NocDashboard() {
   const q = useQuery({ queryKey: ['dashboards', 'noc'], queryFn: () => get<Noc>('/dashboards/noc'), refetchInterval: 60_000, placeholderData: (p) => p });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
-  if (!d) return <LoadingBlock />;
+  if (!d) return <KpiSkeleton />;
   const t = d.totals;
+  const p1p2 = d.openIncidents.filter((p) => (p.level ?? 99) <= 2).reduce((s, p) => s + p.count, 0);
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between text-[12px] text-subtle">
-        <span>Live operations view · refreshes every minute</span>
-        <span>Updated {relativeTime(d.generatedAt)}</span>
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center justify-between -mt-2">
+        <span className="text-[12.5px] text-muted">Live view of infrastructure incidents · refreshes every minute</span>
+        <Updated at={d.generatedAt} fetching={q.isFetching} />
       </div>
       <KpiGrid
         items={[
-          { label: 'Open tickets', value: fmtNumber(t.open), hint: `${fmtNumber(t.openIncidents)} incidents`, onClick: () => (window.location.href = '/tickets?open=true') },
-          { label: 'SLA breached', value: fmtNumber(t.breached), tone: t.breached > 0 ? 'bad' : 'good', hint: 'open tickets' },
-          { label: 'SLA at risk', value: fmtNumber(t.atRisk), tone: t.atRisk > 0 ? 'warn' : 'good', hint: 'warning threshold passed' },
-          { label: 'Unassigned', value: fmtNumber(t.unassigned), tone: t.unassigned > 0 ? 'warn' : 'default' },
-          { label: 'Major / escalated', value: `${fmtNumber(t.major)} / ${fmtNumber(t.escalated)}`, tone: t.major > 0 ? 'bad' : 'default' },
-          { label: 'Today', value: `${fmtNumber(t.openedToday)} / ${fmtNumber(t.resolvedToday)}`, hint: `opened / resolved · MTTR ${fmtDuration(t.mttrTodayMinutes)}` },
+          { label: 'Open incidents', value: fmtNumber(t.openIncidents), hint: `${fmtNumber(t.openedToday)} opened · ${fmtNumber(t.resolvedToday)} resolved today`, onClick: () => (window.location.href = '/tickets?type=incident&open=true') },
+          { label: 'P1 / P2 open', value: fmtNumber(p1p2), tone: p1p2 > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.major)} major · ${fmtNumber(t.escalated)} escalated` },
+          { label: 'SLA at risk', value: fmtNumber(t.atRisk), tone: t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} already breached`, onClick: () => (window.location.href = '/tickets?open=true&slaState=breached') },
+          { label: 'Unassigned', value: fmtNumber(t.unassigned), tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', onClick: () => (window.location.href = '/tickets?open=true&unassigned=true') },
         ]}
       />
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card title="Open incidents by priority" actions={<span className="text-[11px] text-subtle">count (breached)</span>}>
-          <BreakdownBar items={d.openIncidents.map((p) => ({ label: p.label, value: p.count, secondary: p.breached, color: p.color, href: p.id ? `/tickets?type=incident&open=true&priorityId=${p.id}` : undefined }))} emptyText="No open incidents" />
-        </Card>
-        <Card title="Ticket aging (open)">
-          <TrendChart data={d.aging} x="bucket" kind="bar" series={[{ key: 'count', label: 'Open tickets' }]} height={180} xFormatter={(v) => v} />
-        </Card>
-        <Card title="Monitoring events (24h)" actions={<Link to="/integrations" className="text-[11.5px] text-brand-700 dark:text-brand-300 hover:underline">Events</Link>}>
-          <KpiGrid columns={3} items={[{ label: 'PRTG events', value: fmtNumber(d.monitoringEvents24h.total) }, { label: 'Tickets created', value: fmtNumber(d.monitoringEvents24h.ticketsCreated) }, { label: 'Ticket rate', value: d.monitoringEvents24h.total ? `${Math.round((d.monitoringEvents24h.ticketsCreated / d.monitoringEvents24h.total) * 100)}%` : '—' }]} />
-          <div className="mt-3">
-            <BreakdownBar dense items={d.monitoringEvents24h.bySeverity.map((s) => ({ label: s.severity, value: s.count, secondary: s.ticketed, secondaryLabel: 'ticketed' }))} emptyText="No events received in the last 24 hours" />
+      <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" to="/tickets?open=true&priorityId=&type=incident" toLabel="All incidents" padded={false}>
+        <div className="px-5">
+          <TicketMiniTable rows={d.criticalOpen} max={8} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee']} empty="No P1/P2 or major incidents open" />
+        </div>
+      </Panel>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <Panel title="Ticket aging" subtitle="How long open tickets have been waiting" className="xl:col-span-1">
+          <TrendChart data={d.aging} x="bucket" kind="bar" series={[{ key: 'count', label: 'Open tickets' }]} height={170} xFormatter={(v) => v} />
+          <div className="mt-4 pt-4 border-t border-default grid grid-cols-3 gap-3">
+            <Stat label="PRTG events · 24h" value={fmtNumber(d.monitoringEvents24h.total)} />
+            <Stat label="Tickets from monitoring" value={fmtNumber(d.monitoringEvents24h.ticketsCreated)} />
+            <Stat label="Ticket rate" value={d.monitoringEvents24h.total ? `${Math.round((d.monitoringEvents24h.ticketsCreated / d.monitoringEvents24h.total) * 100)}%` : '—'} />
           </div>
-        </Card>
+        </Panel>
+        <Panel title="At risk or breached" subtitle="Soonest SLA deadline first" to="/tickets?open=true&slaState=breached" toLabel="All breached" padded={false}>
+          <div className="px-5">
+            <TicketMiniTable rows={d.slaAtRisk.items} max={6} columns={['customer', 'priority', 'sla']} empty="Every open ticket is within SLA" />
+          </div>
+        </Panel>
+        <Panel title="Engineer load" subtitle="Open tickets per engineer in NOC, infrastructure and network teams">
+          <WorkloadList items={d.engineerWorkload.slice(0, 8)} />
+        </Panel>
       </div>
-      <Card title={`Critical and major open tickets (${d.criticalOpen.length})`}>
-        <TicketMiniTable rows={d.criticalOpen} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee', 'age']} empty="No P1/P2 or major tickets open" />
-      </Card>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card title={`SLA at risk and breached (${d.slaAtRisk.atRisk + d.slaAtRisk.breached})`} actions={<Link to="/tickets?open=true&slaState=breached" className="text-[11.5px] text-brand-700 dark:text-brand-300 hover:underline">All breached</Link>}>
-          <TicketMiniTable rows={d.slaAtRisk.items} columns={['customer', 'priority', 'sla', 'assignee']} empty="All open tickets are within SLA" />
-        </Card>
-        <Card title={`Unassigned (${d.unassigned.count})`} actions={<Link to="/tickets?open=true&unassigned=true" className="text-[11.5px] text-brand-700 dark:text-brand-300 hover:underline">Queue</Link>}>
-          <TicketMiniTable rows={d.unassigned.items} columns={['customer', 'priority', 'category', 'age']} empty="Nothing waiting for assignment" />
-        </Card>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card title="Open by category (NOC)">
-          <BreakdownBar items={d.byCategory.map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="No open NOC tickets" />
-        </Card>
-        <Card title="Engineer workload" actions={<span className="text-[11px] text-subtle">NOC · infrastructure · network</span>}>
-          <WorkloadList items={d.engineerWorkload} />
-        </Card>
-        <Card title="Recently resolved">
-          <TicketMiniTable rows={d.recentlyResolved} columns={['customer', 'priority', 'resolved']} empty="Nothing resolved yet" />
-        </Card>
-      </div>
+      <Panel title="Open by category" subtitle="NOC categories, breaches in red" to="/tickets?open=true" toLabel="All open">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+          <BreakdownBar items={d.byCategory.slice(0, 5).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="No open NOC tickets" />
+          <BreakdownBar items={d.byCategory.slice(5, 10).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="" max={Math.max(1, ...d.byCategory.map((c) => c.count))} />
+        </div>
+      </Panel>
     </div>
   );
 }
