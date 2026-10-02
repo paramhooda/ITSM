@@ -2,11 +2,10 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Sun, Moon, Monitor, LogOut, Laptop } from 'lucide-react';
+import { LogOut, Laptop } from 'lucide-react';
 import type { Principal } from '@itsm/shared';
 import { api, get, patch, post, del, ApiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
-import { useUiStore } from '@/stores/ui';
 import { Badge, Button, Card, ConfirmDialog, DataTable, Field, Input, KeyValue, PageHeader, Select, Toggle, type Column } from '@/components/ui';
 import { fmtDateTime, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -82,7 +81,6 @@ export default function ProfilePage() {
   const user = useAuthStore((s) => s.user)!;
   const setUser = useAuthStore((s) => s.setUser);
   const clear = useAuthStore((s) => s.clear);
-  const { theme, setTheme } = useUiStore();
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -179,11 +177,6 @@ export default function ProfilePage() {
     },
   ];
 
-  const themeOptions = [
-    { value: 'light' as const, label: 'Light', Icon: Sun },
-    { value: 'dark' as const, label: 'Dark', Icon: Moon },
-    { value: 'system' as const, label: 'System', Icon: Monitor },
-  ];
 
   return (
     <div className="max-w-5xl">
@@ -218,16 +211,6 @@ export default function ProfilePage() {
             </form>
           </Card>
 
-          <Card title="Appearance">
-            <div className="flex items-center gap-2">
-              {themeOptions.map(({ value, label, Icon }) => (
-                <button key={value} type="button" onClick={() => setTheme(value)} className={cn('inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px]', theme === value ? 'border-brand-600 bg-brand-600/10 text-brand-700 dark:text-brand-300 font-medium' : 'border-default text-muted hover:bg-surface-2')}>
-                  <Icon className="h-4 w-4" /> {label}
-                </button>
-              ))}
-              <span className="text-xs text-subtle ml-2">Stored on this device.</span>
-            </div>
-          </Card>
 
           <Card title="Notifications">
             <div className="flex flex-col gap-3">

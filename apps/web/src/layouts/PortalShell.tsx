@@ -1,48 +1,43 @@
 import { type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Sparkles, ShieldCheck } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
 import { cn } from '@/lib/utils';
 import { PORTAL_NAV } from './nav';
-import { SidebarNav, ThemeToggle, NotificationBell, UserMenu, MobileNav } from './AppShell';
+import { Sidebar, NotificationBell, UserMenu, MobileNav, BrandLogo } from './AppShell';
 import { AssistantPanel } from '@/components/AssistantPanel';
 
 export function PortalShell({ children }: { children: ReactNode }) {
   const can = useAuthStore((s) => s.can);
   const navigate = useNavigate();
-  const { assistantOpen, setAssistantOpen, sidebarCollapsed } = useUiStore();
+  const { assistantOpen, setAssistantOpen } = useUiStore();
   return (
-    <div className="h-full flex">
-      <aside className={cn('hidden md:flex flex-col border-r border-default bg-surface shrink-0', sidebarCollapsed ? 'w-14' : 'w-56')}>
-        <div className={cn('flex items-center gap-2 h-12 px-3 border-b border-default', sidebarCollapsed && 'justify-center px-0')}>
-          <div className="h-7 w-7 rounded-md bg-slate-900 dark:bg-brand-600 text-sky-400 dark:text-white flex items-center justify-center shrink-0">
-            <ShieldCheck className="h-4 w-4" />
-          </div>
-          {!sidebarCollapsed && <div className="font-semibold text-[13px] leading-tight truncate">Customer Portal</div>}
-        </div>
-        <SidebarNav items={PORTAL_NAV} />
-      </aside>
+    <div className="h-full flex bg-app">
+      <Sidebar items={PORTAL_NAV} label="Customer Portal" />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-12 flex items-center gap-2 px-3 border-b border-default bg-surface shrink-0">
-          <div className="text-[13px] text-muted truncate">Managed Services Portal</div>
+        <header className="h-14 flex items-center gap-2 px-4 md:px-6 border-b border-default bg-surface shrink-0">
+          <div className="text-[13px] text-muted truncate">Managed services portal</div>
           <div className="flex-1" />
           {can('portal:tickets') && (
-            <button onClick={() => navigate('/portal/tickets/new')} className="flex items-center gap-1.5 h-8 px-3 rounded-md bg-brand-600 text-white text-[13px] font-medium hover:bg-brand-700">
+            <button onClick={() => navigate('/portal/tickets/new')} className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-brand-600 text-white text-[13px] font-medium hover:bg-brand-700 shadow-[0_1px_2px_rgba(10,31,61,0.12)]">
               <Plus className="h-4 w-4" /> Raise a ticket
             </button>
           )}
           {can('ai:use') && (
-            <button onClick={() => setAssistantOpen(!assistantOpen)} className={cn('h-8 w-8 rounded-md flex items-center justify-center text-muted hover:bg-surface-2', assistantOpen && 'bg-brand-600/10 text-brand-600')} title="AI assistant">
-              <Sparkles className="h-4 w-4" />
+            <button onClick={() => setAssistantOpen(!assistantOpen)} className={cn('h-9 w-9 rounded-lg flex items-center justify-center text-muted hover:bg-surface-2', assistantOpen && 'bg-brand-50 text-brand-700')} title="AI assistant">
+              <Sparkles className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
           )}
           <NotificationBell />
-          <ThemeToggle />
+          <div className="hidden sm:block w-px h-6 mx-1" style={{ background: 'var(--border)' }} />
+          <BrandLogo className="hidden sm:inline-flex mx-1" />
           <UserMenu />
         </header>
         <div className="flex-1 flex min-h-0">
-          <main className="flex-1 overflow-y-auto p-4 md:p-5">{children}</main>
+          <main className="flex-1 overflow-y-auto">
+            <div className="p-5 md:p-7 max-w-[1300px] mx-auto">{children}</div>
+          </main>
           {assistantOpen && <AssistantPanel />}
         </div>
         <MobileNav items={PORTAL_NAV} />

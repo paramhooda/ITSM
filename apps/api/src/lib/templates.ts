@@ -21,10 +21,10 @@ export function render(template: string, data: Record<string, unknown>): string 
 export const escapeHtml = (s: string) => Handlebars.Utils.escapeExpression(s);
 
 /** Minimal HTML email wrapper used by all notifications. */
-export function emailLayout(title: string, bodyHtml: string, footer = 'This message was sent by the MSP Service Management Platform.') {
+export function emailLayout(title: string, bodyHtml: string, footer = 'This message was sent by Progression Service Management.') {
   return `<!doctype html><html><body style="margin:0;padding:24px;background:#f4f5f7;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#1f2933">
 <div style="max-width:640px;margin:0 auto;background:#fff;border-radius:8px;border:1px solid #e4e7eb;overflow:hidden">
-<div style="padding:16px 24px;background:#0f172a;color:#fff;font-weight:600;font-size:16px">${escapeHtml(title)}</div>
+<div style="padding:16px 24px;background:#0a1f3d;color:#fff;font-weight:600;font-size:16px">${escapeHtml(title)}</div>
 <div style="padding:24px;font-size:14px;line-height:1.55">${bodyHtml}</div>
 <div style="padding:12px 24px;background:#f8fafc;color:#64748b;font-size:12px">${escapeHtml(footer)}</div>
 </div></body></html>`;

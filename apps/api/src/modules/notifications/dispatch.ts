@@ -38,7 +38,7 @@ export async function queueNotification(tx: Tx, input: NotificationInput) {
     .from(schema.notificationTemplates)
     .where(and(eq(schema.notificationTemplates.event, input.event), eq(schema.notificationTemplates.channel, 'email'), eq(schema.notificationTemplates.isActive, true)))
     .limit(1);
-  const data = { platformName: 'MSP Service Management', appUrl: config.APP_URL, ...input.data };
+  const data = { platformName: 'Progression', appUrl: config.APP_URL, ...input.data };
   let subject = input.title ?? input.event;
   let html = '';
   if (template) {

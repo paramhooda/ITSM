@@ -39,6 +39,9 @@ async function seedRoles(tx: Tx) {
         .insert(schema.rolePermissions)
         .values(ALL_PERMISSIONS.filter((p) => !p.startsWith('portal:')).map((permission) => ({ roleId: roleId!, permission })))
         .onConflictDoNothing();
+    } else {
+      // System roles pick up permissions introduced by upgrades (never removes what an admin granted).
+      await tx.insert(schema.rolePermissions).values(def.permissions.map((permission) => ({ roleId: roleId!, permission }))).onConflictDoNothing();
     }
   }
 }
@@ -251,7 +254,7 @@ async function seedCatalogItems(tx: Tx) {
 
 async function seedSystemSettings(tx: Tx) {
   const defaults: Record<string, { value: unknown; description: string }> = {
-    'platform.name': { value: 'MSP Service Management', description: 'Product name shown in the UI and emails' },
+    'platform.name': { value: 'Progression', description: 'Product name shown in the UI and emails' },
     'tickets.auto_close_days': { value: 5, description: 'Days after resolution before a ticket is automatically closed' },
     'tickets.reopen_window_days': { value: 14, description: 'Days after closure a customer may reopen a ticket' },
     'tickets.default_sla_policy_fallback': { value: true, description: 'Apply the default SLA policy when no contract policy applies' },

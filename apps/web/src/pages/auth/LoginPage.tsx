@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { ShieldCheck } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api, ApiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { Button, Input, Field } from '@/components/ui';
@@ -39,45 +38,52 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-full flex items-center justify-center p-6 bg-app">
-      <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2 mb-6 justify-center">
-          <div className="h-9 w-9 rounded-lg bg-slate-900 dark:bg-brand-600 text-sky-400 dark:text-white flex items-center justify-center">
-            <ShieldCheck className="h-5 w-5" />
+    <div className="min-h-full flex flex-col bg-app">
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-[400px]">
+          <div className="flex justify-center mb-8">
+            <img src="/logo.png" alt="Progression" className="h-10 w-auto" draggable={false} />
           </div>
-          <div>
-            <div className="font-semibold leading-tight">MSP Service Management</div>
-            <div className="text-xs text-muted">ITSM · Helpdesk · Assets · CMDB</div>
-          </div>
-        </div>
-        <form onSubmit={submit} className="card p-6 flex flex-col gap-4">
-          <div className="font-semibold text-base">{forgot ? 'Reset your password' : 'Sign in'}</div>
-          {sent ? (
-            <div className="text-[13px] text-muted">If an account exists for <strong>{email}</strong>, a password reset link has been emailed.</div>
-          ) : (
-            <>
-              <Field label="Email">
-                <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-              </Field>
-              {!forgot && (
-                <Field label="Password">
-                  <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <form onSubmit={submit} className="card p-7 flex flex-col gap-5">
+            <div>
+              <h1 className="text-[20px] font-semibold tracking-[-0.02em]">{forgot ? 'Reset your password' : 'Sign in'}</h1>
+              <p className="text-[13.5px] text-muted mt-1">{forgot ? 'We will email you a link to choose a new password.' : 'Service management platform'}</p>
+            </div>
+            {sent ? (
+              <div className="text-[13.5px] text-secondary">
+                If an account exists for <span className="font-medium text-default">{email}</span>, a password reset link has been emailed.
+              </div>
+            ) : (
+              <>
+                <Field label="Email">
+                  <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus placeholder="you@company.com" />
                 </Field>
-              )}
-              {error && <div className="text-[13px] text-red-600 bg-red-50 dark:bg-red-500/10 rounded-md px-3 py-2">{error}</div>}
-              <Button type="submit" loading={loading} size="lg" className="w-full justify-center">
-                {forgot ? 'Send reset link' : 'Sign in'}
-              </Button>
-            </>
-          )}
-          <button type="button" className="text-xs text-muted hover:text-default text-center" onClick={() => { setForgot(!forgot); setSent(false); setError(null); }}>
-            {forgot ? 'Back to sign in' : 'Forgot your password?'}
-          </button>
-        </form>
-        <div className="text-center text-xs text-subtle mt-4">
-          <Link to="/login">Enterprise Managed Services Platform</Link>
+                {!forgot && (
+                  <Field label="Password">
+                    <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••••" />
+                  </Field>
+                )}
+                {error && <div className="text-[13px] text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
+                <Button type="submit" loading={loading} size="lg" className="w-full justify-center">
+                  {forgot ? 'Send reset link' : 'Continue'}
+                </Button>
+              </>
+            )}
+            <button
+              type="button"
+              className="text-[13px] text-muted hover:text-default text-center"
+              onClick={() => {
+                setForgot(!forgot);
+                setSent(false);
+                setError(null);
+              }}
+            >
+              {forgot ? 'Back to sign in' : 'Forgot your password?'}
+            </button>
+          </form>
         </div>
       </div>
+      <div className="py-5 text-center text-[12px] text-subtle">© {new Date().getFullYear()} Progression · Managed services platform</div>
     </div>
   );
 }

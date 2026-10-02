@@ -91,7 +91,7 @@ export function normalizeParams(ctx: Ctx, def: ReportDefinition, raw: Record<str
 
 async function platformName(tx: Tx) {
   const [row] = await tx.select({ value: schema.systemSettings.value }).from(schema.systemSettings).where(eq(schema.systemSettings.key, 'platform.name')).limit(1);
-  return typeof row?.value === 'string' && row.value ? row.value : 'MSP Service Management';
+  return typeof row?.value === 'string' && row.value ? row.value : 'Progression';
 }
 
 async function customerName(tx: Tx, id: string | null) {

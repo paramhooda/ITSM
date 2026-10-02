@@ -40,11 +40,14 @@ export async function buildApp() {
           directives: {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-            fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            fontSrc: ["'self'", 'data:'],
             imgSrc: ["'self'", 'data:', 'blob:'],
             connectSrc: ["'self'"],
             frameAncestors: ["'none'"],
+            // Only force HTTPS upgrades when the platform is actually served over TLS;
+            // on-premise deployments often run plain HTTP on an internal network.
+            upgradeInsecureRequests: config.APP_URL.startsWith('https://') ? [] : null,
           },
         }
       : false,
@@ -55,7 +58,7 @@ export async function buildApp() {
   await app.register(multipart, { limits: { fileSize: config.MAX_UPLOAD_MB * 1024 * 1024, files: 10 } });
   await app.register(swagger, {
     openapi: {
-      info: { title: 'MSP Service Management Platform API', version: '1.0.0', description: 'ITSM, Helpdesk, Asset Management & CMDB platform for Managed Services Providers.' },
+      info: { title: 'Progression Service Management API', version: '1.0.0', description: 'ITSM, Helpdesk, Asset Management & CMDB platform for Managed Services Providers.' },
       components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' }, apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' } } },
       security: [{ bearerAuth: [] }, { apiKey: [] }],
     },

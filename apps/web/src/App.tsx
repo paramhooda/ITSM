@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth';
 import { LoadingBlock } from '@/components/ui';
 import { AppShell } from '@/layouts/AppShell';
 import { PortalShell } from '@/layouts/PortalShell';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import LoginPage from '@/pages/auth/LoginPage';
 import type { Permission } from '@itsm/shared';
 import { routes as appRoutes } from '@/routes';
@@ -59,6 +60,7 @@ export default function App() {
 
   return (
     <Shell>
+      <ErrorBoundary resetKey={location.pathname} compact>
       <Suspense fallback={<LoadingBlock />}>
         <Routes>
           {visible.map((r) => (
@@ -76,6 +78,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      </ErrorBoundary>
     </Shell>
   );
 }

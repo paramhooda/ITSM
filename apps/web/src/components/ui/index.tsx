@@ -15,24 +15,24 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<Variant, string> = {
-  primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm',
-  secondary: 'bg-surface-2 text-default hover:brightness-95 dark:hover:brightness-125 border border-default',
-  outline: 'bg-transparent border border-default text-default hover:bg-surface-2',
+  primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-[0_1px_2px_rgba(10,31,61,0.12),inset_0_1px_0_rgba(255,255,255,0.12)]',
+  secondary: 'bg-white text-default border border-strong hover:bg-surface-2 shadow-[0_1px_2px_rgba(10,31,61,0.06)]',
+  outline: 'bg-white text-default border border-strong hover:bg-surface-2 shadow-[0_1px_2px_rgba(10,31,61,0.04)]',
   ghost: 'bg-transparent text-muted hover:bg-surface-2 hover:text-default',
-  danger: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
+  danger: 'bg-red-600 text-white hover:bg-red-700 shadow-[0_1px_2px_rgba(10,31,61,0.12)]',
 };
 const sizeClasses: Record<Size, string> = {
-  sm: 'h-7 px-2.5 text-xs gap-1.5',
-  md: 'h-8.5 px-3 text-[13px] gap-2',
-  lg: 'h-10 px-4 text-sm gap-2',
-  icon: 'h-8 w-8 p-0 justify-center',
+  sm: 'h-7.5 px-2.5 text-[12.5px] gap-1.5',
+  md: 'h-9 px-3.5 text-[13px] gap-2',
+  lg: 'h-10 px-4 text-[13.5px] gap-2',
+  icon: 'h-8.5 w-8.5 p-0 justify-center',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({ className, variant = 'primary', size = 'md', loading, icon, children, disabled, ...props }, ref) => (
   <button
     ref={ref}
     disabled={disabled || loading}
-    className={cn('inline-flex items-center rounded-lg font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 disabled:opacity-50 disabled:cursor-not-allowed', variantClasses[variant], sizeClasses[size], className)}
+    className={cn('inline-flex items-center rounded-lg font-medium whitespace-nowrap transition-[background-color,box-shadow,transform] duration-150 active:translate-y-px focus:outline-none focus-visible:ring-[3px] focus-visible:ring-brand-500/30 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:translate-y-0', variantClasses[variant], sizeClasses[size], className)}
     {...props}
   >
     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
@@ -69,7 +69,7 @@ export function Checkbox({ label, className, ...props }: InputHTMLAttributes<HTM
   const id = useId();
   return (
     <label htmlFor={props.id ?? id} className={cn('inline-flex items-center gap-2 text-[13px] cursor-pointer select-none', className)}>
-      <input id={props.id ?? id} type="checkbox" className="h-4 w-4 rounded border-default accent-brand-600" {...props} />
+      <input id={props.id ?? id} type="checkbox" className="h-4 w-4 rounded border-strong accent-brand-600" {...props} />
       {label}
     </label>
   );
@@ -79,7 +79,7 @@ export function Field({ label, hint, error, required, children, className }: { l
   return (
     <div className={cn('flex flex-col gap-1', className)}>
       {label && (
-        <label className="text-[12.5px] font-medium text-muted">
+        <label className="text-[12.5px] font-medium text-secondary">
           {label}
           {required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
@@ -94,7 +94,7 @@ export function Field({ label, hint, error, required, children, className }: { l
 // ------------------------------------------------------------------ Badge
 export function Badge({ color, className, children, dot, ...props }: HTMLAttributes<HTMLSpanElement> & { color?: string | null; dot?: boolean }) {
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] font-medium whitespace-nowrap', colorClass(color), className)} {...props}>
+    <span className={cn('inline-flex items-center gap-1.5 rounded-md px-2 py-[3px] text-[11.5px] font-medium leading-none whitespace-nowrap', colorClass(color), className)} {...props}>
       {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
       {children}
     </span>
@@ -106,12 +106,12 @@ export function Card({ className, children, title, actions, padded = true, ...pr
   return (
     <div className={cn('card', className)} {...props}>
       {(title || actions) && (
-        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-default">
-          <div className="font-semibold text-[13px]">{title}</div>
+        <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-default">
+          <div className="font-semibold text-[13.5px] text-default">{title}</div>
           <div className="flex items-center gap-2">{actions}</div>
         </div>
       )}
-      <div className={cn(padded && 'p-4')}>{children}</div>
+      <div className={cn(padded && 'p-5')}>{children}</div>
     </div>
   );
 }
@@ -119,11 +119,11 @@ export function Card({ className, children, title, actions, padded = true, ...pr
 // ------------------------------------------------------------------ Page header
 export function PageHeader({ title, subtitle, actions, breadcrumb }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; breadcrumb?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
       <div className="min-w-0">
-        {breadcrumb && <div className="text-xs text-subtle mb-1">{breadcrumb}</div>}
-        <h1 className="text-lg font-semibold leading-tight truncate">{title}</h1>
-        {subtitle && <div className="text-[13px] text-muted mt-0.5">{subtitle}</div>}
+        {breadcrumb && <div className="text-[12.5px] text-subtle mb-1.5">{breadcrumb}</div>}
+        <h1 className="text-[22px] font-semibold leading-tight tracking-[-0.02em] truncate">{title}</h1>
+        {subtitle && <div className="text-[13.5px] text-muted mt-1">{subtitle}</div>}
       </div>
       {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
     </div>
@@ -133,9 +133,9 @@ export function PageHeader({ title, subtitle, actions, breadcrumb }: { title: Re
 // ------------------------------------------------------------------ Empty / loading / error states
 export function EmptyState({ title = 'Nothing here yet', description, action, icon }: { title?: ReactNode; description?: ReactNode; action?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center py-12 px-4">
-      <div className="h-10 w-10 rounded-full bg-surface-2 flex items-center justify-center text-subtle mb-3">{icon ?? <Inbox className="h-5 w-5" />}</div>
-      <div className="font-medium">{title}</div>
+    <div className="flex flex-col items-center justify-center text-center py-14 px-4">
+      <div className="h-11 w-11 rounded-full bg-surface-2 border border-default flex items-center justify-center text-subtle mb-3">{icon ?? <Inbox className="h-5 w-5" />}</div>
+      <div className="font-medium text-[14px]">{title}</div>
       {description && <div className="text-[13px] text-muted mt-1 max-w-sm">{description}</div>}
       {action && <div className="mt-4">{action}</div>}
     </div>
@@ -181,18 +181,18 @@ export function Dialog({ open, onClose, title, children, footer, width = 'max-w-
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:pt-[8vh]">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" onClick={onClose} />
-      <div className={cn('relative card w-full shadow-xl fade-in max-h-[88vh] flex flex-col', width)} role="dialog" aria-modal>
+      <div className="absolute inset-0 bg-navy-900/35 backdrop-blur-[2px]" onClick={onClose} />
+      <div className={cn('relative card w-full shadow-pop scale-in max-h-[88vh] flex flex-col', width)} role="dialog" aria-modal>
         {title && (
-          <div className="flex items-center justify-between px-5 py-3 border-b border-default">
-            <div className="font-semibold">{title}</div>
-            <button onClick={onClose} className="text-muted hover:text-default" aria-label="Close">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-default">
+            <div className="font-semibold text-[15px]">{title}</div>
+            <button onClick={onClose} className="h-7 w-7 rounded-md flex items-center justify-center text-muted hover:text-default hover:bg-surface-2" aria-label="Close">
               <X className="h-4 w-4" />
             </button>
           </div>
         )}
         <div className="px-5 py-4 overflow-y-auto">{children}</div>
-        {footer && <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-default bg-surface-2/60 rounded-b-[10px]">{footer}</div>}
+        {footer && <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-default bg-surface-2/60 rounded-b-[12px]">{footer}</div>}
       </div>
     </div>,
     document.body,
@@ -209,11 +209,11 @@ export function Drawer({ open, onClose, title, children, width = 'max-w-xl', foo
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className={cn('relative bg-surface border-l border-default w-full h-full shadow-2xl flex flex-col fade-in', width)}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-default">
-          <div className="font-semibold">{title}</div>
-          <button onClick={onClose} className="text-muted hover:text-default" aria-label="Close">
+      <div className="absolute inset-0 bg-navy-900/35 backdrop-blur-[2px]" onClick={onClose} />
+      <div className={cn('relative bg-surface border-l border-default w-full h-full shadow-pop flex flex-col fade-in', width)}>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-default">
+          <div className="font-semibold text-[15px]">{title}</div>
+          <button onClick={onClose} className="h-7 w-7 rounded-md flex items-center justify-center text-muted hover:text-default hover:bg-surface-2" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -256,10 +256,10 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: { t
         <button
           key={t.key}
           onClick={() => onChange(t.key)}
-          className={cn('px-3 py-2 text-[13px] font-medium border-b-2 -mb-px whitespace-nowrap transition-colors', value === t.key ? 'border-brand-600 text-default' : 'border-transparent text-muted hover:text-default')}
+          className={cn('px-3 py-2.5 text-[13.5px] font-medium border-b-2 -mb-px whitespace-nowrap transition-colors', value === t.key ? 'border-brand-600 text-default' : 'border-transparent text-muted hover:text-default')}
         >
           {t.label}
-          {t.count !== undefined && <span className="ml-1.5 rounded-full bg-surface-2 px-1.5 text-[11px] text-muted">{t.count}</span>}
+          {t.count !== undefined && <span className="ml-1.5 rounded-full bg-surface-2 px-1.5 py-px text-[11px] text-muted tnum">{t.count}</span>}
         </button>
       ))}
     </div>
@@ -320,9 +320,9 @@ export function DataTable<T extends { id?: string }>({ columns, rows, onRowClick
 
 export function Pagination({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (p: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
-  if (total <= pageSize) return <div className="text-xs text-muted px-3 py-2">{total} {total === 1 ? 'record' : 'records'}</div>;
+  if (total <= pageSize) return <div className="text-[12.5px] text-muted px-4 py-2.5">{total} {total === 1 ? 'record' : 'records'}</div>;
   return (
-    <div className="flex items-center justify-between px-3 py-2 text-xs text-muted border-t border-default">
+    <div className="flex items-center justify-between px-4 py-2.5 text-[12.5px] text-muted border-t border-default">
       <div>
         {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
       </div>
@@ -348,10 +348,10 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
   useEffect(() => setLocal(value), [value]);
   return (
     <div className={cn('relative', className)}>
-      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-subtle" />
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-subtle pointer-events-none" />
       <input
         autoFocus={autoFocus}
-        className="input pl-8"
+        className="input pl-9"
         placeholder={placeholder}
         value={local}
         onChange={(e) => {
@@ -371,8 +371,8 @@ export function KeyValue({ items, columns = 2, className }: { items: { label: Re
     <dl className={cn('grid gap-x-6 gap-y-3', cols, className)}>
       {items.map((it, i) => (
         <div key={i} className={cn(it.span === 2 && 'sm:col-span-2', it.span === 3 && 'sm:col-span-3')}>
-          <dt className="text-[11.5px] uppercase tracking-wide text-subtle font-medium">{it.label}</dt>
-          <dd className="text-[13.5px] mt-0.5 break-words">{it.value ?? '—'}</dd>
+          <dt className="text-[12px] text-muted font-medium">{it.label}</dt>
+          <dd className="text-[13.5px] mt-0.5 break-words text-default">{it.value ?? '—'}</dd>
         </div>
       ))}
     </dl>
@@ -381,15 +381,15 @@ export function KeyValue({ items, columns = 2, className }: { items: { label: Re
 
 // ------------------------------------------------------------------ Stat tile
 export function StatTile({ label, value, hint, tone, onClick, icon }: { label: ReactNode; value: ReactNode; hint?: ReactNode; tone?: 'default' | 'good' | 'warn' | 'bad'; onClick?: () => void; icon?: ReactNode }) {
-  const toneClass = { default: '', good: 'text-emerald-600 dark:text-emerald-400', warn: 'text-amber-600 dark:text-amber-400', bad: 'text-red-600 dark:text-red-400' }[tone ?? 'default'];
+  const toneClass = { default: 'text-default', good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600' }[tone ?? 'default'];
   return (
-    <div className={cn('card p-4 flex flex-col gap-1', onClick && 'cursor-pointer hover:border-brand-400 transition-colors')} onClick={onClick}>
-      <div className="flex items-center justify-between text-[12px] text-muted font-medium">
+    <div className={cn('card p-5 flex flex-col gap-1.5', onClick && 'cursor-pointer hover:shadow-raised transition-shadow')} onClick={onClick}>
+      <div className="flex items-center justify-between text-[12.5px] text-muted font-medium">
         <span>{label}</span>
         {icon && <span className="text-subtle">{icon}</span>}
       </div>
-      <div className={cn('text-2xl font-semibold tracking-tight', toneClass)}>{value}</div>
-      {hint && <div className="text-xs text-subtle">{hint}</div>}
+      <div className={cn('text-[28px] leading-none font-semibold tracking-[-0.02em] tnum', toneClass)}>{value}</div>
+      {hint && <div className="text-[12px] text-subtle mt-0.5">{hint}</div>}
     </div>
   );
 }
@@ -403,7 +403,7 @@ export function Avatar({ name, size = 'sm', className }: { name?: string | null;
     .slice(0, 2)
     .map((p) => p[0]!.toUpperCase())
     .join('');
-  return <span className={cn('inline-flex items-center justify-center rounded-full bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200 font-semibold shrink-0', s, className)}>{txt || '?'}</span>;
+  return <span className={cn('inline-flex items-center justify-center rounded-full bg-brand-100 text-brand-800 font-semibold shrink-0', s, className)}>{txt || '?'}</span>;
 }
 
 // ------------------------------------------------------------------ Progress bar
@@ -412,7 +412,7 @@ export function ProgressBar({ pct, tone, className }: { pct: number; tone?: 'aut
   const t = tone === 'auto' || !tone ? (p >= 100 ? 'bad' : p >= 75 ? 'warn' : 'good') : tone;
   const color = { good: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-red-500', neutral: 'bg-brand-500' }[t];
   return (
-    <div className={cn('h-1.5 w-full rounded-full bg-surface-2 overflow-hidden', className)}>
+    <div className={cn('h-1.5 w-full rounded-full bg-surface-3 overflow-hidden', className)}>
       <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${p}%` }} />
     </div>
   );
@@ -421,7 +421,7 @@ export function ProgressBar({ pct, tone, className }: { pct: number; tone?: 'aut
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode }) {
   return (
     <label className="inline-flex items-center gap-2 cursor-pointer select-none text-[13px]">
-      <span role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className={cn('relative inline-flex h-5 w-9 items-center rounded-full transition-colors', checked ? 'bg-brand-600' : 'bg-surface-2 border border-default')}>
+      <span role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className={cn('relative inline-flex h-5 w-9 items-center rounded-full transition-colors', checked ? 'bg-brand-600' : 'bg-surface-3 border border-strong')}>
         <span className={cn('inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform', checked ? 'translate-x-4' : 'translate-x-0.5')} />
       </span>
       {label}
@@ -430,7 +430,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-default bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-mono text-muted">{children}</kbd>;
+  return <kbd className="rounded-md border border-default bg-white px-1.5 py-0.5 text-[10.5px] font-mono text-muted shadow-[0_1px_0_rgba(10,31,61,0.06)]">{children}</kbd>;
 }
 
 export const CheckIcon = Check;

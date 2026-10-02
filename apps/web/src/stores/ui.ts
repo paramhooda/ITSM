@@ -1,10 +1,6 @@
 import { create } from 'zustand';
 
-type Theme = 'light' | 'dark' | 'system';
-
 interface UiState {
-  theme: Theme;
-  setTheme: (t: Theme) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
   assistantOpen: boolean;
@@ -15,31 +11,7 @@ interface UiState {
   setSearchOpen: (v: boolean) => void;
 }
 
-function applyTheme(t: Theme) {
-  const dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  document.documentElement.classList.toggle('dark', dark);
-}
-
-const initialTheme = ((): Theme => {
-  try {
-    return (localStorage.getItem('itsm.theme') as Theme) || 'system';
-  } catch {
-    return 'system';
-  }
-})();
-
 export const useUiStore = create<UiState>((set) => ({
-  theme: initialTheme,
-  setTheme: (theme) => {
-    try {
-      if (theme === 'system') localStorage.removeItem('itsm.theme');
-      else localStorage.setItem('itsm.theme', theme);
-    } catch {
-      /* ignore */
-    }
-    applyTheme(theme);
-    set({ theme });
-  },
   sidebarCollapsed: (() => {
     try {
       return localStorage.getItem('itsm.sidebar') === 'collapsed';
@@ -65,4 +37,10 @@ export const useUiStore = create<UiState>((set) => ({
   setSearchOpen: (searchOpen) => set({ searchOpen }),
 }));
 
-applyTheme(initialTheme);
+// The product ships a single light theme; clear any legacy dark preference.
+try {
+  document.documentElement.classList.remove('dark');
+  localStorage.removeItem('itsm.theme');
+} catch {
+  /* ignore */
+}
