@@ -223,11 +223,52 @@ export async function listScopeItems(ctx: Ctx, contractId: string) {
 /** Scope of all covering contracts of a customer, grouped per contract and header. */
 export async function customerScope(ctx: Ctx, customerId: string) {
   ctx.requireCustomer(customerId);
-  const contracts = await ctx.tx.select({ id: schema.contracts.id, number: schema.contracts.number, name: schema.contracts.name, status: schema.contracts.status }).from(schema.contracts).where(and(eq(schema.contracts.customerId, customerId), inArray(schema.contracts.status, COVERING_STATUSES)));
+  const contracts = await ctx.tx
+    .select({ id: schema.contracts.id, number: schema.contracts.number, name: schema.contracts.name, status: schema.contracts.status, startDate: schema.contracts.startDate, endDate: schema.contracts.endDate, slaPolicyId: schema.contracts.slaPolicyId, supportHoursCalendarId: schema.contracts.supportHoursCalendarId })
+    .from(schema.contracts)
+    .where(and(eq(schema.contracts.customerId, customerId), inArray(schema.contracts.status, COVERING_STATUSES)))
+    .orderBy(asc(schema.contracts.endDate));
   if (!contracts.length) return [];
-  const rows = await ctx.tx.select().from(schema.scopeItems).where(inArray(schema.scopeItems.contractId, contracts.map((c) => c.id))).orderBy(asc(schema.scopeItems.sortOrder), asc(schema.scopeItems.name));
+  const contractIds = contracts.map((c) => c.id);
+  const rows = await ctx.tx.select().from(schema.scopeItems).where(inArray(schema.scopeItems.contractId, contractIds)).orderBy(asc(schema.scopeItems.sortOrder), asc(schema.scopeItems.name));
   const items = await decorate(ctx.tx, rows);
-  return contracts.map((c) => ({ contract: c, groups: groupByHeader(items.filter((i) => i.contractId === c.id)) }));
+  const services = await ctx.tx
+    .select({ cs: schema.contractServices, serviceName: schema.services.name, domain: schema.services.domain, serviceDefaultSlaPolicyId: schema.services.defaultSlaPolicyId })
+    .from(schema.contractServices)
+    .innerJoin(schema.services, eq(schema.services.id, schema.contractServices.serviceId))
+    .where(inArray(schema.contractServices.contractId, contractIds))
+    .orderBy(asc(schema.services.name));
+  const sites = await ctx.tx
+    .select({ contractId: schema.contractSites.contractId, id: schema.sites.id, name: schema.sites.name, code: schema.sites.code })
+    .from(schema.contractSites)
+    .innerJoin(schema.sites, eq(schema.sites.id, schema.contractSites.siteId))
+    .where(inArray(schema.contractSites.contractId, contractIds));
+  const policies = new Map((await ctx.tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name }).from(schema.slaPolicies)).map((p) => [p.id, p.name]));
+  const teams = new Map((await ctx.tx.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams)).map((t) => [t.id, t.name]));
+  const calendars = new Map((await ctx.tx.select({ id: schema.businessCalendars.id, name: schema.businessCalendars.name }).from(schema.businessCalendars)).map((c) => [c.id, c.name]));
+  return contracts.map((c) => ({
+    contract: { ...c, slaPolicyName: c.slaPolicyId ? policies.get(c.slaPolicyId) ?? null : null },
+    services: services
+      .filter((s) => s.cs.contractId === c.id)
+      .map((s) => {
+        const effective = s.cs.slaPolicyId ?? c.slaPolicyId ?? s.serviceDefaultSlaPolicyId ?? null;
+        return {
+          serviceId: s.cs.serviceId,
+          serviceName: s.serviceName,
+          domain: s.domain,
+          slaPolicyId: s.cs.slaPolicyId,
+          slaPolicyName: s.cs.slaPolicyId ? policies.get(s.cs.slaPolicyId) ?? null : null,
+          effectiveSlaPolicyId: effective,
+          effectiveSlaPolicyName: effective ? policies.get(effective) ?? null : null,
+          teamId: s.cs.teamId,
+          teamName: s.cs.teamId ? teams.get(s.cs.teamId) ?? null : null,
+          supportHoursCalendarId: s.cs.supportHoursCalendarId,
+          supportHoursCalendarName: (s.cs.supportHoursCalendarId ?? c.supportHoursCalendarId) ? calendars.get(s.cs.supportHoursCalendarId ?? c.supportHoursCalendarId!) ?? null : null,
+        };
+      }),
+    sites: sites.filter((s) => s.contractId === c.id).map(({ contractId: _x, ...s }) => s),
+    groups: groupByHeader(items.filter((i) => i.contractId === c.id)),
+  }));
 }
 
 async function validateRefs(ctx: Ctx, customerId: string, input: Partial<ScopeItemInput>) {

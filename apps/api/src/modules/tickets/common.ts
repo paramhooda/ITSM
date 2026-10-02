@@ -17,6 +17,7 @@ export const SYSTEM_PRINCIPAL: Principal = {
   id: SYSTEM_USER_ID,
   email: 'system@local',
   name: 'System',
+  phone: null,
   userType: 'msp',
   customerId: null,
   status: 'active',
