@@ -59,7 +59,7 @@ export default function CustomerListPage() {
     },
     { key: 'industryLabel', header: 'Industry', render: (r) => <span className="text-muted">{r.industryLabel ?? '—'}</span> },
     { key: 'typeLabel', header: 'Type', render: (r) => <span className="text-muted">{r.typeLabel ?? '—'}</span> },
-    { key: 'status', header: 'Status', render: (r) => (r.statusLabel ? <Badge color={r.statusColor} dot>{r.statusLabel}</Badge> : '—') },
+    { key: 'status', header: 'Status', render: (r) => (r.statusLabel ? <Badge color={r.statusColor ?? undefined} dot>{r.statusLabel}</Badge> : '—') },
     { key: 'accountManagerName', header: 'Account manager', render: (r) => r.accountManagerName ?? <span className="text-subtle">Unassigned</span> },
     { key: 'openTickets', header: 'Open tickets', sortable: true, className: 'text-right tabular-nums', render: (r) => (r.openTickets > 0 ? <span className="font-medium">{r.openTickets}</span> : <span className="text-subtle">0</span>) },
     { key: 'activeContracts', header: 'Active contracts', sortable: true, className: 'text-right tabular-nums', render: (r) => (r.activeContracts > 0 ? r.activeContracts : <span className="text-amber-600 dark:text-amber-400">0</span>) },

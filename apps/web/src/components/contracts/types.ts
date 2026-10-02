@@ -149,7 +149,7 @@ export interface ContractListItem {
   createdAt: string;
 }
 
-export interface ContractDetail extends ContractListItem {
+export interface ContractDetail extends Omit<ContractListItem, 'services' | 'entitlements'> {
   customer: { id: string; code: string; name: string; accountManagerId: string | null; accountManagerName: string | null } | null;
   canViewCommercial: boolean;
   supportHoursCalendarId: string | null;

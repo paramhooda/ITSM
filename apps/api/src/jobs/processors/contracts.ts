@@ -88,7 +88,7 @@ export async function sendContractNotifications(now = new Date()) {
           .from(schema.attachments)
           .where(and(eq(schema.attachments.entityType, 'contract'), eq(schema.attachments.entityId, contract.id), inArray(schema.attachments.docType, ['agreement', 'po'])));
         if (docs === 0 && (await claimMilestone(tx, contract.id, contract.customerId, 'missing_documents'))) {
-          await queueNotification(tx, { ...base, event: 'contract.missing_documents', recipients: await recipients(), data, channels: ['in_app', 'email'] });
+          await queueNotification(tx, { ...base, event: 'contract.missing_documents', recipients: await recipients(), data, channels: ['in_app'] });
           sent++;
         }
       }

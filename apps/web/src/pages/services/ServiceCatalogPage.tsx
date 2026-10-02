@@ -125,7 +125,7 @@ export default function ServiceCatalogPage() {
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <Badge color={DOMAIN_COLORS[s.domain] ?? 'slate'}>{s.domain.replace('_', ' ').toUpperCase()}</Badge>
-                      {s.statusLabel && s.statusLabel !== 'Active' && <Badge color={s.statusColor}>{s.statusLabel}</Badge>}
+                      {s.statusLabel && s.statusLabel !== 'Active' && <Badge color={s.statusColor ?? undefined}>{s.statusLabel}</Badge>}
                     </div>
                   </div>
                   {s.description && <div className="text-xs text-muted mt-1 line-clamp-2">{s.description}</div>}
@@ -165,7 +165,7 @@ function ServicePanel({ id, canManage, onEdit, onDelete }: { id: string; canMana
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-base font-semibold flex items-center gap-2">{s.name}<Badge color={DOMAIN_COLORS[s.domain] ?? 'slate'}>{s.domain.replace('_', ' ').toUpperCase()}</Badge>{s.statusLabel && <Badge color={s.statusColor}>{s.statusLabel}</Badge>}{!s.isActive && <Badge color="gray">Inactive</Badge>}</div>
+          <div className="text-base font-semibold flex items-center gap-2">{s.name}<Badge color={DOMAIN_COLORS[s.domain] ?? 'slate'}>{s.domain.replace('_', ' ').toUpperCase()}</Badge>{s.statusLabel && <Badge color={s.statusColor ?? undefined}>{s.statusLabel}</Badge>}{!s.isActive && <Badge color="gray">Inactive</Badge>}</div>
           <div className="text-xs text-subtle font-mono">{s.key}</div>
         </div>
         {canManage && (

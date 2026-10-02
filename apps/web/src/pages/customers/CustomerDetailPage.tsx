@@ -86,7 +86,7 @@ export default function CustomerDetailPage() {
           <span className="flex items-center gap-2 flex-wrap">
             {c.name}
             <span className="font-mono text-[12px] text-subtle font-normal">{c.code}</span>
-            {c.statusLabel && <Badge color={c.statusColor} dot>{c.statusLabel}</Badge>}
+            {c.statusLabel && <Badge color={c.statusColor ?? undefined} dot>{c.statusLabel}</Badge>}
             {!c.isActive && <Badge color="gray">Inactive</Badge>}
           </span>
         }
@@ -290,7 +290,7 @@ function ScopeTab({ id }: { id: string }) {
   return (
     <div className="space-y-4">
       {q.data.map(({ contract, services, sites, groups }) => (
-        <Card key={contract.id} title={<span className="flex items-center gap-2"><Link to={`/contracts/${contract.id}`} className="hover:underline">{contract.number} · {contract.name}</Link><ContractStatusBadge status={contract.status} /></span>} actions={<span className="text-xs text-muted">{fmtDate(contract.startDate)} – {fmtDate(contract.endDate)} · SLA: {contract.slaPolicyName ?? 'default'}</span>}>
+        <Card key={contract.id} title={`${contract.number} · ${contract.name}`} actions={<><ContractStatusBadge status={contract.status} /><span className="text-xs text-muted">{fmtDate(contract.startDate)} – {fmtDate(contract.endDate)} · SLA: {contract.slaPolicyName ?? 'default'}</span><Link to={`/contracts/${contract.id}`} className="text-xs text-brand-600 hover:underline">Open</Link></>}>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-1">
               <div className="text-[11.5px] uppercase tracking-wide text-subtle font-medium mb-1.5">Covered services</div>
@@ -349,8 +349,8 @@ function TicketsTab({ id }: { id: string }) {
     { key: 'number', header: 'Ticket', width: '130px', render: (t) => <span className="font-mono text-[12.5px]">{t.number}</span> },
     { key: 'title', header: 'Title', render: (t) => <span className="font-medium">{t.title}</span> },
     { key: 'type', header: 'Type', render: (t) => <span className="text-muted">{titleCase(t.type)}</span> },
-    { key: 'priority', header: 'Priority', render: (t) => (t.priorityLabel ? <Badge color={t.priorityColor}>{t.priorityLabel}</Badge> : '—') },
-    { key: 'status', header: 'Status', render: (t) => (t.statusLabel ? <Badge color={t.statusColor}>{t.statusLabel}</Badge> : '—') },
+    { key: 'priority', header: 'Priority', render: (t) => (t.priorityLabel ? <Badge color={t.priorityColor ?? undefined}>{t.priorityLabel}</Badge> : '—') },
+    { key: 'status', header: 'Status', render: (t) => (t.statusLabel ? <Badge color={t.statusColor ?? undefined}>{t.statusLabel}</Badge> : '—') },
     { key: 'assigneeName', header: 'Assignee', render: (t) => <span className="text-muted">{t.assigneeName ?? 'Unassigned'}</span> },
     { key: 'createdAt', header: 'Created', render: (t) => <span className="text-muted" title={fmtDateTime(t.createdAt)}>{relativeTime(t.createdAt)}</span> },
   ];

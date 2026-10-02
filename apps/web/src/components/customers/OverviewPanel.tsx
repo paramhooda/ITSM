@@ -136,8 +136,8 @@ export function OverviewPanel({ overview, customerId }: { overview: CustomerOver
                     {t.number}
                   </Link>
                   <span className="truncate flex-1">{t.title}</span>
-                  {t.priorityLabel && <Badge color={t.priorityColor}>{t.priorityLabel}</Badge>}
-                  <Badge color={t.statusColor}>{t.statusLabel}</Badge>
+                  {t.priorityLabel && <Badge color={t.priorityColor ?? undefined}>{t.priorityLabel}</Badge>}
+                  <Badge color={t.statusColor ?? undefined}>{t.statusLabel}</Badge>
                   <span className="text-subtle whitespace-nowrap">{relativeTime(t.createdAt)}</span>
                 </li>
               ))}

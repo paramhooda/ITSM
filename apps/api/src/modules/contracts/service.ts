@@ -27,11 +27,15 @@ const isUniqueViolation = (err: unknown) => (err as { code?: string })?.code ===
 
 // ---------------------------------------------------------------- helpers
 
-function stripCommercial<T extends Record<string, unknown>>(row: T, allowed: boolean): T {
+type CommercialField = (typeof commercialFields)[number];
+/** A contract row with the commercial columns optional (absent unless the caller holds contracts:commercial). */
+export type PublicContract = Omit<ContractRow, CommercialField> & Partial<Pick<ContractRow, CommercialField>>;
+
+function stripCommercial(row: ContractRow, allowed: boolean): PublicContract {
   if (allowed) return row;
-  const copy = { ...row } as Record<string, unknown>;
+  const copy: Record<string, unknown> = { ...row };
   for (const f of commercialFields) delete copy[f];
-  return copy as T;
+  return copy as PublicContract;
 }
 
 function hasCommercialInput(input: Record<string, unknown>) {
@@ -202,7 +206,7 @@ export async function listContracts(ctx: Ctx, q: ContractListQuery) {
     const utils = myEnts.map((e) => util.get(e.id)!).filter(Boolean);
     const allowed = ctx.can('contracts:commercial', r.contract.customerId);
     return {
-      ...stripCommercial(r.contract as unknown as Record<string, unknown>, allowed),
+      ...stripCommercial(r.contract, allowed),
       value: allowed ? (r.contract.value === null ? null : Number(r.contract.value)) : undefined,
       customerName: r.customerName,
       customerCode: r.customerCode,
@@ -282,7 +286,7 @@ export async function getContract(ctx: Ctx, id: string) {
   const docTypes = new Set(docs.map((d) => d.docType));
 
   return {
-    ...stripCommercial(contract as unknown as Record<string, unknown>, allowed),
+    ...stripCommercial(contract, allowed),
     value: allowed ? (contract.value === null ? null : Number(contract.value)) : undefined,
     canViewCommercial: allowed,
     ...statusDisplay(contract.status, statusMap),
