@@ -137,6 +137,7 @@ describe.skipIf(!hasDb)('cmdb + assets + discovery (database)', () => {
         name: 'Test Admin',
         userType: 'msp',
         customerId: null,
+        phone: null,
         status: 'active',
         timezone: 'UTC',
         preferences: {},
@@ -216,9 +217,9 @@ describe.skipIf(!hasDb)('cmdb + assets + discovery (database)', () => {
   it('lists with filters and summarises', async () => {
     const list = await as((ctx) => cmdb.listCis(ctx, { page: 1, pageSize: 50, customerId, q: '10.9.0.1', sort: 'name', order: 'asc' }));
     expect(list.total).toBe(2);
-    const byType = await as((ctx) => cmdb.listCis(ctx, { page: 1, pageSize: 50, customerId, typeKey: 'hypervisor' }));
+    const byType = await as((ctx) => cmdb.listCisFull(ctx, { page: 1, pageSize: 50, customerId, typeKey: 'hypervisor' }));
     expect(byType.items.map((i) => i.name)).toEqual(['esx-01']);
-    expect((byType.items[0] as { relationshipCount: number }).relationshipCount).toBe(1);
+    expect(byType.items[0].relationshipCount).toBe(1);
     const summary = await as((ctx) => cmdb.ciSummary(ctx, customerId));
     expect(summary.total).toBe(4);
     expect(summary.byType.find((t) => t.key === 'hypervisor')?.count).toBe(1);

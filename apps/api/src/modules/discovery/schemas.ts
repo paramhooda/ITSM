@@ -41,7 +41,7 @@ export const sourceCreateBody = z.object({
 export type SourceCreateInput = z.infer<typeof sourceCreateBody>;
 
 /** `.partial()` keeps `.default()` values in zod v4, which would silently reset ports/timeouts on PATCH; strip them. */
-const stripDefaults = (shape: z.ZodRawShape) => z.object(Object.fromEntries(Object.entries(shape).map(([k, v]) => [k, (v instanceof z.ZodDefault ? v.removeDefault() : v).optional()])));
+const stripDefaults = (shape: z.ZodRawShape) => z.object(Object.fromEntries(Object.entries(shape).map(([k, v]) => [k, ((v instanceof z.ZodDefault ? v.removeDefault() : v) as z.ZodType).optional()])));
 export const sourceConfigPatchSchema = stripDefaults(sourceConfigSchema.shape).extend({ snmp: stripDefaults(snmpSchema.shape).optional() });
 export const sourcePatchBody = sourceCreateBody.omit({ customerId: true, config: true, sourceType: true }).partial().extend({ sourceType: z.string().max(64).optional(), config: sourceConfigPatchSchema.optional() });
 export type SourcePatchInput = z.infer<typeof sourcePatchBody>;

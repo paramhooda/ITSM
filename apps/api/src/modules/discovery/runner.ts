@@ -54,6 +54,13 @@ class RunLog {
   }
 }
 
+export class RunNotFoundError extends Error {
+  constructor(runId: string) {
+    super(`Discovery run ${runId} not found (not committed yet?)`);
+  }
+}
+
+/** Executes one queued run. Throws RunNotFoundError when the row does not exist yet so the queue retries with backoff. */
 export async function executeRun(runId: string, signal?: AbortSignal) {
   const loaded = await withSystem(async (tx) => {
     const [run] = await tx.select().from(discoveryRuns).where(eq(discoveryRuns.id, runId)).limit(1);
@@ -63,7 +70,7 @@ export async function executeRun(runId: string, signal?: AbortSignal) {
   });
   if (!loaded) {
     logger.warn({ runId }, 'discovery run not found');
-    return;
+    throw new RunNotFoundError(runId);
   }
   const { run, source } = loaded;
   if (!source) {

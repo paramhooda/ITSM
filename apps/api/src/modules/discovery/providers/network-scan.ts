@@ -159,8 +159,9 @@ export function suggestType(h: TypeHints): string {
 
   // Port-based fallback
   if (ports.has(9100) || ports.has(631)) return 'printer';
-  if (ports.has(3389) && !ports.has(22) && !ports.has(80) && !ports.has(443)) return 'endpoint';
-  if (ports.has(3389) && (ports.has(445) || ports.has(443))) return 'server';
+  if (ports.has(3389) && ports.size === 1) return 'endpoint';
+  if (ports.has(3389) && (ports.has(445) || ports.has(443) || ports.has(80))) return 'server';
+  if (ports.has(3389) && !ports.has(22)) return 'endpoint';
   if (ports.has(22) && (ports.has(80) || ports.has(443) || ports.has(8443)) && !ports.has(445)) return d ? 'server' : 'other';
   if (ports.has(22) && !ports.has(80) && !ports.has(443)) return 'server';
   if (ports.has(5900) || ports.has(5901)) return 'endpoint';
