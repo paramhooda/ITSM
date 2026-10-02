@@ -1,39 +1,37 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CheckCircle2, RotateCcw, ShieldCheck, ShieldOff, ShieldQuestion, Check, X, UserRound, Users, MapPin, Layers } from 'lucide-react';
-import { Button, Badge, LoadingBlock, ErrorBlock, Dialog, Textarea, Field, KeyValue } from '@/components/ui';
+import { CheckCircle2, RotateCcw, ShieldCheck, ShieldOff, ShieldQuestion, Check, X, MessageSquare, Info, ClipboardCheck, FileSignature } from 'lucide-react';
+import { Button, Badge, LoadingBlock, ErrorBlock, Dialog, Textarea, Field } from '@/components/ui';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, RailTabs, RailCard, RailRows, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
 import { useUiStore } from '@/stores/ui';
-import { fmtDateTime, relativeTime } from '@/lib/format';
+import { fmtDateTime, fmtDuration, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { Panel } from '@/components/tickets/Panel';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { SlaCard } from '@/components/tickets/SlaCard';
-import { TimelineItem } from '@/components/tickets/TimelineItem';
-import { Composer } from '@/components/tickets/Composer';
 import { AttachmentsSection } from '@/components/tickets/AttachmentsSection';
 import { portalApi, pk, type PortalTicket } from '@/components/portal/api';
 
+const minutesBetween = (a: string, b: string | Date) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60_000));
+
+/** Contract scope for the customer: in / out / unknown, and which agreement the service levels come from. */
 function ScopeCard({ ticket }: { ticket: PortalTicket }) {
   const s = ticket.scope;
   const Icon = s.status === 'in_scope' ? ShieldCheck : s.status === 'out_of_scope' ? ShieldOff : ShieldQuestion;
   const cls = s.status === 'in_scope' ? 'text-emerald-700' : s.status === 'out_of_scope' ? 'text-rose-700' : 'text-muted';
   return (
-    <Panel title="Contract">
-      <div className={cn('flex items-start gap-2 text-[13px]', cls)}>
-        <Icon className="h-4 w-4 mt-0.5 shrink-0" />
-        <span>{s.label}</span>
-      </div>
-      {ticket.contract && (
-        <div className="mt-2 text-[12px] text-muted">
-          Service levels from <span className="text-default">{ticket.contract.slaPolicyName ?? ticket.contract.name}</span>
-          {ticket.service ? ` · ${ticket.service.name}` : ''}
-        </div>
-      )}
-      {s.status === 'out_of_scope' && <div className="mt-2 text-[12px] text-muted">Nothing is blocked: we still work the ticket and your account manager will let you know if a quote is needed.</div>}
-    </Panel>
+    <RailCard title={<><FileSignature className="h-3.5 w-3.5 text-subtle" /> Contract</>}>
+      <RailRows
+        rows={[
+          { label: 'Scope', value: <span className={cn('inline-flex items-center gap-1.5', cls)} title={s.status === 'out_of_scope' ? 'Still worked as usual; your account manager will say if a quote is needed' : undefined}><Icon className="h-3.5 w-3.5" /> {s.label}</span> },
+          { label: 'Contract', value: ticket.contract ? `${ticket.contract.number} · ${ticket.contract.name}` : s.contract ? `${s.contract.number} · ${s.contract.name}` : null },
+          { label: 'Service levels', value: ticket.contract?.slaPolicyName ?? ticket.slaPolicy?.name ?? null },
+          { label: 'Service', value: ticket.service?.name, hidden: !ticket.service },
+        ]}
+      />
+    </RailCard>
   );
 }
 
@@ -95,159 +93,193 @@ export default function PortalTicketDetailPage() {
   });
   const [dialog, setDialog] = useState<null | 'reopen' | 'confirm'>(null);
   const [approvalComment, setApprovalComment] = useState('');
+  const entries = useMemo(() => (ticket?.timeline ?? []).map(fromTimeline), [ticket?.timeline]);
 
   if (ticketQ.isLoading) return <LoadingBlock label="Loading ticket…" />;
   if (ticketQ.isError || !ticket) return <ErrorBlock error={ticketQ.error} retry={() => ticketQ.refetch()} />;
 
   const cat = ticket.status?.category ?? 'open';
+  const isResolved = cat === 'resolved';
   const closedLike = cat === 'closed' || cat === 'cancelled';
+  const ended = isResolved || closedLike;
   const a = ticket.actions;
+  const fmtValue = (v: unknown) => (v === true ? 'Yes' : v === false ? 'No' : v === null || v === undefined || v === '' ? null : Array.isArray(v) ? v.join(', ') : String(v));
+  const who = ticket.assignee ? `${ticket.assignee.firstName ?? ticket.assignee.name}${ticket.team ? ` · ${ticket.team.name}` : ''}` : ticket.team?.name ?? null;
+
+  // ---- header: the one or two things a customer can do, plus a short state line
+  const primary = (
+    <>
+      {a.confirmClose && <Button size="sm" icon={<CheckCircle2 className="h-3.5 w-3.5" />} onClick={() => setDialog('confirm')}>Confirm it&apos;s fixed</Button>}
+      {a.reopen && <Button size="sm" variant="outline" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => setDialog('reopen')}>Reopen</Button>}
+    </>
+  );
+  const controls = (
+    <>
+      <TicketStatusBadge status={ticket.status} />
+      <PriorityBadge priority={ticket.priority} />
+      {ticket.category && <Badge color="slate">{ticket.category.label}</Badge>}
+      {ticket.status?.key === 'pending_customer' && <Badge color="amber">Waiting for your reply</Badge>}
+      {ticket.approvalStatus && ticket.approvalStatus !== 'none' && <Badge color={ticket.approvalStatus === 'approved' ? 'green' : ticket.approvalStatus === 'rejected' ? 'red' : 'amber'}>Approval: {ticket.approvalStatus}</Badge>}
+      {isResolved && a.confirmClose && <span className="text-[12.5px] text-emerald-700">Confirm the fix to close, or reopen if it still fails · closes automatically after a few days</span>}
+      {closedLike && !a.reopen && ticket.resolvedAt && <span className="text-[12.5px] text-muted">Reopen window of {a.reopenWindowDays} days has passed · raise a new ticket if it returns</span>}
+    </>
+  );
+
+  // ---- form
+  const sections: FormSection[] = [
+    {
+      key: 'description',
+      title: 'Description',
+      columns: 1,
+      fields: [
+        { label: 'Description', kind: 'prose', value: ticket.description ?? '' },
+        { label: 'What we did', kind: 'prose', value: ticket.resolutionNotes ?? '', hidden: !ended || !ticket.resolutionNotes },
+        { label: 'Resolution code', value: ticket.resolutionCode?.label, hidden: !ended || !ticket.resolutionCode },
+      ],
+    },
+    {
+      key: 'request',
+      title: 'Request details',
+      description: ticket.catalogItem?.name,
+      hidden: ticket.form.length === 0,
+      fields: ticket.form.map((f): FieldDef => ({ label: f.label, value: fmtValue(f.value), kind: f.type === 'textarea' ? 'prose' : 'text', span: f.type === 'textarea' ? 2 : 1 })),
+    },
+    {
+      key: 'status',
+      title: 'Status',
+      fields: [
+        { label: 'Status', value: <TicketStatusBadge status={ticket.status} /> },
+        { label: 'Priority', value: <PriorityBadge priority={ticket.priority} /> },
+        { label: 'Type', value: ticket.typeLabel },
+        { label: 'Category', value: ticket.category?.label },
+        { label: 'Engineer', value: who ?? <span className="text-muted">Being assigned</span> },
+        { label: 'Raised by', value: ticket.requester ? (ticket.isMine ? `You (${ticket.requester.name})` : ticket.requester.name) : ticket.requesterContact?.name },
+        { label: 'Site', value: ticket.site?.name, hidden: !ticket.site },
+        { label: 'Service', value: ticket.service?.name, hidden: !ticket.service },
+        { label: 'Affected', value: [...ticket.cis.map((c) => c.name), ...ticket.assets.map((x) => `${x.name} (${x.tag})`)].join(', '), hidden: !ticket.cis.length && !ticket.assets.length },
+        { label: 'Raised', value: <span title={fmtDateTime(ticket.createdAt)}>{fmtDateTime(ticket.createdAt)}</span> },
+        { label: 'Last update', value: <span title={fmtDateTime(ticket.lastActivityAt)}>{relativeTime(ticket.lastActivityAt)}</span> },
+        { label: 'Due', value: ticket.dueAt ? fmtDateTime(ticket.dueAt) : null, hidden: !ticket.dueAt || ended },
+        { label: 'Resolved', value: ticket.resolvedAt ? fmtDateTime(ticket.resolvedAt) : null, hidden: !ticket.resolvedAt },
+        { label: 'Closed', value: ticket.closedAt ? fmtDateTime(ticket.closedAt) : null, hidden: !ticket.closedAt },
+      ],
+    },
+  ];
+
+  const tabs = [
+    { key: 'attachments', label: 'Attachments', count: ticket.attachments.items.length, content: <section className="card px-4 py-3"><AttachmentsSection entityType="ticket" entityId={ticket.id} canUpload={a.comment || ticket.attachments.canUpload} showVisibility={false} /></section> },
+  ];
+
+  const pending = a.approve ? ticket.pendingForMe[0] : undefined;
+  const details = (
+    <>
+      <SlaCard slas={ticket.slas} policyName={ticket.slaPolicy?.name ?? null} />
+      <ScopeCard ticket={ticket} />
+      {ticket.approvals.length > 0 && (
+        <RailCard title={<><ClipboardCheck className="h-3.5 w-3.5 text-subtle" /> Approval</>}>
+          <div className="flex flex-col gap-2">
+            {ticket.approvals.map((ap) => (
+              <div key={ap.id} className="text-[12.5px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{ap.stepName ?? `Step ${ap.step}`}</span>
+                  <Badge color={{ pending: 'amber', approved: 'green', rejected: 'red' }[ap.status] ?? 'slate'}>{ap.status}</Badge>
+                </div>
+                <div className="text-muted">
+                  {ap.status === 'pending' ? `Waiting for ${ap.approverLabel}` : `${ap.decidedByName ?? ap.approverLabel}${ap.decidedAt ? ` · ${fmtDateTime(ap.decidedAt)}` : ''}`}
+                </div>
+                {ap.comment && <div className="text-muted italic">“{ap.comment}”</div>}
+              </div>
+            ))}
+            {pending && (
+              <div className="mt-1 pt-2 border-t border-default">
+                <Textarea value={approvalComment} onChange={(e) => setApprovalComment(e.target.value)} placeholder="Comment (optional)" className="min-h-[56px] text-[12.5px]" />
+                <div className="flex gap-2 mt-2">
+                  <Button size="sm" icon={<Check className="h-3.5 w-3.5" />} loading={decide.isPending} onClick={() => decide.mutate({ approvalId: pending.id, decision: 'approved' })}>
+                    Approve
+                  </Button>
+                  <Button size="sm" variant="danger" icon={<X className="h-3.5 w-3.5" />} loading={decide.isPending} onClick={() => decide.mutate({ approvalId: pending.id, decision: 'rejected' })}>
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </RailCard>
+      )}
+    </>
+  );
 
   return (
-    <div className="flex flex-col gap-3 max-w-6xl">
-      <div className="card px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
-          <Link to="/portal/tickets" className="hover:underline">My tickets</Link>
-          <span>/</span>
-          <span className="font-mono font-medium text-default">{ticket.number}</span>
-          <TypeBadge type={ticket.type} />
-          {ticket.reopenCount > 0 && <Badge color="slate">Reopened</Badge>}
-          <span className="ml-auto text-subtle" title={fmtDateTime(ticket.createdAt)}>
-            Raised {relativeTime(ticket.createdAt)}{ticket.requester ? ` by ${ticket.isMine ? 'you' : ticket.requester.name}` : ''}
-          </span>
-        </div>
-        <div className="mt-1.5 flex flex-wrap items-start gap-3">
-          <div className="flex-1 min-w-[240px]">
-            <h1 className="text-lg font-semibold leading-snug">{ticket.title}</h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <TicketStatusBadge status={ticket.status} />
-              <PriorityBadge priority={ticket.priority} />
-              {ticket.category && <Badge color="slate">{ticket.category.label}</Badge>}
-              {ticket.status?.key === 'pending_customer' && <Badge color="amber">Waiting for your reply</Badge>}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-            {a.confirmClose && (
-              <Button size="sm" icon={<CheckCircle2 className="h-3.5 w-3.5" />} onClick={() => setDialog('confirm')}>
-                Confirm it&apos;s fixed
-              </Button>
-            )}
-            {a.reopen && (
-              <Button size="sm" variant="outline" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => setDialog('reopen')}>
-                Reopen
-              </Button>
-            )}
-          </div>
-        </div>
-        {cat === 'resolved' && (
-          <div className="mt-3 rounded-md bg-emerald-50 text-emerald-800 text-[12.5px] px-3 py-2">
-            We believe this is resolved. If everything works, confirm so we can close it; otherwise reopen and tell us what is still wrong. Unconfirmed tickets close automatically after a few days.
-          </div>
-        )}
-        {closedLike && !a.reopen && ticket.resolvedAt && <div className="mt-3 text-[12px] text-muted">This ticket can no longer be reopened (the {a.reopenWindowDays}-day window has passed). Please raise a new ticket if the problem returns.</div>}
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-3 items-start">
-        <div className="flex flex-col gap-3 min-w-0">
-          <Panel title="Description">
-            <div className="text-[13.5px] whitespace-pre-wrap break-words">{ticket.description || <span className="text-subtle">No description.</span>}</div>
-            {ticket.form.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-default">
-                {ticket.catalogItem && <div className="text-[12.5px] font-medium mb-2">{ticket.catalogItem.name}</div>}
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                  {ticket.form.map((f) => (
-                    <div key={f.key}>
-                      <dt className="text-[11.5px] uppercase tracking-wide text-subtle font-medium">{f.label}</dt>
-                      <dd className="text-[13px] break-words">{f.value === true ? 'Yes' : f.value === false ? 'No' : f.value === null || f.value === undefined || f.value === '' ? '—' : String(f.value)}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            )}
-            {(cat === 'resolved' || closedLike) && ticket.resolutionNotes && (
-              <div className="mt-3 pt-3 border-t border-default">
-                <div className="text-[11.5px] uppercase tracking-wide text-subtle font-medium">What we did</div>
-                <div className="text-[13.5px] whitespace-pre-wrap mt-0.5">{ticket.resolutionNotes}</div>
-              </div>
-            )}
-          </Panel>
-
-          <Panel title={<span>Conversation <span className="text-subtle font-normal">{ticket.timeline.length}</span></span>}>
-            <div>
-              {ticket.timeline.map((it, i) => (
-                <TimelineItem key={it.id} item={it} isLast={i === ticket.timeline.length - 1} />
-              ))}
-              {ticket.timeline.length === 0 && <div className="text-[12.5px] text-muted">No updates yet.</div>}
-            </div>
-            {a.comment && (
-              <div className="mt-3">
-                <Composer canComment canWorkNote={false} submitting={comment.isPending} placeholder="Write a reply to the service desk…" onSubmit={(v) => comment.mutateAsync(v.body)} />
-              </div>
-            )}
-          </Panel>
-
-          <Panel title="Attachments">
-            <AttachmentsSection entityType="ticket" entityId={ticket.id} canUpload={a.comment} showVisibility={false} />
-          </Panel>
-        </div>
-
-        <aside className="xl:sticky xl:top-4 min-w-0 flex flex-col gap-3">
-          <Panel title="Status">
-            <KeyValue
-              columns={1}
-              items={[
-                { label: 'Status', value: <TicketStatusBadge status={ticket.status} /> },
-                { label: 'Priority', value: <PriorityBadge priority={ticket.priority} /> },
-                { label: 'Engineer', value: ticket.assignee ? <span className="inline-flex items-center gap-1.5"><UserRound className="h-3.5 w-3.5 text-subtle" /> {ticket.assignee.firstName ?? ticket.assignee.name}{ticket.team ? <span className="text-muted"> · {ticket.team.name}</span> : null}</span> : ticket.team ? <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-subtle" /> {ticket.team.name}</span> : <span className="text-muted">Being assigned</span> },
-                ...(ticket.site ? [{ label: 'Site', value: <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-subtle" /> {ticket.site.name}</span> }] : []),
-                ...(ticket.service ? [{ label: 'Service', value: <span className="inline-flex items-center gap-1.5"><Layers className="h-3.5 w-3.5 text-subtle" /> {ticket.service.name}</span> }] : []),
-                ...(ticket.cis.length || ticket.assets.length ? [{ label: 'Affected', value: [...ticket.cis.map((c) => c.name), ...ticket.assets.map((x) => `${x.name} (${x.tag})`)].join(', ') }] : []),
-                { label: 'Last update', value: <span title={fmtDateTime(ticket.lastActivityAt)}>{relativeTime(ticket.lastActivityAt)}</span> },
-              ]}
-            />
-          </Panel>
-
-          <SlaCard slas={ticket.slas} policyName={ticket.slaPolicy?.name ?? null} />
-
-          <ScopeCard ticket={ticket} />
-
-          {ticket.approvals.length > 0 && (
-            <Panel title="Approval">
-              <div className="flex flex-col gap-2">
-                {ticket.approvals.map((ap) => (
-                  <div key={ap.id} className="text-[12.5px]">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{ap.stepName ?? `Step ${ap.step}`}</span>
-                      <Badge color={{ pending: 'amber', approved: 'green', rejected: 'red' }[ap.status] ?? 'slate'}>{ap.status}</Badge>
-                    </div>
-                    <div className="text-muted">
-                      {ap.status === 'pending' ? `Waiting for ${ap.approverLabel}` : `${ap.decidedByName ?? ap.approverLabel}${ap.decidedAt ? ` · ${fmtDateTime(ap.decidedAt)}` : ''}`}
-                    </div>
-                    {ap.comment && <div className="text-muted italic">“{ap.comment}”</div>}
-                  </div>
-                ))}
-                {a.approve && ticket.pendingForMe.length > 0 && (
-                  <div className="mt-1 pt-2 border-t border-default">
-                    <div className="text-[12.5px] text-muted mb-1.5">This request needs your decision.</div>
-                    <Textarea value={approvalComment} onChange={(e) => setApprovalComment(e.target.value)} placeholder="Comment (optional)" className="min-h-[56px] text-[12.5px]" />
-                    <div className="flex gap-2 mt-2">
-                      <Button size="sm" icon={<Check className="h-3.5 w-3.5" />} loading={decide.isPending} onClick={() => decide.mutate({ approvalId: ticket.pendingForMe[0].id, decision: 'approved' })}>
-                        Approve
-                      </Button>
-                      <Button size="sm" variant="danger" icon={<X className="h-3.5 w-3.5" />} loading={decide.isPending} onClick={() => decide.mutate({ approvalId: ticket.pendingForMe[0].id, decision: 'rejected' })}>
-                        Reject
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </Panel>
-          )}
-        </aside>
-      </div>
+    <>
+      <RecordLayout
+        header={
+          <RecordHeader
+            crumbs={[{ label: 'My tickets', to: '/portal/tickets' }, { label: ticket.number }]}
+            number={ticket.number}
+            title={ticket.title}
+            badges={
+              <>
+                <TypeBadge type={ticket.type} />
+                {ticket.reopenCount > 0 && <Badge color="slate">Reopened ×{ticket.reopenCount}</Badge>}
+              </>
+            }
+            controls={controls}
+            primary={primary}
+            createdAt={ticket.createdAt}
+            createdBy={ticket.requester ? (ticket.isMine ? 'you' : ticket.requester.name) : ticket.requesterContact?.name ?? null}
+            updatedAt={ticket.updatedAt}
+          >
+            <RecordRibbon items={glance(ticket)} columns={4} />
+          </RecordHeader>
+        }
+        main={
+          <>
+            <RecordForm sections={sections} />
+            <RelatedTabs tabs={tabs} />
+          </>
+        }
+        aside={
+          <RailTabs
+            tabs={[
+              {
+                key: 'activity',
+                label: 'Conversation',
+                icon: MessageSquare,
+                badge: entries.length,
+                content: (
+                  <ActivityStream
+                    title="Conversation"
+                    entries={entries}
+                    emptyText="No updates yet."
+                    maxHeight="calc(100vh - 220px)"
+                    composer={a.comment ? { canComment: true, canWorkNote: false, submitting: comment.isPending, placeholder: 'Write a reply to the service desk…', onSubmit: (v) => comment.mutateAsync(v.body) } : undefined}
+                  />
+                ),
+              },
+              { key: 'details', label: 'Details', icon: Info, content: details },
+            ]}
+          />
+        }
+      />
 
       <ReasonDialog open={dialog === 'reopen'} onClose={() => setDialog(null)} title={`Reopen ${ticket.number}`} label="What is still wrong?" confirmLabel="Reopen ticket" required busy={reopen.isPending} onSubmit={(t) => reopen.mutateAsync(t)} />
-      <ReasonDialog open={dialog === 'confirm'} onClose={() => setDialog(null)} title="Confirm the fix" intro="Confirming closes the ticket with your name on it. You can still reopen it within the reopen window if the problem comes back." label="Comment (optional)" confirmLabel="Yes, it's fixed" busy={confirm.isPending} onSubmit={(t) => confirm.mutateAsync(t)} />
-    </div>
+      <ReasonDialog open={dialog === 'confirm'} onClose={() => setDialog(null)} title="Confirm the fix" intro={`Closes the ticket in your name; you can reopen it within ${a.reopenWindowDays} days if the problem returns.`} label="Comment (optional)" confirmLabel="Yes, it's fixed" busy={confirm.isPending} onSubmit={(t) => confirm.mutateAsync(t)} />
+    </>
   );
+}
+
+// ---------------------------------------------------------------- at a glance
+
+/** What a customer checks first: how long it has been open, whether we have replied, when it is due, when it was fixed. */
+function glance(ticket: PortalTicket): { label: string; value: string; tone?: 'good' | 'warn' | 'bad'; hint?: string }[] {
+  const ended = ticket.resolvedAt ?? ticket.closedAt ?? null;
+  const age = minutesBetween(ticket.createdAt, ended ?? new Date());
+  const firstResponse = ticket.firstResponseAt ? minutesBetween(ticket.createdAt, ticket.firstResponseAt) : null;
+  const overdue = !!ticket.dueAt && !ended && new Date(ticket.dueAt) < new Date();
+  return [
+    { label: ended ? 'Time to fix' : 'Open for', value: fmtDuration(age) },
+    { label: 'First reply', value: firstResponse === null ? (ended ? '—' : 'pending') : fmtDuration(firstResponse), tone: firstResponse === null && !ended ? 'warn' : undefined, hint: ticket.firstResponseAt ? fmtDateTime(ticket.firstResponseAt) : undefined },
+    { label: 'Due', value: ended ? '—' : ticket.dueAt ? relativeTime(ticket.dueAt) : '—', tone: overdue ? 'bad' : undefined, hint: ticket.dueAt ? fmtDateTime(ticket.dueAt) : undefined },
+    { label: 'Last update', value: relativeTime(ticket.lastActivityAt), hint: fmtDateTime(ticket.lastActivityAt) },
+  ];
 }

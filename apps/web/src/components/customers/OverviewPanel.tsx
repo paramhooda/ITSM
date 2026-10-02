@@ -23,7 +23,7 @@ export function OverviewPanel({ overview, customerId }: { overview: CustomerOver
         <StatTile label="SLA compliance (30d)" value={sla.compliancePct === null ? '—' : `${sla.compliancePct}%`} hint={`${sla.met} met · ${sla.breached} breached`} tone={slaTone} icon={<ShieldCheck className="h-4 w-4" />} />
         <StatTile label="Active contracts" value={o.counts.activeContracts} hint={`${o.counts.contracts} total`} icon={<FileSignature className="h-4 w-4" />} onClick={() => navigate(`/contracts?customerId=${customerId}`)} />
         <StatTile label="Assets" value={o.counts.assets} icon={<Boxes className="h-4 w-4" />} onClick={() => navigate(`/assets?customerId=${customerId}`)} />
-        <StatTile label="CIs" value={o.counts.cis} icon={<Server className="h-4 w-4" />} onClick={() => navigate(`/cmdb?customerId=${customerId}`)} />
+        <StatTile label="CIs" value={o.counts.cis} icon={<Server className="h-4 w-4" />} onClick={() => navigate(`/cmdb/cis?customerId=${customerId}`)} />
         <StatTile label="Next PM / visit" value={next ? fmtDate(next) : '—'} hint={nextLabel ?? 'Nothing in the next 30 days'} icon={<CalendarCheck className="h-4 w-4" />} />
       </div>
 

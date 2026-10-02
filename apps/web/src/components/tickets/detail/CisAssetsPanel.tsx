@@ -45,7 +45,7 @@ export function CisAssetsPanel({ ticket, canEdit }: { ticket: TicketDetail; canE
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {ticket.cis.map((c) => (
-            <Link key={c.id} to={`/cmdb/${c.id}`} className="inline-flex items-center gap-1.5 rounded-md border border-default bg-surface-2 px-2 py-0.5 text-[12.5px] hover:border-brand-400" title={[c.hostname, c.ipAddress].filter(Boolean).join(' · ')}>
+            <Link key={c.id} to={`/cmdb/cis/${c.id}`} className="inline-flex items-center gap-1.5 rounded-md border border-default bg-surface-2 px-2 py-0.5 text-[12.5px] hover:border-brand-400" title={[c.hostname, c.ipAddress].filter(Boolean).join(' · ')}>
               <Server className="h-3 w-3 text-subtle" /> {c.name}
               {c.id === ticket.primaryCiId && <span className="text-[10px] uppercase text-subtle">primary</span>}
             </Link>

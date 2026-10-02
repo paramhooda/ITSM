@@ -98,7 +98,7 @@ export default function AssetListPage() {
     { key: 'warrantyEnd', header: 'Warranty', sortable: true, render: (a) => <CoverageBadge coverage={a.warranty} /> },
     { key: 'amcEnd', header: 'AMC', sortable: true, render: (a) => <CoverageBadge coverage={a.amc} /> },
     { key: 'ci', header: 'CI', render: (a) => a.ciId ? (
-      <Link to={`/cmdb/${a.ciId}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-brand-600 hover:underline">
+      <Link to={`/cmdb/cis/${a.ciId}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-brand-600 hover:underline">
         <Server className="h-3.5 w-3.5" /> {a.ciName}
       </Link>
     ) : <span className="text-subtle">—</span> },

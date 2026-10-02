@@ -65,7 +65,7 @@ export function TicketMiniTable({ rows, columns = ['customer', 'priority', 'stat
               {has('priority') && <td>{t.priority ? <Badge color={t.priority_color ?? undefined}>{t.priority.split(' - ')[0]}</Badge> : '—'}</td>}
               {has('severity') && <td>{t.severity ? <Badge color={t.severity_color ?? undefined}>{t.severity}</Badge> : '—'}</td>}
               {has('category') && <td className="text-muted whitespace-nowrap">{t.category ?? '—'}</td>}
-              {has('ci') && <td className="text-muted whitespace-nowrap max-w-[140px] truncate">{t.ci_id && !isCustomer ? <Link to={`/cmdb/${t.ci_id}`} className="hover:underline">{t.ci_name}</Link> : t.ci_name ?? '—'}</td>}
+              {has('ci') && <td className="text-muted whitespace-nowrap max-w-[140px] truncate">{t.ci_id && !isCustomer ? <Link to={`/cmdb/cis/${t.ci_id}`} className="hover:underline">{t.ci_name}</Link> : t.ci_name ?? '—'}</td>}
               {has('status') && <td>{t.status ? <Badge color={t.status_color ?? TICKET_CATEGORY_COLORS[t.status_category ?? ''] ?? undefined} dot>{t.status}</Badge> : '—'}</td>}
               {has('sla') && <td className="whitespace-nowrap"><SlaCell sla={t.sla} /></td>}
               {has('due') && <td className="whitespace-nowrap text-muted">{t.due_at ? relativeTime(t.due_at) : '—'}</td>}

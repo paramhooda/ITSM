@@ -62,7 +62,7 @@ export function ChangeImpactCard({ ticketId, canManage }: { ticketId: string; ca
                 {result.affectedCis.length === 0 && <div className="text-muted">None linked</div>}
                 {result.affectedCis.map((c) => (
                   <div key={c.id} className="flex items-center justify-between gap-2">
-                    <Link to={`/cmdb/${c.id}`} className="truncate hover:underline">{c.name}</Link>
+                    <Link to={`/cmdb/cis/${c.id}`} className="truncate hover:underline">{c.name}</Link>
                     <span className="text-subtle shrink-0">{c.dependents} dep.</span>
                   </div>
                 ))}

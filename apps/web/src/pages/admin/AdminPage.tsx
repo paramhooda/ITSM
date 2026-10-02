@@ -33,7 +33,7 @@ const ApiKeysPage = page(() => import('./ApiKeysPage'));
 const SettingsPage = page(() => import('./SettingsPage'));
 const OutboxPage = page(() => import('./OutboxPage'));
 const AuditPage = page(() => import('./AuditPage'));
-const IntegrationsPage = page(() => import('./IntegrationsPage'));
+const IntegrationsPage = page(() => import('@/pages/integrations/IntegrationsPage'));
 
 const CONFIG: Permission[] = ['admin:config'];
 const USERS: Permission[] = ['admin:users'];
@@ -73,7 +73,7 @@ export default function AdminPage() {
           <Route path="settings" element={<Guarded perm={['admin:system', 'admin:config']}><SettingsPage /></Guarded>} />
           <Route path="outbox" element={<Guarded perm={['admin:system', 'admin:config']}><OutboxPage /></Guarded>} />
           <Route path="audit" element={<Guarded perm={['admin:audit']}><AuditPage /></Guarded>} />
-          <Route path="integrations" element={<Guarded perm={['integrations:manage']}><IntegrationsPage /></Guarded>} />
+          <Route path="integrations" element={<Guarded perm={['integrations:events', 'integrations:manage']}><IntegrationsPage /></Guarded>} />
           <Route path="*" element={<Navigate to="/admin" replace />} />
         </Routes>
       </Suspense>

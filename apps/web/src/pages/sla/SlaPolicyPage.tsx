@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Save, Copy, Trash2, Star, Plus, Unlink, Search, FileSignature } from 'lucide-react';
+import { Save, Copy, Trash2, Star, Plus, Unlink, Search, FileSignature, CalendarClock, Gauge, BarChart3 } from 'lucide-react';
 import { SLA_METRICS, TICKET_TYPES } from '@itsm/shared';
 import { get, post, patch, put, del } from '@/api/client';
-import { Button, Badge, Card, Field, Input, Textarea, Select, Tabs, Toggle, LoadingBlock, ErrorBlock, Dialog, EmptyState, Checkbox, ProgressBar } from '@/components/ui';
+import { Button, Badge, Card, Input, Textarea, Select, Toggle, LoadingBlock, ErrorBlock, Dialog, ConfirmDialog, EmptyState, Checkbox, ProgressBar } from '@/components/ui';
+import type { MenuItem } from '@/components/Menu';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, RailCard, RailRows, type FormSection } from '@/components/record';
 import { useLookups } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
 import { fmtDate, fmtDateTime, fmtNumber, fmtPct, titleCase } from '@/lib/format';
@@ -19,7 +21,6 @@ import { usageSummary, METRIC_LABEL, type SlaPolicy, type SlaTarget, type Policy
 
 type TicketType = (typeof TICKET_TYPES)[number];
 type Metric = (typeof SLA_METRICS)[number];
-type Tab = 'targets' | 'contracts' | 'compliance';
 
 interface CellValue {
   minutes: number | null;
@@ -35,7 +36,7 @@ interface Preview {
   metrics: { metric: string; minutes: number; warnPct: number; calendar: string; appliesTo: string; dueAt: string; warnAt: string; elapsedHours: number }[];
 }
 
-/** One SLA policy: targets, the contracts mapped to it and its compliance. */
+/** One SLA policy: an editable record with its targets, the contracts mapped to it and its compliance. */
 export default function SlaPolicyPage() {
   const { id } = useParams();
   const isNew = !id || id === 'new';
@@ -47,7 +48,6 @@ export default function SlaPolicyPage() {
   const policyQ = useQuery({ queryKey: ['sla', 'policy', id], queryFn: () => get<SlaPolicy>(`/sla/policies/${id}`), enabled: !isNew });
   const holidayCals = useConfigKind<{ id: string; name: string }>('holiday-calendars');
 
-  const [tab, setTab] = useState<Tab>('targets');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [calendarId, setCalendarId] = useState<string | null>(null);
@@ -59,6 +59,8 @@ export default function SlaPolicyPage() {
   const [ticketType, setTicketType] = useState<TicketType>('incident');
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const p = policyQ.data;
@@ -138,7 +140,7 @@ export default function SlaPolicyPage() {
   }
 
   async function remove() {
-    if (!confirm(`Delete policy "${name}"?`)) return;
+    setDeleting(true);
     try {
       await del(`/sla/policies/${id}`);
       void qc.invalidateQueries({ queryKey: ['sla'] });
@@ -147,6 +149,9 @@ export default function SlaPolicyPage() {
       navigate('/sla');
     } catch (err) {
       toast.error(errorMessage(err));
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
     }
   }
 
@@ -155,125 +160,185 @@ export default function SlaPolicyPage() {
   const p = policyQ.data;
   const selectedCal = calendars.find((c) => c.id === calendarId);
   const ro = !canEdit;
+  const mark = <T,>(set: (v: T) => void) => (v: T) => {
+    if (ro) return;
+    set(v);
+    setDirty(true);
+  };
+
+  // ---- header: Save (+ Clone) up front, Delete in the overflow menu
+  const primary = canEdit ? (
+    <>
+      <Button size="sm" icon={<Save className="h-3.5 w-3.5" />} onClick={save} loading={saving} disabled={!isNew && !dirty}>Save</Button>
+      {!isNew && <Button size="sm" variant="outline" icon={<Copy className="h-3.5 w-3.5" />} onClick={clone}>Clone</Button>}
+    </>
+  ) : undefined;
+  const menu: MenuItem[] = canEdit && !isNew ? [{ label: p?.isDefault ? 'Delete (default policy)' : 'Delete policy', icon: <Trash2 className="h-4 w-4" />, onClick: () => setConfirmDelete(true), danger: true, disabled: !!p?.isDefault }] : [];
+
+  // ---- the policy record, edited in place
+  const policySection: FormSection = {
+    key: 'policy',
+    title: 'Policy',
+    fields: [
+      { label: 'Name', edit: <Input value={name} disabled={ro} onChange={(e) => mark(setName)(e.target.value)} className="h-8 py-0 text-[13px] max-w-[420px]" placeholder="e.g. Gold support" /> },
+      { label: 'Active', edit: <Toggle checked={isActive} onChange={mark(setIsActive)} label={<span className="text-[12.5px] text-muted">{isActive ? 'Applied to new tickets' : 'Not applied to new tickets'}</span>} /> },
+      { label: 'Description', edit: <Textarea rows={2} value={description} disabled={ro} onChange={(e) => mark(setDescription)(e.target.value)} className="min-h-[56px] text-[13px]" />, span: 2 },
+      {
+        label: 'Business calendar',
+        hint: 'Platform default calendar when empty',
+        edit: (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={calendarId ?? ''} disabled={ro} placeholder="Platform default" options={calendars.map((c) => ({ value: c.id, label: c.name }))} onChange={(e) => mark(setCalendarId)(e.target.value || null)} className="h-8 py-0 text-[12.5px] max-w-[260px]" />
+            {selectedCal && <span className="text-[12px] text-subtle">{selectedCal.timezone}{selectedCal.is24x7 ? ' · 24x7' : ''}</span>}
+          </div>
+        ),
+      },
+      { label: 'Holiday calendar', hint: "Overrides the calendar's own holiday list", edit: <Select value={holidayCalendarId ?? ''} disabled={ro} placeholder="Use calendar holidays" options={(holidayCals.data ?? []).map((c) => ({ value: c.id, label: c.name }))} onChange={(e) => mark(setHolidayCalendarId)(e.target.value || null)} className="h-8 py-0 text-[12.5px] max-w-[260px]" /> },
+      { label: 'Default policy', hint: 'Used when neither the contract, service nor catalog item sets one', edit: <Toggle checked={isDefault} onChange={mark(setIsDefault)} label={<span className="text-[12.5px] text-muted">{isDefault ? 'Fallback for everything' : 'Not the fallback'}</span>} /> },
+    ],
+  };
+
+  const targetsContent = (
+    <RecordForm
+      sections={[
+        {
+          key: 'targets',
+          title: <span>Targets <span className="text-muted font-normal">· {targetCount} defined</span></span>,
+          description: 'Durations like 30m, 4h or 2d · warn % · 24x7 clock · a priority row beats "Any priority"',
+          actions: <Segmented size="sm" options={TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t), count: Object.entries(cells).filter(([k, v]) => k.startsWith(`${t}|`) && v.minutes).length }))} value={ticketType} onChange={setTicketType} />,
+          fields: [],
+          children: (
+            <div className="-mx-5 -my-1.5 overflow-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th className="w-40">Priority</th>
+                    {SLA_METRICS.map((m) => (
+                      <th key={m}>{METRIC_LABEL[m]}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rowsFor(ticketType).map((row) => (
+                    <tr key={row.id ?? 'any'}>
+                      <td className="align-top pt-3">{row.id ? <Badge color={row.color ?? undefined}>{row.label}</Badge> : <span className="text-muted text-[12.5px]">{row.label}</span>}</td>
+                      {SLA_METRICS.map((m) => {
+                        const key = cellKey(ticketType, row.id, m);
+                        const v = cells[key];
+                        return (
+                          <td key={m} className="align-top">
+                            <div className="flex items-center gap-1.5">
+                              <DurationInput size="sm" width={72} value={v?.minutes ?? null} disabled={ro} onChange={(min) => setCell(key, { minutes: min })} placeholder="—" />
+                              <input type="number" min={1} max={100} title="Warn at % of target" style={{ width: 54, flex: 'none' }} className="input h-8 py-0 px-1 text-[12px] text-center disabled:opacity-40" disabled={ro || !v?.minutes} value={v?.warnPct ?? 75} onChange={(e) => setCell(key, { warnPct: Math.min(100, Math.max(1, Number(e.target.value) || 75)) })} />
+                              <label className="inline-flex items-center gap-1 text-[11px] text-muted cursor-pointer select-none" title="Measure on calendar time (24x7) regardless of business hours">
+                                <input type="checkbox" className="h-3.5 w-3.5 accent-navy-800 disabled:opacity-40" disabled={ro || !v?.minutes} checked={!!v?.calendarTime} onChange={(e) => setCell(key, { calendarTime: e.target.checked })} />
+                                24x7
+                              </label>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ),
+        },
+        {
+          key: 'pause',
+          title: 'Pause statuses',
+          columns: 1,
+          fields: [
+            {
+              label: 'Also pause in',
+              hint: 'In addition to statuses that pause SLA by default',
+              edit: <MultiSelect value={pauseStatusIds} disabled={ro} onChange={(v) => { setPauseStatusIds(v); setDirty(true); }} options={statuses.map((s) => ({ value: s.id, label: s.label, hint: s.pausesSla ? 'pauses by default' : titleCase(s.statusCategory ?? '') }))} maxHeight="max-h-40" />,
+            },
+          ],
+        },
+      ]}
+    />
+  );
+
+  const ribbon = p
+    ? [
+        { label: 'Targets', value: String(targetCount), hint: 'Cells with a duration' },
+        { label: 'Contracts', value: String(p.usage.contracts + p.usage.contractServices), hint: `${p.usage.contracts} at contract level · ${p.usage.contractServices} per service` },
+        { label: 'Services', value: String(p.usage.services) },
+        { label: 'Catalog items', value: String(p.usage.catalogItems) },
+        { label: 'Tickets', value: String(p.usage.tickets) },
+      ]
+    : [];
 
   return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
-        <div className="min-w-0">
-          <Link to="/sla" className="inline-flex items-center gap-1 text-[12.5px] text-muted hover:text-default mb-1.5"><ArrowLeft className="h-3.5 w-3.5" /> Service levels</Link>
-          <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.025em] flex items-center gap-2 flex-wrap">
-            {isNew ? 'New SLA policy' : name || p?.name}
-            {p?.isDefault && <Badge color="amber"><Star className="h-3 w-3" /> default</Badge>}
-            {p && !p.isActive && <Badge color="gray">inactive</Badge>}
-          </h1>
-          <div className="text-[13.5px] text-muted mt-1">{p ? `Used by ${usageSummary(p.usage)}` : 'Targets per ticket type and priority; leave a cell empty when no commitment applies.'}</div>
-        </div>
-        {canEdit && (
-          <div className="flex items-center gap-2 shrink-0">
-            {!isNew && (
+    <>
+      <RecordLayout
+        header={
+          <RecordHeader
+            crumbs={[{ label: 'Service levels', to: '/sla' }, { label: isNew ? 'New policy' : name || p?.name || '' }]}
+            title={isNew ? 'New SLA policy' : name || p?.name || ''}
+            onTitleChange={canEdit && !isNew ? mark(setName) : undefined}
+            badges={
               <>
-                <Button variant="outline" icon={<Copy className="h-4 w-4" />} onClick={clone}>Clone</Button>
-                <Button variant="outline" icon={<Trash2 className="h-4 w-4" />} disabled={p?.isDefault} title={p?.isDefault ? 'The default policy cannot be deleted' : undefined} onClick={remove}>Delete</Button>
+                {p?.isDefault && <Badge color="amber" className="gap-1"><Star className="h-3 w-3" /> Default</Badge>}
+                {p && !p.isActive && <Badge color="gray">Inactive</Badge>}
               </>
+            }
+            controls={
+              <>
+                {dirty && <Badge color="amber" dot>Unsaved changes</Badge>}
+                {p && <span className="text-[12.5px] text-muted">Used by {usageSummary(p.usage)}</span>}
+              </>
+            }
+            primary={primary}
+            menu={menu}
+            updatedAt={p?.updatedAt ?? null}
+          >
+            {ribbon.length > 0 && <RecordRibbon items={ribbon} columns={5} />}
+          </RecordHeader>
+        }
+        main={
+          <>
+            <RecordForm sections={[policySection]} />
+            {isNew ? (
+              targetsContent
+            ) : (
+              <RelatedTabs
+                tabs={[
+                  { key: 'targets', label: 'Targets', count: targetCount, content: targetsContent },
+                  { key: 'contracts', label: 'Contracts', count: (p?.usage.contracts ?? 0) + (p?.usage.contractServices ?? 0), content: <ContractsTab policy={p!} /> },
+                  { key: 'compliance', label: 'Compliance', content: <ComplianceTab policyId={id!} /> },
+                ]}
+              />
             )}
-            <Button icon={<Save className="h-4 w-4" />} onClick={save} loading={saving} disabled={!isNew && !dirty}>Save</Button>
-          </div>
-        )}
-      </div>
+          </>
+        }
+        aside={
+          isNew ? undefined : (
+            <>
+              <PreviewPanel policyId={id!} dirty={dirty} />
+              <RailCard title={<><Gauge className="h-3.5 w-3.5 text-subtle" /> In use</>}>
+                <RailRows
+                  rows={[
+                    { label: 'Calendar', value: p?.calendarName ? `${p.calendarName}${p.calendarIs24x7 ? ' · 24x7' : ''}` : 'Platform default' },
+                    { label: 'Holidays', value: p?.holidayCalendarName, hidden: !p?.holidayCalendarName },
+                    { label: 'Pauses in', value: p?.pauseStatuses.length ? p.pauseStatuses.map((s) => s.label).join(', ') : null },
+                    { label: 'Contracts', value: String(p?.usage.contracts ?? 0) },
+                    { label: 'Contract services', value: String(p?.usage.contractServices ?? 0) },
+                    { label: 'Services', value: String(p?.usage.services ?? 0) },
+                    { label: 'Catalog items', value: String(p?.usage.catalogItems ?? 0) },
+                    { label: 'Tickets', value: String(p?.usage.tickets ?? 0) },
+                  ]}
+                />
+              </RailCard>
+            </>
+          )
+        }
+      />
 
-      {!isNew && (
-        <Tabs<Tab>
-          className="mb-5"
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { key: 'targets', label: 'Targets', count: targetCount },
-            { key: 'contracts', label: 'Contracts', count: (p?.usage.contracts ?? 0) + (p?.usage.contractServices ?? 0) },
-            { key: 'compliance', label: 'Compliance' },
-          ]}
-        />
-      )}
-
-      {(isNew || tab === 'targets') && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-          <div className="xl:col-span-2">
-            <Card title="Policy">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-                <Field label="Name" required>
-                  <Input value={name} disabled={ro} onChange={(e) => { setName(e.target.value); setDirty(true); }} />
-                </Field>
-                <Field label="Business calendar" hint={selectedCal ? `${selectedCal.timezone}${selectedCal.is24x7 ? ' · 24x7' : ''}` : 'Platform default calendar'}>
-                  <Select value={calendarId ?? ''} disabled={ro} placeholder="Platform default" options={calendars.map((c) => ({ value: c.id, label: c.name }))} onChange={(e) => { setCalendarId(e.target.value || null); setDirty(true); }} />
-                </Field>
-                <Field label="Description" className="sm:col-span-2">
-                  <Textarea rows={2} value={description} disabled={ro} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} />
-                </Field>
-                <Field label="Holiday calendar" hint="Overrides the calendar's own holiday list">
-                  <Select value={holidayCalendarId ?? ''} disabled={ro} placeholder="Use calendar holidays" options={(holidayCals.data ?? []).map((c) => ({ value: c.id, label: c.name }))} onChange={(e) => { setHolidayCalendarId(e.target.value || null); setDirty(true); }} />
-                </Field>
-                <div className="flex items-end gap-6 pb-1">
-                  <Toggle checked={isDefault} onChange={(v) => { if (ro) return; setIsDefault(v); setDirty(true); }} label="Default policy" />
-                  <Toggle checked={isActive} onChange={(v) => { if (ro) return; setIsActive(v); setDirty(true); }} label="Active" />
-                </div>
-              </div>
-            </Card>
-          </div>
-          <PreviewPanel policyId={isNew ? null : id!} dirty={dirty} />
-          <div className="xl:col-span-3 flex flex-col gap-5">
-            <Card
-              title={<span>Targets <span className="text-muted font-normal">· {targetCount} defined</span></span>}
-              padded={false}
-              actions={<Segmented size="sm" options={TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t), count: Object.entries(cells).filter(([k, v]) => k.startsWith(`${t}|`) && v.minutes).length }))} value={ticketType} onChange={setTicketType} />}
-            >
-              <div className="overflow-auto">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th className="w-40">Priority</th>
-                      {SLA_METRICS.map((m) => (
-                        <th key={m}>{METRIC_LABEL[m]}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rowsFor(ticketType).map((row) => (
-                      <tr key={row.id ?? 'any'}>
-                        <td className="align-top pt-3">{row.id ? <Badge color={row.color ?? undefined}>{row.label}</Badge> : <span className="text-muted text-[12.5px]">{row.label}</span>}</td>
-                        {SLA_METRICS.map((m) => {
-                          const key = cellKey(ticketType, row.id, m);
-                          const v = cells[key];
-                          return (
-                            <td key={m} className="align-top">
-                              <div className="flex items-center gap-1.5">
-                                <DurationInput size="sm" width={72} value={v?.minutes ?? null} disabled={ro} onChange={(min) => setCell(key, { minutes: min })} placeholder="—" />
-                                <input type="number" min={1} max={100} title="Warn at % of target" style={{ width: 54, flex: 'none' }} className="input h-8 py-0 px-1 text-[12px] text-center disabled:opacity-40" disabled={ro || !v?.minutes} value={v?.warnPct ?? 75} onChange={(e) => setCell(key, { warnPct: Math.min(100, Math.max(1, Number(e.target.value) || 75)) })} />
-                                <label className="inline-flex items-center gap-1 text-[11px] text-muted cursor-pointer select-none" title="Measure on calendar time (24x7) regardless of business hours">
-                                  <input type="checkbox" className="h-3.5 w-3.5 accent-navy-800 disabled:opacity-40" disabled={ro || !v?.minutes} checked={!!v?.calendarTime} onChange={(e) => setCell(key, { calendarTime: e.target.checked })} />
-                                  24x7
-                                </label>
-                              </div>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="px-4 py-2.5 text-[12px] text-subtle border-t border-default">Duration · warn % · 24x7 clock. Enter durations like <code className="font-mono">30m</code>, <code className="font-mono">4h</code> or <code className="font-mono">2d</code>. Priority-specific targets win over "Any priority".</div>
-            </Card>
-
-            <Card title="Pause statuses">
-              <div className="text-[12.5px] text-muted mb-2">SLA clocks pause while a ticket is in any status marked "pauses SLA" in the option list, plus these policy-specific statuses.</div>
-              <MultiSelect value={pauseStatusIds} disabled={ro} onChange={(v) => { setPauseStatusIds(v); setDirty(true); }} options={statuses.map((s) => ({ value: s.id, label: s.label, hint: s.pausesSla ? 'pauses by default' : titleCase(s.statusCategory ?? '') }))} maxHeight="max-h-40" />
-            </Card>
-          </div>
-        </div>
-      )}
-
-      {!isNew && tab === 'contracts' && <ContractsTab policy={p!} />}
-      {!isNew && tab === 'compliance' && <ComplianceTab policyId={id!} />}
-    </div>
+      <ConfirmDialog open={confirmDelete} onClose={() => setConfirmDelete(false)} onConfirm={() => void remove()} title={`Delete "${name || p?.name}"?`} description={p ? `Used by ${usageSummary(p.usage)}. Contracts on this policy fall back to their service or the platform default.` : undefined} confirmLabel="Delete policy" danger loading={deleting} />
+    </>
   );
 }
 
@@ -338,14 +403,14 @@ function ContractsTab({ policy }: { policy: SlaPolicy }) {
   );
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <Card
-        title={<span>Contracts on this policy <span className="text-muted font-normal">· {contractLevel.length}</span></span>}
+        title={<span>Contracts <span className="text-muted font-normal">· {contractLevel.length}</span></span>}
         padded={false}
         actions={canManage && <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setAssigning(true)}>Assign contracts</Button>}
       >
         {q.isLoading ? <LoadingBlock /> : q.isError ? <ErrorBlock error={q.error} retry={() => q.refetch()} /> : contractLevel.length === 0 ? (
-          <EmptyState icon={<FileSignature className="h-5 w-5" />} title="No contracts mapped" description="Assign contracts here, or pick this policy on the contract itself. Contracts without a policy use their service default, then the platform default." action={canManage && <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setAssigning(true)}>Assign contracts</Button>} />
+          <EmptyState icon={<FileSignature className="h-5 w-5" />} title="No contracts mapped" description="Assign contracts here or pick this policy on the contract itself." action={canManage && <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setAssigning(true)}>Assign contracts</Button>} />
         ) : (
           <div className="overflow-auto">
             <table className="table">
@@ -357,7 +422,6 @@ function ContractsTab({ policy }: { policy: SlaPolicy }) {
       </Card>
       {serviceLevel.length > 0 && (
         <Card title={<span>Service-level overrides <span className="text-muted font-normal">· {serviceLevel.length}</span></span>} padded={false}>
-          <div className="px-5 py-2.5 text-[12.5px] text-muted border-b border-default">Contracts where a specific service is mapped to this policy, overriding the contract-level policy for that service.</div>
           <div className="overflow-auto">
             <table className="table">
               <thead><tr><th className="w-32">Number</th><th>Contract · services</th><th>Customer</th><th>Status</th><th>Term</th><th className="w-36" /></tr></thead>
@@ -405,7 +469,6 @@ function AssignDialog({ open, onClose, policy, already, onDone }: { open: boolea
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-subtle pointer-events-none" />
           <input className="input pl-9" placeholder="Search by number, name or customer…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
         </div>
-        <div className="text-[12.5px] text-muted">The policy applies to every ticket raised under the contract unless a contract service or catalog item sets its own.</div>
         <div className="border border-default rounded-lg max-h-[46vh] overflow-y-auto divide-y divide-[var(--border)]">
           {list.isLoading && <LoadingBlock />}
           {!list.isLoading && candidates.length === 0 && <div className="py-8 text-center text-[13px] text-subtle">No contracts match.</div>}
@@ -436,36 +499,34 @@ function ComplianceTab({ policyId }: { policyId: string }) {
   const t = q.data.totals;
   const tone = t.compliancePct === null ? 'default' : t.compliancePct >= 95 ? 'good' : t.compliancePct >= 85 ? 'warn' : 'bad';
   return (
-    <div className="flex flex-col gap-5">
-      <Card title="Compliance by metric" actions={<Segmented size="sm" options={[{ value: 7, label: '7 days' }, { value: 30, label: '30 days' }, { value: 90, label: '90 days' }]} value={days} onChange={setDays} />}>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
-          <Stat label="Compliance" value={fmtPct(t.compliancePct, 1)} tone={tone} />
-          <Stat label="Completed" value={fmtNumber(t.completed)} />
-          <Stat label="Breached" value={fmtNumber(t.breached)} tone={t.breached > 0 ? 'bad' : 'default'} />
-          <Stat label="Overdue now" value={fmtNumber(t.overdueRunning)} tone={t.overdueRunning > 0 ? 'warn' : 'default'} />
-        </div>
-        {q.data.groups.length === 0 ? (
-          <div className="text-[13px] text-subtle py-4 text-center">No SLA clocks started under this policy in the period.</div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {q.data.groups.map((g) => (
-              <div key={g.key} className="grid grid-cols-[120px_1fr_auto] items-center gap-4">
-                <div className="text-[13px] font-medium text-default">{METRIC_LABEL[g.label] ?? titleCase(g.label)}</div>
-                <ProgressBar pct={g.compliancePct ?? 0} tone={g.compliancePct === null ? 'neutral' : g.compliancePct >= 95 ? 'good' : g.compliancePct >= 85 ? 'warn' : 'bad'} />
-                <div className="text-[12.5px] text-muted tnum text-right whitespace-nowrap">
-                  <span className="text-default font-medium">{fmtPct(g.compliancePct, 1)}</span> · {g.met} met · {g.breached} breached · {g.running} running
-                  {g.avgElapsedMinutes !== null && <span className="text-subtle"> · avg {formatDuration(g.avgElapsedMinutes)}</span>}
-                </div>
+    <Card title="Compliance by metric" actions={<Segmented size="sm" options={[{ value: 7, label: '7 days' }, { value: 30, label: '30 days' }, { value: 90, label: '90 days' }]} value={days} onChange={setDays} />}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+        <Stat label="Compliance" value={fmtPct(t.compliancePct, 1)} tone={tone} />
+        <Stat label="Completed" value={fmtNumber(t.completed)} />
+        <Stat label="Breached" value={fmtNumber(t.breached)} tone={t.breached > 0 ? 'bad' : 'default'} />
+        <Stat label="Overdue now" value={fmtNumber(t.overdueRunning)} tone={t.overdueRunning > 0 ? 'warn' : 'default'} />
+      </div>
+      {q.data.groups.length === 0 ? (
+        <EmptyState icon={<BarChart3 className="h-5 w-5" />} title="No SLA clocks in this period" description="Clocks started under this policy appear here by metric." />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {q.data.groups.map((g) => (
+            <div key={g.key} className="grid grid-cols-[120px_1fr_auto] items-center gap-4">
+              <div className="text-[13px] font-medium text-default">{METRIC_LABEL[g.label] ?? titleCase(g.label)}</div>
+              <ProgressBar pct={g.compliancePct ?? 0} tone={g.compliancePct === null ? 'neutral' : g.compliancePct >= 95 ? 'good' : g.compliancePct >= 85 ? 'warn' : 'bad'} />
+              <div className="text-[12.5px] text-muted tnum text-right whitespace-nowrap">
+                <span className="text-default font-medium">{fmtPct(g.compliancePct, 1)}</span> · {g.met} met · {g.breached} breached · {g.running} running
+                {g.avgElapsedMinutes !== null && <span className="text-subtle"> · avg {formatDuration(g.avgElapsedMinutes)}</span>}
               </div>
-            ))}
-          </div>
-        )}
-      </Card>
-    </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
-// ---------------------------------------------------------------- preview
+// ---------------------------------------------------------------- preview (rail)
 
 function PreviewPanel({ policyId, dirty }: { policyId: string | null; dirty: boolean }) {
   const lookups = useLookups();
@@ -480,41 +541,40 @@ function PreviewPanel({ policyId, dirty }: { policyId: string | null; dirty: boo
     enabled: !!policyId && !!startIso,
   });
   return (
-    <Card title="Preview due dates">
+    <RailCard title={<><CalendarClock className="h-3.5 w-3.5 text-subtle" /> Preview due dates</>} action={dirty ? <span className="text-[11.5px] text-amber-600">as last saved</span> : undefined}>
       {!policyId ? (
-        <div className="text-[12.5px] text-muted">Save the policy to preview due dates.</div>
+        <div className="text-[12.5px] text-subtle">Save the policy to preview due dates.</div>
       ) : (
-        <div className="flex flex-col gap-3">
-          {dirty && <div className="text-[12px] text-amber-600">Preview reflects the last saved version.</div>}
+        <div className="flex flex-col gap-2">
           <div className="grid grid-cols-2 gap-2">
-            <Select value={ticketType} options={TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t) }))} onChange={(e) => setTicketType(e.target.value as TicketType)} />
-            <Select value={priorityId} placeholder="Any priority" options={priorities.map((p) => ({ value: p.id, label: p.label }))} onChange={(e) => setPriorityId(e.target.value)} />
+            <Select value={ticketType} options={TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t) }))} onChange={(e) => setTicketType(e.target.value as TicketType)} className="h-8 py-0 text-[12.5px]" />
+            <Select value={priorityId} placeholder="Any priority" options={priorities.map((p) => ({ value: p.id, label: p.label }))} onChange={(e) => setPriorityId(e.target.value)} className="h-8 py-0 text-[12.5px]" />
           </div>
-          <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+          <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} className="h-8 py-0 text-[12.5px]" />
           {q.isLoading && <LoadingBlock label="Calculating…" />}
           {q.error && <div className="text-[12.5px] text-red-600">{errorMessage(q.error)}</div>}
           {q.data && (
             <div>
-              <div className="text-[12px] text-subtle mb-2">
-                Calendar: {q.data.calendar.name} ({q.data.calendar.timezone}){q.data.calendar.holidays ? ` · ${q.data.calendar.holidays} holidays` : ''}
+              <div className="text-[11.5px] text-subtle mb-1">
+                {q.data.calendar.name} · {q.data.calendar.timezone}{q.data.calendar.holidays ? ` · ${q.data.calendar.holidays} holidays` : ''}
               </div>
               {q.data.metrics.length === 0 ? (
-                <div className="text-[12.5px] text-muted">No targets apply to this combination.</div>
+                <div className="text-[12.5px] text-subtle">No targets for this combination.</div>
               ) : (
                 <div className="text-[12.5px]">
                   {q.data.metrics.map((m) => (
-                    <div key={m.metric} className="border-t border-default py-1.5">
+                    <div key={m.metric} className="border-t border-default/60 py-1.5">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-medium">{METRIC_LABEL[m.metric as Metric] ?? m.metric}</span>
                         <span className="text-muted">{formatDuration(m.minutes)} · {m.calendar === '24x7' ? '24x7' : 'business hrs'}</span>
                       </div>
                       <div className="flex items-center justify-between gap-2 text-[12px]">
                         <span className="text-subtle">due</span>
-                        <span>{fmtDateTime(m.dueAt)}</span>
+                        <span className="tnum">{fmtDateTime(m.dueAt)}</span>
                       </div>
                       <div className="flex items-center justify-between gap-2 text-[11px] text-subtle">
                         <span>warn at {m.warnPct}%</span>
-                        <span>{fmtDateTime(m.warnAt)}</span>
+                        <span className="tnum">{fmtDateTime(m.warnAt)}</span>
                       </div>
                     </div>
                   ))}
@@ -524,6 +584,6 @@ function PreviewPanel({ policyId, dirty }: { policyId: string | null; dirty: boo
           )}
         </div>
       )}
-    </Card>
+    </RailCard>
   );
 }

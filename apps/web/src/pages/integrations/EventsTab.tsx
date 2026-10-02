@@ -68,7 +68,7 @@ export function EventsTab({ integrations }: { integrations: Integration[] }) {
       </div>
     ) },
     { key: 'customer', header: 'Customer', render: (r) => (r.customerName ? <span className="truncate block max-w-[160px]">{r.customerName}</span> : <Badge color="amber">unresolved</Badge>) },
-    { key: 'ci', header: 'CI', render: (r) => (r.matchedCiId ? <Link to={`/cmdb/${r.matchedCiId}`} onClick={(e) => e.stopPropagation()} className="text-brand-600 hover:underline truncate block max-w-[140px]">{r.ciName ?? 'CI'}</Link> : <span className="text-subtle">—</span>) },
+    { key: 'ci', header: 'CI', render: (r) => (r.matchedCiId ? <Link to={`/cmdb/cis/${r.matchedCiId}`} onClick={(e) => e.stopPropagation()} className="text-brand-600 hover:underline truncate block max-w-[140px]">{r.ciName ?? 'CI'}</Link> : <span className="text-subtle">—</span>) },
     { key: 'ticket', header: 'Ticket', render: (r) => (r.ticketId ? <Link to={`/tickets/${r.ticketId}`} onClick={(e) => e.stopPropagation()} className="text-brand-600 hover:underline font-mono text-xs">{r.ticketNumber}</Link> : <span className="text-subtle">—</span>) },
     { key: 'processingStatus', header: 'Processing', width: '130px', render: (r) => <ProcessingBadge status={r.processingStatus} title={r.processingNote} /> },
   ];

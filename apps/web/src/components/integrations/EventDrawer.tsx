@@ -73,7 +73,7 @@ export function EventDrawer({ id, onClose }: { id: string | null; onClose: () =>
               { label: 'Sensor / rule', value: ev.sensor ?? '—' },
               { label: 'External id', value: <span className="font-mono text-xs">{ev.externalId}</span> },
               { label: 'Occurred', value: ev.normalized?.occurredAt ? fmtDateTime(ev.normalized.occurredAt) : '—' },
-              { label: 'Configuration item', value: ev.matchedCiId ? <Link className="text-brand-600 hover:underline inline-flex items-center gap-1" to={`/cmdb/${ev.matchedCiId}`}>{ev.ciName ?? 'CI'} <ExternalLink className="h-3 w-3" /></Link> : <span className="text-muted">not matched</span> },
+              { label: 'Configuration item', value: ev.matchedCiId ? <Link className="text-brand-600 hover:underline inline-flex items-center gap-1" to={`/cmdb/cis/${ev.matchedCiId}`}>{ev.ciName ?? 'CI'} <ExternalLink className="h-3 w-3" /></Link> : <span className="text-muted">not matched</span> },
               { label: 'Ticket', value: ev.ticket ? <Link className="text-brand-600 hover:underline inline-flex items-center gap-1" to={`/tickets/${ev.ticket.id}`}>{ev.ticket.number} <Badge color={ev.ticket.statusColor ?? undefined}>{ev.ticket.statusLabel}</Badge></Link> : <span className="text-muted">none</span> },
               { label: 'Processed', value: ev.processedAt ? fmtDateTime(ev.processedAt) : <span className="text-muted">pending</span> },
               { label: 'Tags', value: ev.normalized?.tags?.length ? <span className="flex flex-wrap gap-1">{ev.normalized.tags.map((t) => <Badge key={t} color="slate">{t}</Badge>)}</span> : '—' },

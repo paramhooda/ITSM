@@ -73,7 +73,7 @@ export function ProgramDrawer({ programId, onClose, onSchedule }: { programId: s
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-[11.5px] uppercase tracking-wide text-subtle font-medium mb-1">Configuration items ({p.cis.length})</div>
-                <div className="flex flex-wrap gap-1.5">{p.cis.map((c) => <Link key={c.id} to={`/cmdb/${c.id}`} className="rounded-md border border-default bg-surface-2 px-2 py-0.5 text-[12px] hover:underline">{c.name}</Link>)}{p.cis.length === 0 && <span className="text-[12px] text-subtle">—</span>}</div>
+                <div className="flex flex-wrap gap-1.5">{p.cis.map((c) => <Link key={c.id} to={`/cmdb/cis/${c.id}`} className="rounded-md border border-default bg-surface-2 px-2 py-0.5 text-[12px] hover:underline">{c.name}</Link>)}{p.cis.length === 0 && <span className="text-[12px] text-subtle">—</span>}</div>
               </div>
               <div>
                 <div className="text-[11.5px] uppercase tracking-wide text-subtle font-medium mb-1">Assets ({p.assets.length})</div>

@@ -30,7 +30,7 @@ function Row({ r, direction, onRemove, canManage }: { r: Relationship; direction
         {direction === 'out' ? r.typeName : r.inverseName}
       </span>
       <CiTypeBadge typeKey={r.ci.typeKey} name={r.ci.typeName} color={r.ci.typeColor} />
-      <Link to={`/cmdb/${r.ci.id}`} className="font-medium hover:underline truncate">
+      <Link to={`/cmdb/cis/${r.ci.id}`} className="font-medium hover:underline truncate">
         {r.ci.name}
       </Link>
       <CiStatusBadge status={r.ci.status} />
