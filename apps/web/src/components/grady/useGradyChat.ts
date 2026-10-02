@@ -1,9 +1,9 @@
 import { useCallback, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUiStore } from '@/stores/ui';
-import { aiApi, aiQk, type AiMessage } from '@/components/ai/api';
+import { aiApi, aiQk, type AiMessage, type PendingAction } from '@/components/ai/api';
 
-/** Does the assistant's last message propose an action and wait for a go-ahead? */
+/** Fallback only: the server now reports a pending action explicitly; this reads older replies that asked in prose. */
 export function proposesAction(m: AiMessage | undefined) {
   if (!m || m.role !== 'assistant') return false;
   const text = m.content.trim();
@@ -18,6 +18,8 @@ export function useGradyChat() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [useContext, setUseContext] = useState(true);
   const [lastSent, setLastSent] = useState('');
+  /** The action the server holds for confirmation on the open conversation (from the last reply or the loaded conversation). */
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 
   const status = useQuery({ queryKey: aiQk.status, queryFn: aiApi.status, staleTime: 60_000, retry: false });
   const enabled = !!status.data?.enabled;
@@ -28,9 +30,10 @@ export function useGradyChat() {
     mutationFn: (text: string) => aiApi.chat({ conversationId: conversationId ?? undefined, message: text, context: useContext && assistantContext ? assistantContext : undefined }),
     onSuccess: (res, text) => {
       setConversationId(res.conversationId);
-      qc.setQueryData(aiQk.conversation(res.conversationId), (old: { id: string; title: string | null; messages: AiMessage[] } | undefined) => {
+      setPendingAction(res.pendingAction ?? null);
+      qc.setQueryData(aiQk.conversation(res.conversationId), (old: { id: string; title: string | null; messages: AiMessage[]; pendingAction?: PendingAction | null } | undefined) => {
         const mine: AiMessage = { id: `local-${Date.now()}`, role: 'user', content: text, toolCalls: [], createdAt: new Date().toISOString() };
-        return { id: res.conversationId, title: old?.title ?? null, messages: [...(old?.messages ?? []), mine, res.message] };
+        return { id: res.conversationId, title: old?.title ?? null, messages: [...(old?.messages ?? []), mine, res.message], pendingAction: res.pendingAction ?? null };
       });
       void qc.invalidateQueries({ queryKey: aiQk.conversation(res.conversationId) });
       void qc.invalidateQueries({ queryKey: aiQk.conversations });
@@ -62,6 +65,8 @@ export function useGradyChat() {
   );
 
   const list = messages.data?.messages ?? [];
+  // A conversation reopened from the list carries its own pending action.
+  const held = send.isPending ? null : (messages.data?.pendingAction ?? pendingAction);
   return {
     status,
     enabled,
@@ -70,7 +75,10 @@ export function useGradyChat() {
     model: status.data?.model ?? null,
     conversations: conversations.data?.items ?? [],
     conversationId,
-    open: (id: string | null) => setConversationId(id),
+    open: (id: string | null) => {
+      setConversationId(id);
+      setPendingAction(null);
+    },
     title: messages.data?.title ?? null,
     messages: list,
     loadingMessages: messages.isLoading && !!conversationId,
@@ -79,9 +87,13 @@ export function useGradyChat() {
     lastSent,
     submit,
     retry: () => lastSent && submit(lastSent),
-    reset: () => setConversationId(null),
+    reset: () => {
+      setConversationId(null);
+      setPendingAction(null);
+    },
     remove: (id: string) => remove.mutate(id),
-    awaitingGoAhead: !send.isPending && !!status.data?.canAct && proposesAction(list[list.length - 1]),
+    pendingAction: held,
+    awaitingGoAhead: !send.isPending && !!status.data?.canAct && (!!held || proposesAction(list[list.length - 1])),
     contextLabel: assistantContext?.label ? String(assistantContext.label) : null,
     useContext,
     setUseContext,

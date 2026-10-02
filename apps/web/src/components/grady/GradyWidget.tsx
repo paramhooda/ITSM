@@ -203,9 +203,16 @@ function GradyWindow({ onClose }: { onClose: () => void }) {
             {chat.loadingMessages && <div className="text-[12.5px] text-subtle inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading conversation…</div>}
             {chat.messages.map((m) => <Bubble key={m.id} m={m} />)}
             {chat.awaitingGoAhead && (
-              <div className="flex gap-2 pl-9">
-                <Button size="sm" icon={<Check className="h-3.5 w-3.5" />} onClick={() => send('Yes, proceed.')}>Yes, go ahead</Button>
-                <Button size="sm" variant="outline" icon={<X className="h-3.5 w-3.5" />} onClick={() => send('No, do not do that.')}>No</Button>
+              <div className="pl-9 flex flex-col gap-2">
+                {chat.pendingAction && (
+                  <div className="rounded-xl border border-amber-200/80 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
+                    <span className="font-medium">Waiting for your go-ahead:</span> {chat.pendingAction.preview}. Nothing has been changed yet.
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button size="sm" icon={<Check className="h-3.5 w-3.5" />} onClick={() => send('Yes, proceed.')}>Yes, go ahead</Button>
+                  <Button size="sm" variant="outline" icon={<X className="h-3.5 w-3.5" />} onClick={() => send('No, do not do that.')}>No</Button>
+                </div>
               </div>
             )}
             {chat.pending && <Thinking text={chat.pending} />}

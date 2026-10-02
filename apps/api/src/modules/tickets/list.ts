@@ -374,3 +374,53 @@ export async function similarTickets(ctx: Ctx, id: string) {
     })),
   };
 }
+
+// ---------------------------------------------------------------- exact counts and breakdowns (assistant query layer)
+
+export const GROUP_DIMENSIONS = ['status', 'statusCategory', 'type', 'priority', 'customer', 'team', 'assignee', 'service', 'category', 'site', 'slaState'] as const;
+export type GroupDimension = (typeof GROUP_DIMENSIONS)[number];
+
+/** One number: how many tickets match the filters. Same predicates as the list, so it never disagrees with it. */
+export async function countTickets(ctx: Ctx, q: StatsQuery): Promise<number> {
+  return countRows(ctx.tx, sql`tickets`, buildWhere(ctx, q));
+}
+
+const GROUP_SQL: Record<Exclude<GroupDimension, 'slaState'>, { label: SQL; join: SQL; order: SQL }> = {
+  status: { label: sql`coalesce(st.label, 'Unknown')`, join: sql`left join config_options st on st.id = tickets.status_id`, order: sql`min(st.sort_order) asc nulls last, count(*) desc` },
+  statusCategory: { label: sql`coalesce(st.status_category, 'unknown')`, join: sql`left join config_options st on st.id = tickets.status_id`, order: sql`count(*) desc` },
+  type: { label: sql`tickets.type`, join: sql``, order: sql`count(*) desc` },
+  priority: { label: sql`coalesce(pr.label, 'No priority')`, join: sql`left join config_options pr on pr.id = tickets.priority_id`, order: sql`min(pr.level) asc nulls last` },
+  customer: { label: sql`coalesce(c.name, 'Unknown customer')`, join: sql`left join customers c on c.id = tickets.customer_id`, order: sql`count(*) desc, 1 asc` },
+  team: { label: sql`coalesce(tm.name, 'No team')`, join: sql`left join teams tm on tm.id = tickets.assigned_team_id`, order: sql`count(*) desc, 1 asc` },
+  assignee: { label: sql`coalesce(u.name, 'Unassigned')`, join: sql`left join users u on u.id = tickets.assignee_id`, order: sql`count(*) desc, 1 asc` },
+  service: { label: sql`coalesce(s.name, 'No service')`, join: sql`left join services s on s.id = tickets.service_id`, order: sql`count(*) desc, 1 asc` },
+  category: { label: sql`coalesce(cat.label, 'No category')`, join: sql`left join config_options cat on cat.id = tickets.category_id`, order: sql`count(*) desc, 1 asc` },
+  site: { label: sql`coalesce(si.name, 'No site')`, join: sql`left join sites si on si.id = tickets.site_id`, order: sql`count(*) desc, 1 asc` },
+};
+
+/**
+ * Counts per group for one dimension, over the same predicates as the list. Groups
+ * always sum to the total (an `Other` row absorbs anything beyond `limit`).
+ */
+export async function groupTickets(ctx: Ctx, q: StatsQuery, by: GroupDimension, limit = 12): Promise<{ total: number; groups: { label: string; count: number }[] }> {
+  const where = buildWhere(ctx, q) ?? sql`true`;
+  if (by === 'slaState') {
+    const [row] = (await ctx.tx.execute(sql`
+      select count(*)::int as total,
+             count(*) filter (where ${slaStateFilterSql.breached})::int as breached,
+             count(*) filter (where ${slaStateFilterSql.atRisk})::int as at_risk
+      from tickets where ${where}`)).rows as { total: number; breached: number; at_risk: number }[];
+    const total = row?.total ?? 0;
+    const breached = row?.breached ?? 0;
+    const atRisk = row?.at_risk ?? 0;
+    return { total, groups: [{ label: 'Breached', count: breached }, { label: 'At risk', count: atRisk }, { label: 'On track', count: Math.max(0, total - breached - atRisk) }] };
+  }
+  const dim = GROUP_SQL[by];
+  const res = await ctx.tx.execute(sql`select ${dim.label} as label, count(*)::int as count from tickets ${dim.join} where ${where} group by 1 order by ${dim.order}`);
+  const rows = res.rows as { label: string; count: number }[];
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  if (rows.length <= limit) return { total, groups: rows };
+  const head = rows.slice(0, limit - 1);
+  const other = rows.slice(limit - 1).reduce((s, r) => s + r.count, 0);
+  return { total, groups: [...head, { label: 'Other', count: other }] };
+}

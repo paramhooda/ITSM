@@ -49,6 +49,13 @@ export interface Conversation {
   messageCount: number;
 }
 
+/** An action the assistant proposed and the platform holds until the user confirms it. */
+export interface PendingAction {
+  id: string;
+  tool: string;
+  preview: string;
+}
+
 export type Tone = 'neutral' | 'formal' | 'friendly' | 'apologetic';
 
 interface Base {
@@ -149,9 +156,9 @@ export const aiApi = {
   status: () => get<AiStatus>('/ai/status'),
   test: () => post<AiTestResult>('/ai/test'),
   conversations: () => get<{ items: Conversation[] }>('/ai/conversations'),
-  conversation: (id: string) => get<{ id: string; title: string | null; messages: AiMessage[] }>(`/ai/conversations/${id}`),
+  conversation: (id: string) => get<{ id: string; title: string | null; messages: AiMessage[]; pendingAction: PendingAction | null }>(`/ai/conversations/${id}`),
   deleteConversation: (id: string) => del(`/ai/conversations/${id}`),
-  chat: (body: { conversationId?: string | null; message: string; context?: Record<string, unknown> | null }) => post<{ conversationId: string; message: AiMessage }>('/ai/chat', body),
+  chat: (body: { conversationId?: string | null; message: string; context?: Record<string, unknown> | null }) => post<{ conversationId: string; message: AiMessage; pendingAction: PendingAction | null }>('/ai/chat', body),
   summarize: (id: string) => post<SummaryResult>(`/ai/tickets/${id}/summarize`),
   classify: (id: string) => post<ClassificationResult>(`/ai/tickets/${id}/classify`),
   classifyDraft: (body: { title: string; description?: string | null; customerId?: string; type?: string }) => post<DraftClassification>('/ai/classify-draft', body),

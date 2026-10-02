@@ -95,9 +95,9 @@ describe('tool registry', () => {
 
   it('filters tools by the principal permissions (admin vs customer user)', async () => {
     const adminTools = await asAdmin(async (ctx) => availableTools(ctx).map((t) => t.name));
-    expect(adminTools).toEqual(expect.arrayContaining(['search', 'list_tickets', 'get_ticket', 'list_customers', 'get_customer', 'get_ci', 'impact_analysis', 'my_workload', 'out_of_scope_work', 'create_ticket', 'assign_ticket', 'set_status', 'link_tickets']));
+    expect(adminTools).toEqual(expect.arrayContaining(['search', 'query_tickets', 'get_ticket', 'list_customers', 'get_customer', 'get_ci', 'impact_analysis', 'my_workload', 'out_of_scope_work', 'create_ticket', 'assign_ticket', 'set_status', 'link_tickets']));
     const portalTools = await asCustomer(async (ctx) => availableTools(ctx).map((t) => t.name));
-    expect(portalTools).toEqual(expect.arrayContaining(['list_tickets', 'get_ticket', 'ticket_timeline', 'knowledge_search', 'sla_compliance', 'entitlement_usage', 'list_contracts', 'create_ticket', 'add_comment', 'upcoming_maintenance']));
+    expect(portalTools).toEqual(expect.arrayContaining(['query_tickets', 'get_ticket', 'ticket_timeline', 'knowledge_search', 'sla_compliance', 'entitlement_usage', 'list_contracts', 'create_ticket', 'add_comment', 'upcoming_maintenance']));
     for (const forbidden of ['list_customers', 'get_customer', 'get_ci', 'ci_history', 'impact_analysis', 'my_workload', 'assign_ticket', 'set_status', 'link_tickets', 'engineer_directory', 'problem_candidates']) expect(portalTools).not.toContain(forbidden);
   });
 
@@ -105,7 +105,7 @@ describe('tool registry', () => {
     const noAct: Principal = { ...admin, globalPermissions: new Set([...admin.globalPermissions].filter((p) => p !== 'ai:act')) };
     const names = await runAs(noAct, meta, async (ctx) => availableTools(ctx).map((t) => t.name));
     for (const t of ACTION_TOOLS) expect(names).not.toContain(t.name);
-    expect(names).toContain('list_tickets');
+    expect(names).toContain('query_tickets');
     const ok = await runAs(noAct, meta, async (ctx) => toolAvailable(ctx, toolByName('create_ticket')!));
     expect(ok).toBe(false);
   });
@@ -350,7 +350,7 @@ describe('tool loop with a fake provider', () => {
       this.calls.push(opts);
       const last = opts.messages[opts.messages.length - 1]!;
       if (last.role === 'user') {
-        expect(opts.tools?.some((t) => t.name === 'list_tickets')).toBe(true);
+        expect(opts.tools?.some((t) => t.name === 'query_tickets')).toBe(true);
         return { text: '', toolCalls: [{ id: 'call_1', name: 'list_tickets', input: { customer: `AIA${S.toUpperCase()}`, openOnly: true, limit: 5 } }, { id: 'call_2', name: 'assign_ticket', input: { ticket: numbers.a1, engineer: 'me' } }], stopReason: 'tool_use', usage: { inputTokens: 10, outputTokens: 5 } };
       }
       const results = opts.messages.filter((m) => m.role === 'tool') as { name: string; content: string; isError?: boolean }[];
@@ -372,18 +372,28 @@ describe('tool loop with a fake provider', () => {
       expect(res.message.content).toMatch(/\[INC-\d+\]\(\/tickets\/[0-9a-f-]{36}\)/);
       expect(res.message.toolCalls.map((t) => t.name)).toEqual(['list_tickets', 'assign_ticket']);
       expect(res.message.toolCalls.every((t) => t.ok)).toBe(true);
-      expect(res.message.toolCalls[1]!.action).toBe(true);
+      // the action was proposed, not run: the platform holds it until the user confirms
+      expect(res.message.toolCalls[1]).toMatchObject({ action: true, proposed: true });
+      expect(res.pendingAction).toMatchObject({ tool: 'assign_ticket' });
       expect(res.usage.inputTokens).toBe(30);
+      const [held] = await withSystem((tx) => tx.select({ assigneeId: schema.tickets.assigneeId }).from(schema.tickets).where(eq(schema.tickets.id, ticketIds[0]!)));
+      expect(held!.assigneeId).not.toBe(admin.id);
 
       const conv = await asAdmin((ctx) => ai.getConversation(ctx, res.conversationId));
       expect(conv.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+      expect(conv.pendingAction?.tool).toBe('assign_ticket');
       expect(conv.title!.length).toBeLessThanOrEqual(60);
       const mine = await asAdmin((ctx) => ai.listConversations(ctx));
       expect(mine.items.some((c) => c.id === res.conversationId)).toBe(true);
       expect(mine.items.find((c) => c.id === res.conversationId)!.messageCount).toBe(2);
       // the conversation is private to its owner
       await expect(asCustomer((ctx) => ai.getConversation(ctx, res.conversationId))).rejects.toBeInstanceOf(AppError);
-      // the action happened through the service layer with source = ai
+
+      // the user confirms: the platform commits the held action through the service layer with source = ai, without asking the model
+      const yes = await asAdmin((ctx) => ai.chat(ctx, { conversationId: res.conversationId, message: 'Yes, proceed.' }));
+      expect(fake.calls.length).toBe(2);
+      expect(yes.message.content).toMatch(/^Done: Assigned /);
+      expect(yes.pendingAction).toBeNull();
       const [t] = await withSystem((tx) => tx.select({ assigneeId: schema.tickets.assigneeId }).from(schema.tickets).where(eq(schema.tickets.id, ticketIds[0]!)));
       expect(t!.assigneeId).toBe(admin.id);
       const audits = await withSystem((tx) => tx.select({ source: schema.auditLog.source, action: schema.auditLog.action }).from(schema.auditLog).where(eq(schema.auditLog.entityId, ticketIds[0]!)));

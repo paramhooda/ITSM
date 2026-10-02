@@ -36,209 +36,23 @@ export interface AiTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
   requires: Permission[];
   /** Customer (portal) users: permissions required, or `null` when the tool is not offered in the portal. */
   portal: Permission[] | null;
-  /** Mutates data: requires `ai:act` and confirmation from the user when the request is ambiguous. */
+  /** Mutates data: requires `ai:act`; never runs until the user has confirmed the preview (propose-then-commit). */
   action: boolean;
+  /** Kept for compatibility but no longer offered to the model (superseded by a better tool). */
+  hidden?: boolean;
   run(ctx: Ctx, input: z.infer<S>): Promise<unknown>;
-  /** One-line description shown in the conversation ("Listed 5 open tickets for Acme"). */
+  /** One-line description shown in the conversation ("Listed 5 open tickets for Sample Customer"). */
   summary(input: z.infer<S>, result: unknown): string;
+  /** Action tools: what exactly will happen, resolved against real records, shown to the user before they confirm. */
+  preview?(ctx: Ctx, input: z.infer<S>): Promise<string>;
 }
 
 const define = <S extends z.ZodTypeAny>(t: AiTool<S>): AiTool => t as unknown as AiTool;
 
-export const isCustomerUser = (ctx: Ctx) => ctx.user.userType === 'customer';
-export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const ticketLink = (ctx: Ctx, id: string) => (isCustomerUser(ctx) ? `/portal/tickets/${id}` : `/tickets/${id}`);
-const trunc = (s: string | null | undefined, n: number) => (s ? (s.length > n ? `${s.slice(0, n)}…` : s) : s ?? null);
-const iso = (d: Date | string | null | undefined) => (d ? (d instanceof Date ? d.toISOString() : String(d)) : null);
-const like = (s: string) => `%${s.trim().replace(/[%_]/g, (m) => `\\${m}`)}%`;
+import { isCustomerUser, UUID_RE, ticketLink, trunc, iso, period, listQuery, resolveTicket, resolveCustomerId, resolveOption, resolveService, resolveSite, resolveCi, resolveEngineer, resolveTeam, compactTicket, compactDetail, compactTimeline } from './helpers';
+import { queryTicketsSchema, runTicketQuery, describeTicketQuery } from './query';
+export * from './helpers';
 
-// ---------------------------------------------------------------- resolvers (names → ids, always within the caller's visibility)
-
-export async function resolveTicket(ctx: Ctx, ref: string): Promise<TicketRow> {
-  const r = ref.trim();
-  if (!r) throw new ValidationError('Ticket reference is required');
-  if (UUID_RE.test(r)) return loadTicket(ctx, r);
-  return loadTicketByNumber(ctx, r.toUpperCase());
-}
-
-/** Customer users are always resolved to their own customer regardless of the reference. */
-export async function resolveCustomerId(ctx: Ctx, ref?: string | null, required = false): Promise<string | undefined> {
-  if (isCustomerUser(ctx)) {
-    if (!ctx.user.customerId) throw new ValidationError('Your account is not linked to a customer');
-    return ctx.user.customerId;
-  }
-  const r = ref?.trim();
-  if (!r) {
-    if (required) throw new ValidationError('Customer is required (name, code or id)');
-    return undefined;
-  }
-  if (UUID_RE.test(r)) {
-    ctx.requireCustomer(r);
-    return r;
-  }
-  const rows = await ctx.tx
-    .select({ id: schema.customers.id, name: schema.customers.name, code: schema.customers.code })
-    .from(schema.customers)
-    .where(or(ilike(schema.customers.name, like(r)), ilike(schema.customers.code, r)))
-    .orderBy(asc(schema.customers.name))
-    .limit(6);
-  const exact = rows.filter((c) => c.name.toLowerCase() === r.toLowerCase() || c.code.toLowerCase() === r.toLowerCase());
-  const pick = exact.length === 1 ? exact : rows;
-  if (pick.length === 1) return pick[0]!.id;
-  if (!pick.length) throw new NotFoundError('Customer', `No customer matching "${r}" is visible to you`);
-  throw new ValidationError(`Customer "${r}" is ambiguous: ${pick.map((c) => `${c.name} (${c.code})`).join(', ')}. Ask the user which one they mean.`);
-}
-
-async function resolveOption(ctx: Ctx, type: string, ref?: string | null) {
-  const r = ref?.trim();
-  if (!r) return null;
-  const all = (await optionsOfType(ctx.tx, type)).filter((o) => o.isActive);
-  const hit = all.find((o) => o.id === r) ?? all.find((o) => o.key.toLowerCase() === r.toLowerCase()) ?? all.find((o) => o.label.toLowerCase() === r.toLowerCase()) ?? all.find((o) => o.label.toLowerCase().startsWith(r.toLowerCase())) ?? all.find((o) => o.label.toLowerCase().includes(r.toLowerCase()));
-  if (!hit) throw new ValidationError(`Unknown ${type.replace(/_/g, ' ')} "${r}". Valid values: ${all.map((o) => o.key).join(', ')}`);
-  return hit;
-}
-
-async function resolveService(ctx: Ctx, ref?: string | null) {
-  const r = ref?.trim();
-  if (!r) return null;
-  if (UUID_RE.test(r)) {
-    const [s] = await ctx.tx.select({ id: schema.services.id, name: schema.services.name }).from(schema.services).where(eq(schema.services.id, r)).limit(1);
-    if (!s) throw new NotFoundError('Service');
-    return s;
-  }
-  const rows = await ctx.tx.select({ id: schema.services.id, name: schema.services.name, key: schema.services.key }).from(schema.services).where(and(eq(schema.services.isActive, true), or(eq(schema.services.key, r), ilike(schema.services.name, like(r))))).limit(5);
-  const exact = rows.filter((s) => s.key === r || s.name.toLowerCase() === r.toLowerCase());
-  const pick = exact.length === 1 ? exact : rows;
-  if (pick.length === 1) return pick[0]!;
-  if (!pick.length) throw new NotFoundError('Service', `No service matching "${r}"`);
-  throw new ValidationError(`Service "${r}" is ambiguous: ${pick.map((s) => s.name).join(', ')}`);
-}
-
-async function resolveSite(ctx: Ctx, customerId: string, ref?: string | null) {
-  const r = ref?.trim();
-  if (!r) return null;
-  const rows = await ctx.tx.select({ id: schema.sites.id, name: schema.sites.name, code: schema.sites.code }).from(schema.sites).where(and(eq(schema.sites.customerId, customerId), or(ilike(schema.sites.name, like(r)), ilike(schema.sites.code, r)))).limit(5);
-  const exact = rows.filter((s) => s.name.toLowerCase() === r.toLowerCase() || s.code.toLowerCase() === r.toLowerCase());
-  const pick = exact.length === 1 ? exact : rows;
-  if (pick.length === 1) return pick[0]!;
-  if (!pick.length) throw new NotFoundError('Site', `No site matching "${r}" for this customer`);
-  throw new ValidationError(`Site "${r}" is ambiguous: ${pick.map((s) => s.name).join(', ')}`);
-}
-
-async function resolveCi(ctx: Ctx, ref: string, customerId?: string) {
-  const r = ref.trim();
-  if (UUID_RE.test(r)) return { id: r };
-  const res = await listCisMin(ctx, { page: 1, pageSize: 8, q: r, customerId });
-  const low = r.toLowerCase();
-  const exact = res.items.filter((c) => c.name.toLowerCase() === low || c.hostname?.toLowerCase() === low || c.ipAddress === r);
-  const pick = exact.length ? exact : res.items;
-  if (pick.length === 1) return pick[0]!;
-  if (!pick.length) throw new NotFoundError('Configuration item', `No configuration item matching "${r}" is visible to you`);
-  throw new ValidationError(`CI "${r}" is ambiguous: ${pick.map((c) => `${c.name}${c.hostname ? ` (${c.hostname})` : ''}`).join(', ')}. Ask the user which one.`);
-}
-
-async function resolveEngineer(ctx: Ctx, ref?: string | null) {
-  const r = ref?.trim();
-  if (!r) return null;
-  if (r.toLowerCase() === 'me') return { id: ctx.user.id, name: ctx.user.name };
-  if (UUID_RE.test(r)) {
-    const [u] = await ctx.tx.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, r)).limit(1);
-    if (!u) throw new NotFoundError('Engineer');
-    return u;
-  }
-  const rows = await engineerDirectory(ctx, r);
-  const exact = rows.filter((u) => u.email.toLowerCase() === r.toLowerCase() || u.name.toLowerCase() === r.toLowerCase());
-  const pick = exact.length === 1 ? exact : rows;
-  if (pick.length === 1) return pick[0]!;
-  if (!pick.length) throw new NotFoundError('Engineer', `No engineer matching "${r}"`);
-  throw new ValidationError(`Engineer "${r}" is ambiguous: ${pick.slice(0, 6).map((u) => `${u.name} <${u.email}>`).join(', ')}`);
-}
-
-async function resolveTeam(ctx: Ctx, ref?: string | null) {
-  const r = ref?.trim();
-  if (!r) return null;
-  const rows = await ctx.tx.select({ id: schema.teams.id, key: schema.teams.key, name: schema.teams.name }).from(schema.teams).where(and(eq(schema.teams.isActive, true), or(eq(schema.teams.id, UUID_RE.test(r) ? r : '00000000-0000-0000-0000-000000000000'), eq(schema.teams.key, r), ilike(schema.teams.name, like(r))))).limit(5);
-  const exact = rows.filter((t) => t.key === r || t.name.toLowerCase() === r.toLowerCase());
-  const pick = exact.length === 1 ? exact : rows;
-  if (pick.length === 1) return pick[0]!;
-  if (!pick.length) throw new NotFoundError('Team', `No team matching "${r}"`);
-  throw new ValidationError(`Team "${r}" is ambiguous: ${pick.map((t) => t.name).join(', ')}`);
-}
-
-// ---------------------------------------------------------------- compact shapes (keep tool results small)
-
-type ListItem = Awaited<ReturnType<typeof listTickets>>['items'][number];
-export const compactTicket = (ctx: Ctx, t: ListItem) => ({
-  number: t.number,
-  id: t.id,
-  type: t.type,
-  title: t.title,
-  customer: t.customerName,
-  site: t.siteName,
-  service: t.serviceName,
-  status: t.status.label,
-  statusCategory: t.status.category,
-  priority: t.priority?.label ?? null,
-  category: t.categoryLabel,
-  assignee: t.assigneeName,
-  team: t.teamName,
-  scope: t.scopeStatus,
-  isMajor: t.isMajor,
-  sla: t.sla ? { metric: t.sla.metric, state: t.sla.state, breached: t.sla.breached, dueAt: iso(t.sla.dueAt), remainingMinutes: t.sla.remainingMinutes } : null,
-  dueAt: iso(t.dueAt),
-  createdAt: iso(t.createdAt),
-  resolvedAt: iso(t.resolvedAt),
-  link: ticketLink(ctx, t.id),
-});
-
-type Detail = Awaited<ReturnType<typeof getTicket>>;
-export function compactDetail(ctx: Ctx, d: Detail) {
-  return {
-    number: d.number,
-    id: d.id,
-    type: d.type,
-    title: d.title,
-    description: trunc(d.description, 1500),
-    customer: d.customer?.name ?? null,
-    site: d.site?.name ?? null,
-    service: d.service?.name ?? null,
-    contract: d.contract ? `${d.contract.number} (${d.contract.status}, ends ${d.contract.endDate})` : null,
-    status: d.status?.label ?? null,
-    statusCategory: d.status?.category ?? null,
-    priority: d.priority?.label ?? null,
-    impact: d.impact?.label ?? null,
-    urgency: d.urgency?.label ?? null,
-    category: d.category?.label ?? null,
-    subcategory: d.subcategory?.label ?? null,
-    domain: d.domain,
-    scope: d.scopeStatus,
-    assignee: d.assignee?.name ?? null,
-    team: d.team?.name ?? null,
-    requester: d.requester?.name ?? d.requesterContact?.name ?? null,
-    isMajor: d.isMajor,
-    escalationLevel: d.escalationLevel,
-    tags: d.tags,
-    primaryCi: d.cis.find((c) => c.role === 'primary')?.name ?? d.cis[0]?.name ?? null,
-    cis: d.cis.map((c) => ({ name: c.name, hostname: c.hostname, ip: c.ipAddress })),
-    links: d.links.map((l) => ({ type: l.linkType, direction: l.direction, number: l.ticket.number, title: l.ticket.title, status: l.ticket.status?.label ?? null })),
-    slas: d.slas.map((s) => ({ metric: s.metric, state: s.state, dueAt: iso(s.dueAt), remainingMinutes: s.remainingMinutes, pctConsumed: s.pctConsumed, breached: s.breached })),
-    resolutionNotes: trunc(d.resolutionNotes, 1000),
-    createdAt: iso(d.createdAt),
-    updatedAt: iso(d.updatedAt),
-    dueAt: iso(d.dueAt),
-    resolvedAt: iso(d.resolvedAt),
-    closedAt: iso(d.closedAt),
-    link: ticketLink(ctx, d.id),
-  };
-}
-
-export const compactTimeline = (items: Awaited<ReturnType<typeof timeline>>['items'], max: number) =>
-  items.slice(-max).map((i) => ({ at: iso(i.createdAt), by: i.actorName, kind: i.kind === 'comment' ? i.type : i.type, internal: i.isInternal, text: trunc(i.kind === 'comment' ? i.body : i.summary, 600) }));
-
-const period = (days: number) => new Date(Date.now() - days * 86_400_000);
-
-/** Fills the flag keys `ListQuery` requires (zod transforms make them required-but-undefined). */
-export const listQuery = (q: Partial<ListQuery>): ListQuery => ({ page: 1, pageSize: 20, order: 'desc', unassigned: undefined, mine: undefined, watching: undefined, isMajor: undefined, open: undefined, ...q });
 
 // ---------------------------------------------------------------- read tools
 
@@ -265,6 +79,17 @@ const ticketRef = z.string().max(80).describe('Ticket number (e.g. INC-000123) o
 
 export const READ_TOOLS: AiTool[] = [
   define({
+    name: 'query_tickets',
+    description: "The one way to answer questions about tickets: how many (mode 'count'), by priority/status/customer/team/engineer/service (mode 'breakdown' + groupBy), or which ones (mode 'list'). The result's `facts` lines carry the exact figures and say what was counted; quote them. Unless the user says otherwise, tickets means open tickets (new, in progress or pending).",
+    inputSchema: queryTicketsSchema,
+    requires: ['tickets:read'],
+    portal: ['portal:tickets'],
+    action: false,
+    run: (ctx, input) => runTicketQuery(ctx, input),
+    summary: describeTicketQuery,
+  }),
+
+  define({
     name: 'search',
     description: 'Global search across tickets, customers, assets, CIs, contracts, services and knowledge articles. Use when you do not know which entity type the user means.',
     inputSchema: z.object({ q: z.string().min(2).max(200), types: z.array(z.enum(['ticket', 'customer', 'asset', 'ci', 'contract', 'service', 'kb', 'visit'])).optional(), limit: z.number().int().min(1).max(20).optional() }),
@@ -281,11 +106,12 @@ export const READ_TOOLS: AiTool[] = [
 
   define({
     name: 'list_tickets',
-    description: 'List tickets with filters (type, status category, priority, customer, assignee, service, scope, SLA state, dates, text). Returns at most 20 compact rows plus the total count.',
+    description: 'Superseded by query_tickets (mode list). Kept for stored conversations.',
     inputSchema: listTicketsSchema,
     requires: ['tickets:read'],
     portal: ['portal:tickets'],
     action: false,
+    hidden: true,
     run: async (ctx, input) => {
       const customerId = await resolveCustomerId(ctx, input.customer);
       const priority = await resolveOption(ctx, 'ticket_priority', input.priority);
@@ -365,11 +191,12 @@ export const READ_TOOLS: AiTool[] = [
 
   define({
     name: 'ticket_stats',
-    description: 'Counts of open/breached/at-risk/unassigned/due-today/overdue tickets, by status category and type, optionally for one customer or ticket type.',
+    description: 'Superseded by query_tickets (mode count / breakdown). Kept for stored conversations.',
     inputSchema: z.object({ customer: z.string().max(200).optional(), type: z.enum(['incident', 'request', 'problem', 'change']).optional() }),
     requires: ['tickets:read'],
     portal: ['portal:tickets'],
     action: false,
+    hidden: true,
     run: async (ctx, input) => ticketStats(ctx, { customerId: await resolveCustomerId(ctx, input.customer), type: input.type }),
     summary: (input) => `Computed ticket statistics${input.customer ? ` for ${input.customer}` : ''}`,
   }),
@@ -609,7 +436,8 @@ export const READ_TOOLS: AiTool[] = [
       const res = await listTickets(ctx, listQuery({ page: 1, pageSize: input.limit ?? 20, sort: 'dueAt', order: 'asc', mine: true, open: true }));
       const soon = Date.now() + 4 * 3_600_000;
       const items = res.items.map((t) => compactTicket(ctx, t));
-      return { total: res.total, breached: items.filter((t) => t.sla?.breached).length, dueWithin4h: res.items.filter((t) => t.dueAt && t.dueAt.getTime() <= soon && t.dueAt.getTime() >= Date.now()).length, overdue: res.items.filter((t) => t.dueAt && t.dueAt.getTime() < Date.now()).length, items };
+      const breached = items.filter((t) => t.sla?.breached).length;
+      return { total: res.total, breached, dueWithin4h: res.items.filter((t) => t.dueAt && t.dueAt.getTime() <= soon && t.dueAt.getTime() >= Date.now()).length, overdue: res.items.filter((t) => t.dueAt && t.dueAt.getTime() < Date.now()).length, items, facts: [`${res.total} open tickets assigned to ${ctx.user.name}${breached ? `, ${breached} with a breached SLA` : ''}`] };
     },
     summary: (_i, result) => `Read workload (${(result as { total: number }).total} open tickets)`,
   }),
@@ -778,6 +606,17 @@ export const ACTION_TOOLS: AiTool[] = [
       return { created: true, number: d.number, id: d.id, title: d.title, status: d.status?.label, priority: d.priority?.label ?? null, customer: d.customer?.name, scope: d.scopeStatus, link: ticketLink(ctx, d.id) };
     },
     summary: (_i, result) => `Created ticket ${(result as { number: string }).number}`,
+    preview: async (ctx, input) => {
+      const customerId = (await resolveCustomerId(ctx, input.customer, true))!;
+      const [cust] = await ctx.tx.select({ name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, customerId)).limit(1);
+      const [priority, site, service] = await Promise.all([isCustomerUser(ctx) ? null : resolveOption(ctx, 'ticket_priority', input.priority), resolveSite(ctx, customerId, input.site), resolveService(ctx, input.service)]);
+      const parts = [`Create a${input.type === 'incident' ? 'n incident' : ' service request'} for ${cust?.name ?? 'the customer'}`];
+      if (site) parts.push(`at ${site.name}`);
+      parts.push(`titled "${input.title}"`);
+      if (priority) parts.push(`with priority ${priority.label}`);
+      if (service) parts.push(`on the service ${service.name}`);
+      return parts.join(' ');
+    },
   }),
 
   define({
@@ -794,6 +633,11 @@ export const ACTION_TOOLS: AiTool[] = [
       return { added: true, ticket: t.number, commentId: c.id, kind: c.kind, visibleToCustomer: !c.isInternal, link: ticketLink(ctx, t.id) };
     },
     summary: (input, result) => `Added ${(result as { kind: string }).kind === 'work_note' ? 'work note' : 'comment'} to ${input.ticket.toUpperCase()}`,
+    preview: async (ctx, input) => {
+      const t = await resolveTicket(ctx, input.ticket);
+      const internal = !!input.internal && !isCustomerUser(ctx);
+      return `Add ${internal ? 'an internal work note' : 'a comment visible to the customer'} to ${t.number} ("${t.title.slice(0, 80)}"): "${input.body.length > 160 ? `${input.body.slice(0, 160)}…` : input.body}"`;
+    },
   }),
 
   define({
@@ -813,6 +657,12 @@ export const ACTION_TOOLS: AiTool[] = [
       return { assigned: true, ticket: d.number, assignee: d.assignee?.name ?? null, team: d.team?.name ?? null, status: d.status?.label, link: ticketLink(ctx, d.id) };
     },
     summary: (input, result) => `Assigned ${input.ticket.toUpperCase()} to ${(result as { assignee: string | null }).assignee ?? (result as { team: string | null }).team ?? 'nobody'}`,
+    preview: async (ctx, input) => {
+      if (!input.engineer && !input.team) throw new ValidationError('Provide an engineer and/or a team');
+      const t = await resolveTicket(ctx, input.ticket);
+      const [eng, team] = await Promise.all([resolveEngineer(ctx, input.engineer), resolveTeam(ctx, input.team)]);
+      return `Assign ${t.number} ("${t.title.slice(0, 80)}") to ${[eng?.name, team ? `the team ${team.name}` : null].filter(Boolean).join(' and ')}${input.comment ? ` with the comment "${input.comment}"` : ''}`;
+    },
   }),
 
   define({
@@ -833,6 +683,14 @@ export const ACTION_TOOLS: AiTool[] = [
       return { updated: true, ticket: d.number, status: d.status?.label, statusCategory: d.status?.category, link: ticketLink(ctx, d.id) };
     },
     summary: (input, result) => `Set ${input.ticket.toUpperCase()} to ${(result as { status: string }).status}`,
+    preview: async (ctx, input) => {
+      const t = await resolveTicket(ctx, input.ticket);
+      const statuses = await applicableStatuses(ctx, t.type);
+      const r = input.status.trim().toLowerCase();
+      const to = statuses.find((s) => s.key === r) ?? statuses.find((s) => s.label.toLowerCase() === r) ?? statuses.find((s) => s.label.toLowerCase().startsWith(r));
+      if (!to) throw new ValidationError(`Unknown status "${input.status}" for ${t.type}. Valid: ${statuses.map((s) => s.key).join(', ')}`);
+      return `Set ${t.number} ("${t.title.slice(0, 80)}") to ${to.label}${input.resolutionNotes ? ` with the resolution notes "${input.resolutionNotes.slice(0, 120)}"` : ''}${input.comment ? ` and the comment "${input.comment.slice(0, 120)}"` : ''}`;
+    },
   }),
 
   define({
@@ -849,6 +707,10 @@ export const ACTION_TOOLS: AiTool[] = [
       return { linked: true, ticket: t.number, target: target.number, linkType: link.linkType };
     },
     summary: (input) => `Linked ${input.ticket.toUpperCase()} → ${input.target.toUpperCase()} (${input.linkType ?? 'related'})`,
+    preview: async (ctx, input) => {
+      const [t, target] = await Promise.all([resolveTicket(ctx, input.ticket), resolveTicket(ctx, input.target)]);
+      return `Link ${t.number} to ${target.number} as ${(input.linkType ?? 'related').replace(/_/g, ' ')}`;
+    },
   }),
 ];
 
@@ -864,7 +726,7 @@ export function toolAvailable(ctx: Ctx, tool: AiTool): boolean {
   return perms.every((p) => ctx.can(p));
 }
 
-export const availableTools = (ctx: Ctx): AiTool[] => ALL_TOOLS.filter((t) => toolAvailable(ctx, t));
+export const availableTools = (ctx: Ctx): AiTool[] => ALL_TOOLS.filter((t) => !t.hidden && toolAvailable(ctx, t));
 
 /** zod → JSON schema for the provider (draft 2020-12 with the `$schema` marker removed). */
 export function toolJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
