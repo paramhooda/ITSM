@@ -97,6 +97,8 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
     unassignedOpen: num(live.unassigned_open),
     majorOpen: num(live.major_open),
     slaCompliancePct: pct(resMet, resMet + resBreached),
+    resolutionMet: resMet,
+    resolutionBreached: resBreached,
     slaBreaches: sumOf(series, 'slaBreached'),
     mttrMinutes: weightedOf(series, 'mttrMinutes', 'resolved'),
     firstResponseMinutes: weightedOf(series, 'firstResponseMinutes', 'opened'),

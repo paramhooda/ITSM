@@ -32,7 +32,6 @@ export function ManagementDashboard({ days, customerId, onDays, onCustomer }: { 
   const q = useQuery({ queryKey: ['dashboards', 'management', days, customerId], queryFn: () => get<Management>('/dashboards/management', { days, customerId: customerId || undefined }), placeholderData: (p) => p, staleTime: 30_000 });
   const d = q.data;
   const k = d?.kpis ?? {};
-  const resMet = d?.series.reduce((s, r) => s + r.resolved, 0) ?? 0;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -71,7 +70,7 @@ export function ManagementDashboard({ days, customerId, onDays, onCustomer }: { 
               <TrendChart data={d.series} x="day" kind={days <= 30 ? 'bar' : 'line'} series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved' }, { key: 'breaches', label: 'SLA breaches', color: STATUS_COLORS.critical }]} height={240} />
             </Card>
             <Card title="Resolution SLA">
-              <SlaGauge pct={k.slaCompliancePct} met={resMet ? undefined : undefined} label="Resolution compliance" />
+              <SlaGauge pct={k.slaCompliancePct} met={k.resolutionMet ?? 0} breached={k.resolutionBreached ?? 0} label="Resolution compliance" />
               <div className="mt-4">
                 <TrendChart data={d.series} x="day" kind="line" series={[{ key: 'mttrMinutes', label: 'MTTR (min)' }]} height={120} valueFormatter={(v) => fmtDuration(v)} title="Mean time to resolve" />
               </div>

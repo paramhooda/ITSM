@@ -87,19 +87,21 @@ export function svgChart(chart: ReportChart, width = 640, height = 240): string 
   const y = (v: number) => m.top + h - (Math.max(0, v) / max) * h;
   const parts: string[] = [];
   // grid + y ticks
-  for (let i = 0; i <= 4; i++) {
-    const v = (max / 4) * i;
+  const ticks = max <= 4 && Number.isInteger(max) ? max : 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = (max / ticks) * i;
     parts.push(`<line x1="${m.left}" x2="${width - m.right}" y1="${y(v)}" y2="${y(v)}" stroke="${GRID}" stroke-width="1"/>`, `<text x="${m.left - 6}" y="${y(v) + 4}" font-size="10" text-anchor="end" fill="${MUTED}">${fmtTick(v)}</text>`);
   }
   const labelEvery = Math.max(1, Math.ceil(data.length / 10));
   if (chart.type === 'bar') {
     const group = w / data.length;
     const gap = 2;
-    const barW = Math.max(2, (group - 8) / series.length - gap);
+    const barW = Math.min(40, Math.max(2, (group - 8) / series.length - gap));
+    const offset = (group - (barW + gap) * series.length) / 2;
     data.forEach((d, i) => {
       series.forEach((k, si) => {
         const v = Number(d[k]) || 0;
-        const x = m.left + i * group + 4 + si * (barW + gap);
+        const x = m.left + i * group + offset + si * (barW + gap);
         const top = y(v);
         parts.push(`<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, m.top + h - top).toFixed(1)}" rx="2" fill="${SERIES[si % SERIES.length]}"><title>${escapeHtml(`${d[chart.x]}: ${v}`)}</title></rect>`);
       });

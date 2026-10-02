@@ -9,8 +9,8 @@ const STATUS_COLOR: Record<string, string> = { completed: 'green', failed: 'red'
 export function RunsTable({ runs, loading, canManage, isCustomer, onToggleVisible, onDelete }: { runs: ReportRun[]; loading?: boolean; canManage: boolean; isCustomer: boolean; onToggleVisible?: (run: ReportRun, visible: boolean) => void; onDelete?: (run: ReportRun) => void }) {
   const columns: Column<ReportRun>[] = [
     { key: 'name', header: 'Report', render: (r) => <div className="min-w-0"><div className="font-medium truncate">{r.name}</div>{r.scheduleName && <div className="text-[11px] text-subtle">Schedule: {r.scheduleName}</div>}</div> },
-    ...(isCustomer ? [] : [{ key: 'customer', header: 'Customer', render: (r: ReportRun) => <span className="text-muted">{r.customerName ?? <span className="text-subtle">MSP-wide</span>}</span> }]),
-    { key: 'period', header: 'Period', render: (r) => <span className="text-muted">{String(r.parameters?.period ?? '—')}</span> },
+    ...(isCustomer ? [] : [{ key: 'customer', header: 'Customer', render: (r: ReportRun) => <span className="text-muted whitespace-nowrap">{r.customerName ?? <span className="text-subtle">MSP-wide</span>}</span> }]),
+    { key: 'period', header: 'Period', render: (r) => <span className="text-muted whitespace-nowrap text-[12px]">{String(r.parameters?.period ?? '—')}</span> },
     { key: 'createdAt', header: 'Generated', render: (r) => <span className="text-muted whitespace-nowrap">{fmtDateTime(r.createdAt)}{r.requestedByName ? <span className="text-subtle"> · {r.requestedByName}</span> : ''}</span> },
     { key: 'rowCount', header: 'Rows', className: 'text-right', render: (r) => <span className="tabular-nums">{r.rowCount === null ? '—' : fmtNumber(r.rowCount)}</span> },
     { key: 'format', header: 'Format', render: (r) => <Badge color="slate">{r.format.toUpperCase()}</Badge> },
