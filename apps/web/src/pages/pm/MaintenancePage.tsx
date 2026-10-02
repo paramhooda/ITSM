@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -18,7 +18,7 @@ import { ScheduleOccurrenceDialog } from '@/components/pm/ScheduleOccurrenceDial
 import { CompleteOccurrenceDialog, RescheduleOccurrenceDialog, CancelOccurrenceDialog } from '@/components/pm/OccurrenceActions';
 import { ProgramForm } from '@/components/pm/ProgramForm';
 import { ProgramDrawer } from '@/components/pm/ProgramDrawer';
-import { PM_STATUSES, PM_STATUS_LABELS, PM_STATUS_COLORS, FREQUENCY_LABELS, type OccurrenceRow, type ProgramRow, type PmStatus, type PmFrequency } from '@/components/pm/types';
+import { PM_STATUSES, PM_STATUS_LABELS, FREQUENCY_LABELS, type OccurrenceRow, type ProgramRow, type PmStatus, type PmFrequency } from '@/components/pm/types';
 
 type Tab = 'schedule' | 'programs' | 'performance';
 const TABS: { key: Tab; label: string }[] = [
@@ -28,6 +28,7 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 const DEFAULTS = { tab: 'schedule', status: 'planned,scheduled,rescheduled,missed', sort: 'plannedDate', order: 'asc' };
 const FILTER_KEYS = ['q', 'customerId', 'status', 'from', 'to', 'engineerId', 'teamId', 'overdue', 'mine', 'frequency', 'isActive', 'siteId'];
+const LEGEND: Record<string, string> = { planned: 'bg-slate-400', scheduled: 'bg-blue-400', rescheduled: 'bg-indigo-400', completed: 'bg-emerald-400', missed: 'bg-red-400', cancelled: 'bg-gray-300' };
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 export default function MaintenancePage() {
@@ -75,7 +76,7 @@ export default function MaintenancePage() {
 
   const rowActions = (o: OccurrenceRow) => {
     const open = ['planned', 'scheduled', 'rescheduled', 'missed'].includes(o.status);
-    const items = [] as { label: string; icon: JSX.Element; onClick: () => void; danger?: boolean }[];
+    const items = [] as { label: string; icon: ReactNode; onClick: () => void; danger?: boolean }[];
     if (canManage && open) items.push({ label: o.status === 'planned' || o.status === 'missed' ? 'Schedule' : 'Move / re-assign', icon: <CalendarPlus className="h-3.5 w-3.5" />, onClick: () => setDialog({ kind: 'schedule', occ: o }) });
     if ((canManage || can('field:execute')) && open) items.push({ label: 'Mark completed', icon: <CheckCircle2 className="h-3.5 w-3.5" />, onClick: () => setDialog({ kind: 'complete', occ: o }) });
     if (canManage && open) items.push({ label: 'Reschedule', icon: <RefreshCw className="h-3.5 w-3.5" />, onClick: () => setDialog({ kind: 'reschedule', occ: o }) });
@@ -279,7 +280,7 @@ function MonthCalendar({ month, items, loading, onMonthChange, onSelect }: { mon
           <Button variant="ghost" size="icon" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Next month"><ChevronRight className="h-4 w-4" /></Button>
           <span className="ml-2 text-[13px] font-medium">{month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
         </div>
-        <div className="flex items-center gap-2 text-[11.5px] text-muted">{(['planned', 'scheduled', 'completed', 'missed'] as PmStatus[]).map((st) => <span key={st} className="inline-flex items-center gap-1"><span className={cn('h-2.5 w-2.5 rounded-sm', `bg-${PM_STATUS_COLORS[st]}-400`)} />{PM_STATUS_LABELS[st]}</span>)}{loading && <span>· loading…</span>}</div>
+        <div className="flex items-center gap-2 text-[11.5px] text-muted">{(['planned', 'scheduled', 'completed', 'missed'] as PmStatus[]).map((st) => <span key={st} className="inline-flex items-center gap-1"><span className={cn('h-2.5 w-2.5 rounded-sm', LEGEND[st])} />{PM_STATUS_LABELS[st]}</span>)}{loading && <span>· loading…</span>}</div>
       </div>
       <div className="grid grid-cols-7 bg-surface-2 border-b border-default">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <div key={d} className="px-2 py-1 text-[10.5px] uppercase tracking-wide text-subtle font-medium text-center">{d}</div>)}</div>
       <div className="grid grid-cols-7">
