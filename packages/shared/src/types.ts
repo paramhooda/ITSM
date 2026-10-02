@@ -5,6 +5,7 @@ export interface Principal {
   id: string;
   email: string;
   name: string;
+  phone?: string | null;
   userType: 'msp' | 'customer';
   customerId: string | null;
   permissions: Permission[];

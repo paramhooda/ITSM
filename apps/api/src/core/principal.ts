@@ -6,6 +6,7 @@ export interface Principal {
   id: string;
   email: string;
   name: string;
+  phone: string | null;
   userType: 'msp' | 'customer';
   customerId: string | null;
   status: string;
@@ -100,6 +101,7 @@ export async function loadPrincipal(userId: string): Promise<Principal | null> {
     id: user.id,
     email: user.email,
     name: user.name,
+    phone: user.phone,
     userType: user.userType,
     customerId: user.customerId,
     status: user.status,
@@ -125,6 +127,7 @@ export async function loadApiKeyPrincipal(rawKey: string, sha256: (s: string) =>
     id: row.id,
     email: `apikey:${row.keyPrefix}`,
     name: row.name,
+    phone: null,
     userType: 'msp',
     customerId: row.customerId,
     status: 'active',
@@ -146,6 +149,7 @@ export function toPublicPrincipal(p: Principal) {
     id: p.id,
     email: p.email,
     name: p.name,
+    phone: p.phone,
     userType: p.userType,
     customerId: p.customerId,
     permissions: [...all],
