@@ -234,6 +234,6 @@ export const SYSTEM_ROLES: Record<string, { name: string; description: string; u
     name: 'Customer User',
     description: 'Raises and tracks tickets for their own organization.',
     userType: 'customer',
-    permissions: ['portal:access', 'portal:tickets', 'portal:contracts', 'ai:use', 'ai:act'],
+    permissions: ['portal:access', 'portal:tickets', 'portal:contracts', 'portal:assets', 'ai:use', 'ai:act'],
   },
 };

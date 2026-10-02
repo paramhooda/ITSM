@@ -17,20 +17,25 @@ interface WorkflowStep {
 
 const CUSTOMER_ROLE_KEYS = ['customer_admin', 'customer_user'];
 
-/** Creates one pending `approvals` row per workflow step and moves the ticket to awaiting_approval. */
+/**
+ * Creates one `approvals` row per workflow step and moves the ticket to awaiting_approval.
+ * Steps run in order: only the first is `pending`; the rest wait (`waiting`) and are
+ * released one at a time as each step is approved. A rejection anywhere ends the
+ * workflow and skips whatever is left.
+ */
 export async function startApproval(ctx: Ctx, ticket: TicketRow, workflowId: string, opts: { silent?: boolean } = {}): Promise<ApprovalRow[]> {
   const [wf] = await ctx.tx.select().from(schema.approvalWorkflows).where(eq(schema.approvalWorkflows.id, workflowId)).limit(1);
   if (!wf) throw new NotFoundError('Approval workflow');
   const steps = (wf.steps ?? []) as WorkflowStep[];
   if (!steps.length) throw new ValidationError('The approval workflow has no steps');
-  // Supersede any previous pending steps (re-request).
-  await ctx.tx.update(schema.approvals).set({ status: 'superseded', decidedAt: new Date() }).where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'pending')));
+  // Supersede any previous open steps (re-request).
+  await ctx.tx.update(schema.approvals).set({ status: 'superseded', decidedAt: new Date() }).where(and(eq(schema.approvals.ticketId, ticket.id), inArray(schema.approvals.status, ['pending', 'waiting'])));
   const [customer] = await ctx.tx.select({ accountManagerId: schema.customers.accountManagerId }).from(schema.customers).where(eq(schema.customers.id, ticket.customerId)).limit(1);
   const rows: ApprovalRow[] = [];
   let i = 0;
   for (const step of steps) {
     i++;
-    const values: typeof schema.approvals.$inferInsert = { ticketId: ticket.id, customerId: ticket.customerId, step: i, stepName: step.name ?? `Step ${i}`, status: 'pending' };
+    const values: typeof schema.approvals.$inferInsert = { ticketId: ticket.id, customerId: ticket.customerId, step: i, stepName: step.name ?? `Step ${i}`, status: i === 1 ? 'pending' : 'waiting' };
     switch (step.approverType) {
       case 'customer_admin':
       case 'customer_contact':
@@ -162,6 +167,11 @@ export async function decide(ctx: Ctx, ticketId: string, approvalId: string, dec
   const ticket = await loadTicket(ctx, ticketId);
   const [a] = await ctx.tx.select().from(schema.approvals).where(and(eq(schema.approvals.id, approvalId), eq(schema.approvals.ticketId, ticket.id))).limit(1);
   if (!a) throw new NotFoundError('Approval step');
+  if (a.status === 'waiting') {
+    // Steps are sequential: an earlier step must be decided first.
+    const [earlier] = await ctx.tx.select({ step: schema.approvals.step }).from(schema.approvals).where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'pending'))).orderBy(asc(schema.approvals.step)).limit(1);
+    throw new ValidationError(`Step ${earlier?.step ?? a.step - 1} must be decided before ${a.stepName ?? `step ${a.step}`}`);
+  }
   if (a.status !== 'pending') throw new ValidationError('This approval step has already been decided');
   if (isCustomerUser(ctx)) {
     if (!ctx.can('portal:approve', ticket.customerId) || ctx.user.customerId !== ticket.customerId) throw new ForbiddenError('Missing permission: portal:approve');
@@ -177,14 +187,21 @@ export async function decide(ctx: Ctx, ticketId: string, approvalId: string, dec
 
   let current = await reloadTicket(ctx.tx, ticket.id);
   if (decision === 'rejected') {
-    await ctx.tx.update(schema.approvals).set({ status: 'skipped', decidedAt: now }).where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'pending')));
+    await ctx.tx.update(schema.approvals).set({ status: 'skipped', decidedAt: now }).where(and(eq(schema.approvals.ticketId, ticket.id), inArray(schema.approvals.status, ['pending', 'waiting'])));
     await ctx.tx.update(schema.tickets).set({ approvalStatus: 'rejected', updatedAt: now }).where(eq(schema.tickets.id, ticket.id));
     current = await reloadTicket(ctx.tx, ticket.id);
     const rejected = await statusByKey(ctx, 'rejected', ticket.type).catch(() => null);
     if (rejected) current = await changeStatusCore(ctx, current, rejected, { action: 'approval', silent: true, comment: comment ?? undefined });
     await notifyTicketEvent(ctx, ticket.type === 'change' ? 'change.rejected' : 'request.rejected', current, { comment: comment ?? null });
   } else {
-    const [{ pending }] = await ctx.tx.select({ pending: sql<number>`count(*)::int` }).from(schema.approvals).where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'pending')));
+    // Release the next waiting step, if any; otherwise the workflow is complete.
+    const [nextStep] = await ctx.tx.select().from(schema.approvals).where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'waiting'))).orderBy(asc(schema.approvals.step)).limit(1);
+    if (nextStep) {
+      await ctx.tx.update(schema.approvals).set({ status: 'pending' }).where(eq(schema.approvals.id, nextStep.id));
+      await addActivity(ctx, ticket, { type: 'approval', summary: `${nextStep.stepName ?? `Step ${nextStep.step}`} is now awaiting approval`, data: { approvalId: nextStep.id, step: nextStep.step }, customerVisible: true });
+      await notifyTicketEvent(ctx, ticket.type === 'change' ? 'change.approval_requested' : 'request.approval_requested', current, {});
+    }
+    const [{ pending }] = await ctx.tx.select({ pending: sql<number>`count(*)::int` }).from(schema.approvals).where(and(eq(schema.approvals.ticketId, ticket.id), inArray(schema.approvals.status, ['pending', 'waiting'])));
     if (pending === 0) {
       await ctx.tx.update(schema.tickets).set({ approvalStatus: 'approved', updatedAt: now }).where(eq(schema.tickets.id, ticket.id));
       current = await reloadTicket(ctx.tx, ticket.id);

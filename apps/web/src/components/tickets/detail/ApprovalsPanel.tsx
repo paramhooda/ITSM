@@ -78,9 +78,9 @@ export function ApprovalsPanel({ ticket, approvals, canApprove, canRequest }: { 
                       {a.comment ? ` — "${a.comment}"` : ''}
                     </div>
                   </div>
-                  <Badge color={STATUS_COLORS[a.status] ?? 'slate'} className="capitalize">
+                  <Badge color={STATUS_COLORS[a.status] ?? 'slate'} className="capitalize" title={a.status === 'waiting' ? 'Opens when the earlier step is approved' : undefined}>
                     {a.status === 'pending' ? <Clock className="h-3 w-3" /> : null}
-                    {a.status}
+                    {a.status === 'waiting' ? 'Waiting for earlier step' : a.status}
                   </Badge>
                   {a.status === 'pending' && mine && deciding !== a.id && (
                     <Button size="sm" variant="outline" onClick={() => setDeciding(a.id)}>

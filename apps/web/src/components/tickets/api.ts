@@ -1,5 +1,5 @@
 import { get, post, put, patch, del } from '@/api/client';
-import type { TicketDetail, TicketListRow, TicketStats, TimelineEntry, SimilarTicket, SavedView, TimeEntry, Task, Approval, SlaMetricSummary, ProblemDetails, ChangeDetails } from './types';
+import type { TicketDetail, TicketListRow, TicketStats, TimelineEntry, SimilarTicket, SavedView, TimeEntry, Task, Approval, SlaMetricSummary, ProblemDetails, ChangeDetails, MyApproval } from './types';
 
 export interface Paginated<T> {
   items: T[];
@@ -58,6 +58,8 @@ export const ticketsApi = {
   watch: (id: string, userId?: string) => post(`/tickets/${id}/watchers`, userId ? { userId } : {}),
   unwatch: (id: string, userId?: string) => del(`/tickets/${id}/watchers${userId ? `/${userId}` : ''}`),
   approvals: (id: string) => get<{ items: Approval[]; approvalStatus: string | null }>(`/tickets/${id}/approvals`),
+  /** Pending approval steps addressed to the signed-in user (by user, role or team). */
+  myApprovals: () => get<{ items: MyApproval[]; total: number }>('/approvals/mine'),
   decide: (id: string, approvalId: string, body: Record<string, unknown>) => post<{ items: Approval[]; approvalStatus: string | null }>(`/tickets/${id}/approvals/${approvalId}/decide`, body),
   requestApproval: (id: string, body: Record<string, unknown> = {}) => post(`/tickets/${id}/request-approval`, body),
   problem: (id: string, body: Record<string, unknown>) => patch<ProblemDetails>(`/tickets/${id}/problem`, body),

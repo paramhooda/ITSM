@@ -22,11 +22,17 @@ export const routes: AppRoute[] = [
   // Tickets
   { path: '/tickets', component: page(() => import('@/pages/tickets/TicketListPage')), perm: ['tickets:read'] },
   { path: '/tickets/new', component: page(() => import('@/pages/tickets/TicketCreatePage')), perm: ['tickets:create'] },
+  { path: '/tickets/approvals', component: page(() => import('@/pages/tickets/ApprovalsInboxPage')), perm: ['requests:approve', 'changes:approve'] },
   { path: '/tickets/:id', component: page(() => import('@/pages/tickets/TicketDetailPage')), perm: ['tickets:read'] },
   // Customers & contracts
-  { path: '/customers', component: page(() => import('@/pages/customers/CustomerListPage')), perm: ['customers:read'] },
+  // Customers: Overview · Accounts
+  { path: '/customers', component: page(() => import('@/pages/customers/CustomersOverviewPage')), perm: ['customers:read'] },
+  { path: '/customers/accounts', component: page(() => import('@/pages/customers/CustomerListPage')), perm: ['customers:read'] },
   { path: '/customers/:id', component: page(() => import('@/pages/customers/CustomerDetailPage')), perm: ['customers:read'] },
-  { path: '/contracts', component: page(() => import('@/pages/contracts/ContractListPage')), perm: ['contracts:read'] },
+  // Contracts & Scope: Overview · Contracts · Entitlements · Service levels
+  { path: '/contracts', component: page(() => import('@/pages/contracts/ContractsOverviewPage')), perm: ['contracts:read'] },
+  { path: '/contracts/list', component: page(() => import('@/pages/contracts/ContractListPage')), perm: ['contracts:read'] },
+  { path: '/contracts/entitlements', component: page(() => import('@/pages/contracts/EntitlementsPage')), perm: ['contracts:read'] },
   { path: '/contracts/:id', component: page(() => import('@/pages/contracts/ContractDetailPage')), perm: ['contracts:read'] },
   { path: '/services', component: page(() => import('@/pages/services/ServiceCatalogPage')), perm: ['services:read'] },
   { path: '/teams', component: page(() => import('@/pages/teams/TeamsPage')), perm: ['tickets:read', 'admin:users'] },
@@ -34,7 +40,11 @@ export const routes: AppRoute[] = [
   /** Policies are edited under Administration; keep /sla/new and /sla/:id links working. */
   { path: '/sla/:id', component: page(() => import('@/pages/sla/SlaPolicyRedirect')), perm: ['contracts:read', 'admin:config'] },
   // Assets & CMDB
-  { path: '/assets', component: page(() => import('@/pages/assets/AssetListPage')), perm: ['assets:read'] },
+  // Assets: Overview · Inventory · Warranty & AMC · Lifecycle
+  { path: '/assets', component: page(() => import('@/pages/assets/AssetsOverviewPage')), perm: ['assets:read'] },
+  { path: '/assets/inventory', component: page(() => import('@/pages/assets/AssetListPage')), perm: ['assets:read'] },
+  { path: '/assets/coverage', component: page(() => import('@/pages/assets/AssetsCoveragePage')), perm: ['assets:read'] },
+  { path: '/assets/lifecycle', component: page(() => import('@/pages/assets/AssetsLifecyclePage')), perm: ['assets:read'] },
   { path: '/assets/:id', component: page(() => import('@/pages/assets/AssetDetailPage')), perm: ['assets:read'] },
   // Configuration (CMDB) module
   { path: '/cmdb', component: page(() => import('@/pages/cmdb/CmdbOverviewPage')), perm: ['cmdb:read'] },
@@ -56,11 +66,17 @@ export const routes: AppRoute[] = [
   /** Monitoring & SIEM lives under Administration now; keep old links working. */
   { path: '/integrations', component: page(() => import('@/pages/integrations/IntegrationsRedirect')), perm: ['integrations:events', 'integrations:manage'] },
   // Field & maintenance
-  { path: '/field', component: page(() => import('@/pages/field/FieldVisitListPage')), perm: ['field:read'] },
+  // Field Service: Overview · Visits · Calendar · Preventive maintenance
+  { path: '/field', component: page(() => import('@/pages/field/FieldOverviewPage')), perm: ['field:read'] },
+  { path: '/field/visits', component: page(() => import('@/pages/field/FieldVisitListPage')), perm: ['field:read'] },
+  { path: '/field/calendar', component: page(() => import('@/pages/field/FieldCalendarPage')), perm: ['field:read'] },
   { path: '/field/:id', component: page(() => import('@/pages/field/FieldVisitDetailPage')), perm: ['field:read'] },
   { path: '/maintenance', component: page(() => import('@/pages/pm/MaintenancePage')), perm: ['pm:read'] },
   // Knowledge
-  { path: '/knowledge', component: page(() => import('@/pages/knowledge/KnowledgeListPage')), perm: ['kb:read', 'portal:access'], shared: true, portal: true },
+  // Knowledge: Overview · Articles · Categories (portal users land on the articles)
+  { path: '/knowledge', component: page(() => import('@/pages/knowledge/KnowledgeOverviewPage')), perm: ['kb:read', 'portal:access'], shared: true, portal: true },
+  { path: '/knowledge/articles', component: page(() => import('@/pages/knowledge/KnowledgeListPage')), perm: ['kb:read', 'portal:access'], shared: true, portal: true },
+  { path: '/knowledge/categories', component: page(() => import('@/pages/knowledge/KnowledgeCategoriesPage')), perm: ['kb:manage'] },
   { path: '/knowledge/:id', component: page(() => import('@/pages/knowledge/KnowledgeArticlePage')), perm: ['kb:read', 'portal:access'], shared: true, portal: true },
   // Reports
   { path: '/reports', component: page(() => import('@/pages/reports/ReportsPage')), perm: ['reports:run', 'portal:reports'], shared: true, portal: true },
@@ -74,8 +90,13 @@ export const routes: AppRoute[] = [
   { path: '/portal/tickets/new', component: page(() => import('@/pages/portal/PortalNewTicketPage')), perm: ['portal:tickets'], portal: true },
   { path: '/portal/tickets/:id', component: page(() => import('@/pages/portal/PortalTicketDetailPage')), perm: ['portal:tickets'], portal: true },
   { path: '/portal/services', component: page(() => import('@/pages/portal/PortalServicesPage')), perm: ['portal:contracts'], portal: true },
-  { path: '/portal/assets', component: page(() => import('@/pages/portal/PortalAssetsPage')), perm: ['portal:assets'], portal: true },
+  { path: '/portal/services/sla', component: page(() => import('@/pages/portal/PortalServicesSlaPage')), perm: ['portal:contracts'], portal: true },
+  { path: '/portal/services/contracts', component: page(() => import('@/pages/portal/PortalServicesContractsPage')), perm: ['portal:contracts'], portal: true },
+  { path: '/portal/assets', component: page(() => import('@/pages/portal/PortalAssetsOverviewPage')), perm: ['portal:assets'], portal: true },
+  { path: '/portal/assets/inventory', component: page(() => import('@/pages/portal/PortalAssetsPage')), perm: ['portal:assets'], portal: true },
+  { path: '/portal/assets/coverage', component: page(() => import('@/pages/portal/PortalAssetsCoveragePage')), perm: ['portal:assets'], portal: true },
   { path: '/portal/maintenance', component: page(() => import('@/pages/portal/PortalMaintenancePage')), perm: ['portal:access'], portal: true },
+  { path: '/portal/maintenance/history', component: page(() => import('@/pages/portal/PortalMaintenanceHistoryPage')), perm: ['portal:access'], portal: true },
   { path: '/portal/approvals', component: page(() => import('@/pages/portal/PortalApprovalsPage')), perm: ['portal:approve'], portal: true },
   { path: '/portal/users', component: page(() => import('@/pages/portal/PortalUsersPage')), perm: ['portal:manage_users'], portal: true },
 ];

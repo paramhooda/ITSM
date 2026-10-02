@@ -129,6 +129,13 @@ export interface Task {
   sortOrder: number;
 }
 
+/** An approval step in the signed-in user's inbox, with the ticket it belongs to. */
+export interface MyApproval extends Approval {
+  ticketId: string;
+  customerId: string;
+  ticket: { id: string; number: string; title: string; type: TicketType; customerId: string; customerName: string | null; priority: OptionLabel | null; status: OptionLabel | null; requesterName: string | null; createdAt: string };
+}
+
 export interface Approval {
   id: string;
   step: number;

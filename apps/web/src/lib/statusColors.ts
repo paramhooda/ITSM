@@ -11,7 +11,7 @@ export const TICKET_CATEGORY_COLORS: Record<string, string> = { new: 'blue', ope
 export const TICKET_TYPE_COLORS: Record<string, string> = { incident: 'red', request: 'blue', problem: 'orange', change: 'purple' };
 export const PRIORITY_LEVEL_COLORS: Record<number, string> = { 1: 'red', 2: 'orange', 3: 'amber', 4: 'blue', 5: 'slate' };
 export const SCOPE_COLORS: Record<string, string> = { in_scope: 'green', out_of_scope: 'rose', unknown: 'slate' };
-export const APPROVAL_STATUS_COLORS: Record<string, string> = { pending: 'amber', approved: 'green', rejected: 'red', skipped: 'gray', superseded: 'gray' };
+export const APPROVAL_STATUS_COLORS: Record<string, string> = { pending: 'amber', waiting: 'slate', approved: 'green', rejected: 'red', skipped: 'gray', superseded: 'gray' };
 
 export const VISIT_STATUS_COLORS: Record<string, string> = { requested: 'slate', scheduled: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'gray' };
 export const PM_STATUS_COLORS: Record<string, string> = { planned: 'slate', scheduled: 'blue', rescheduled: 'indigo', completed: 'green', missed: 'red', cancelled: 'gray' };
