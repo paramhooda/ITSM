@@ -51,14 +51,15 @@ export async function deliverOutbox(batch = 50) {
 }
 
 registerProcessor({ queue: 'notifications', concurrency: 1, processor: async () => deliverOutbox() });
+
 registerSchedule({ queue: 'notifications', jobName: 'deliver-outbox', pattern: '* * * * *' });
 
 /** Recover rows stuck in "sending" (worker crash mid-send). */
 registerSchedule({ queue: 'maintenance', jobName: 'recover-outbox', pattern: '*/10 * * * *' });
 registerProcessor({
   queue: 'maintenance',
-  processor: async (job) => {
-    if (job.name !== 'recover-outbox') return;
+  jobName: 'recover-outbox',
+  processor: async () => {
     await withSystem((tx) =>
       tx
         .update(schema.notificationOutbox)

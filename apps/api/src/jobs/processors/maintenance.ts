@@ -7,8 +7,8 @@ import { logger } from '@/core/logger';
 registerSchedule({ queue: 'maintenance', jobName: 'partitions', pattern: '15 2 * * *' });
 registerProcessor({
   queue: 'maintenance',
-  processor: async (job) => {
-    if (job.name !== 'partitions') return;
+  jobName: 'partitions',
+  processor: async () => {
     await withSystem(async (tx) => {
       await tx.execute(sql`SELECT app_ensure_month_partitions('audit_log', 3)`);
       await tx.execute(sql`SELECT app_ensure_month_partitions('integration_events', 3)`);
