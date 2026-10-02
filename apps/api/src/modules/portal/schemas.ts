@@ -20,6 +20,8 @@ export const ticketListQuery = paginationSchema.extend({
   siteId: uuid.optional(),
   /** Priority key (p1..p5) or id, as the portal home's "by priority" bars link to it. */
   priority: z.string().max(40).optional(),
+  createdFrom: z.string().max(30).optional(),
+  createdTo: z.string().max(30).optional(),
   mine: boolQ.optional(),
   sort: z.enum(['createdAt', 'updatedAt', 'lastActivityAt', 'dueAt', 'priority', 'number', 'status']).optional(),
   order: z.enum(['asc', 'desc']).optional(),

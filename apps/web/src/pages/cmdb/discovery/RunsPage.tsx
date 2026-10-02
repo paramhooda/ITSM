@@ -1,14 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ban, Play } from 'lucide-react';
 import { toast } from 'sonner';
-import { PageHeader, Button, Select, DataTable, EmptyState, ErrorBlock, Pagination, FilterBar, FilterChip, type Column } from '@/components/ui';
+import { PageHeader, Button, DataTable, EmptyState, ErrorBlock, Pagination, ListShell, FilterGroup, FilterOptions, FilterSelect, type AppliedFilter, type Column } from '@/components/ui';
 import { useListState } from '@/hooks/useListState';
 import { useCustomersLookup } from '@/hooks/useLookups';
-import { fmtDateTime, fmtNumber } from '@/lib/format';
+import { fmtDateTime, fmtNumber, titleCase } from '@/lib/format';
 import { dotClass } from '@/lib/utils';
-import { CmdbNav, DiscoveryNav } from '@/components/cmdb/CmdbNav';
+import { CMDB_MODULES } from '@/layouts/modules';
+import { DiscoveryNav } from '@/components/cmdb/CmdbNav';
 import { RunStatusBadge, runSummary, runDurationText } from '@/components/cmdb/DiscoveryBits';
 import { errorMessage } from '@/components/cmdb/hooks';
 import { discoveryApi, discoveryKeys, RUN_COLORS, type DiscoveryRun } from '@/components/cmdb/api';
@@ -26,6 +27,15 @@ export default function RunsPage() {
   const q = useQuery({ queryKey: discoveryKeys.runs(params), queryFn: () => discoveryApi.runs(params), placeholderData: (p) => p, refetchInterval: (x) => (x.state.data?.items.some((r) => r.status === 'running' || r.status === 'queued') ? 3000 : 15_000) });
   const cancel = useMutation({ mutationFn: (id: string) => discoveryApi.cancelRun(id), onSuccess: () => { toast.success('Run cancelled'); qc.invalidateQueries({ queryKey: discoveryKeys.all }); }, onError: (e) => toast.error(errorMessage(e)) });
   const items = q.data?.items ?? [];
+  const customerItems = customers.data?.items ?? [];
+  const sourceItems = sources.data?.items ?? [];
+
+  const applied: AppliedFilter[] = [];
+  const addApplied = (key: string, label: ReactNode, keys: string[] = [key]) => applied.push({ key, label, onRemove: () => set(Object.fromEntries(keys.map((k) => [k, undefined]))) });
+  if (state.status) addApplied('status', `Status: ${titleCase(state.status)}`);
+  if (state.customerId) addApplied('customerId', `Customer: ${customerItems.find((c) => c.id === state.customerId)?.name ?? '…'}`, ['customerId', 'sourceId']);
+  if (state.sourceId) addApplied('sourceId', `Source: ${sourceItems.find((s) => s.id === state.sourceId)?.name ?? '…'}`);
+  const total = q.data?.total;
 
   const columns: Column<DiscoveryRun>[] = [
     { key: 'status', header: 'Status', width: '120px', render: (r) => <RunStatusBadge status={r.status} /> },
@@ -40,22 +50,34 @@ export default function RunsPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader title="Discovery runs" subtitle="Each scan of a source, with its outcome and log" actions={<Button size="sm" variant="outline" icon={<Play className="h-4 w-4" />} onClick={() => navigate('/cmdb/discovery/sources')}>Start a run</Button>} />
-      <CmdbNav />
-      <div className="flex flex-wrap items-center gap-2"><DiscoveryNav /></div>
-      {q.isError && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
-      <FilterBar
-        activeCount={(state.customerId ? 1 : 0) + (state.sourceId ? 1 : 0) + (state.status ? 1 : 0)}
+      <ListShell
+        id="discovery-runs"
+        modules={CMDB_MODULES}
+        filters={
+          <>
+            <FilterGroup label="Status">
+              <FilterOptions options={STATUSES.map((st) => ({ value: st, label: titleCase(st), dot: dotClass(RUN_COLORS[st]) }))} value={state.status} onChange={(v) => set({ status: v as string | undefined })} />
+            </FilterGroup>
+            <FilterGroup label="Customer">
+              <FilterSelect value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value, sourceId: undefined })} placeholder="All customers" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
+            </FilterGroup>
+            <FilterGroup label="Source">
+              <FilterSelect value={state.sourceId ?? ''} onChange={(e) => set({ sourceId: e.target.value })} placeholder="All sources" options={sourceItems.map((s) => ({ value: s.id, label: s.name }))} />
+            </FilterGroup>
+          </>
+        }
+        applied={applied}
+        activeCount={applied.length}
         onClear={() => set({ customerId: undefined, sourceId: undefined, status: undefined })}
-        chips={STATUSES.map((st) => <FilterChip key={st} active={state.status === st} onClick={() => set({ status: state.status === st ? undefined : st })} dot={dotClass(RUN_COLORS[st])}>{st}</FilterChip>)}
+        count={total !== undefined ? `${fmtNumber(total)} ${total === 1 ? 'run' : 'runs'}` : undefined}
+        quick={<DiscoveryNav />}
       >
-        <Select className="w-44 h-8 py-0 text-[13px]" value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value, sourceId: undefined })} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
-        <Select className="w-52 h-8 py-0 text-[13px]" value={state.sourceId ?? ''} onChange={(e) => set({ sourceId: e.target.value })} placeholder="All sources" options={(sources.data?.items ?? []).map((s) => ({ value: s.id, label: s.name }))} />
-      </FilterBar>
-      <div className="card overflow-hidden">
-        <DataTable columns={columns} rows={items} loading={q.isLoading} dense onRowClick={(r) => navigate(`/cmdb/discovery/runs/${r.id}`)} rowClassName={(r) => (r.status === 'failed' ? 'row-rail-bad' : r.status === 'running' || r.status === 'queued' ? 'row-rail-warn' : undefined)} empty={<EmptyState title="No runs yet" description="Open a source and press Run now, or set a schedule." />} />
-        <Pagination page={page} pageSize={pageSize} total={q.data?.total ?? 0} onPage={setPage} />
-      </div>
-      <div className="text-[12px] text-subtle">{fmtNumber(q.data?.total ?? 0)} runs</div>
+        {q.isError && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
+        <div className="card overflow-hidden">
+          <DataTable columns={columns} rows={items} loading={q.isLoading} dense onRowClick={(r) => navigate(`/cmdb/discovery/runs/${r.id}`)} rowClassName={(r) => (r.status === 'failed' ? 'row-rail-bad' : r.status === 'running' || r.status === 'queued' ? 'row-rail-warn' : undefined)} empty={<EmptyState title="No runs yet" description="Open a source and press Run now, or set a schedule." />} />
+          <Pagination page={page} pageSize={pageSize} total={q.data?.total ?? 0} onPage={setPage} />
+        </div>
+      </ListShell>
     </div>
   );
 }

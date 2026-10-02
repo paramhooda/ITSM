@@ -175,6 +175,8 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     statusId,
     priorityId,
     siteId: q.siteId,
+    createdFrom: q.createdFrom,
+    createdTo: q.createdTo,
     q: q.q,
     requesterUserId: q.mine ? ctx.user.id : undefined,
     // boolean flags of the MSP list (never set from the portal)

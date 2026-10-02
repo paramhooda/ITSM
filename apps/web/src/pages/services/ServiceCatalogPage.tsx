@@ -2,14 +2,15 @@ import { useMemo, useState, type ComponentType } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Layers, Users, Ticket, Activity, Server, ShieldCheck, Wrench, Headset, Briefcase, Cloud, Network, Database, FolderTree, Settings2, Pencil } from 'lucide-react';
-import { PageHeader, Button, Badge, Card, Drawer, LoadingBlock, ErrorBlock, EmptyState, SearchInput, Select, Checkbox, KeyValue, FilterBar } from '@/components/ui';
+import { PageHeader, Button, Badge, Card, Drawer, LoadingBlock, ErrorBlock, EmptyState, KeyValue, ListShell, FilterGroup, FilterOptions, FilterToggle, type AppliedFilter } from '@/components/ui';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { Panel } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { Stat } from '@/components/dashboards/Panel';
 import { get } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
-import { cn, colorClass } from '@/lib/utils';
+import { useListState } from '@/hooks/useListState';
+import { cn, colorClass, dotClass } from '@/lib/utils';
 import { DOMAIN_COLORS } from '@/lib/statusColors';
 import { fmtDate, fmtNumber } from '@/lib/format';
 import { ContractStatusBadge } from '@/components/contracts/ContractBits';
@@ -18,6 +19,8 @@ import { DOMAINS } from '@itsm/shared';
 
 const ICONS: Record<string, ComponentType<{ className?: string; strokeWidth?: number }>> = { server: Server, 'shield-check': ShieldCheck, wrench: Wrench, headset: Headset, briefcase: Briefcase, cloud: Cloud, network: Network, database: Database, layers: Layers };
 const categoryCount = (c: Category) => c.services.length + c.subcategories.reduce((n, s) => n + s.services.length, 0);
+const categoryServices = (c: Category) => [...c.services, ...c.subcategories.flatMap((sc) => sc.services)];
+const FILTER_KEYS = ['q', 'domain', 'line', 'inactive'];
 
 /**
  * Service catalog: a browse view of everything we deliver, by service line and
@@ -28,16 +31,31 @@ export default function ServiceCatalogPage() {
   const can = useAuthStore((s) => s.can);
   const canManage = can('services:manage');
   const canConfig = can('admin:config');
-  const [q, setQ] = useState('');
-  const [domain, setDomain] = useState('');
-  const [showInactive, setShowInactive] = useState(false);
+  const { state, set } = useListState();
+  const q = state.q ?? '';
+  const domain = state.domain ?? '';
+  const showInactive = state.inactive === 'true';
+  const line = state.line ?? '';
   const [selected, setSelected] = useState<string | null>(null);
 
   const catalog = useQuery({ queryKey: ['services', 'catalog', { q, domain, showInactive }], queryFn: () => get<Catalog>('/services/catalog', { q: q || undefined, domain: domain || undefined, includeInactive: showInactive ? 'true' : undefined }), placeholderData: (p) => p });
 
   const data = catalog.data;
-  const categories = useMemo(() => (data?.categories ?? []).filter((c) => categoryCount(c) > 0), [data]);
-  const filtering = !!(q || domain);
+  const allCategories = useMemo(() => (data?.categories ?? []).filter((c) => categoryCount(c) > 0), [data]);
+  const categories = useMemo(() => (line ? allCategories.filter((c) => c.key === line) : allCategories), [allCategories, line]);
+  const uncategorised = line && line !== 'uncategorised' ? [] : data?.uncategorised ?? [];
+  const allServices = useMemo(() => [...allCategories.flatMap(categoryServices), ...(data?.uncategorised ?? [])], [allCategories, data]);
+  const shown = categories.reduce((n, c) => n + categoryCount(c), 0) + uncategorised.length;
+  const filtering = !!(q || domain || line);
+
+  const activeCount = FILTER_KEYS.filter((k) => state[k]).length;
+  const clear = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])), false);
+  const lineLabel = (key: string) => (key === 'uncategorised' ? 'Uncategorised' : allCategories.find((c) => c.key === key)?.label ?? key);
+  const applied: AppliedFilter[] = [];
+  if (q) applied.push({ key: 'q', label: `Search: “${q}”`, onRemove: () => set({ q: undefined }, false) });
+  if (domain) applied.push({ key: 'domain', label: `Domain: ${DOMAIN_LABEL[domain] ?? domain}`, onRemove: () => set({ domain: undefined }, false) });
+  if (line) applied.push({ key: 'line', label: `Service line: ${lineLabel(line)}`, onRemove: () => set({ line: undefined }, false) });
+  if (showInactive) applied.push({ key: 'inactive', label: 'Including inactive', onRemove: () => set({ inactive: undefined }, false) });
 
   return (
     <div className="flex flex-col gap-4">
@@ -51,58 +69,65 @@ export default function ServiceCatalogPage() {
           </>
         }
       />
-      <FilterBar activeCount={(q ? 1 : 0) + (domain ? 1 : 0) + (showInactive ? 1 : 0)} onClear={() => { setQ(''); setDomain(''); setShowInactive(false); }}>
-        <SearchInput value={q} onChange={setQ} placeholder="Search services…" className="w-64" />
-        <Select value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="All domains" options={DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABEL[d] ?? d }))} className="w-40 h-8 py-0 text-[13px]" />
-        <Checkbox label="Show inactive" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-      </FilterBar>
-
-      {data && (
-        <InsightBand
-          id="catalog"
-          summary={`${fmtNumber(data.totals.services)} offerings in ${fmtNumber(categories.length)} service lines`}
-          kpis={[
-            { label: 'Service offerings', value: fmtNumber(data.totals.services), hint: `${fmtNumber(categories.length)} service lines`, icon: <Layers className="h-4 w-4" /> },
-            { label: 'Subscribed customers', value: fmtNumber(data.totals.subscribedCustomers), hint: 'customers with an active contract', icon: <Users className="h-4 w-4" />, onClick: () => navigate('/contracts') },
-            { label: 'Open tickets', value: fmtNumber(data.totals.openTickets), hint: 'across all services', icon: <Ticket className="h-4 w-4" />, onClick: () => navigate('/tickets') },
-            { label: 'Incidents · 30 days', value: fmtNumber(data.totals.incidents30d), tone: data.totals.incidents30d > 0 ? 'warn' : 'default', hint: 'incidents raised against a service', icon: <Activity className="h-4 w-4" /> },
-          ]}
-          panels={
-            <>
-              <Panel title="Offerings by service line" subtitle="Where the catalog is deepest">
-                <BreakdownBar dense items={[...categories].sort((a, b) => categoryCount(b) - categoryCount(a)).map((c) => ({ label: c.label, value: categoryCount(c), color: c.color ?? null, href: `#cat-${c.key}` }))} emptyText="No service lines" />
-              </Panel>
-              <Panel title="By domain" subtitle="Click to filter">
-                <BreakdownBar dense items={DOMAINS.map((d) => ({ label: DOMAIN_LABEL[d] ?? d, value: [...categories.flatMap((c) => [...c.services, ...c.subcategories.flatMap((sc) => sc.services)]), ...data.uncategorised].filter((sv) => sv.domain === d).length, color: DOMAIN_COLORS[d] ?? null, active: domain === d })).filter((i) => i.value > 0)} onSelect={(i) => { const d = DOMAINS.find((x) => (DOMAIN_LABEL[x] ?? x) === i.label); if (d) setDomain(domain === d ? '' : d); }} />
-              </Panel>
-            </>
-          }
-        />
-      )}
-      {catalog.isLoading && <LoadingBlock />}
-      {catalog.isError && <ErrorBlock error={catalog.error} retry={() => catalog.refetch()} />}
-      {data && categories.length === 0 && data.uncategorised.length === 0 && (
-        <Card><EmptyState icon={<Layers className="h-5 w-5" />} title={filtering ? 'No services match' : 'No services yet'} description={filtering ? 'Try a different search or domain.' : 'Define the services you deliver; contracts reference them for coverage, SLA and scope.'} action={canManage && !filtering && <Button icon={<Plus className="h-4 w-4" />} onClick={() => navigate('/admin/services?new=1')}>New service</Button>} /></Card>
-      )}
-      {data && (categories.length > 0 || data.uncategorised.length > 0) && (
-        <div className="grid grid-cols-1 xl:grid-cols-[220px_1fr] gap-6 items-start">
-          <nav className="hidden xl:block sticky top-0">
-            <div className="text-[11px] uppercase tracking-[0.08em] text-subtle font-medium px-2.5 pb-2">Service lines</div>
-            {categories.map((c) => (
-              <a key={c.id} href={`#cat-${c.key}`} className="flex items-center gap-2.5 rounded-lg px-2.5 h-8.5 text-[13px] text-secondary hover:bg-white hover:text-default border border-transparent hover:border-default transition-colors">
-                <CategoryIcon icon={c.icon} color={c.color} size="sm" />
-                <span className="truncate flex-1">{c.label}</span>
-                <span className="text-[11.5px] text-subtle tnum">{categoryCount(c)}</span>
-              </a>
-            ))}
-            {data.uncategorised.length > 0 && (
-              <a href="#cat-uncategorised" className="flex items-center gap-2.5 rounded-lg px-2.5 h-8.5 text-[13px] text-secondary hover:bg-white hover:text-default border border-transparent hover:border-default transition-colors">
-                <CategoryIcon icon={null} color={null} size="sm" />
-                <span className="truncate flex-1">Uncategorised</span>
-                <span className="text-[11.5px] text-subtle tnum">{data.uncategorised.length}</span>
-              </a>
-            )}
-          </nav>
+      <ListShell
+        id="catalog"
+        search={{ value: q, onChange: (v) => set({ q: v }, false), placeholder: 'Search services…' }}
+        activeCount={activeCount}
+        onClear={clear}
+        applied={applied}
+        count={data ? `${fmtNumber(shown)} ${shown === 1 ? 'offering' : 'offerings'}` : undefined}
+        filters={
+          <>
+            <FilterGroup label="Service line">
+              <FilterOptions
+                options={[
+                  ...allCategories.map((c) => ({ value: c.key, label: c.label, count: categoryCount(c) })),
+                  ...((data?.uncategorised.length ?? 0) > 0 ? [{ value: 'uncategorised', label: 'Uncategorised', count: data!.uncategorised.length }] : []),
+                ]}
+                value={line || undefined}
+                onChange={(v) => set({ line: v as string | undefined }, false)}
+                emptyLabel={catalog.isLoading ? 'Loading…' : 'No service lines'}
+              />
+            </FilterGroup>
+            <FilterGroup label="Domain">
+              <FilterOptions options={DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABEL[d] ?? d, dot: dotClass(DOMAIN_COLORS[d] ?? 'slate'), count: domain && domain !== d ? null : allServices.filter((sv) => sv.domain === d).length }))} value={domain || undefined} onChange={(v) => set({ domain: v as string | undefined }, false)} />
+            </FilterGroup>
+            <FilterGroup label="Show">
+              <FilterToggle label="Include inactive" checked={showInactive} onChange={(v) => set({ inactive: v ? 'true' : undefined }, false)} />
+            </FilterGroup>
+          </>
+        }
+        insights={
+          data ? (
+            <InsightBand
+              id="catalog"
+              summary={`${fmtNumber(data.totals.services)} offerings in ${fmtNumber(allCategories.length)} service lines`}
+              kpis={[
+                { label: 'Service offerings', value: fmtNumber(data.totals.services), hint: `${fmtNumber(allCategories.length)} service lines`, icon: <Layers className="h-4 w-4" /> },
+                { label: 'Subscribed customers', value: fmtNumber(data.totals.subscribedCustomers), hint: 'customers with an active contract', icon: <Users className="h-4 w-4" />, onClick: () => navigate('/contracts') },
+                { label: 'Open tickets', value: fmtNumber(data.totals.openTickets), hint: 'across all services', icon: <Ticket className="h-4 w-4" />, onClick: () => navigate('/tickets') },
+                { label: 'Incidents · 30 days', value: fmtNumber(data.totals.incidents30d), tone: data.totals.incidents30d > 0 ? 'warn' : 'default', hint: 'incidents raised against a service', icon: <Activity className="h-4 w-4" /> },
+              ]}
+              panels={
+                <>
+                  <Panel title="Offerings by service line" subtitle="Click a line to browse it">
+                    <BreakdownBar dense items={[...allCategories].sort((a, b) => categoryCount(b) - categoryCount(a)).map((c) => ({ label: c.label, value: categoryCount(c), color: c.color ?? null, active: line === c.key }))} onSelect={(i) => { const c = allCategories.find((x) => x.label === i.label); if (c) set({ line: line === c.key ? undefined : c.key }, false); }} emptyText="No service lines" />
+                  </Panel>
+                  <Panel title="By domain" subtitle="Click to filter">
+                    <BreakdownBar dense items={DOMAINS.map((d) => ({ label: DOMAIN_LABEL[d] ?? d, value: allServices.filter((sv) => sv.domain === d).length, color: DOMAIN_COLORS[d] ?? null, active: domain === d })).filter((i) => i.value > 0)} onSelect={(i) => { const d = DOMAINS.find((x) => (DOMAIN_LABEL[x] ?? x) === i.label); if (d) set({ domain: domain === d ? undefined : d }, false); }} />
+                  </Panel>
+                </>
+              }
+            />
+          ) : undefined
+        }
+      >
+        {catalog.isLoading && <LoadingBlock />}
+        {catalog.isError && <ErrorBlock error={catalog.error} retry={() => catalog.refetch()} />}
+        {data && categories.length === 0 && uncategorised.length === 0 && (
+          <Card><EmptyState icon={<Layers className="h-5 w-5" />} title={filtering ? 'No services match' : 'No services yet'} description={filtering ? 'Try a different search, domain or service line.' : 'Define the services you deliver; contracts reference them for coverage, SLA and scope.'} action={canManage && !filtering && <Button icon={<Plus className="h-4 w-4" />} onClick={() => navigate('/admin/services?new=1')}>New service</Button>} /></Card>
+        )}
+        {data && (categories.length > 0 || uncategorised.length > 0) && (
           <div className="flex flex-col gap-8 min-w-0">
             {categories.map((c, i) => (
               <section key={c.id} id={`cat-${c.key}`} className={cn('scroll-mt-6 rise-in', `rise-in-${Math.min(4, i + 1)}`)}>
@@ -142,21 +167,21 @@ export default function ServiceCatalogPage() {
                 </div>
               </section>
             ))}
-            {data.uncategorised.length > 0 && (
+            {uncategorised.length > 0 && (
               <section id="cat-uncategorised" className="scroll-mt-6">
                 <header className="flex items-start gap-3.5 mb-4">
                   <CategoryIcon icon={null} color={null} />
                   <div>
-                    <h2 className="text-[18px] font-semibold tracking-[-0.02em] leading-tight flex items-center gap-2">Uncategorised <span className="text-[12.5px] font-medium text-subtle tnum">{data.uncategorised.length}</span></h2>
+                    <h2 className="text-[18px] font-semibold tracking-[-0.02em] leading-tight flex items-center gap-2">Uncategorised <span className="text-[12.5px] font-medium text-subtle tnum">{uncategorised.length}</span></h2>
                     <p className="text-[13px] text-muted mt-0.5">Assign these to a service line so they appear in the right place for customers and reports.</p>
                   </div>
                 </header>
-                <ServiceGrid services={data.uncategorised} selected={selected} onSelect={setSelected} />
+                <ServiceGrid services={uncategorised} selected={selected} onSelect={setSelected} />
               </section>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </ListShell>
 
       <Drawer open={!!selected} onClose={() => setSelected(null)} title="Service" width="max-w-xl">
         {selected && <ServicePanel id={selected} canManage={canManage} />}

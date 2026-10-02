@@ -1,20 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, AlertTriangle, FileSignature, CalendarClock, Gauge, Ban } from 'lucide-react';
 import { toast } from 'sonner';
-import { PageHeader, Button, DataTable, Pagination, SearchInput, Select, Drawer, Card, EmptyState, FilterBar, FilterChip, type Column } from '@/components/ui';
+import { PageHeader, Button, DataTable, Pagination, Drawer, Card, EmptyState, FilterChip, ListShell, FilterGroup, FilterOptions, FilterSelect, type AppliedFilter, type Column } from '@/components/ui';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { Panel } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { ExpiringContracts, type ExpiringContract } from '@/components/dashboards/ExpiringContracts';
 import { get, post, ApiError } from '@/api/client';
 import { useListState } from '@/hooks/useListState';
-import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
+import { useLookups, useCustomersLookup, useEngineers } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
 import { fmtDate, fmtNumber } from '@/lib/format';
 import { cn, dotClass } from '@/lib/utils';
 import { CONTRACT_STATUS_COLORS } from '@/lib/statusColors';
+import { CONTRACT_MODULES } from '@/layouts/modules';
 import { ContractForm, type ContractPayload } from '@/components/contracts/ContractForm';
 import { ContractStatusBadge, ExpiryCountdown } from '@/components/contracts/ContractBits';
 import { CONTRACT_STATUSES, type ContractListItem, type ContractDetail, type Paginated } from '@/components/contracts/types';
@@ -33,14 +34,20 @@ interface ContractSummary {
 
 const DEFAULTS = { sort: 'endDate', order: 'asc' };
 const FILTER_KEYS = ['q', 'customerId', 'status', 'typeId', 'expiringWithinDays', 'serviceId', 'ownerUserId'];
+const EXPIRY_OPTIONS = [
+  { value: '30', label: 'Within 30 days' },
+  { value: '60', label: 'Within 60 days' },
+  { value: '90', label: 'Within 90 days' },
+];
 
 export default function ContractListPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
   const { state, set, page, pageSize, setPage } = useListState(DEFAULTS);
-  const { options, byKey } = useLookups();
+  const { options, byKey, lookups } = useLookups();
   const customers = useCustomersLookup();
+  const engineers = useEngineers();
   const [creating, setCreating] = useState(state.new === '1');
   const statuses = (state.status ?? '').split(',').filter(Boolean);
 
@@ -65,7 +72,6 @@ export default function ContractListPage() {
   });
 
   const toggleStatus = (s: string) => set({ status: (statuses.includes(s) ? statuses.filter((x) => x !== s) : [...statuses, s]).join(',') });
-  const activeCount = FILTER_KEYS.filter((k) => state[k]).length;
   const clear = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
 
   const columns: Column<ContractListItem>[] = [
@@ -95,6 +101,42 @@ export default function ContractListPage() {
   const sm = summary.data;
   const statusLabel = (s: string) => byKey('contract_status', s)?.label ?? sm?.byStatus.find((b) => b.key === s)?.label ?? s;
   const statusColor = (s: string) => byKey('contract_status', s)?.color ?? CONTRACT_STATUS_COLORS[s] ?? 'slate';
+  const customerItems = customers.data?.items ?? [];
+  const types = options('contract_type');
+  const services = lookups?.services ?? [];
+  const owners = engineers.data ?? [];
+  const countByType = new Map((sm?.byType ?? []).map((b) => [b.key, b.count]));
+
+  const applied: AppliedFilter[] = [];
+  const addApplied = (key: string, label: ReactNode) => applied.push({ key, label, onRemove: () => set({ [key]: undefined }) });
+  if (state.q) addApplied('q', `Search: “${state.q}”`);
+  if (statuses.length) addApplied('status', `Status: ${statuses.map(statusLabel).join(', ')}`);
+  if (state.customerId) addApplied('customerId', `Customer: ${customerItems.find((c) => c.id === state.customerId)?.name ?? '…'}`);
+  if (state.typeId) addApplied('typeId', `Type: ${types.find((o) => o.id === state.typeId)?.label ?? '…'}`);
+  if (state.expiringWithinDays) addApplied('expiringWithinDays', `Expiring: ${EXPIRY_OPTIONS.find((o) => o.value === state.expiringWithinDays)?.label.toLowerCase() ?? `within ${state.expiringWithinDays} days`}`);
+  if (state.serviceId) addApplied('serviceId', `Service: ${services.find((sv) => sv.id === state.serviceId)?.name ?? '…'}`);
+  if (state.ownerUserId) addApplied('ownerUserId', `Owner: ${owners.find((u) => u.id === state.ownerUserId)?.name ?? '…'}`);
+  const total = query.data?.total;
+
+  const rail = (
+    <>
+      <FilterGroup label="Customer">
+        <FilterSelect value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
+      </FilterGroup>
+      <FilterGroup label="Type">
+        <FilterOptions options={types.map((o) => ({ value: o.id, label: o.label, count: sm ? countByType.get(o.key) ?? 0 : undefined }))} value={state.typeId} onChange={(v) => set({ typeId: v as string | undefined })} />
+      </FilterGroup>
+      <FilterGroup label="Expiring" hint="Covering contracts ending soon">
+        <FilterOptions options={EXPIRY_OPTIONS} value={state.expiringWithinDays} onChange={(v) => set({ expiringWithinDays: v as string | undefined })} />
+      </FilterGroup>
+      <FilterGroup label="Service" defaultOpen={!!state.serviceId}>
+        <FilterSelect value={state.serviceId ?? ''} onChange={(e) => set({ serviceId: e.target.value })} placeholder="Any service" options={services.map((sv) => ({ value: sv.id, label: sv.name }))} />
+      </FilterGroup>
+      <FilterGroup label="Owner" defaultOpen={!!state.ownerUserId}>
+        <FilterSelect value={state.ownerUserId ?? ''} onChange={(e) => set({ ownerUserId: e.target.value })} placeholder="Any owner" options={owners.map((u) => ({ value: u.id, label: u.name }))} />
+      </FilterGroup>
+    </>
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -104,62 +146,64 @@ export default function ContractListPage() {
         actions={can('contracts:manage') && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>New contract</Button>}
       />
 
-      <FilterBar
-        activeCount={activeCount}
+      <ListShell
+        id="contracts"
+        modules={CONTRACT_MODULES}
+        search={{ value: state.q ?? '', onChange: (v) => set({ q: v }), placeholder: 'Search number or name…' }}
+        filters={rail}
+        applied={applied}
+        activeCount={applied.length}
         onClear={clear}
-        chips={CONTRACT_STATUSES.map((s) => (
+        count={total !== undefined ? `${fmtNumber(total)} ${total === 1 ? 'contract' : 'contracts'}` : undefined}
+        quick={CONTRACT_STATUSES.map((s) => (
           <FilterChip key={s} active={statuses.includes(s)} onClick={() => toggleStatus(s)} dot={dotClass(statusColor(s))} count={sm?.byStatus.find((b) => b.key === s)?.count ?? 0}>
             {statusLabel(s)}
           </FilterChip>
         ))}
+        insights={
+          <InsightBand
+            id="contracts"
+            loading={summary.isLoading}
+            summary={sm ? `${fmtNumber(sm.total)} contracts${state.customerId ? ' for this customer' : ''}` : undefined}
+            kpis={
+              sm
+                ? [
+                    { label: 'Active contracts', value: fmtNumber(sm.active), icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(sm.total)} in total · ${fmtNumber(sm.expired)} expired`, onClick: () => set({ status: 'active,expiring' }) },
+                    { label: 'Expiring · 90d', value: fmtNumber(sm.expiring90), tone: sm.expiring90 > 0 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(sm.expiring30)} within 30 days`, onClick: () => set({ expiringWithinDays: state.expiringWithinDays === '90' ? undefined : '90' }) },
+                    { label: 'Entitlements near limit', value: fmtNumber(sm.entitlementsOverThreshold), tone: sm.entitlementsOverThreshold > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: 'usage past the warning threshold' },
+                    { label: 'Entitlements exhausted', value: fmtNumber(sm.entitlementsExhausted), tone: sm.entitlementsExhausted > 0 ? 'bad' : 'good', icon: <Ban className="h-4 w-4" />, hint: 'further usage is out of scope' },
+                  ]
+                : []
+            }
+            panels={
+              sm && (
+                <>
+                  <Panel title="Expiring soon" subtitle="Contracts ending within 90 days">
+                    <ExpiringContracts items={(expiring.data?.items ?? []).slice(0, 6)} />
+                  </Panel>
+                  <Panel title="By status" subtitle="Click a status to filter">
+                    <BreakdownBar dense items={sm.byStatus.map((b) => ({ label: statusLabel(b.key), value: b.count, color: statusColor(b.key), active: statuses.length === 1 && statuses[0] === b.key }))} onSelect={(i) => { const b = sm.byStatus.find((x) => statusLabel(x.key) === i.label); if (b) set({ status: statuses.length === 1 && statuses[0] === b.key ? '' : b.key }); }} />
+                  </Panel>
+                </>
+              )
+            }
+          />
+        }
       >
-        <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search number or name…" className="w-60" />
-        <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} className="w-48 h-8 py-0 text-[13px]" />
-        <Select value={state.typeId ?? ''} onChange={(e) => set({ typeId: e.target.value })} placeholder="Any type" options={options('contract_type').map((o) => ({ value: o.id, label: o.label }))} className="w-40 h-8 py-0 text-[13px]" />
-        <Select value={state.expiringWithinDays ?? ''} onChange={(e) => set({ expiringWithinDays: e.target.value })} placeholder="Any expiry" options={[{ value: '30', label: 'Expiring in 30 days' }, { value: '60', label: 'Expiring in 60 days' }, { value: '90', label: 'Expiring in 90 days' }]} className="w-44 h-8 py-0 text-[13px]" />
-      </FilterBar>
-
-      <InsightBand
-        id="contracts"
-        loading={summary.isLoading}
-        summary={sm ? `${fmtNumber(sm.total)} contracts${state.customerId ? ' for this customer' : ''}` : undefined}
-        kpis={
-          sm
-            ? [
-                { label: 'Active contracts', value: fmtNumber(sm.active), icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(sm.total)} in total · ${fmtNumber(sm.expired)} expired`, onClick: () => set({ status: 'active,expiring' }) },
-                { label: 'Expiring · 90d', value: fmtNumber(sm.expiring90), tone: sm.expiring90 > 0 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(sm.expiring30)} within 30 days`, onClick: () => set({ expiringWithinDays: state.expiringWithinDays === '90' ? undefined : '90' }) },
-                { label: 'Entitlements near limit', value: fmtNumber(sm.entitlementsOverThreshold), tone: sm.entitlementsOverThreshold > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: 'usage past the warning threshold' },
-                { label: 'Entitlements exhausted', value: fmtNumber(sm.entitlementsExhausted), tone: sm.entitlementsExhausted > 0 ? 'bad' : 'good', icon: <Ban className="h-4 w-4" />, hint: 'further usage is out of scope' },
-              ]
-            : []
-        }
-        panels={
-          sm && (
-            <>
-              <Panel title="Expiring soon" subtitle="Contracts ending within 90 days">
-                <ExpiringContracts items={(expiring.data?.items ?? []).slice(0, 6)} />
-              </Panel>
-              <Panel title="By status" subtitle="Click a status to filter">
-                <BreakdownBar dense items={sm.byStatus.map((b) => ({ label: statusLabel(b.key), value: b.count, color: statusColor(b.key), active: statuses.length === 1 && statuses[0] === b.key }))} onSelect={(i) => { const b = sm.byStatus.find((x) => statusLabel(x.key) === i.label); if (b) set({ status: statuses.length === 1 && statuses[0] === b.key ? '' : b.key }); }} />
-              </Panel>
-            </>
-          )
-        }
-      />
-
-      <Card padded={false}>
-        <DataTable
-          columns={columns}
-          rows={query.data?.items ?? []}
-          loading={query.isLoading}
-          onRowClick={(r) => navigate(`/contracts/${r.id}`)}
-          sort={{ key: state.sort, order: state.order as 'asc' | 'desc' }}
-          onSort={onSort}
-          rowClassName={(r) => (r.entitlements.anyExhausted || (r.daysToExpiry < 0 && !['terminated', 'renewed', 'draft'].includes(r.status)) ? 'row-rail-bad' : r.entitlements.anyOverThreshold || (r.daysToExpiry >= 0 && r.daysToExpiry <= 30 && !['terminated', 'renewed', 'draft'].includes(r.status)) ? 'row-rail-warn' : undefined)}
-          empty={<EmptyState icon={<FileSignature className="h-5 w-5" />} title="No contracts" description="Contracts define covered services and sites, SLA policy, entitlements and scope." />}
-        />
-        <Pagination page={page} pageSize={pageSize} total={query.data?.total ?? 0} onPage={setPage} />
-      </Card>
+        <Card padded={false}>
+          <DataTable
+            columns={columns}
+            rows={query.data?.items ?? []}
+            loading={query.isLoading}
+            onRowClick={(r) => navigate(`/contracts/${r.id}`)}
+            sort={{ key: state.sort, order: state.order as 'asc' | 'desc' }}
+            onSort={onSort}
+            rowClassName={(r) => (r.entitlements.anyExhausted || (r.daysToExpiry < 0 && !['terminated', 'renewed', 'draft'].includes(r.status)) ? 'row-rail-bad' : r.entitlements.anyOverThreshold || (r.daysToExpiry >= 0 && r.daysToExpiry <= 30 && !['terminated', 'renewed', 'draft'].includes(r.status)) ? 'row-rail-warn' : undefined)}
+            empty={<EmptyState icon={<FileSignature className="h-5 w-5" />} title="No contracts" description="Contracts define covered services and sites, SLA policy, entitlements and scope." />}
+          />
+          <Pagination page={page} pageSize={pageSize} total={query.data?.total ?? 0} onPage={setPage} />
+        </Card>
+      </ListShell>
       <Drawer open={creating} onClose={() => { setCreating(false); if (state.new) set({ new: undefined }, false); }} title="New contract" width="max-w-3xl">
         {creating && <ContractForm mode="create" customerId={state.customerId || undefined} onSubmit={(b) => create.mutate(b)} onCancel={() => setCreating(false)} submitting={create.isPending} />}
       </Drawer>

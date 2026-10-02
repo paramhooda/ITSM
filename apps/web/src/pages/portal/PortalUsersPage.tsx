@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { UserPlus, KeyRound, Pencil, UserX, UserCheck, Copy, Users } from 'lucide-react';
-import { PageHeader, Button, SearchInput, DataTable, Pagination, Badge, Dialog, Drawer, ConfirmDialog, Field, Input, Select, EmptyState, ErrorBlock, type Column } from '@/components/ui';
+import { PageHeader, Button, DataTable, Pagination, Badge, Dialog, Drawer, ConfirmDialog, Field, Input, Select, EmptyState, ErrorBlock, ListShell, FilterGroup, FilterOptions, type Column, type AppliedFilter } from '@/components/ui';
+import { fmtNumber } from '@/lib/format';
 import { useListState } from '@/hooks/useListState';
 import { fmtDateTime, relativeTime } from '@/lib/format';
 import { portalApi, pk, ROLE_LABELS, type PortalUser, type PortalRole } from '@/components/portal/api';
@@ -119,6 +120,10 @@ export default function PortalUsersPage() {
   ];
 
   const inviteValid = inv.name.trim().length > 0 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.email.trim());
+  const activeCount = ['q', 'status'].filter((k) => state[k]).length;
+  const applied: AppliedFilter[] = [];
+  if (state.q) applied.push({ key: 'q', label: `Search: “${state.q}”`, onRemove: () => set({ q: undefined }) });
+  if (state.status) applied.push({ key: 'status', label: state.status === 'active' ? 'Active users' : 'Disabled users', onRemove: () => set({ status: undefined }) });
 
   return (
     <div className="max-w-6xl">
@@ -131,20 +136,30 @@ export default function PortalUsersPage() {
           </Button>
         }
       />
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <SearchInput value={state.q ?? ''} onChange={(q) => set({ q })} placeholder="Search name or e-mail…" className="w-full sm:w-72" />
-        <Select value={state.status ?? ''} onChange={(e) => set({ status: e.target.value })} placeholder="Active and disabled" options={[{ value: 'active', label: 'Active' }, { value: 'disabled', label: 'Disabled' }]} className="w-auto" />
-      </div>
-      <div className="card">
-        {list.isError ? (
-          <ErrorBlock error={list.error} retry={() => list.refetch()} />
-        ) : (
-          <>
-            <DataTable columns={columns} rows={list.data?.items ?? []} loading={list.isLoading} empty={<EmptyState icon={<Users className="h-5 w-5" />} title="No users found" />} onRowClick={(u) => setEdit(u)} />
-            <Pagination page={page} pageSize={PAGE} total={list.data?.total ?? 0} onPage={setPage} />
-          </>
-        )}
-      </div>
+      <ListShell
+        id="portal-users"
+        search={{ value: state.q ?? '', onChange: (q) => set({ q }), placeholder: 'Search name or e-mail…' }}
+        activeCount={activeCount}
+        onClear={() => set({ q: undefined, status: undefined })}
+        applied={applied}
+        count={list.data ? `${fmtNumber(list.data.total)} ${list.data.total === 1 ? 'user' : 'users'}` : undefined}
+        filters={
+          <FilterGroup label="Status">
+            <FilterOptions options={[{ value: 'active', label: 'Active' }, { value: 'disabled', label: 'Disabled' }]} value={state.status} onChange={(v) => set({ status: v as string | undefined })} />
+          </FilterGroup>
+        }
+      >
+        <div className="card">
+          {list.isError ? (
+            <ErrorBlock error={list.error} retry={() => list.refetch()} />
+          ) : (
+            <>
+              <DataTable columns={columns} rows={list.data?.items ?? []} loading={list.isLoading} empty={<EmptyState icon={<Users className="h-5 w-5" />} title="No users found" description={activeCount ? 'Adjust or clear the filters.' : undefined} />} onRowClick={(u) => setEdit(u)} />
+              <Pagination page={page} pageSize={PAGE} total={list.data?.total ?? 0} onPage={setPage} />
+            </>
+          )}
+        </div>
+      </ListShell>
 
       <Dialog
         open={invite}

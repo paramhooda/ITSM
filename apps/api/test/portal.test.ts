@@ -158,7 +158,9 @@ describe('customer portal', () => {
     expect(me.preview).toBe(false);
     const meB = await asB((ctx) => portal.me(ctx));
     expect(meB.customer.id).toBe(ids.customerB);
-    expect(meB.permissions).not.toContain('portal:assets');
+    // Customer users see their asset inventory too; only administration stays with customer_admin.
+    expect(meB.permissions).toContain('portal:assets');
+    expect(meB.permissions).not.toContain('portal:manage_users');
   });
 
   it('lists only the customer\'s own tickets and ignores a foreign customerId', async () => {

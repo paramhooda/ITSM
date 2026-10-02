@@ -71,6 +71,10 @@ export interface ArticleFilters extends Pagination {
   tag?: string;
   authorId?: string;
   ciTypeKey?: string;
+  updatedFrom?: string;
+  updatedTo?: string;
+  expiring?: boolean;
+  needsReview?: boolean;
   sort?: string;
   order?: 'asc' | 'desc';
 }
@@ -93,6 +97,10 @@ export async function listArticles(ctx: Ctx, f: ArticleFilters) {
   if (f.tag) conds.push(sql`${f.tag} = ANY(${a.tags})`);
   if (f.authorId) conds.push(eq(a.authorId, f.authorId));
   if (f.ciTypeKey) conds.push(eq(a.ciTypeKey, f.ciTypeKey));
+  if (f.updatedFrom) conds.push(sql`${a.updatedAt} >= ${f.updatedFrom}::date`);
+  if (f.updatedTo) conds.push(sql`${a.updatedAt} < ${f.updatedTo}::date + interval '1 day'`);
+  if (f.expiring) conds.push(sql`${a.expiresAt} IS NOT NULL AND ${a.expiresAt} <= now() + interval '30 days'`);
+  if (f.needsReview) conds.push(and(eq(a.status, 'published'), sql`coalesce(${a.reviewedAt}, ${a.publishedAt}, ${a.updatedAt}) < now() - interval '12 months'`)!);
   const where = and(...conds.filter((c): c is SQL => !!c));
   const [{ count }] = await ctx.tx.select({ count: sql<number>`count(*)::int` }).from(a).where(where);
   const term = f.q?.trim();

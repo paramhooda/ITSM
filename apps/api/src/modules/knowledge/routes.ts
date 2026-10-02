@@ -63,6 +63,12 @@ export default async function routes(app: FastifyInstance) {
         tag: z.string().optional(),
         authorId: z.string().uuid().optional(),
         ciTypeKey: z.string().optional(),
+        updatedFrom: z.string().max(30).optional(),
+        updatedTo: z.string().max(30).optional(),
+        /** Expires within 30 days. */
+        expiring: z.coerce.boolean().optional(),
+        /** Published and not reviewed for 12 months (same rule as the stats "stale" list). */
+        needsReview: z.coerce.boolean().optional(),
       }),
     },
   }, h((ctx, req) => svc.listArticles(ctx, req.query as svc.ArticleFilters)));

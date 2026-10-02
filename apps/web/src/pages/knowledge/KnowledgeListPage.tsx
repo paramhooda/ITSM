@@ -1,19 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, BookOpen, FolderOpen, Folder, AlertTriangle, FileText, PenLine, CalendarClock } from 'lucide-react';
+import { Plus, BookOpen, AlertTriangle, FileText, PenLine, CalendarClock } from 'lucide-react';
 import { get } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
-import { useLookups } from '@/hooks/useLookups';
+import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
 import { useListState } from '@/hooks/useListState';
-import { Button, PageHeader, SearchInput, Select, Pagination, EmptyState, LoadingBlock, ErrorBlock, Badge, FilterBar } from '@/components/ui';
+import { Button, PageHeader, Select, Pagination, EmptyState, LoadingBlock, ErrorBlock, ListShell, FilterGroup, FilterOptions, FilterSelect, FilterDateRange, FilterToggle, type AppliedFilter } from '@/components/ui';
+import { KNOWLEDGE_MODULES } from '@/layouts/modules';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { Panel, RowList } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
-import { fmtNumber, titleCase } from '@/lib/format';
+import { fmtDate, fmtNumber, titleCase } from '@/lib/format';
+import { dotClass } from '@/lib/utils';
+import { DOMAIN_COLORS, KB_STATUS_COLORS, KB_VISIBILITY_COLORS } from '@/lib/statusColors';
+import { itemsOf } from '@/components/tickets/api';
 import { ArticleCard, type ArticleSummary } from '@/components/knowledge/ArticleCard';
 import { ArticleEditor, DOMAIN_OPTIONS, type KbCategory } from '@/components/knowledge/ArticleEditor';
-import { cn } from '@/lib/utils';
 
 interface ListResponse {
   items: ArticleSummary[];
@@ -32,14 +35,33 @@ interface Stats {
 }
 
 const DEFAULTS = { pageSize: '25' };
+const STATUS_OPTIONS = [
+  { value: 'published', label: 'Published' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'archived', label: 'Archived' },
+];
+const VISIBILITY_OPTIONS = [
+  { value: 'internal', label: 'Internal' },
+  { value: 'customer', label: 'Customer-specific' },
+  { value: 'public', label: 'Public' },
+];
+const SORT_OPTIONS = [
+  { value: 'updatedAt:desc', label: 'Recently updated' },
+  { value: 'viewCount:desc', label: 'Most viewed' },
+  { value: 'title:asc', label: 'Title A–Z' },
+  { value: 'publishedAt:desc', label: 'Recently published' },
+];
+const FILTER_KEYS = ['q', 'categoryId', 'type', 'status', 'domain', 'visibility', 'customerId', 'tag', 'updatedFrom', 'updatedTo', 'expiring', 'needsReview'];
 
+/** Articles module of Knowledge: the browsable list, with the article browser the portal users already know. */
 export default function KnowledgeListPage() {
   const navigate = useNavigate();
   const can = useAuthStore((s) => s.can);
-  const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
+  const isCustomer = useAuthStore((s) => s.isCustomer());
   const canManage = !isCustomer && can('kb:manage');
   const { state, set, page, pageSize, setPage } = useListState(DEFAULTS);
   const { options } = useLookups();
+  const customers = useCustomersLookup();
   const [editorOpen, setEditorOpen] = useState(false);
 
   const categories = useQuery({ queryKey: ['knowledge', 'categories'], queryFn: () => get<{ items: KbCategory[]; uncategorized: number }>('/knowledge/categories'), staleTime: 60_000 });
@@ -55,7 +77,12 @@ export default function KnowledgeListPage() {
       status: !isCustomer ? state.status || undefined : undefined,
       domain: state.domain || undefined,
       visibility: !isCustomer ? state.visibility || undefined : undefined,
+      customerId: !isCustomer ? state.customerId || undefined : undefined,
       tag: state.tag || undefined,
+      updatedFrom: state.updatedFrom || undefined,
+      updatedTo: state.updatedTo || undefined,
+      expiring: state.expiring === 'true' ? 'true' : undefined,
+      needsReview: state.needsReview === 'true' ? 'true' : undefined,
       sort: state.sort || undefined,
       order: state.order || undefined,
     }),
@@ -64,7 +91,8 @@ export default function KnowledgeListPage() {
   const list = useQuery({ queryKey: ['knowledge', 'list', query], queryFn: () => get<ListResponse>('/knowledge', query), placeholderData: (prev) => prev });
 
   const typeLabel = (key: string) => options('kb_type').find((o) => o.key === key)?.label;
-  const typeOptions = options('kb_type').map((o) => ({ value: o.key, label: o.label }));
+  const typeOptions = options('kb_type');
+  const customerItems = itemsOf<{ id: string; name: string; code: string }>(customers.data);
 
   const tree = useMemo(() => {
     const cats = categories.data?.items ?? [];
@@ -82,14 +110,66 @@ export default function KnowledgeListPage() {
     return rows;
   }, [categories.data]);
   const totalArticles = (categories.data?.items ?? []).reduce((n, c) => n + (c.articleCount ?? 0), 0) + (categories.data?.uncategorized ?? 0);
-  const FILTER_KEYS = ['q', 'categoryId', 'type', 'status', 'domain', 'visibility', 'tag', 'sort', 'order'];
   const activeCount = FILTER_KEYS.filter((k) => state[k]).length;
   const clear = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
+
+  const applied: AppliedFilter[] = [];
+  if (state.q) applied.push({ key: 'q', label: `Search: “${state.q}”`, onRemove: () => set({ q: undefined }) });
+  if (state.categoryId) applied.push({ key: 'categoryId', label: `Category: ${tree.find((r) => r.cat.id === state.categoryId)?.cat.name ?? '…'}`, onRemove: () => set({ categoryId: undefined }) });
+  if (state.type) applied.push({ key: 'type', label: `Type: ${typeLabel(state.type) ?? titleCase(state.type)}`, onRemove: () => set({ type: undefined }) });
+  if (state.domain) applied.push({ key: 'domain', label: `Domain: ${DOMAIN_OPTIONS.find((d) => d.value === state.domain)?.label ?? state.domain}`, onRemove: () => set({ domain: undefined }) });
+  if (!isCustomer && state.visibility) applied.push({ key: 'visibility', label: `Visibility: ${VISIBILITY_OPTIONS.find((v) => v.value === state.visibility)?.label ?? state.visibility}`, onRemove: () => set({ visibility: undefined }) });
+  if (!isCustomer && state.status) applied.push({ key: 'status', label: `Status: ${titleCase(state.status)}`, onRemove: () => set({ status: undefined }) });
+  if (!isCustomer && state.customerId) applied.push({ key: 'customerId', label: `Customer: ${customerItems.find((c) => c.id === state.customerId)?.name ?? '…'}`, onRemove: () => set({ customerId: undefined }) });
+  if (state.tag) applied.push({ key: 'tag', label: `Tag: ${state.tag}`, onRemove: () => set({ tag: undefined }) });
+  if (state.updatedFrom || state.updatedTo) applied.push({ key: 'updated', label: `Updated ${state.updatedFrom ? `from ${fmtDate(state.updatedFrom)}` : ''}${state.updatedFrom && state.updatedTo ? ' ' : ''}${state.updatedTo ? `to ${fmtDate(state.updatedTo)}` : ''}`, onRemove: () => set({ updatedFrom: undefined, updatedTo: undefined }) });
+  if (state.expiring === 'true') applied.push({ key: 'expiring', label: 'Expiring soon', onRemove: () => set({ expiring: undefined }) });
+  if (state.needsReview === 'true') applied.push({ key: 'needsReview', label: 'Needs review', onRemove: () => set({ needsReview: undefined }) });
+
+  const filters = (
+    <>
+      <FilterGroup label="Category">
+        <FilterOptions
+          max={10}
+          options={tree.map(({ cat, depth, count }) => ({ value: cat.id, label: <span style={{ paddingLeft: depth * 10 }}>{cat.name}</span>, count }))}
+          value={state.categoryId}
+          onChange={(v) => set({ categoryId: v as string | undefined })}
+          emptyLabel={categories.isLoading ? 'Loading…' : 'No categories yet'}
+        />
+      </FilterGroup>
+      {typeOptions.length > 0 && (
+        <FilterGroup label="Type">
+          <FilterOptions options={typeOptions.map((o) => ({ value: o.key, label: o.label, count: canManage ? stats.data?.byType[o.key] ?? 0 : null }))} value={state.type} onChange={(v) => set({ type: v as string | undefined })} />
+        </FilterGroup>
+      )}
+      {!isCustomer && (
+        <>
+          <FilterGroup label="Visibility">
+            <FilterOptions options={VISIBILITY_OPTIONS.map((o) => ({ ...o, dot: dotClass(KB_VISIBILITY_COLORS[o.value]), count: canManage ? stats.data?.byVisibility[o.value] ?? 0 : null }))} value={state.visibility} onChange={(v) => set({ visibility: v as string | undefined })} />
+          </FilterGroup>
+          <FilterGroup label="Status">
+            <FilterOptions options={STATUS_OPTIONS.map((o) => ({ ...o, dot: dotClass(KB_STATUS_COLORS[o.value]), count: canManage ? stats.data?.byStatus[o.value] ?? 0 : null }))} value={state.status} onChange={(v) => set({ status: v as string | undefined })} />
+          </FilterGroup>
+          <FilterGroup label="Domain" defaultOpen={!!state.domain}>
+            <FilterOptions options={DOMAIN_OPTIONS.map((o) => ({ ...o, dot: dotClass(DOMAIN_COLORS[o.value]) }))} value={state.domain} onChange={(v) => set({ domain: v as string | undefined })} />
+          </FilterGroup>
+          <FilterGroup label="Customer" defaultOpen={!!state.customerId}>
+            <FilterSelect value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="Any customer" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
+          </FilterGroup>
+        </>
+      )}
+      <FilterGroup label="Updated" defaultOpen={!!(state.updatedFrom || state.updatedTo || state.expiring || state.needsReview)}>
+        <FilterDateRange from={state.updatedFrom} to={state.updatedTo} onChange={(r) => set({ updatedFrom: r.from, updatedTo: r.to })} />
+        <FilterToggle label="Expiring soon" hint="Expiry date within the next 30 days" checked={state.expiring === 'true'} onChange={(v) => set({ expiring: v ? 'true' : undefined })} />
+        {!isCustomer && <FilterToggle label="Needs review" hint="Published over 12 months ago and not reviewed since" checked={state.needsReview === 'true'} onChange={(v) => set({ needsReview: v ? 'true' : undefined })} />}
+      </FilterGroup>
+    </>
+  );
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="Knowledge base"
+        title={isCustomer ? 'Knowledge base' : 'Articles'}
         subtitle={isCustomer ? 'Procedures, guides and answers published for your organization.' : 'Runbooks, SOPs, known errors and customer procedures.'}
         actions={
           canManage && (
@@ -100,113 +180,80 @@ export default function KnowledgeListPage() {
         }
       />
 
-      <FilterBar activeCount={activeCount} onClear={clear}>
-        <SearchInput className="w-72" value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="Search titles, numbers and content…" />
-        <Select className="w-36 h-8 py-0 text-[13px]" value={state.type ?? ''} onChange={(e) => set({ type: e.target.value })} placeholder="All types" options={typeOptions} />
-        <Select className="w-44 h-8 py-0 text-[13px] lg:hidden" value={state.categoryId ?? ''} onChange={(e) => set({ categoryId: e.target.value })} placeholder="All categories" options={tree.map(({ cat, depth }) => ({ value: cat.id, label: `${'— '.repeat(depth)}${cat.name}` }))} />
-        {!isCustomer && <Select className="w-36 h-8 py-0 text-[13px]" value={state.domain ?? ''} onChange={(e) => set({ domain: e.target.value })} placeholder="All domains" options={DOMAIN_OPTIONS} />}
-        {!isCustomer && <Select className="w-36 h-8 py-0 text-[13px]" value={state.status ?? ''} onChange={(e) => set({ status: e.target.value })} placeholder="All statuses" options={[{ value: 'published', label: 'Published' }, { value: 'draft', label: 'Draft' }, { value: 'archived', label: 'Archived' }]} />}
-        {!isCustomer && <Select className="w-40 h-8 py-0 text-[13px]" value={state.visibility ?? ''} onChange={(e) => set({ visibility: e.target.value })} placeholder="All visibility" options={[{ value: 'internal', label: 'Internal' }, { value: 'customer', label: 'Customer-specific' }, { value: 'public', label: 'Public' }]} />}
-        <Select
-          className="w-44 h-8 py-0 text-[13px]"
-          value={state.sort ? `${state.sort}:${state.order ?? 'desc'}` : ''}
-          onChange={(e) => {
-            const [sort, order] = e.target.value.split(':');
-            set({ sort: sort || undefined, order: order || undefined });
-          }}
-          placeholder={state.q ? 'Sort: relevance' : 'Sort: recently updated'}
-          options={[
-            { value: 'updatedAt:desc', label: 'Recently updated' },
-            { value: 'viewCount:desc', label: 'Most viewed' },
-            { value: 'title:asc', label: 'Title A–Z' },
-            { value: 'publishedAt:desc', label: 'Recently published' },
-          ]}
-        />
-        {state.tag && (
-          <Badge className="cursor-pointer" onClick={() => set({ tag: undefined })}>
-            tag: {state.tag} ×
-          </Badge>
-        )}
-      </FilterBar>
-
-      {canManage && (
-        <InsightBand
-          id="knowledge"
-          loading={stats.isLoading}
-          summary={stats.data ? `${fmtNumber(totalArticles)} articles` : undefined}
-          kpis={
-            stats.data
-              ? [
-                  { label: 'Published', value: fmtNumber(stats.data.byStatus.published ?? 0), icon: <BookOpen className="h-4 w-4" />, hint: `${fmtNumber(stats.data.byStatus.archived ?? 0)} archived`, onClick: () => set({ status: state.status === 'published' ? undefined : 'published' }) },
-                  { label: 'Drafts', value: fmtNumber(stats.data.byStatus.draft ?? 0), tone: (stats.data.byStatus.draft ?? 0) > 0 ? 'warn' : 'default', icon: <PenLine className="h-4 w-4" />, hint: 'waiting to be published', onClick: () => set({ status: state.status === 'draft' ? undefined : 'draft' }) },
-                  { label: 'Review overdue', value: fmtNumber(stats.data.stale.count), tone: stats.data.stale.count > 0 ? 'bad' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'published over 12 months ago, not reviewed' },
-                  { label: 'Expiring · 30d', value: fmtNumber(stats.data.expiringSoon), tone: stats.data.expiringSoon > 0 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: 'articles with an expiry date coming up' },
-                ]
-              : []
-          }
-          panels={
-            stats.data && (
-              <>
-                <Panel title="Most viewed" subtitle="What people actually open">
-                  <RowList dense empty="No views recorded yet" items={stats.data.topViewed.slice(0, 6).map((t) => ({ key: t.id, leading: <FileText className="h-3.5 w-3.5 text-subtle" />, primary: t.title, secondary: t.number, right: `${fmtNumber(t.viewCount)} views`, href: `/knowledge/${t.id}` }))} />
-                </Panel>
-                <Panel title="By type" subtitle="Runbooks, SOPs, known errors…">
-                  <BreakdownBar dense items={Object.entries(stats.data.byType).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: typeLabel(k) ?? titleCase(k), value: v, active: state.type === k }))} onSelect={(i) => { const k = Object.keys(stats.data!.byType).find((key) => (typeLabel(key) ?? titleCase(key)) === i.label); if (k) set({ type: state.type === k ? undefined : k }); }} />
-                </Panel>
-              </>
-            )
-          }
-        />
-      )}
-
-      <div className="flex gap-4">
-        <aside className="hidden lg:block w-56 shrink-0">
-          <div className="card p-2 sticky top-0">
-            <div className="px-2 pb-1 text-[10.5px] uppercase tracking-wider text-subtle font-semibold">Categories</div>
-            <button className={cn('w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px]', !state.categoryId ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2')} onClick={() => set({ categoryId: undefined })}>
-              <span className="inline-flex items-center gap-2">
-                <BookOpen className="h-3.5 w-3.5" /> All articles
-              </span>
-              <span className="text-xs">{totalArticles}</span>
-            </button>
-            {tree.map(({ cat, depth, count }) => {
-              const active = state.categoryId === cat.id;
-              return (
-                <button key={cat.id} className={cn('w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px]', active ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2')} style={{ paddingLeft: 8 + depth * 14 }} onClick={() => set({ categoryId: active ? undefined : cat.id })} title={cat.description ?? cat.name}>
-                  <span className="inline-flex items-center gap-2 min-w-0">
-                    {active ? <FolderOpen className="h-3.5 w-3.5 shrink-0" /> : <Folder className="h-3.5 w-3.5 shrink-0" />}
-                    <span className="truncate">{cat.name}</span>
-                  </span>
-                  <span className="text-xs">{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-
-        <div className="flex-1 min-w-0">
-          <div className="card" style={{ padding: 0 }}>
-            {list.isLoading && <LoadingBlock />}
-            {list.isError && <ErrorBlock error={list.error} retry={() => list.refetch()} />}
-            {list.data && list.data.items.length === 0 && (
-              <EmptyState
-                icon={<BookOpen className="h-5 w-5" />}
-                title="No articles match"
-                description={isCustomer ? 'Try a different search term.' : 'Adjust the filters or write the first article for this area.'}
-                action={canManage ? <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setEditorOpen(true)}>New article</Button> : undefined}
-              />
-            )}
-            {list.data && list.data.items.length > 0 && (
-              <div className="divide-y divide-[var(--border)]">
-                {list.data.items.map((a) => (
-                  <ArticleCard key={a.id} article={a} showStatus={!isCustomer} typeLabel={typeLabel(a.articleType)} />
-                ))}
-              </div>
-            )}
-            {list.data && <Pagination page={list.data.page} pageSize={list.data.pageSize} total={list.data.total} onPage={setPage} />}
-          </div>
+      <ListShell
+        id={isCustomer ? 'portal-knowledge' : 'knowledge-articles'}
+        modules={isCustomer ? undefined : KNOWLEDGE_MODULES}
+        search={{ value: state.q ?? '', onChange: (v) => set({ q: v }), placeholder: 'Search titles, numbers and content…' }}
+        filters={filters}
+        activeCount={activeCount}
+        onClear={clear}
+        applied={applied}
+        count={list.data ? `${fmtNumber(list.data.total)} ${list.data.total === 1 ? 'article' : 'articles'}` : undefined}
+        toolbar={
+          <Select
+            className="w-44 h-8 py-0 text-[13px]"
+            value={state.sort ? `${state.sort}:${state.order ?? 'desc'}` : ''}
+            onChange={(e) => {
+              const [sort, order] = e.target.value.split(':');
+              set({ sort: sort || undefined, order: order || undefined });
+            }}
+            placeholder={state.q ? 'Sort: relevance' : 'Sort: recently updated'}
+            options={SORT_OPTIONS}
+          />
+        }
+        insights={
+          canManage ? (
+            <InsightBand
+              id="knowledge"
+              loading={stats.isLoading}
+              summary={stats.data ? `${fmtNumber(totalArticles)} articles` : undefined}
+              kpis={
+                stats.data
+                  ? [
+                      { label: 'Published', value: fmtNumber(stats.data.byStatus.published ?? 0), icon: <BookOpen className="h-4 w-4" />, hint: `${fmtNumber(stats.data.byStatus.archived ?? 0)} archived`, onClick: () => set({ status: state.status === 'published' ? undefined : 'published' }) },
+                      { label: 'Drafts', value: fmtNumber(stats.data.byStatus.draft ?? 0), tone: (stats.data.byStatus.draft ?? 0) > 0 ? 'warn' : 'default', icon: <PenLine className="h-4 w-4" />, hint: 'waiting to be published', onClick: () => set({ status: state.status === 'draft' ? undefined : 'draft' }) },
+                      { label: 'Review overdue', value: fmtNumber(stats.data.stale.count), tone: stats.data.stale.count > 0 ? 'bad' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'published over 12 months ago, not reviewed', onClick: () => set({ needsReview: state.needsReview === 'true' ? undefined : 'true' }) },
+                      { label: 'Expiring · 30d', value: fmtNumber(stats.data.expiringSoon), tone: stats.data.expiringSoon > 0 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: 'articles with an expiry date coming up', onClick: () => set({ expiring: state.expiring === 'true' ? undefined : 'true' }) },
+                    ]
+                  : []
+              }
+              panels={
+                stats.data && (
+                  <>
+                    <Panel title="Most viewed" subtitle="What people actually open">
+                      <RowList dense empty="No views recorded yet" items={stats.data.topViewed.slice(0, 6).map((t) => ({ key: t.id, leading: <FileText className="h-3.5 w-3.5 text-subtle" />, primary: t.title, secondary: t.number, right: `${fmtNumber(t.viewCount)} views`, href: `/knowledge/${t.id}` }))} />
+                    </Panel>
+                    <Panel title="By type" subtitle="Runbooks, SOPs, known errors…">
+                      <BreakdownBar dense items={Object.entries(stats.data.byType).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: typeLabel(k) ?? titleCase(k), value: v, active: state.type === k }))} onSelect={(i) => { const k = Object.keys(stats.data!.byType).find((key) => (typeLabel(key) ?? titleCase(key)) === i.label); if (k) set({ type: state.type === k ? undefined : k }); }} />
+                    </Panel>
+                  </>
+                )
+              }
+            />
+          ) : undefined
+        }
+      >
+        <div className="card" style={{ padding: 0 }}>
+          {list.isLoading && <LoadingBlock />}
+          {list.isError && <ErrorBlock error={list.error} retry={() => list.refetch()} />}
+          {list.data && list.data.items.length === 0 && (
+            <EmptyState
+              icon={<BookOpen className="h-5 w-5" />}
+              title="No articles match"
+              description={isCustomer ? 'Try a different search term.' : 'Adjust the filters or write the first article for this area.'}
+              action={canManage ? <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setEditorOpen(true)}>New article</Button> : undefined}
+            />
+          )}
+          {list.data && list.data.items.length > 0 && (
+            <div className="divide-y divide-[var(--border)]">
+              {list.data.items.map((a) => (
+                <ArticleCard key={a.id} article={a} showStatus={!isCustomer} typeLabel={typeLabel(a.articleType)} />
+              ))}
+            </div>
+          )}
+          {list.data && <Pagination page={list.data.page} pageSize={list.data.pageSize} total={list.data.total} onPage={setPage} />}
         </div>
-      </div>
+      </ListShell>
 
       {canManage && <ArticleEditor open={editorOpen} onClose={() => setEditorOpen(false)} defaults={{ categoryId: state.categoryId ?? '' }} onSaved={(a) => navigate(`/knowledge/${a.id}`)} />}
     </div>

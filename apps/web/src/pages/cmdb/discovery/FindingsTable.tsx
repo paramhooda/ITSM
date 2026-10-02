@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button, Badge, Select, SearchInput, DataTable, EmptyState, Pagination, FilterBar, FilterChip, type Column } from '@/components/ui';
+import { Button, Badge, Select, SearchInput, DataTable, EmptyState, Pagination, FilterChip, type Column } from '@/components/ui';
 import { useListState } from '@/hooks/useListState';
 import { useAuthStore } from '@/stores/auth';
 import { dotClass } from '@/lib/utils';
@@ -14,9 +14,10 @@ import { discoveryApi, discoveryKeys, DIFF_COLORS, FINDING_STATUS_COLORS, type F
 
 /**
  * The review queue: findings with filters, multi-select and apply/ignore. Used on the
- * global Findings page, inside a source record and inside a run record.
+ * global Findings page (which renders the filters in its rail and passes `controls={false}`),
+ * inside a source record and inside a run record (an inline filter row above the table).
  */
-export function FindingsTable({ sourceId, runId, customerId, showSource = false, defaultStatus = 'pending', extraFilters }: { sourceId?: string; runId?: string; customerId?: string; showSource?: boolean; defaultStatus?: string; extraFilters?: React.ReactNode }) {
+export function FindingsTable({ sourceId, runId, customerId, showSource = false, defaultStatus = 'pending', extraFilters, controls = true, onTotal }: { sourceId?: string; runId?: string; customerId?: string; showSource?: boolean; defaultStatus?: string; extraFilters?: React.ReactNode; /** false when the page owns the filters (search, status, diff live in its rail). */ controls?: boolean; /** Reports the result total so the page can show it beside the applied filters. */ onTotal?: (total: number) => void }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
@@ -28,6 +29,10 @@ export function FindingsTable({ sourceId, runId, customerId, showSource = false,
   const stats = useQuery({ queryKey: discoveryKeys.findingStats(statsParams), queryFn: () => discoveryApi.findingStats(statsParams), staleTime: 30_000 });
   const [selected, setSelected] = useState<string[]>([]);
   useEffect(() => setSelected([]), [params]);
+  const total = q.data?.total;
+  useEffect(() => {
+    if (total !== undefined) onTotal?.(total);
+  }, [total, onTotal]);
   const invalidate = () => { qc.invalidateQueries({ queryKey: discoveryKeys.all }); qc.invalidateQueries({ queryKey: ['cmdb'] }); };
   const act = useMutation({ mutationFn: ({ id, action }: { id: string; action: 'apply' | 'ignore' }) => discoveryApi.act(id, action), onSuccess: (r, v) => { toast.success(v.action === 'apply' ? `${r.created ? 'Created' : 'Updated'} CI ${r.ciName ?? ''}` : 'Finding ignored'); invalidate(); }, onError: (e) => toast.error(errorMessage(e)) });
   const bulk = useMutation({ mutationFn: (action: 'apply' | 'ignore') => discoveryApi.bulk(selected, action), onSuccess: (r) => { toast[r.failed ? 'warning' : 'success'](`${r.applied} processed${r.failed ? `, ${r.failed} failed` : ''}`); setSelected([]); invalidate(); }, onError: (e) => toast.error(errorMessage(e)) });
@@ -53,23 +58,31 @@ export function FindingsTable({ sourceId, runId, customerId, showSource = false,
 
   return (
     <div className="flex flex-col gap-3">
-      <FilterBar
-        activeCount={(state.q ? 1 : 0) + (state.diffStatus ? 1 : 0) + (state.status !== defaultStatus ? 1 : 0)}
-        onClear={() => set({ q: undefined, diffStatus: undefined, status: defaultStatus })}
-        trailing={selected.length > 0 ? <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted">{selected.length} selected</span><Button size="sm" icon={<Check className="h-3.5 w-3.5" />} loading={bulk.isPending} onClick={() => bulk.mutate('apply')}>Apply</Button><Button size="sm" variant="outline" icon={<X className="h-3.5 w-3.5" />} loading={bulk.isPending} onClick={() => bulk.mutate('ignore')}>Ignore</Button></div> : undefined}
-        chips={
-          <>
-            {['pending', 'applied', 'ignored'].map((st) => <FilterChip key={st} active={state.status === st} onClick={() => set({ status: state.status === st ? '' : st })} dot={dotClass(FINDING_STATUS_COLORS[st])} count={byStatus[st] ?? 0}>{st === 'pending' ? 'To review' : st === 'applied' ? 'Applied' : 'Ignored'}</FilterChip>)}
-            <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
-            {['new', 'changed', 'unchanged'].map((d) => <FilterChip key={d} active={state.diffStatus === d} onClick={() => set({ diffStatus: state.diffStatus === d ? undefined : d })} dot={dotClass(DIFF_COLORS[d])} count={byDiff[d] ?? 0}>{d === 'new' ? 'New devices' : d === 'changed' ? 'Changed' : 'Unchanged'}</FilterChip>)}
-          </>
-        }
-      >
-        <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="IP, hostname, serial…" className="w-56" />
-        {extraFilters}
-        {!sourceId && !runId && <Select className="w-36 h-8 py-0 text-[13px]" value={state.status ?? ''} onChange={(e) => set({ status: e.target.value })} placeholder="Any status" options={['pending', 'applied', 'ignored'].map((v) => ({ value: v, label: v === 'pending' ? 'To review' : v }))} />}
-      </FilterBar>
+      {controls && (
+        <div className="flex flex-wrap items-center gap-2" role="search">
+          <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} placeholder="IP, hostname, serial…" className="w-56" />
+          {extraFilters}
+          {!sourceId && !runId && <Select className="w-36 h-8 py-0 text-[13px]" value={state.status ?? ''} onChange={(e) => set({ status: e.target.value })} placeholder="Any status" options={['pending', 'applied', 'ignored'].map((v) => ({ value: v, label: v === 'pending' ? 'To review' : v }))} />}
+          <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+          {['pending', 'applied', 'ignored'].map((st) => <FilterChip key={st} active={state.status === st} onClick={() => set({ status: state.status === st ? '' : st })} dot={dotClass(FINDING_STATUS_COLORS[st])} count={byStatus[st] ?? 0}>{st === 'pending' ? 'To review' : st === 'applied' ? 'Applied' : 'Ignored'}</FilterChip>)}
+          <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+          {['new', 'changed', 'unchanged'].map((d) => <FilterChip key={d} active={state.diffStatus === d} onClick={() => set({ diffStatus: state.diffStatus === d ? undefined : d })} dot={dotClass(DIFF_COLORS[d])} count={byDiff[d] ?? 0}>{d === 'new' ? 'New devices' : d === 'changed' ? 'Changed' : 'Unchanged'}</FilterChip>)}
+          {((state.q ? 1 : 0) + (state.diffStatus ? 1 : 0) + (state.status !== defaultStatus ? 1 : 0)) > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => set({ q: undefined, diffStatus: undefined, status: defaultStatus })}>
+              Clear filters
+            </Button>
+          )}
+        </div>
+      )}
       <div className="card overflow-hidden">
+        {selected.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 px-3 h-10 border-b border-default bg-brand-50/60 text-[12.5px]">
+            <span className="text-muted">{selected.length} selected</span>
+            <Button size="sm" icon={<Check className="h-3.5 w-3.5" />} loading={bulk.isPending} onClick={() => bulk.mutate('apply')}>Apply</Button>
+            <Button size="sm" variant="outline" icon={<X className="h-3.5 w-3.5" />} loading={bulk.isPending} onClick={() => bulk.mutate('ignore')}>Ignore</Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected([])}>Clear selection</Button>
+          </div>
+        )}
         <DataTable columns={columns} rows={items} loading={q.isLoading} dense onRowClick={(f) => navigate(`/cmdb/discovery/findings/${f.id}`)} rowClassName={(f) => (f.status === 'pending' && f.diffStatus === 'new' ? 'row-rail-good' : f.status === 'pending' && f.diffStatus === 'changed' ? 'row-rail-warn' : undefined)} empty={<EmptyState title="No findings" description={state.status === 'pending' ? 'Nothing waiting for review. Run a scan or change the status filter.' : 'No findings match the filters.'} />} />
         <Pagination page={page} pageSize={pageSize} total={q.data?.total ?? 0} onPage={setPage} />
       </div>

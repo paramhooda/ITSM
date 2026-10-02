@@ -275,6 +275,8 @@ function buildWhere(ctx: Ctx, q: VisitListQuery): SQL | undefined {
   if (range.from) conds.push(gte(V.scheduledStart, range.from));
   if (range.to) conds.push(lt(V.scheduledStart, range.to));
   if (q.unacknowledged) conds.push(and(eq(V.status, 'completed'), isNull(V.customerAckAt))!);
+  if (q.unassigned) conds.push(and(inArray(V.status, ['requested', 'scheduled']), isNull(V.engineerId))!);
+  if (q.overdue) conds.push(and(eq(V.status, 'scheduled'), lt(V.scheduledStart, new Date()))!);
   const like = searchLike(q.q, V.number, V.title);
   if (like) conds.push(like);
   return conds.length ? and(...conds) : undefined;

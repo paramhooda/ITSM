@@ -1,5 +1,6 @@
 import { get, post, patch } from '@/api/client';
 import type { OptionLabel, SlaCompact, SlaMetricSummary, TimelineEntry, CatalogField } from '@/components/tickets/types';
+import type { PortalAssetsOverview } from '@/components/overview/types';
 
 /** API shapes of the customer portal module (apps/api/src/modules/portal). */
 
@@ -283,6 +284,31 @@ export interface PortalSla {
   byPriority: ComplianceGroup[];
 }
 
+/** `expiring` filter of GET /portal/assets: which cover is about to end. */
+export type AssetExpiring = 'warranty30' | 'warranty90' | 'amc30' | 'amc90' | 'expired';
+export const ASSET_EXPIRING_OPTIONS: { value: AssetExpiring; label: string }[] = [
+  { value: 'warranty30', label: 'Warranty ending ≤ 30 d' },
+  { value: 'warranty90', label: 'Warranty ending ≤ 90 d' },
+  { value: 'amc30', label: 'AMC ending ≤ 30 d' },
+  { value: 'amc90', label: 'AMC ending ≤ 90 d' },
+  { value: 'expired', label: 'Cover expired' },
+];
+export const ASSET_EXPIRING_LABELS: Record<string, string> = Object.fromEntries(ASSET_EXPIRING_OPTIONS.map((o) => [o.value, o.label]));
+
+/** Query parameters of GET /portal/assets. */
+export interface PortalAssetListParams {
+  q?: string;
+  siteId?: string;
+  categoryId?: string;
+  lifecycleStage?: string;
+  expiring?: AssetExpiring;
+  sort?: 'tag' | 'name' | 'warrantyEnd' | 'amcEnd' | 'createdAt' | 'updatedAt' | string;
+  order?: 'asc' | 'desc' | string;
+  page?: number;
+  pageSize?: number;
+  [key: string]: unknown;
+}
+
 export interface Coverage {
   status: 'none' | 'active' | 'expiring' | 'expired';
   days: number | null;
@@ -411,6 +437,7 @@ export const pk = {
   services: ['portal', 'services'] as const,
   sla: (days: number) => ['portal', 'sla', days] as const,
   assets: (params: Record<string, unknown>) => ['portal', 'assets', params] as const,
+  assetsOverview: ['portal', 'assets', 'overview'] as const,
   cis: (params: Record<string, unknown>) => ['portal', 'cis', params] as const,
   maintenance: ['portal', 'maintenance'] as const,
   users: (params: Record<string, unknown>) => ['portal', 'users', params] as const,
@@ -429,7 +456,9 @@ export const portalApi = {
   decide: (ticketId: string, approvalId: string, decision: 'approved' | 'rejected', comment?: string | null) => post(`/portal/approvals/${ticketId}/${approvalId}`, { decision, comment: comment || null }),
   services: () => get<PortalServices>('/portal/services'),
   sla: (days: number) => get<PortalSla>('/portal/sla', { days }),
-  assets: (params: Record<string, unknown>) => get<Paginated<PortalAsset>>('/portal/assets', params),
+  assets: (params: PortalAssetListParams) => get<Paginated<PortalAsset>>('/portal/assets', params),
+  /** Headline counts, breakdowns and soonest expiries for the portal assets Overview. */
+  assetsOverview: () => get<PortalAssetsOverview>('/portal/assets/overview'),
   cis: (params: Record<string, unknown>) => get<Paginated<PortalCi>>('/portal/cis', params),
   maintenance: () => get<PortalMaintenance>('/portal/maintenance'),
   acknowledge: (visitId: string, body: { name: string; title?: string | null; notes?: string | null; rating?: number | null }) => post<PortalVisit>(`/portal/visits/${visitId}/acknowledge`, body),

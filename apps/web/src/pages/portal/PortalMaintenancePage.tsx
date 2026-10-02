@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CalendarCheck, Wrench, Download, CheckCircle2, Star, MapPin, UserRound } from 'lucide-react';
-import { PageHeader, Card, Badge, Button, EmptyState, LoadingBlock, ErrorBlock } from '@/components/ui';
+import { PageHeader, Card, Badge, Button, EmptyState, LoadingBlock, ErrorBlock, ListShell, FilterGroup, FilterOptions, type AppliedFilter } from '@/components/ui';
+import { PORTAL_MAINTENANCE_MODULES } from '@/layouts/modules';
 import { download, ApiError } from '@/api/client';
-import { fmtDate, fmtDateTime, relativeTime, titleCase } from '@/lib/format';
+import { useListState } from '@/hooks/useListState';
+import { fmtDate, fmtDateTime, fmtNumber, relativeTime, titleCase } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Panel } from '@/components/tickets/Panel';
 import { AcknowledgeDialog, type AcknowledgeInput } from '@/components/portal/AcknowledgeDialog';
@@ -15,6 +17,7 @@ import { VISIT_STATUS_COLORS, PM_STATUS_COLORS } from '@/lib/statusColors';
 type Entry = { kind: 'visit'; date: string; visit: PortalVisit } | { kind: 'pm'; date: string; occurrence: PortalOccurrence };
 
 const STATUS_COLOR: Record<string, string> = { ...VISIT_STATUS_COLORS, ...PM_STATUS_COLORS };
+const FILTER_KEYS = ['kind', 'site'];
 
 function dayLabel(iso: string) {
   const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso);
@@ -121,11 +124,14 @@ function PastVisit({ v, onAcknowledge, highlighted }: { v: PortalVisit; onAcknow
   );
 }
 
-export default function PortalMaintenancePage() {
+export type MaintenanceSection = 'upcoming' | 'history';
+
+/** Maintenance & visits: the Upcoming module (what is booked) and the History module (what was done, to review and sign off). */
+export default function PortalMaintenancePage({ section = 'upcoming' }: { section?: MaintenanceSection } = {}) {
   const qc = useQueryClient();
-  const [search] = useSearchParams();
-  const highlightVisit = search.get('visit');
-  const highlightOcc = search.get('occurrence');
+  const { state, set } = useListState();
+  const highlightVisit = state.visit ?? null;
+  const highlightOcc = state.occurrence ?? null;
   const view = useQuery({ queryKey: pk.maintenance, queryFn: portalApi.maintenance, staleTime: 60_000 });
   const [ack, setAck] = useState<PortalVisit | null>(null);
   const acknowledge = useMutation({
@@ -138,58 +144,122 @@ export default function PortalMaintenancePage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const upcoming = useMemo<Entry[]>(() => {
+  const kind = state.kind === 'visit' || state.kind === 'pm' ? state.kind : undefined;
+  const site = state.site || undefined;
+
+  /** Everything the section shows, before the rail's filters, as one list of visits and maintenance. */
+  const all = useMemo<(Entry & { siteId: string | null; siteName: string | null })[]>(() => {
     if (!view.data) return [];
-    const entries: Entry[] = [
-      ...view.data.upcoming.visits.map((v): Entry => ({ kind: 'visit', date: v.scheduledStart ?? new Date().toISOString(), visit: v })),
-      ...view.data.upcoming.occurrences.filter((o) => !o.fieldVisitId || !view.data!.upcoming.visits.some((v) => v.id === o.fieldVisitId)).map((o): Entry => ({ kind: 'pm', date: o.date, occurrence: o })),
-    ];
-    return entries.sort((a, b) => a.date.localeCompare(b.date));
-  }, [view.data]);
-  const pastPm = view.data?.past.occurrences.filter((o) => !o.fieldVisitId) ?? [];
+    const d = view.data;
+    if (section === 'upcoming') {
+      const visits = d.upcoming.visits.map((v) => ({ kind: 'visit' as const, date: v.scheduledStart ?? new Date().toISOString(), visit: v, siteId: v.siteId, siteName: v.siteName }));
+      const pm = d.upcoming.occurrences.filter((o) => !o.fieldVisitId || !d.upcoming.visits.some((v) => v.id === o.fieldVisitId)).map((o) => ({ kind: 'pm' as const, date: o.date, occurrence: o, siteId: o.siteId, siteName: o.siteName }));
+      return [...visits, ...pm].sort((a, b) => a.date.localeCompare(b.date));
+    }
+    const visits = d.past.visits.map((v) => ({ kind: 'visit' as const, date: v.actualEnd ?? v.scheduledStart ?? '', visit: v, siteId: v.siteId, siteName: v.siteName }));
+    const pm = d.past.occurrences.filter((o) => !o.fieldVisitId).map((o) => ({ kind: 'pm' as const, date: o.date, occurrence: o, siteId: o.siteId, siteName: o.siteName }));
+    return [...visits, ...pm].sort((a, b) => b.date.localeCompare(a.date));
+  }, [view.data, section]);
+  const shown = useMemo(() => all.filter((e) => (!kind || e.kind === kind) && (!site || e.siteId === site)), [all, kind, site]);
+  const siteOptions = useMemo(() => {
+    const m = new Map<string, { label: string; count: number }>();
+    for (const e of all) {
+      if (!e.siteId) continue;
+      const cur = m.get(e.siteId) ?? { label: e.siteName ?? 'Site', count: 0 };
+      cur.count++;
+      m.set(e.siteId, cur);
+    }
+    return [...m.entries()].map(([value, v]) => ({ value, label: v.label, count: v.count })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [all]);
+  const visitCount = all.filter((e) => e.kind === 'visit' && (!site || e.siteId === site)).length;
+  const pmCount = all.filter((e) => e.kind === 'pm' && (!site || e.siteId === site)).length;
+
+  const activeCount = FILTER_KEYS.filter((k) => state[k]).length;
+  const clear = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])), false);
+  const applied: AppliedFilter[] = [];
+  if (kind) applied.push({ key: 'kind', label: kind === 'visit' ? 'Engineer visits' : 'Preventive maintenance', onRemove: () => set({ kind: undefined }, false) });
+  if (site) applied.push({ key: 'site', label: `Site: ${siteOptions.find((s) => s.value === site)?.label ?? '…'}`, onRemove: () => set({ site: undefined }, false) });
 
   if (view.isLoading) return <LoadingBlock label="Loading your maintenance schedule…" />;
   if (view.isError) return <ErrorBlock error={view.error} retry={() => view.refetch()} />;
 
+  const windowDays = Math.max(0, Math.round((new Date(view.data!.window.to).getTime() - Date.now()) / 86_400_000));
+  const pastVisits = shown.filter((e): e is Entry & { kind: 'visit'; siteId: string | null; siteName: string | null } => e.kind === 'visit');
+  const pastPm = shown.filter((e): e is Entry & { kind: 'pm'; siteId: string | null; siteName: string | null } => e.kind === 'pm');
+  const noun = section === 'upcoming' ? (shown.length === 1 ? 'booking' : 'bookings') : shown.length === 1 ? 'past entry' : 'past entries';
+
   return (
     <div className="max-w-5xl">
-      <PageHeader title="Maintenance & visits" subtitle="Planned preventive maintenance and engineer visits to your sites, plus past visits to review and sign off." />
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 items-start">
-        <Panel title={<span>Upcoming <span className="text-subtle font-normal">next {Math.round((new Date(view.data!.window.to).getTime() - Date.now()) / 86_400_000)} days</span></span>}>
-          {upcoming.length === 0 ? (
-            <EmptyState icon={<CalendarCheck className="h-5 w-5" />} title="Nothing scheduled" description="Planned maintenance and visits will appear here as soon as they are booked." />
-          ) : (
-            <div className="flex flex-col gap-1">
-              {upcoming.map((e) => (
-                <TimelineEntry key={e.kind === 'visit' ? e.visit.id : e.occurrence.id} e={e} highlighted={e.kind === 'visit' ? e.visit.id === highlightVisit : e.occurrence.id === highlightOcc} />
-              ))}
-            </div>
-          )}
-        </Panel>
-        <div className="flex flex-col gap-3">
-          <div className="text-[13px] font-semibold px-1">Past visits</div>
-          {(view.data?.past.visits.length ?? 0) === 0 ? (
-            <Card>
-              <EmptyState icon={<Wrench className="h-5 w-5" />} title="No visits yet" description="Completed visits show the work done and let you acknowledge them." />
-            </Card>
-          ) : (
-            view.data!.past.visits.map((v) => <PastVisit key={v.id} v={v} onAcknowledge={setAck} highlighted={v.id === highlightVisit} />)
-          )}
-          {pastPm.length > 0 && (
-            <Card title="Past preventive maintenance" padded={false}>
-              <ul className="divide-y divide-[var(--border)]">
-                {pastPm.map((o) => (
-                  <li key={o.id} className={cn('px-4 py-2 flex items-center gap-3 text-[12.5px]', o.id === highlightOcc && 'bg-brand-600/5')}>
-                    <span className="w-24 text-muted shrink-0">{fmtDate(o.date)}</span>
-                    <span className="flex-1 min-w-0 truncate">{o.programName}{o.siteName ? ` · ${o.siteName}` : ''}</span>
-                    <Badge color={STATUS_COLOR[o.status] ?? 'slate'}>{titleCase(o.status)}</Badge>
-                  </li>
+      <PageHeader
+        title={section === 'upcoming' ? 'Upcoming maintenance & visits' : 'Maintenance history'}
+        subtitle={section === 'upcoming' ? `Preventive maintenance and engineer visits booked for the next ${windowDays} days.` : 'Past visits to review and sign off, and maintenance already done.'}
+      />
+      <ListShell
+        id={`portal-maintenance-${section}`}
+        modules={PORTAL_MAINTENANCE_MODULES}
+        activeCount={activeCount}
+        onClear={clear}
+        applied={applied}
+        count={`${fmtNumber(shown.length)} ${noun}`}
+        filters={
+          <>
+            <FilterGroup label="Type">
+              <FilterOptions options={[{ value: 'visit', label: 'Engineer visits', count: visitCount }, { value: 'pm', label: 'Preventive maintenance', count: pmCount }]} value={kind} onChange={(v) => set({ kind: v as string | undefined }, false)} />
+            </FilterGroup>
+            {siteOptions.length > 1 && (
+              <FilterGroup label="Site">
+                <FilterOptions options={siteOptions} value={site} onChange={(v) => set({ site: v as string | undefined }, false)} />
+              </FilterGroup>
+            )}
+          </>
+        }
+      >
+        {section === 'upcoming' ? (
+          <Panel title={<span>Upcoming <span className="text-subtle font-normal">next {windowDays} days</span></span>}>
+            {shown.length === 0 ? (
+              <EmptyState icon={<CalendarCheck className="h-5 w-5" />} title="Nothing scheduled" description={activeCount ? 'Nothing matches these filters.' : 'Planned maintenance and visits will appear here as soon as they are booked.'} />
+            ) : (
+              <div className="flex flex-col gap-1">
+                {shown.map((e) => (
+                  <TimelineEntry key={e.kind === 'visit' ? e.visit.id : e.occurrence.id} e={e} highlighted={e.kind === 'visit' ? e.visit.id === highlightVisit : e.occurrence.id === highlightOcc} />
                 ))}
-              </ul>
-            </Card>
-          )}
-        </div>
-      </div>
+              </div>
+            )}
+          </Panel>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {kind !== 'pm' && (
+              <div className="flex flex-col gap-3">
+                <div className="text-[13px] font-semibold px-1">Past visits <span className="text-subtle font-normal tnum">{pastVisits.length}</span></div>
+                {pastVisits.length === 0 ? (
+                  <Card>
+                    <EmptyState icon={<Wrench className="h-5 w-5" />} title="No visits yet" description={activeCount ? 'No past visits match these filters.' : 'Completed visits show the work done and let you acknowledge them.'} />
+                  </Card>
+                ) : (
+                  pastVisits.map((e) => <PastVisit key={e.visit.id} v={e.visit} onAcknowledge={setAck} highlighted={e.visit.id === highlightVisit} />)
+                )}
+              </div>
+            )}
+            {kind !== 'visit' && (
+              <Card title={<span>Past preventive maintenance <span className="text-subtle font-normal tnum">{pastPm.length}</span></span>} padded={false}>
+                {pastPm.length === 0 ? (
+                  <div className="px-4 py-3 text-[12.5px] text-subtle">{activeCount ? 'No past maintenance matches these filters.' : 'No maintenance has been completed in the last 90 days.'}</div>
+                ) : (
+                  <ul className="divide-y divide-[var(--border)]">
+                    {pastPm.map((e) => (
+                      <li key={e.occurrence.id} className={cn('px-4 py-2 flex items-center gap-3 text-[12.5px]', e.occurrence.id === highlightOcc && 'bg-brand-600/5')}>
+                        <span className="w-24 text-muted shrink-0">{fmtDate(e.occurrence.date)}</span>
+                        <span className="flex-1 min-w-0 truncate">{e.occurrence.programName}{e.occurrence.siteName ? ` · ${e.occurrence.siteName}` : ''}</span>
+                        <Badge color={STATUS_COLOR[e.occurrence.status] ?? 'slate'}>{titleCase(e.occurrence.status)}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            )}
+          </div>
+        )}
+      </ListShell>
       <AcknowledgeDialog visit={ack} onClose={() => setAck(null)} busy={acknowledge.isPending} onSubmit={(input) => acknowledge.mutateAsync(input)} />
     </div>
   );

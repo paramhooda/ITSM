@@ -41,6 +41,10 @@ export const visitListQuery = paginationSchema.merge(sortSchema).extend({
   to: dateish.optional(),
   mine: boolQ,
   unacknowledged: boolQ,
+  /** Open visits (requested or scheduled) with no engineer. */
+  unassigned: boolQ,
+  /** Still "scheduled" although the scheduled start has passed. */
+  overdue: boolQ,
 });
 export type VisitListQuery = z.infer<typeof visitListQuery>;
 
