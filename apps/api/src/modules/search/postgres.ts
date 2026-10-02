@@ -66,6 +66,8 @@ export class PostgresSearchProvider implements SearchProvider {
     ticket: async (ctx, q, limit, customer) => {
       const prefix = `${escapeLike(q)}%`;
       const socFilter = !customer && !ctx.can('soc:read') ? sql`and t.domain <> 'soc'` : sql``;
+      // Portal users: RLS already limits rows to their organisation; the explicit predicate keeps that true even if the tenant context were ever wrong.
+      const tenantFilter = customer ? sql`and t.customer_id = ${ctx.user.customerId ?? '00000000-0000-0000-0000-000000000000'}::uuid` : sql``;
       const res = await ctx.tx.execute(sql`
         select t.id, t.number, t.title, t.type, t.domain, c.name as customer_name, s.label as status_label, s.color as status_color,
           (case when t.number ilike ${prefix} then 3 else 0 end)
@@ -77,6 +79,7 @@ export class PostgresSearchProvider implements SearchProvider {
         left join config_options s on s.id = t.status_id
         where (t.number ilike ${prefix} or t.external_ref ilike ${prefix} or t.search_vector @@ websearch_to_tsquery('simple', ${q}) or similarity(t.title, ${q}) > 0.3)
         ${socFilter}
+        ${tenantFilter}
         order by score desc, t.created_at desc
         limit ${limit}`);
       return (res.rows as Row[]).map((r) => ({
@@ -171,12 +174,12 @@ export class PostgresSearchProvider implements SearchProvider {
       const contains = `%${escapeLike(q)}%`;
       const res = await ctx.tx.execute(sql`
         select k.id, k.number, k.name, k.status, k.end_date, c.name as customer_name, t.label as type_label,
-          (case when k.number ilike ${prefix} then 3 when k.po_number ilike ${prefix} then 2 when k.name ilike ${prefix} then 1.5 else 0 end)
+          (case when k.number ilike ${prefix} then 3 when k.name ilike ${prefix} then 1.5 else 0 end)
           + similarity(k.name, ${q}) as score
         from contracts k
         left join customers c on c.id = k.customer_id
         left join config_options t on t.id = k.type_id
-        where (k.number ilike ${prefix} or k.po_number ilike ${prefix} or k.name ilike ${contains} or similarity(k.name, ${q}) > 0.3)
+        where (k.number ilike ${prefix} or k.name ilike ${contains} or similarity(k.name, ${q}) > 0.3)
         order by score desc, k.end_date desc
         limit ${limit}`);
       return (res.rows as Row[]).map((r) => ({

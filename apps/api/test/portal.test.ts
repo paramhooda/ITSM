@@ -12,7 +12,8 @@ import { withSystem, closeDb, schema, type Tx } from '@/db/client';
 import { runAs, type Ctx } from '@/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '@/core/principal';
 import { config } from '@/config';
-import { createTicket } from '@/modules/tickets/service';
+import { createTicket, changeStatus } from '@/modules/tickets/service';
+import { addComment } from '@/modules/tickets/activity';
 import * as portal from '@/modules/portal/service';
 
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
@@ -213,6 +214,40 @@ describe('customer portal', () => {
     expect(detail.timeline.some((i) => i.isInternal || /INTERNAL/.test(i.body ?? ''))).toBe(false);
     expect(detail.timeline.some((i) => i.kind === 'activity' && i.type === 'scope')).toBe(false);
     expect(detail.assignee === null || !('email' in detail.assignee)).toBe(true);
+  });
+
+  it('a customer reply on a ticket awaiting the customer sends it back to the service desk and resumes the SLA', async () => {
+    const pendingId = await withSystem((tx) => optionId(tx, 'ticket_status', 'pending_customer'));
+    await asAdmin((ctx) => changeStatus(ctx, ids.ticketA, { statusId: pendingId }));
+    const paused = await withSystem((tx) => tx.select().from(schema.ticketSlas).where(eq(schema.ticketSlas.ticketId, ids.ticketA)));
+    expect(paused.length).toBeGreaterThan(0);
+    expect(paused.every((r) => r.state === 'paused')).toBe(true);
+
+    // The portal shows it as waiting on the customer.
+    const waiting = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, status: 'awaiting' } as Parameters<typeof portal.listPortalTickets>[1]));
+    expect(waiting.items.some((t) => t.id === ids.ticketA && t.awaitingCustomer)).toBe(true);
+    expect(waiting.counts.awaiting).toBeGreaterThanOrEqual(1);
+
+    // An engineer's own comment does not end the wait; the customer's reply does.
+    await asAdmin((ctx) => addComment(ctx, ids.ticketA, { kind: 'comment', body: 'Still waiting for the serial number.' }));
+    let detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
+    expect(detail.status?.key).toBe('pending_customer');
+
+    await asA((ctx) => portal.commentOnTicket(ctx, ids.ticketA, 'The serial number is SN-12345.'));
+    detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
+    expect(detail.status?.key).toBe('in_progress');
+    expect(detail.timeline.some((i) => i.kind === 'activity' && /Customer replied/.test(i.summary ?? ''))).toBe(true);
+    const resumed = await withSystem((tx) => tx.select().from(schema.ticketSlas).where(eq(schema.ticketSlas.ticketId, ids.ticketA)));
+    expect(resumed.every((r) => r.state !== 'paused' && r.pausedAt === null)).toBe(true);
+    const after = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, status: 'awaiting' } as Parameters<typeof portal.listPortalTickets>[1]));
+    expect(after.items.some((t) => t.id === ids.ticketA)).toBe(false);
+    const audits = await withSystem((tx) => tx.select({ action: schema.auditLog.action }).from(schema.auditLog).where(and(eq(schema.auditLog.entityId, ids.ticketA), eq(schema.auditLog.action, 'ticket.customer_reply'))));
+    expect(audits.length).toBeGreaterThanOrEqual(1);
+
+    // A further customer comment on a ticket that is already in progress changes nothing.
+    await asA((ctx) => portal.commentOnTicket(ctx, ids.ticketA, 'Thanks.'));
+    detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
+    expect(detail.status?.key).toBe('in_progress');
   });
 
   it('lists the pending approval for the customer administrator and approves it', async () => {

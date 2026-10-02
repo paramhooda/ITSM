@@ -16,7 +16,16 @@ export interface StatusChangeOptions {
   action?: string;
   /** Skip the ticket.status_changed notification (caller sends a more specific one). */
   silent?: boolean;
+  /** Replaces the default "Status changed from X to Y" activity line. */
+  summary?: string;
 }
+
+/**
+ * Statuses that mean the service desk is waiting on the customer. A customer
+ * reply on a ticket in one of these puts it straight back in the MSP queue.
+ */
+export const AWAITING_CUSTOMER_KEYS = ['pending_customer'] as const;
+export const isAwaitingCustomer = (opt: Pick<OptionRow, 'key'> | null | undefined): boolean => !!opt && (AWAITING_CUSTOMER_KEYS as readonly string[]).includes(opt.key);
 
 /** Status option by key, validated for the ticket type. */
 export async function statusByKey(ctx: Ctx, key: string, type: TicketType): Promise<OptionRow> {
@@ -105,7 +114,7 @@ export async function changeStatusCore(ctx: Ctx, ticket: TicketRow, to: OptionRo
   const action = opts.action ?? (toCat === 'resolved' ? 'resolve' : toCat === 'closed' ? 'close' : toCat === 'cancelled' ? 'cancel' : reopened ? 'reopen' : 'status');
   await addActivity(ctx, ticket, {
     type: 'status',
-    summary: `Status changed from ${from?.label ?? '—'} to ${to.label}${reopened ? ' (reopened)' : ''}`,
+    summary: opts.summary ?? `Status changed from ${from?.label ?? '—'} to ${to.label}${reopened ? ' (reopened)' : ''}`,
     data: { from: from ? { id: from.id, key: from.key, label: from.label } : null, to: { id: to.id, key: to.key, label: to.label }, action, resolutionNotes: patch.resolutionNotes ?? null },
     customerVisible: true,
   });
@@ -127,4 +136,16 @@ export async function changeStatusCore(ctx: Ctx, ticket: TicketRow, to: OptionRo
     else await notifyTicketEvent(ctx, 'ticket.status_changed', updated, { previousStatus: from?.label ?? null, comment: opts.comment ?? null });
   }
   return reloadTicket(ctx.tx, ticket.id);
+}
+
+/**
+ * A customer reply on a ticket that is waiting on them ends the wait: the ticket
+ * returns to the type's working status (so the SLA clocks resume through the SLA
+ * engine) and the timeline says why. Returns null when the ticket was not waiting.
+ */
+export async function resumeAfterCustomerReply(ctx: Ctx, ticket: TicketRow): Promise<TicketRow | null> {
+  const current = await optionById(ctx.tx, ticket.statusId);
+  if (!isAwaitingCustomer(current)) return null;
+  const to = await statusByKey(ctx, REOPEN_KEY[ticket.type], ticket.type);
+  return changeStatusCore(ctx, ticket, to, { action: 'customer_reply', silent: true, summary: `Customer replied · back with the service desk as ${to.label}` });
 }

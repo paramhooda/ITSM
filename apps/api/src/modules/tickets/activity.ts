@@ -6,6 +6,7 @@ import { diffChanges } from '@/core/audit';
 import { markResponded } from '@/modules/sla/engine';
 import { type TicketRow, addActivity, actorOf, isCustomerUser, loadTicket, loadTicketByNumber, reloadTicket, requireAction, requireRead, userIdOf, optionMap, toLabel } from './common';
 import { notifyTicketEvent } from './notify';
+import { resumeAfterCustomerReply } from './status';
 
 // ---------------------------------------------------------------- comments
 
@@ -37,13 +38,15 @@ export async function addComment(ctx: Ctx, ticketId: string, input: CommentInput
     responded = true;
   }
   await ctx.tx.update(schema.tickets).set(patch).where(eq(schema.tickets.id, t.id));
-  const updated = await reloadTicket(ctx.tx, t.id);
+  let updated = await reloadTicket(ctx.tx, t.id);
   if (responded) {
     await markResponded(ctx.tx, updated, actorOf(ctx), now);
     await addActivity(ctx, t, { type: 'sla', summary: 'First response recorded', data: { commentId: comment.id }, customerVisible: false });
   }
   await ctx.audit({ entityType: 'ticket', entityId: t.id, entityLabel: t.number, action: kind === 'work_note' ? 'ticket.work_note' : 'ticket.comment', customerId: t.customerId, metadata: { commentId: comment.id, kind, minutesSpent: comment.minutesSpent } });
   if (!customer && input.minutesSpent) await addTimeEntry(ctx, t.id, { minutes: input.minutesSpent, description: input.body.slice(0, 200), workType: (input.workType as 'remote' | 'onsite' | 'travel' | 'other') ?? 'remote', billable: input.billable ?? false }, { silent: true });
+  // A customer reply ends an "awaiting customer" wait: the ticket goes back to the service desk and the SLA clocks resume.
+  if (customer) updated = (await resumeAfterCustomerReply(ctx, updated)) ?? updated;
   if (kind !== 'work_note') await notifyTicketEvent(ctx, customer ? 'ticket.customer_comment' : 'ticket.engineer_comment', updated, { comment: input.body });
   return comment;
 }

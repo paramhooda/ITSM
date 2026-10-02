@@ -83,7 +83,15 @@ export default function PortalTicketDetailPage() {
     qc.invalidateQueries({ queryKey: pk.me });
     qc.invalidateQueries({ queryKey: pk.approvals });
   };
-  const comment = useMutation({ mutationFn: (body: string) => portalApi.comment(id, body), onSuccess: invalidate, onError: (e: Error) => toast.error(e.message) });
+  const comment = useMutation({
+    mutationFn: (body: string) => portalApi.comment(id, body),
+    onSuccess: () => {
+      // A reply on a ticket that was waiting on the customer sends it back to the service desk (the API changes the status).
+      if (ticketQ.data?.status?.key === 'pending_customer') toast.success('Thanks — your reply is with the service desk and the ticket is back in progress');
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const reopen = useMutation({ mutationFn: (reason: string) => portalApi.reopen(id, reason), onSuccess: () => { toast.success('Ticket reopened'); setDialog(null); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
   const confirm = useMutation({ mutationFn: (text: string) => portalApi.confirmClose(id, text), onSuccess: () => { toast.success('Thanks — the ticket is closed'); setDialog(null); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
   const decide = useMutation({

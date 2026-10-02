@@ -103,3 +103,18 @@ Permissions decide what a user may do; **navigation areas** decide what their na
 The navigator follows the ServiceNow shape: applications grouped by section, each expandable into its modules (Tickets → Open, Assigned to me, Unassigned, Incidents, Requests, Problems, Changes, Create new; Configuration (CMDB) → Overview, Configuration items, Business services, Service map, CI classes, Discovery), with a *Filter navigator* box at the top. Monitoring & SIEM lives under **Administration → Monitoring & SIEM** (the old `/integrations` and `/discovery` links redirect). Record pages share one layout: breadcrumb trail and number/title in the header with at most two primary actions (the rest under "…"), a two-column field form, related lists as tabs, and an activity stream in the right rail.
 
 System roles ship with sensible areas (a NOC engineer sees tickets, CMDB, discovery, monitoring and knowledge; a field engineer sees tickets, assets, field service, maintenance and knowledge; account managers see customers, contracts, the catalog and reports). Adjust them under **Administration → Roles → Navigation areas**; the change applies at the next page load.
+
+### Customer data isolation
+
+A customer (portal) user is bound to exactly one organisation, and that binding is enforced in four layers that do not depend on each other:
+
+1. **Database.** Every tenant table carries `customer_id` and has a forced row-level-security policy; the API sets the tenant context on every transaction (`app.customer_ids`), so a query that forgets a predicate still returns only that organisation's rows.
+2. **Service layer.** List and lookup functions add the explicit `customer_id = <own customer>` predicate for portal users (tickets, search, knowledge, contracts, entitlements, SLA figures, maintenance), and a portal user asking for another customer by name or code is answered with their own data.
+3. **Assistant (Grady).** The system prompt names the organisation the user belongs to and instructs the model to answer for it only; the worked examples use placeholder names that exist nowhere; every tool result is passed through a *tenant fence* that removes any record naming another organisation before the model sees it (a removal is logged and audited as `ai.tenant_fence`; under normal operation the count is always zero); conversations are stored under the organisation and cannot be continued by the same account from another one.
+4. **Browser.** The web client drops everything it cached for one person when another signs in, including the assistant's screen context.
+
+`apps/api/test/ai-isolation.test.ts` exercises every assistant tool a portal user can reach with inputs that ask for a different customer and asserts that only the user's own organisation comes back.
+
+### Customer replies on waiting tickets
+
+A ticket in **Pending Customer** is the service desk waiting on the customer. When the customer answers (a portal comment, or a comment added through the assistant), the ticket returns to the working status for its type (Incident → In progress, Request → In fulfilment), the SLA clocks resume with the paused time credited, the timeline shows "Customer replied · back with the service desk", and the ticket leaves the customer's "Awaiting your reply" list. An engineer's own comment on a waiting ticket does not change its status.

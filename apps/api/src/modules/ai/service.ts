@@ -8,6 +8,8 @@ import { loadTicket } from '@/modules/tickets/common';
 import { listTickets } from '@/modules/tickets/list';
 import { availableTools, toolDefinitions, toolByName, toolAvailable, stripSecrets, isCustomerUser, listQuery } from './tools';
 import { buildSystemPrompt, describeScope } from './prompts';
+import { fenceToolResult, type TenantFence } from './fence';
+import { logger } from '@/core/logger';
 import type { ChatContext } from './schemas';
 
 /** Hard limits that keep a conversation turn bounded. */
@@ -141,15 +143,37 @@ export interface ToolCallRecord {
   ok: boolean;
   action: boolean;
   error?: string;
+  /** Records of another organisation removed from the result before the model saw it (customer users only; normally 0). */
+  fenced?: number;
 }
 
-const own = (ctx: Ctx, id: string) => and(eq(schema.aiConversations.id, id), eq(schema.aiConversations.userId, ctx.user.id));
+/**
+ * A conversation belongs to the user who started it. Customer users additionally
+ * only ever see conversations held under their current organisation, so a user
+ * moved between customers can never carry context across.
+ */
+const own = (ctx: Ctx, id: string) =>
+  isCustomerUser(ctx)
+    ? and(eq(schema.aiConversations.id, id), eq(schema.aiConversations.userId, ctx.user.id), eq(schema.aiConversations.customerId, ctx.user.customerId ?? '00000000-0000-0000-0000-000000000000'))
+    : and(eq(schema.aiConversations.id, id), eq(schema.aiConversations.userId, ctx.user.id));
+
+/** The organisation a customer (portal) user belongs to; null for MSP staff. Throws for a portal user without one. */
+export async function organisationOf(ctx: Ctx): Promise<TenantFence | null> {
+  if (!isCustomerUser(ctx)) return null;
+  if (!ctx.user.customerId) throw new ForbiddenError('Your account is not linked to a customer');
+  const [c] = await ctx.tx.select({ id: schema.customers.id, name: schema.customers.name, code: schema.customers.code }).from(schema.customers).where(eq(schema.customers.id, ctx.user.customerId)).limit(1);
+  if (!c) throw new ForbiddenError('Your organisation is not available');
+  return { customerId: c.id, customerName: c.name, customerCode: c.code };
+}
 
 export async function listConversations(ctx: Ctx, limit = 20) {
+  const mine = isCustomerUser(ctx)
+    ? and(eq(schema.aiConversations.userId, ctx.user.id), eq(schema.aiConversations.customerId, ctx.user.customerId ?? '00000000-0000-0000-0000-000000000000'))
+    : eq(schema.aiConversations.userId, ctx.user.id);
   const rows = await ctx.tx
     .select({ id: schema.aiConversations.id, title: schema.aiConversations.title, context: schema.aiConversations.context, createdAt: schema.aiConversations.createdAt, updatedAt: schema.aiConversations.updatedAt, messageCount: sql<number>`(select count(*)::int from ai_messages m where m.conversation_id = ai_conversations.id)` })
     .from(schema.aiConversations)
-    .where(eq(schema.aiConversations.userId, ctx.user.id))
+    .where(mine)
     .orderBy(desc(schema.aiConversations.updatedAt))
     .limit(limit);
   return { items: rows };
@@ -230,7 +254,7 @@ function truncateResult(value: unknown): string {
  * (permission denied, validation error, RLS violation) never aborts the
  * surrounding request transaction.
  */
-export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number): Promise<{ record: ToolCallRecord; content: string; isError: boolean }> {
+export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number, fence?: TenantFence | null): Promise<{ record: ToolCallRecord; content: string; isError: boolean }> {
   const tool = toolByName(call.name);
   const base = { name: call.name, input: stripSecrets(call.input ?? {}), action: tool?.action ?? false };
   if (!tool) return { record: { ...base, ok: false, summary: `Unknown tool ${call.name}`, error: 'unknown_tool' }, content: JSON.stringify({ error: `Unknown tool "${call.name}"` }), isError: true };
@@ -240,15 +264,23 @@ export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number): 
   const sp = `ai_tool_${index}`;
   await ctx.tx.execute(sql.raw(`SAVEPOINT ${sp}`));
   try {
-    const result = await tool.run(aiCtx(ctx), parsed.data);
+    const raw = await tool.run(aiCtx(ctx), parsed.data);
     await ctx.tx.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
+    // Customer users: nothing that names another organisation reaches the model, whatever the tool returned.
+    const guard = fence === undefined ? await organisationOf(ctx) : fence;
+    const fenced = guard ? fenceToolResult(raw, guard) : { value: raw, dropped: 0 };
+    const result = fenced.value;
+    if (fenced.dropped > 0) {
+      logger.warn({ tool: tool.name, dropped: fenced.dropped, userId: ctx.user.id, customerId: guard?.customerId, requestId: ctx.requestId }, 'ai tenant fence removed records of another organisation');
+      await ctx.audit({ entityType: 'ai_tool', entityId: ctx.user.id, entityLabel: tool.name, action: 'ai.tenant_fence', customerId: guard?.customerId ?? null, metadata: { tool: tool.name, dropped: fenced.dropped } });
+    }
     let summary: string;
     try {
       summary = tool.summary(parsed.data, result);
     } catch {
       summary = `Ran ${tool.name}`;
     }
-    return { record: { ...base, input: stripSecrets(parsed.data as Record<string, unknown>), ok: true, summary }, content: truncateResult(result), isError: false };
+    return { record: { ...base, input: stripSecrets(parsed.data as Record<string, unknown>), ok: true, summary, ...(fenced.dropped ? { fenced: fenced.dropped } : {}) }, content: truncateResult(result), isError: false };
   } catch (err) {
     try {
       await ctx.tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${sp}`));
@@ -294,6 +326,8 @@ export async function chat(ctx: Ctx, input: ChatInput) {
   ctx.require('ai:use');
   if (!enabled()) throw new AiDisabledError();
   const p = provider();
+  // Customer users are bound to exactly one organisation for the whole turn: prompt, tools and stored conversation.
+  const org = await organisationOf(ctx);
 
   // conversation
   let conv: typeof schema.aiConversations.$inferSelect | undefined;
@@ -312,7 +346,8 @@ export async function chat(ctx: Ctx, input: ChatInput) {
   if (!messages.length || messages[messages.length - 1]!.role !== 'user') messages.push({ role: 'user', content: input.message });
 
   const tools = availableTools(ctx);
-  const system = buildSystemPrompt({ ctx, tools, contextDescription: await describeContext(ctx, input.context), customerScopeSummary: describeScope(ctx) });
+  const organisation = org ? { name: org.customerName, code: org.customerCode } : null;
+  const system = buildSystemPrompt({ ctx, tools, contextDescription: await describeContext(ctx, input.context), customerScopeSummary: describeScope(ctx, organisation), organisation });
   const definitions = toolDefinitions(tools);
 
   const started = Date.now();
@@ -334,7 +369,7 @@ export async function chat(ctx: Ctx, input: ChatInput) {
     }
     messages.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls });
     for (const call of res.toolCalls) {
-      const r = await executeToolCall(ctx, call, toolCallCount++);
+      const r = await executeToolCall(ctx, call, toolCallCount++, org);
       records.push(r.record);
       messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: r.content, isError: r.isError });
     }
