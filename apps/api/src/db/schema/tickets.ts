@@ -255,6 +255,16 @@ export const changeDetails = pgTable('change_details', {
   pirNotes: text('pir_notes'),
   pirOutcome: text('pir_outcome'),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  /** The risk questionnaire: question key → chosen option key; the score and the level it produced. */
+  riskAnswers: jsonb('risk_answers').$type<Record<string, string>>(),
+  riskScore: integer('risk_score'),
+  riskLevel: text('risk_level'),
+  /** The standard change template the ticket was raised from (changes.ts; no FK, the file cannot be imported here). */
+  templateId: uuid('template_id'),
+  /** The CAB meeting the change is on the agenda of. */
+  cabMeetingId: uuid('cab_meeting_id'),
+  /** When the window reminder went out (once per scheduled start). */
+  windowReminderAt: timestamp('window_reminder_at', { withTimezone: true }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 

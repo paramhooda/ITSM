@@ -26,6 +26,7 @@ import { LinksPanel } from '@/components/tickets/detail/LinksPanel';
 import { CisAssetsPanel } from '@/components/tickets/detail/CisAssetsPanel';
 import { ProblemForm } from '@/components/tickets/detail/ProblemForm';
 import { ChangeForm } from '@/components/tickets/detail/ChangeForm';
+import { ChangeRiskCard } from '@/components/changes/ChangeRiskCard';
 import { MajorIncidentPanel } from '@/components/tickets/detail/MajorIncidentPanel';
 import { TicketDetailsRail, TicketAssistRail } from '@/components/tickets/detail/TicketRail';
 import { ResolveDialog, CommentDialog, ScopeDialog } from '@/components/tickets/detail/ActionDialogs';
@@ -215,7 +216,7 @@ export default function TicketDetailPage() {
       )}
       {!isCustomer && <ScopeBadge status={ticket.scopeStatus} detail={ticket.scopeContract?.number ?? null} onClick={p.update ? () => setDialog('scope') : undefined} />}
       {ticket.securitySeverity && <Badge color={ticket.securitySeverity.color ?? undefined}>Severity: {ticket.securitySeverity.label}</Badge>}
-      {ticket.approvalStatus && ticket.approvalStatus !== 'none' && <Badge color={ticket.approvalStatus === 'approved' ? 'green' : ticket.approvalStatus === 'rejected' ? 'red' : 'amber'}>Approval: {ticket.approvalStatus}</Badge>}
+      {ticket.approvalStatus && ticket.approvalStatus !== 'none' && <Badge color={ticket.approvalStatus === 'approved' || ticket.approvalStatus === 'not_required' ? 'green' : ticket.approvalStatus === 'rejected' ? 'red' : 'amber'}>{ticket.approvalStatus === 'not_required' ? 'Pre-approved' : `Approval: ${ticket.approvalStatus}`}</Badge>}
     </>
   );
 
@@ -359,7 +360,7 @@ export default function TicketDetailPage() {
   // ---- related lists
   const tabs = [
     { key: 'major', label: 'Major incident', hidden: isCustomer || !(ticket.isMajor || ticket.major), content: <MajorIncidentPanel ticket={ticket} canEdit={p.major} /> },
-    { key: 'plan', label: ticket.type === 'problem' ? 'Problem analysis' : 'Change plan', hidden: !(ticket.type === 'problem' || ticket.type === 'change'), content: ticket.type === 'problem' ? <ProblemForm ticketId={ticket.id} details={ticket.problem} canEdit={p.problem} /> : <ChangeForm ticketId={ticket.id} details={ticket.change} canEdit={p.change} /> },
+    { key: 'plan', label: ticket.type === 'problem' ? 'Problem analysis' : 'Change plan', hidden: !(ticket.type === 'problem' || ticket.type === 'change'), content: ticket.type === 'problem' ? <ProblemForm ticketId={ticket.id} details={ticket.problem} canEdit={p.problem} /> : <div className="flex flex-col gap-4">{!isCustomer && <ChangeRiskCard ticketId={ticket.id} details={ticket.change} canEdit={p.change} />}<ChangeForm ticketId={ticket.id} details={ticket.change} canEdit={p.change} /></div> },
     { key: 'approvals', label: 'Approvals', count: ticket.approvals.length, hidden: !(ticket.approvals.length > 0 || (!isCustomer && (ticket.type === 'change' || ticket.type === 'request'))), content: <ApprovalsPanel ticket={ticket} approvals={ticket.approvals} canApprove={p.approve} canRequest={!isCustomer && (p.change || p.update)} /> },
     { key: 'tasks', label: 'Tasks', count: ticket.tasks.length, hidden: isCustomer, content: <TasksPanel ticketId={ticket.id} tasks={ticket.tasks} canEdit={p.tasks && !isClosed} /> },
     { key: 'items', label: 'Affected CIs & assets', count: ticket.cis.length + ticket.assets.length, content: <CisAssetsPanel ticket={ticket} canEdit={p.update} /> },

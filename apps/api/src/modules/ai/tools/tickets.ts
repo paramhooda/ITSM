@@ -15,6 +15,7 @@ import { reopenPortalTicket, confirmResolution } from '@/modules/portal/service'
 import { engineerDirectory } from '@/modules/iam/service';
 import { define, type PreviewDetail } from './types';
 import { ticketRef } from './core';
+import { calendar as changeCalendar } from '@/modules/changes/service';
 import { isCustomerUser, ticketLink, trunc, iso, listQuery, resolveTicket, resolveCustomerId, resolveOption, resolveService, resolveSite, resolveCi, resolveEngineer, resolveTeam, resolveUser, parseWhen, compactTicket } from '../helpers';
 
 /** Ticket tools: everything the ticket pages can do, each wrapping the same service function the page uses. */
@@ -165,6 +166,35 @@ export const TICKETS: ReturnType<typeof define>[] = [
       return { ticket: t.number, approvalStatus: res.approvalStatus, items: res.items.map((a) => ({ id: a.id, step: a.step, name: a.stepName, approver: a.approverUser?.name ?? a.approverTeam?.name ?? a.approverRole?.name ?? null, status: a.status, decidedBy: a.decidedByUser?.name ?? null, decidedAt: iso(a.decidedAt), comment: trunc(a.comment, 300), canDecide: a.canDecide })) };
     },
     summary: (input, result) => `Read ${(result as { items: unknown[] }).items.length} approval steps of ${input.ticket.toUpperCase()}`,
+  }),
+  define({
+    name: 'change_calendar',
+    toolset: 'tickets',
+    description: 'The change calendar: changes scheduled in a period (default the next 7 days) with their window, type, status, risk and scheduling conflicts (shared systems, the same business service, blackout windows), plus the blackout windows in force. Use for "what changes are planned this week", "is anything scheduled on Saturday", "any change freezes coming up".',
+    inputSchema: z.object({
+      from: z.string().max(40).optional().describe('ISO date or time the period starts (default now)'),
+      to: z.string().max(40).optional().describe('ISO date or time the period ends (default from + days)'),
+      days: z.number().int().min(1).max(90).optional().describe('Length of the period when `to` is omitted (default 7)'),
+      customer: z.string().max(200).optional().describe('Customer name, code or id to limit to one organisation'),
+    }),
+    requires: ['tickets:read'],
+    portal: null,
+    action: false,
+    run: async (ctx, input) => {
+      const from = input.from ? new Date(input.from) : new Date();
+      if (Number.isNaN(from.getTime())) throw new ValidationError('from is not a date');
+      const to = input.to ? new Date(input.to) : new Date(from.getTime() + (input.days ?? 7) * 86_400_000);
+      if (Number.isNaN(to.getTime())) throw new ValidationError('to is not a date');
+      const customerId = await resolveCustomerId(ctx, input.customer);
+      const cal = await changeCalendar(ctx, { from, to, customerId, blackouts: true });
+      const items = cal.items.slice(0, 40).map((c) => ({ number: c.number, title: c.title, customer: c.customerName, type: c.changeType, status: c.status.label, approval: c.approvalStatus, risk: c.riskLevel ?? c.riskLabel, scheduledStart: iso(c.scheduledStart), scheduledEnd: iso(c.scheduledEnd), assignee: c.assigneeName, conflicts: c.conflicts.map((x) => x.text), link: ticketLink(ctx, c.ticketId) }));
+      const facts = [
+        `${cal.counts.changes} change(s) scheduled between ${iso(from)} and ${iso(to)}${customerId ? ' for the customer' : ''}; ${cal.counts.conflicts} with scheduling conflicts; ${cal.counts.blackouts} blackout window(s) in the period`,
+        ...cal.blackouts.map((b) => `Blackout "${b.name}" from ${iso(b.startsAt)} to ${iso(b.endsAt)}${b.customerId ? ' (one customer)' : ' (every customer)'}${b.allowEmergency ? ', emergency changes allowed' : ''}`),
+      ];
+      return { from: iso(from), to: iso(to), counts: cal.counts, items, blackouts: cal.blackouts.map((b) => ({ name: b.name, startsAt: iso(b.startsAt), endsAt: iso(b.endsAt), reason: b.reason })), facts, link: '/operations/change-calendar' };
+    },
+    summary: (_input, result) => `Read the change calendar (${(result as { counts: { changes: number; conflicts: number } }).counts.changes} changes, ${(result as { counts: { conflicts: number } }).counts.conflicts} with conflicts)`,
   }),
   define({
     name: 'escalation_history',

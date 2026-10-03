@@ -97,6 +97,8 @@ export function ticketAttention(t: TicketDetail, now: Clock, act: TicketAttentio
   }
 
   if (t.approvalStatus === 'pending') items.push({ key: 'approval', tone: 'info', text: 'Approval pending', action: { label: 'Approvals', to: '?tab=approvals' } });
+  // A change the questionnaire rates high that nobody has approved yet.
+  if (t.type === 'change' && t.change?.riskLevel === 'high' && t.approvalStatus !== 'approved' && t.approvalStatus !== 'not_required') items.push({ key: 'change-risk', tone: 'warn', text: `High-risk change${t.change.riskScore != null ? ` (${t.change.riskScore}/100)` : ''} not yet approved`, action: { label: 'Plan', to: '?tab=plan' } });
   if (t.scopeStatus === 'out_of_scope') items.push({ key: 'scope', tone: 'warn', text: 'Out of contract scope', action: call('Scope', act.onScope) });
   if (t.reopenCount > 0) items.push({ key: 'reopened', tone: 'info', text: `Reopened ${t.reopenCount}×` });
 

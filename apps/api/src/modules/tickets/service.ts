@@ -37,6 +37,7 @@ import {
   userIdOf,
 } from './common';
 import type { CreateTicketInput, UpdateTicketInput, ChangeDetailsInput, ProblemDetailsInput } from './schemas';
+import { loadTemplate, recordConflicts, type TemplateRow as ChangeTemplateRow } from '@/modules/changes/service';
 
 // ---------------------------------------------------------------- helpers
 
@@ -131,6 +132,15 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
     approvalWorkflowId = catalog.approvalWorkflowId ?? null;
   }
 
+  // Standard change templates: the plans are prefilled; a pre-approved template skips approval.
+  let template: ChangeTemplateRow | null = null;
+  if (type === 'change' && input.changeTemplateId) {
+    template = await loadTemplate(ctx.tx, input.changeTemplateId, customerId);
+    if (!template) throw new NotFoundError('Change template');
+    categoryId = categoryId ?? template.categoryId ?? null;
+    serviceId = serviceId ?? template.serviceId ?? null;
+  }
+
   // Validate option ids by type
   const category = await requireOption(ctx.tx, 'ticket_category', categoryId, 'category');
   const subcategory = await requireOption(ctx.tx, 'ticket_subcategory', input.subcategoryId, 'subcategory');
@@ -199,7 +209,7 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
       contractId,
       serviceId,
       title: input.title,
-      description: input.description ?? null,
+      description: input.description ?? template?.descriptionTemplate ?? null,
       categoryId,
       subcategoryId: input.subcategoryId ?? null,
       priorityId,
@@ -248,8 +258,15 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
 
   // Type extensions
   if (type === 'change') {
-    const c = input.change ?? {};
-    await ctx.tx.insert(schema.changeDetails).values({ ticketId: ticket.id, customerId, changeType: c.changeType ?? 'normal', riskId: c.riskId ?? (await defaultOption(ctx, 'change_risk'))?.id ?? null, riskAssessment: c.riskAssessment ?? null, impactAssessment: c.impactAssessment ?? null, justification: c.justification ?? null, implementationPlan: c.implementationPlan ?? null, testPlan: c.testPlan ?? null, backoutPlan: c.backoutPlan ?? null, communicationPlan: c.communicationPlan ?? null, scheduledStart: c.scheduledStart ?? null, scheduledEnd: c.scheduledEnd ?? null, downtimeExpectedMinutes: c.downtimeExpectedMinutes ?? null, cabNotes: c.cabNotes ?? null });
+    // What the form sent wins over the template; the template fills the rest.
+    const given = Object.fromEntries(Object.entries(input.change ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== '')) as NonNullable<CreateTicketInput['change']>;
+    const tpl = template ? { changeType: template.changeType as ChangeDetailsInput['changeType'], riskId: template.riskId, justification: template.justification, implementationPlan: template.implementationPlan, testPlan: template.testPlan, backoutPlan: template.backoutPlan, communicationPlan: template.communicationPlan, downtimeExpectedMinutes: template.downtimeExpectedMinutes } : {};
+    const c = { ...tpl, ...given };
+    await ctx.tx.insert(schema.changeDetails).values({ ticketId: ticket.id, customerId, changeType: c.changeType ?? 'normal', riskId: c.riskId ?? (await defaultOption(ctx, 'change_risk'))?.id ?? null, riskAssessment: c.riskAssessment ?? null, impactAssessment: c.impactAssessment ?? null, justification: c.justification ?? null, implementationPlan: c.implementationPlan ?? null, testPlan: c.testPlan ?? null, backoutPlan: c.backoutPlan ?? null, communicationPlan: c.communicationPlan ?? null, scheduledStart: c.scheduledStart ?? null, scheduledEnd: c.scheduledEnd ?? null, downtimeExpectedMinutes: c.downtimeExpectedMinutes ?? null, cabNotes: c.cabNotes ?? null, templateId: template?.id ?? null });
+    if (template?.skipApproval) {
+      await ctx.tx.update(schema.tickets).set({ approvalStatus: 'not_required' }).where(eq(schema.tickets.id, ticket.id));
+      await addActivity(ctx, ticket, { type: 'approval', summary: `Pre-approved standard change (template "${template.name}")`, data: { templateId: template.id }, customerVisible: false });
+    }
   } else if (type === 'problem') {
     const p = input.problem ?? {};
     await ctx.tx.insert(schema.problemDetails).values({ ticketId: ticket.id, customerId, symptoms: p.symptoms ?? null, investigation: p.investigation ?? null, rootCause: p.rootCause ?? null, workaround: p.workaround ?? null, isKnownError: p.isKnownError ?? false, permanentFix: p.permanentFix ?? null, kbArticleId: p.kbArticleId ?? null, impactSummary: p.impactSummary ?? null });
@@ -276,6 +293,8 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
   }
   // Triage on arrival runs a moment later in the worker (the row must be committed first); the job checks the switches itself.
   if (type === 'incident' || type === 'request') void enqueue('ai', 'triage-ticket', { ticketId: ticket.id }, { delay: 2000, jobId: `triage-${ticket.id}` });
+  // A scheduled change is checked for clashes right away (a warning on the ticket, never a block).
+  if (type === 'change' && input.change?.scheduledStart) await recordConflicts(ctx, ticket);
   return reloadTicket(ctx.tx, ticket.id);
 }
 
@@ -677,6 +696,7 @@ export async function updateChangeDetails(ctx: Ctx, id: string, patch: ChangeDet
   if (Object.keys(changes).length) {
     await ctx.audit({ entityType: 'ticket', entityId: t.id, entityLabel: t.number, action: 'change.update', customerId: t.customerId, changes });
     await addActivity(ctx, t, { type: 'update', summary: `Change details updated (${Object.keys(changes).map((k) => k.replace(/([A-Z])/g, ' $1').toLowerCase()).join(', ')})`, data: { fields: Object.keys(changes) }, customerVisible: Object.keys(changes).some((k) => k.startsWith('scheduled')) });
+    if (['scheduledStart', 'scheduledEnd', 'changeType'].some((k) => k in changes)) await recordConflicts(ctx, t);
   }
   return after;
 }

@@ -16,7 +16,7 @@ import { RULE_KINDS, SECRET_SETTING_KEY, settingVisible, type RuleKind } from '.
  */
 
 /** Settings the assistant may change, by prefix; anything else is read-only or hidden. */
-export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.'];
+export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.'];
 const settingValue = z.union([z.string().max(2000), z.number(), z.boolean(), z.null(), z.array(z.string().max(100)).max(50)]);
 
 /** Validation for the settings whose shape the platform depends on. */
@@ -32,6 +32,8 @@ function validateSetting(key: string, value: unknown) {
     case 'ai.turn_timeout_seconds': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 10 && value <= 600, 'must be between 10 and 600 seconds');
     case 'ai.conversation_retention_days': return expect(typeof value === 'number' && Number.isInteger(value) && (value === 0 || (value >= 7 && value <= 3650)), 'must be 0 (keep forever) or 7 to 3650 days');
     case 'ai.disabled_features': return expect(Array.isArray(value) && value.every((v) => (AI_FEATURES as readonly string[]).includes(String(v))), `must be a list of: ${AI_FEATURES.join(', ')}`);
+    case 'changes.reminder_hours': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 168, 'must be between 1 and 168 hours');
+    case 'changes.conflict_warnings': return expect(typeof value === 'boolean', 'must be true or false');
     case 'ai.triage.auto_apply_confidence': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 100, 'must be between 50 and 100');
     case 'ai.triage.storm_window_minutes': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 5 && value <= 1440, 'must be between 5 and 1440 minutes');
     case 'ai.triage.storm_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 50, 'must be between 2 and 50');

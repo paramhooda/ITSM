@@ -58,6 +58,8 @@ export const MSP_NAV: NavItem[] = [
       { to: '/operations/major-incidents', label: 'Major incidents' },
       { to: '/operations/on-call', label: 'On-call', perm: ['oncall:read'] },
       { to: '/operations/announcements', label: 'Announcements', perm: ['announcements:manage'] },
+      { to: '/operations/change-calendar', label: 'Change calendar' },
+      { to: '/operations/cab', label: 'CAB', perm: ['changes:cab', 'changes:approve', 'changes:manage'] },
     ],
   },
   {

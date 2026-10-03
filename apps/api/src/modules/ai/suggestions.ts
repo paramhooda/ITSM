@@ -11,6 +11,7 @@ import { loadTicket, optionsOfType, optionById, isCustomerUser, type TicketRow, 
 import { evaluateAssignment } from '@/modules/tickets/assignment';
 import { suggest as kbSuggest, getArticle } from '@/modules/knowledge/service';
 import { impact as ciImpact } from '@/modules/cmdb/service';
+import { detectConflicts } from '@/modules/changes/service';
 import { llmJson, enabled, asSteps, type Steps } from './service';
 import { assertFeature } from './guards';
 import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, MAJOR_UPDATE_SYSTEM, RESOLUTION_SYSTEM, RESOLUTION_NOTES_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompt';
@@ -679,6 +680,9 @@ async function gatherChangeImpact(ctx: Ctx, changeId: string) {
     .map((o) => ({ id: o.id, number: o.number, title: o.title, scheduledStart: o.scheduledStart?.toISOString() ?? null, scheduledEnd: o.scheduledEnd?.toISOString() ?? null, status: statusRows.find((s) => s.id === o.statusId)?.label ?? null, statusCategory: statusRows.find((s) => s.id === o.statusId)?.category ?? null, link: ticketLink(ctx, o.id) }))
     .filter((o) => !['closed', 'cancelled'].includes(o.statusCategory ?? ''));
 
+  // Scheduling conflicts (shared CIs, the same business service, blackout windows) and the questionnaire's verdict.
+  const conflicts = await detectConflicts(ctx, row.id).then((r) => r.conflicts).catch(() => []);
+  const questionnaire = change?.riskLevel ? { level: change.riskLevel as 'low' | 'medium' | 'high', score: change.riskScore ?? null } : null;
   const data = {
     change: { number: row.number, title: row.title, type: change?.changeType ?? null, risk: change?.risk?.label ?? null, scheduledStart: change?.scheduledStart?.toISOString() ?? null, scheduledEnd: change?.scheduledEnd?.toISOString() ?? null, downtimeExpectedMinutes: change?.downtimeExpectedMinutes ?? null, backoutPlan: !!change?.backoutPlan, testPlan: !!change?.testPlan, implementationPlan: trunc(change?.implementationPlan, 600) },
     affectedCis: affected,
@@ -686,16 +690,19 @@ async function gatherChangeImpact(ctx: Ctx, changeId: string) {
     businessServices: [...services],
     openTickets: [...openTickets.values()].slice(0, 30),
     otherChanges,
+    conflicts: conflicts.map((c) => ({ kind: c.kind, text: c.text, ticket: c.ticket ? { id: c.ticket.id, number: c.ticket.number, link: ticketLink(ctx, c.ticket.id) } : null })),
+    questionnaire,
   };
   const critical = [...dependents.values()].filter((d) => d.criticality === 'critical' || d.criticality === 'high').length + affected.filter((a) => a.criticality === 'critical' || a.criticality === 'high').length;
-  const heuristicLevel: 'low' | 'medium' | 'high' = services.size > 0 || critical > 0 || (change?.changeType === 'emergency') ? 'high' : dependents.size > 3 || openTickets.size > 0 || otherChanges.length > 0 ? 'medium' : 'low';
+  const heuristicLevel: 'low' | 'medium' | 'high' = questionnaire?.level === 'high' || conflicts.some((c) => c.kind === 'blackout') || services.size > 0 || critical > 0 || (change?.changeType === 'emergency') ? 'high' : questionnaire?.level === 'medium' || dependents.size > 3 || openTickets.size > 0 || otherChanges.length > 0 || conflicts.length > 0 ? 'medium' : 'low';
   const fallback: z.infer<typeof impactSchema> = {
     riskLevel: heuristicLevel,
-    riskSummary: `${row.number} touches ${affected.length} configuration item(s)${affected.length ? ` (${affected.map((a) => a.name).join(', ')})` : ''} with ${dependents.size} downstream dependent CI(s)${services.size ? ` and ${services.size} business service(s): ${[...services].join(', ')}` : ''}. ${openTickets.size ? `${openTickets.size} open ticket(s) already reference the affected items. ` : ''}${otherChanges.length ? `${otherChanges.length} other change(s) are scheduled in the same window (${otherChanges.map((o) => o.number).join(', ')}). ` : ''}${change?.backoutPlan ? 'A backout plan is documented.' : 'No backout plan is documented.'}`,
+    riskSummary: `${row.number} touches ${affected.length} configuration item(s)${affected.length ? ` (${affected.map((a) => a.name).join(', ')})` : ''} with ${dependents.size} downstream dependent CI(s)${services.size ? ` and ${services.size} business service(s): ${[...services].join(', ')}` : ''}. ${openTickets.size ? `${openTickets.size} open ticket(s) already reference the affected items. ` : ''}${otherChanges.length ? `${otherChanges.length} other change(s) are scheduled in the same window (${otherChanges.map((o) => o.number).join(', ')}). ` : ''}${conflicts.length ? `${conflicts.length} scheduling conflict(s): ${conflicts.map((c) => c.text).join('; ')}. ` : ''}${questionnaire ? `The risk questionnaire rates it ${questionnaire.level}${questionnaire.score != null ? ` (${questionnaire.score}/100)` : ''}. ` : ''}${change?.backoutPlan ? 'A backout plan is documented.' : 'No backout plan is documented.'}`,
     recommendations: [
       !change?.backoutPlan ? 'Document a backout plan before approval' : null,
       !change?.testPlan ? 'Add a test / verification plan' : null,
       services.size ? 'Notify business-service owners and schedule within an agreed maintenance window' : null,
+      conflicts.length ? `Resolve the scheduling conflicts (${conflicts.map((c) => c.ticket?.number ?? c.blackout?.name ?? c.kind).join(', ')}) or move the window` : null,
       otherChanges.length ? 'Coordinate with the overlapping changes to avoid compounding outages' : null,
       openTickets.size ? 'Review open tickets on the affected CIs; consider linking them to this change' : null,
       !change?.scheduledStart ? 'Set a scheduled start and end' : null,

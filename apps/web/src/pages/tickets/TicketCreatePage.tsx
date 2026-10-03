@@ -9,6 +9,8 @@ import { useAuthStore } from '@/stores/auth';
 import { get } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { ticketsApi, itemsOf } from '@/components/tickets/api';
+import { changesApi, changeKeys } from '@/components/changes/api';
+import { ConflictList } from '@/components/changes/ChangeRiskCard';
 import { CatalogForm } from '@/components/tickets/CatalogForm';
 import { EntityPicker, type PickerItem } from '@/components/tickets/EntityPicker';
 import { ScopeBadge } from '@/components/tickets/ScopeBadge';
@@ -53,10 +55,11 @@ interface FormState {
   implementationPlan: string;
   backoutPlan: string;
   justification: string;
+  changeTemplateId: string;
   symptoms: string;
 }
 
-const empty = (type: TicketType, customerId = ''): FormState => ({ type, customerId, siteId: '', serviceId: '', contractId: '', title: '', description: '', categoryId: '', subcategoryId: '', impactId: '', urgencyId: '', priorityId: '', securitySeverityId: '', assignedTeamId: '', assigneeId: '', catalogItemId: '', formData: {}, tags: '', isMajor: false, changeType: 'normal', riskId: '', scheduledStart: '', scheduledEnd: '', implementationPlan: '', backoutPlan: '', justification: '', symptoms: '' });
+const empty = (type: TicketType, customerId = ''): FormState => ({ type, customerId, siteId: '', serviceId: '', contractId: '', title: '', description: '', categoryId: '', subcategoryId: '', impactId: '', urgencyId: '', priorityId: '', securitySeverityId: '', assignedTeamId: '', assigneeId: '', catalogItemId: '', formData: {}, tags: '', isMajor: false, changeType: 'normal', riskId: '', scheduledStart: '', scheduledEnd: '', implementationPlan: '', backoutPlan: '', justification: '', changeTemplateId: '', symptoms: '' });
 
 const nn = (v: string) => (v ? v : null);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -81,6 +84,7 @@ export default function TicketCreatePage() {
     siteId: idParam(search.get('siteId')),
     categoryId: idParam(search.get('categoryId')),
     catalogItemId: idParam(search.get('catalogItemId')),
+    changeTemplateId: idParam(search.get('templateId')),
   }));
   const mounted = useRef(false);
   const [cis, setCis] = useState<PickerItem[]>([]);
@@ -122,6 +126,17 @@ export default function TicketCreatePage() {
   useEffect(() => {
     if (f.type !== 'request' && f.catalogItemId) patch({ catalogItemId: '', formData: {} });
   }, [f.type, f.catalogItemId]);
+  // Standard change templates: the plans are prefilled; a pre-approved template skips approval on the server.
+  const templates = useQuery({ queryKey: changeKeys.templates({ customerId: f.customerId || 'all' }), queryFn: () => changesApi.templates({ customerId: f.customerId || undefined }), enabled: f.type === 'change' && !isCustomer, staleTime: 60_000 });
+  const template = useMemo(() => (templates.data?.items ?? []).find((t) => t.id === f.changeTemplateId) ?? null, [templates.data, f.changeTemplateId]);
+  useEffect(() => {
+    if (!template) return;
+    patch({ changeType: template.changeType, riskId: template.riskId ?? f.riskId, implementationPlan: template.implementationPlan ?? f.implementationPlan, backoutPlan: template.backoutPlan ?? f.backoutPlan, justification: template.justification ?? f.justification, categoryId: template.categoryId ?? f.categoryId, serviceId: template.serviceId ?? f.serviceId, title: f.title || template.titleTemplate || '', description: f.description || template.descriptionTemplate || '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template?.id]);
+  // Clashes with other windows and blackouts, checked as the window is typed.
+  const previewKey = f.type === 'change' && f.customerId && f.scheduledStart ? { customerId: f.customerId, scheduledStart: new Date(f.scheduledStart).toISOString(), scheduledEnd: f.scheduledEnd ? new Date(f.scheduledEnd).toISOString() : undefined, changeType: f.changeType, ciIds: cis.map((c) => c.id) } : null;
+  const conflictPreview = useQuery({ queryKey: ['changes', 'preview', previewKey], queryFn: () => changesApi.previewConflicts(previewKey!), enabled: !!previewKey && !Number.isNaN(new Date(f.scheduledStart).getTime()), staleTime: 15_000 });
   useEffect(() => {
     // The first run keeps a prefilled site; later customer changes reset what depends on the customer.
     if (!mounted.current) {
@@ -164,6 +179,7 @@ export default function TicketCreatePage() {
         primaryAssetId: assets[0]?.id ?? null,
         assetIds: assets.map((a) => a.id),
       };
+      if (f.type === 'change' && f.changeTemplateId) body.changeTemplateId = f.changeTemplateId;
       if (f.type === 'change') body.change = { changeType: f.changeType, riskId: nn(f.riskId), scheduledStart: nn(f.scheduledStart) ? new Date(f.scheduledStart).toISOString() : null, scheduledEnd: nn(f.scheduledEnd) ? new Date(f.scheduledEnd).toISOString() : null, implementationPlan: f.implementationPlan || null, backoutPlan: f.backoutPlan || null, justification: f.justification || null };
       if (f.type === 'problem') body.problem = { symptoms: f.symptoms || null };
       const t = await ticketsApi.create(body);
@@ -318,6 +334,11 @@ export default function TicketCreatePage() {
           {f.type === 'change' && (
             <Card title="Change">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {!isCustomer && (
+                  <Field label="Standard change template" className="sm:col-span-2" hint={template ? `${template.skipApproval ? 'Pre-approved: no approval workflow. ' : ''}${template.description ?? ''}`.trim() || undefined : 'Prefills the plans; a pre-approved template skips approval'}>
+                    <Select value={f.changeTemplateId} onChange={(e) => patch({ changeTemplateId: e.target.value })} placeholder="No template" options={(templates.data?.items ?? []).map((t) => ({ value: t.id, label: `${t.name}${t.skipApproval ? ' · pre-approved' : ''}` }))} />
+                  </Field>
+                )}
                 <Field label="Change type">
                   <Select value={f.changeType} onChange={(e) => patch({ changeType: e.target.value })} options={[{ value: 'standard', label: 'Standard (pre-approved)' }, { value: 'normal', label: 'Normal' }, { value: 'emergency', label: 'Emergency' }]} />
                 </Field>
@@ -330,6 +351,11 @@ export default function TicketCreatePage() {
                 <Field label="Scheduled end">
                   <Input type="datetime-local" value={f.scheduledEnd} onChange={(e) => patch({ scheduledEnd: e.target.value })} />
                 </Field>
+                {previewKey && conflictPreview.data && (
+                  <div className="sm:col-span-2">
+                    {conflictPreview.data.conflicts.length ? <ConflictList conflicts={conflictPreview.data.conflicts} /> : <div className="text-[12.5px] text-emerald-700">No clash with another change or a blackout window.</div>}
+                  </div>
+                )}
                 <Field label="Justification" className="sm:col-span-2">
                   <Textarea value={f.justification} onChange={(e) => patch({ justification: e.target.value })} />
                 </Field>

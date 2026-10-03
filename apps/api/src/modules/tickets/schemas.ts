@@ -80,6 +80,8 @@ export const createTicketSchema = z.object({
   slaPolicyId: nullableUuid,
   externalRef: z.string().max(200).nullable().optional(),
   change: changeDetailsSchema.optional(),
+  /** A standard change template to raise the change from (prefills the plans; a pre-approved template skips approval). */
+  changeTemplateId: uuid.optional(),
   problem: problemDetailsSchema.optional(),
 });
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;

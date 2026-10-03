@@ -24,11 +24,14 @@ export const routes: AppRoute[] = [
   { path: '/tickets/new', component: page(() => import('@/pages/tickets/TicketCreatePage')), perm: ['tickets:create'] },
   { path: '/tickets/approvals', component: page(() => import('@/pages/tickets/ApprovalsInboxPage')), perm: ['requests:approve', 'changes:approve'] },
   { path: '/tickets/:id', component: page(() => import('@/pages/tickets/TicketDetailPage')), perm: ['tickets:read'] },
-  // Operations: Major incidents · On-call · Announcements (handover follows)
+  // Operations: Major incidents · On-call · Announcements · Change calendar · CAB (handover follows)
   { path: '/operations', component: page(() => import('@/pages/operations/MajorIncidentsPage')), perm: ['tickets:read'] },
   { path: '/operations/major-incidents', component: page(() => import('@/pages/operations/MajorIncidentsPage')), perm: ['tickets:read'] },
   { path: '/operations/on-call', component: page(() => import('@/pages/operations/OnCallPage')), perm: ['oncall:read'] },
   { path: '/operations/announcements', component: page(() => import('@/pages/operations/AnnouncementsPage')), perm: ['announcements:manage'] },
+  { path: '/operations/change-calendar', component: page(() => import('@/pages/operations/ChangeCalendarPage')), perm: ['tickets:read'] },
+  { path: '/operations/cab', component: page(() => import('@/pages/operations/CabMeetingsPage')), perm: ['changes:cab', 'changes:approve', 'changes:manage'] },
+  { path: '/operations/cab/:id', component: page(() => import('@/pages/operations/CabMeetingPage')), perm: ['changes:cab', 'changes:approve', 'changes:manage'] },
   // Customers & contracts
   // Customers: Overview · Accounts
   { path: '/customers', component: page(() => import('@/pages/customers/CustomersOverviewPage')), perm: ['customers:read'] },

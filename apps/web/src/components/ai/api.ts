@@ -246,6 +246,9 @@ export interface ChangeImpactResult extends Base {
   businessServices: string[];
   openTickets: { number: string; title: string; status: string; link: string }[];
   otherChanges: { id: string; number: string; title: string; scheduledStart: string | null; scheduledEnd: string | null; status: string | null; link: string }[];
+  /** Scheduling conflicts of the window (shared systems, the same business service, blackouts) and the questionnaire's verdict. */
+  conflicts?: { kind: 'ci' | 'service' | 'blackout'; text: string; ticket: { id: string; number: string; link: string } | null }[];
+  questionnaire?: { level: 'low' | 'medium' | 'high'; score: number | null } | null;
   riskSummary: string;
   riskLevel: 'low' | 'medium' | 'high';
   recommendations: string[];

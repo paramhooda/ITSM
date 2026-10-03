@@ -1,5 +1,6 @@
 import { eq, and, inArray, asc, desc, or, ilike, ne } from 'drizzle-orm';
 import { enqueue } from '@/jobs/queues';
+import { recordConflicts } from '@/modules/changes/service';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
@@ -152,6 +153,8 @@ export async function setCis(ctx: Ctx, ticketId: string, ciIds: string[]) {
   const names = ids.length ? await ctx.tx.select({ id: schema.cis.id, name: schema.cis.name }).from(schema.cis).where(inArray(schema.cis.id, ids)) : [];
   await addActivity(ctx, t, { type: 'ci', summary: ids.length ? `Affected CIs set: ${names.map((n) => n.name).join(', ')}` : 'Affected CIs cleared', data: { ciIds: ids, previous: before.map((b) => b.ciId) }, customerVisible: false });
   await ctx.audit({ entityType: 'ticket', entityId: t.id, entityLabel: t.number, action: 'ticket.cis', customerId: t.customerId, changes: { ciIds: { old: before.map((b) => b.ciId), new: ids } } });
+  // A change touching different systems may now clash with another window.
+  if (t.type === 'change') await recordConflicts(ctx, t);
   return names;
 }
 

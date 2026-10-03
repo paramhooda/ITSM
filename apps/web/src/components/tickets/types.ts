@@ -208,6 +208,13 @@ export interface ChangeDetails {
   pirNotes: string | null;
   pirOutcome: string | null;
   reviewedAt: string | null;
+  /** The risk questionnaire: question key → option key, the score (0-100) and the level it produced. */
+  riskAnswers?: Record<string, string> | null;
+  riskScore?: number | null;
+  riskLevel?: 'low' | 'medium' | 'high' | null;
+  templateId?: string | null;
+  cabMeetingId?: string | null;
+  windowReminderAt?: string | null;
 }
 
 export interface TicketPermissions {

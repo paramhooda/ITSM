@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Lock, ChevronDown, ChevronRight, MessageSquare, History, Sparkles, Bot, ArrowRightLeft, UserCheck, Flag, ShieldCheck, Link2, Server, ListChecks, Timer, AlertTriangle, ClipboardCheck, Eye, Pencil, Flame, Megaphone, Frown, type LucideIcon } from 'lucide-react';
+import { Lock, ChevronDown, ChevronRight, MessageSquare, History, Sparkles, Bot, ArrowRightLeft, UserCheck, Flag, ShieldCheck, Link2, Server, ListChecks, Timer, AlertTriangle, ClipboardCheck, Eye, Pencil, Flame, Megaphone, Frown, Gavel, type LucideIcon } from 'lucide-react';
 import { get } from '@/api/client';
 import { Avatar } from '@/components/ui';
 import { Segmented } from '@/components/dashboards/Panel';
@@ -29,13 +29,13 @@ export interface StreamEntry {
   editedAt?: string | null;
 }
 
-const ICONS: Record<string, LucideIcon> = { created: Sparkles, status: ArrowRightLeft, assignment: UserCheck, priority: Flag, scope: ShieldCheck, link: Link2, ci: Server, task: ListChecks, time: Timer, sla: Timer, escalation: AlertTriangle, approval: ClipboardCheck, watcher: Eye, update: Pencil, history: History, major: Flame, major_update: Megaphone, ai: Bot, page: Megaphone, sentiment: Frown };
+const ICONS: Record<string, LucideIcon> = { created: Sparkles, status: ArrowRightLeft, assignment: UserCheck, priority: Flag, scope: ShieldCheck, link: Link2, ci: Server, task: ListChecks, time: Timer, sla: Timer, escalation: AlertTriangle, approval: ClipboardCheck, watcher: Eye, update: Pencil, history: History, major: Flame, major_update: Megaphone, ai: Bot, page: Megaphone, sentiment: Frown, change_conflict: AlertTriangle, cab: Gavel };
 const SECRET = /(password|secret|token|key|community)/i;
 
 export const fromTimeline = (t: TimelineEntry): StreamEntry =>
   t.kind === 'comment'
     ? { id: t.id, at: t.createdAt, actor: t.actorName, kind: t.isInternal || t.type === 'work_note' ? 'note' : 'comment', body: t.body, internal: t.isInternal || t.type === 'work_note', tone: t.type === 'resolution' ? 'good' : undefined, minutesSpent: t.minutesSpent, editedAt: t.editedAt }
-    : { id: t.id, at: t.createdAt, actor: t.actorName, kind: 'event', title: t.summary, body: t.type === 'status' && t.data?.resolutionNotes ? String(t.data.resolutionNotes) : null, internal: t.isInternal, icon: t.type, tone: t.type === 'escalation' || (t.type === 'major' && !t.data?.demoted) || (t.type === 'sla' && /breach/i.test(t.summary ?? '')) ? 'bad' : undefined };
+    : { id: t.id, at: t.createdAt, actor: t.actorName, kind: 'event', title: t.summary, body: t.type === 'status' && t.data?.resolutionNotes ? String(t.data.resolutionNotes) : null, internal: t.isInternal, icon: t.type, tone: t.type === 'escalation' || (t.type === 'major' && !t.data?.demoted) || (t.type === 'sla' && /breach/i.test(t.summary ?? '')) || (t.type === 'change_conflict' && /^Scheduling conflict/.test(t.summary ?? '')) ? 'bad' : t.type === 'cab' && /^CAB approved/.test(t.summary ?? '') ? 'good' : undefined };
 
 export const fromAudit = (e: AuditEntry): StreamEntry => ({
   id: e.id,

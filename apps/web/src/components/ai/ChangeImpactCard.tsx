@@ -87,6 +87,13 @@ export function ChangeImpactCard({ ticketId, canManage }: { ticketId: string; ca
                 </ul>
               </div>
             )}
+            {(result.conflicts?.length ?? 0) > 0 && (
+              <div className="rounded-md border border-red-200 bg-red-50 text-red-900 px-3 py-2 text-[12.5px]">
+                <div className="font-medium inline-flex items-center gap-1 mb-0.5"><AlertTriangle className="h-3.5 w-3.5" /> Scheduling conflicts</div>
+                <ul className="flex flex-col gap-0.5">{result.conflicts!.map((c, i) => <li key={i}>{c.text}{c.ticket && <> · <Link to={c.ticket.link} className="font-mono underline underline-offset-2">{c.ticket.number}</Link></>}</li>)}</ul>
+              </div>
+            )}
+            {result.questionnaire && <div className="text-[12.5px] text-muted">Risk questionnaire: <Badge color={RISK_COLOR[result.questionnaire.level]}>{result.questionnaire.level}{result.questionnaire.score != null ? ` · ${result.questionnaire.score}/100` : ''}</Badge></div>}
             {result.otherChanges.length > 0 && (
               <div>
                 <div className="text-[11px] uppercase tracking-wide text-subtle font-medium">Overlapping changes</div>

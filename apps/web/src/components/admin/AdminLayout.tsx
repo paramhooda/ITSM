@@ -52,6 +52,14 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    label: 'Change management',
+    items: [
+      { to: '/admin/change-templates', label: 'Standard change templates', perm: CONFIG },
+      { to: '/admin/change-risk-questions', label: 'Change risk questions', perm: CONFIG },
+      { to: '/admin/change-blackouts', label: 'Blackout windows', perm: CONFIG },
+    ],
+  },
+  {
     label: 'CMDB model',
     items: [
       { to: '/admin/ci-types', label: 'CI types', perm: CONFIG },

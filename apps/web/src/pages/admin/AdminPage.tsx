@@ -25,6 +25,9 @@ const EscalationRulesPage = page(() => import('./EscalationRulesPage'));
 const NotificationTemplatesPage = page(() => import('./NotificationTemplatesPage'));
 const NotificationRulesPage = page(() => import('./NotificationRulesPage'));
 const ApprovalsPage = page(() => import('./ApprovalsPage'));
+const ChangeTemplatesPage = page(() => import('./ChangeTemplatesPage'));
+const ChangeRiskQuestionsPage = page(() => import('./ChangeRiskQuestionsPage'));
+const ChangeBlackoutsPage = page(() => import('./ChangeBlackoutsPage'));
 const CatalogPage = page(() => import('./CatalogPage'));
 const CiTypesPage = page(() => import('./CiTypesPage'));
 const RelationshipTypesPage = page(() => import('./RelationshipTypesPage'));
@@ -68,6 +71,9 @@ export default function AdminPage() {
           <Route path="notifications/templates" element={<Guarded perm={CONFIG}><NotificationTemplatesPage /></Guarded>} />
           <Route path="notifications/rules" element={<Guarded perm={CONFIG}><NotificationRulesPage /></Guarded>} />
           <Route path="approvals" element={<Guarded perm={CONFIG}><ApprovalsPage /></Guarded>} />
+          <Route path="change-templates" element={<Guarded perm={CONFIG}><ChangeTemplatesPage /></Guarded>} />
+          <Route path="change-risk-questions" element={<Guarded perm={CONFIG}><ChangeRiskQuestionsPage /></Guarded>} />
+          <Route path="change-blackouts" element={<Guarded perm={CONFIG}><ChangeBlackoutsPage /></Guarded>} />
           <Route path="catalog" element={<Guarded perm={CONFIG}><CatalogPage /></Guarded>} />
           <Route path="ci-types" element={<Guarded perm={CONFIG}><CiTypesPage /></Guarded>} />
           <Route path="relationship-types" element={<Guarded perm={CONFIG}><RelationshipTypesPage /></Guarded>} />

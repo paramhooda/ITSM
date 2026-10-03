@@ -3,4 +3,4 @@
  * style, playbooks) changes; stored on every reply so answers can be traced to
  * the prompt that produced them.
  */
-export const PROMPT_VERSION = '2.2.0';
+export const PROMPT_VERSION = '2.3.0';

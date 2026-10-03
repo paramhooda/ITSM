@@ -18,5 +18,6 @@ export * from './schema/ai';
 export * from './schema/integrations';
 export * from './schema/oncall';
 export * from './schema/status';
+export * from './schema/changes';
 export * from './schema-ext/audit';
 export * from './schema-ext/events';
