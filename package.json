@@ -19,7 +19,9 @@
     "test": "npm run test -w apps/api",
     "db:generate": "npm run db:generate -w apps/api",
     "db:migrate": "npm run db:migrate -w apps/api",
-    "db:seed": "npm run db:seed -w apps/api"
+    "db:seed": "npm run db:seed -w apps/api",
+    "lint:ui": "npm run lint:ui -w apps/web",
+    "verify": "npm run typecheck && npm run lint:ui"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

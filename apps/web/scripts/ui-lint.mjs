@@ -25,10 +25,12 @@ const walk = (dir) => {
 walk(root);
 
 /** Files allowed to own an <h1>: the shared headers and the logged-out pages. */
-const H1_ALLOWED = [/components\/ui\/index\.tsx$/, /components\/record\/RecordHeader\.tsx$/, /components\/dashboards\/Hero\.tsx$/, /pages\/auth\//, /components\/admin\/AdminLayout\.tsx$/];
+const H1_ALLOWED = [/components\/ui\/index\.tsx$/, /components\/record\/RecordHeader\.tsx$/, /components\/dashboards\/Hero\.tsx$/, /pages\/auth\//];
 /** Page files that are not pages in the contract's sense (redirects, logged-out, tab bodies hosted by a page). */
 const PAGE_EXEMPT = [/Redirect\.tsx$/, /pages\/auth\//, /Tab\.tsx$/, /FindingsTable\.tsx$/];
-const HEADER_MARKERS = ['<PageHeader', '<RecordHeader', '<DashboardHero', '<ListShell', '<AdminLayout', '<Navigate', '<RecordLayout'];
+const HEADER_MARKERS = ['<PageHeader', '<RecordHeader', '<DashboardHero', '<ListShell', '<AdminLayout', '<SectionHeader', '<Navigate', '<RecordLayout'];
+/** A page that only renders another page (a module alias such as /portal/services/sla) inherits that page's header. */
+const isAlias = (src) => /^import \w+Page from '\.\/\w+Page';/m.test(src) && /return <\w+Page\b/.test(src);
 
 const problems = [];
 const report = (file, line, rule, text) => problems.push(`${relative(process.cwd(), file)}:${line}  ${rule}  ${text.trim().slice(0, 110)}`);
@@ -46,8 +48,13 @@ for (const file of files) {
   });
   const isPage = /\/pages\/.*Page\.tsx$/.test(file) && !PAGE_EXEMPT.some((re) => re.test(file));
   if (isPage) {
-    if (!HEADER_MARKERS.some((m) => src.includes(m))) report(file, 1, 'page-without-shared-header', rel);
-    if (src.includes('<ListShell') && !/EmptyState|empty=/.test(src)) report(file, 1, 'list-without-empty-state', rel);
+    if (!HEADER_MARKERS.some((m) => src.includes(m)) && !isAlias(src)) report(file, 1, 'page-without-shared-header', rel);
+    if (src.includes('<ListShell')) {
+      // The table may live in a sibling component (./FindingsTable); its empty state counts.
+      const siblings = [...src.matchAll(/from '\.\/(\w+)'/g)].map((m) => join(file, '..', `${m[1]}.tsx`)).filter((p) => { try { return statSync(p).isFile(); } catch { return false; } });
+      const sources = [src, ...siblings.map((p) => readFileSync(p, 'utf8'))];
+      if (!sources.some((t) => /EmptyState|empty=/.test(t))) report(file, 1, 'list-without-empty-state', rel);
+    }
   }
 }
 

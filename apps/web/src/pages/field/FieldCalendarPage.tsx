@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, CalendarDays, List as ListIcon } from 'lucide-react';
-import { PageHeader, Button, ListShell, FilterGroup, FilterSelect, FilterToggle, type AppliedFilter } from '@/components/ui';
+import { PageHeader, Button, ListShell, FilterGroup, FilterSelect, FilterToggle, EmptyState, type AppliedFilter } from '@/components/ui';
 import { FIELD_MODULES } from '@/layouts/modules';
 import { Segmented } from '@/components/dashboards/Panel';
 import { useListState } from '@/hooks/useListState';
@@ -81,6 +81,7 @@ export default function FieldCalendarPage() {
         }
       >
         <VisitCalendar weekStart={weekStart} items={items} loading={calendar.isFetching} onWeekChange={(d) => set({ week: ymd(d) }, false)} onSelect={(id) => navigate(`/field/${id}`)} />
+        {!calendar.isFetching && items.length === 0 && <EmptyState title="No visits this week" description="Change the week or the filters, or schedule a visit from the Visits module." />}
         {calendar.isError && <div className="text-[12.5px] text-red-600">{(calendar.error as Error).message}</div>}
       </ListShell>
 

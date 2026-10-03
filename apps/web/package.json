@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint:ui": "node scripts/ui-lint.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

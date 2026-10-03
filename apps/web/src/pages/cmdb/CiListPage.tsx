@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Upload, Download, Server, AlertOctagon, Radar, EyeOff, Boxes, Bookmark, ChevronDown, Share2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { get, post, del, download, buildQuery } from '@/api/client';
-import { PageHeader, Button, DataTable, Pagination, Select, Badge, Dialog, Input, Checkbox, ListShell, FilterGroup, FilterOptions, FilterSelect, FilterToggle, type AppliedFilter, type Column } from '@/components/ui';
+import { PageHeader, Button, DataTable, Pagination, Select, Badge, Dialog, Input, Checkbox, ListShell, FilterGroup, FilterOptions, FilterSelect, FilterToggle, type AppliedFilter, type Column , EmptyState } from '@/components/ui';
 import { Menu } from '@/components/Menu';
 import { cmdbApi } from '@/components/cmdb/api';
 import type { SavedView } from '@/components/tickets/types';
@@ -290,7 +290,7 @@ export default function CiListPage() {
         }
       >
         <div className="card overflow-hidden">
-          <DataTable columns={columns} rows={list.data?.items ?? []} loading={list.isLoading} onRowClick={(c) => navigate(`/cmdb/cis/${c.id}`)} rowClassName={(c) => (c.criticality === 'critical' && c.status === 'active' ? 'row-rail-bad' : undefined)} sort={{ key: state.sort, order: state.order as 'asc' | 'desc' }} onSort={onSort} dense />
+          <DataTable columns={columns} rows={list.data?.items ?? []} loading={list.isLoading} empty={<EmptyState icon={<Server className="h-5 w-5" />} title="No configuration items match" description="Change or reset the filters, or add items through discovery or by hand." />} onRowClick={(c) => navigate(`/cmdb/cis/${c.id}`)} rowClassName={(c) => (c.criticality === 'critical' && c.status === 'active' ? 'row-rail-bad' : undefined)} sort={{ key: state.sort, order: state.order as 'asc' | 'desc' }} onSort={onSort} dense />
           <Pagination page={page} pageSize={pageSize} total={list.data?.total ?? 0} onPage={setPage} />
         </div>
       </ListShell>

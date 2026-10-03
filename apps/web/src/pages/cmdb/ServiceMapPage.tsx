@@ -39,7 +39,7 @@ export default function ServiceMapPage() {
     <div className="flex flex-col gap-4">
       <PageHeader title="Service map" subtitle="A business service and every configuration item it depends on, top down" actions={d ? <Button size="sm" variant="outline" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => navigate(`/cmdb/cis/${d.root.id}`)}>Open record</Button> : undefined} />
       <CmdbNav />
-      <div className="card p-2.5 flex flex-wrap items-center gap-2">
+      <div className="filter-bar" role="toolbar" aria-label="Service map scope" data-testid="filter-bar">
         <Select className="w-44 h-8 py-0 text-[13px]" value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value }, false)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
         <Select className="w-72 h-8 py-0 text-[13px]" value={routeId && services.data?.items.some((s) => s.id === routeId) ? routeId : ''} onChange={(e) => e.target.value && navigate(`/cmdb/services/${e.target.value}`)} placeholder="Choose a business service…" options={(services.data?.items ?? []).map((s) => ({ value: s.id, label: `${s.name}${s.customerName ? ` · ${s.customerName}` : ''}` }))} />
         <span className="text-[12px] text-subtle">or any CI:</span>

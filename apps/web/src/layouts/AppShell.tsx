@@ -200,7 +200,7 @@ export function Sidebar({ items, label }: { items: NavItem[]; label: string }) {
   }, [toggleSidebar]);
   const tip = `${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar · ${SIDEBAR_SHORTCUT}`;
   return (
-    <aside className={cn('group/side relative hidden md:flex flex-col border-r border-default bg-[#fafafa] shrink-0 transition-[width] duration-200', sidebarCollapsed ? 'w-[60px]' : 'w-60')} data-collapsed={sidebarCollapsed || undefined}>
+    <aside className={cn('group/side relative hidden md:flex flex-col border-r border-default bg-app shrink-0 transition-[width] duration-200', sidebarCollapsed ? 'w-[60px]' : 'w-60')} data-collapsed={sidebarCollapsed || undefined}>
       <div className={cn('flex items-center h-14 border-b border-default shrink-0', sidebarCollapsed ? 'justify-center px-0' : 'px-4')}>
         {sidebarCollapsed ? (
           <Link to="/" aria-label="Progression home" className="inline-flex">

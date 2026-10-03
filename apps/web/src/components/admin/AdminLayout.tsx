@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { Permission } from '@itsm/shared';
 import { useAuthStore } from '@/stores/auth';
 import { cn } from '@/lib/utils';
-import { Select } from '@/components/ui';
+import { Select , PageHeader } from '@/components/ui';
 
 export interface AdminNavItem {
   to: string;
@@ -132,17 +132,9 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   );
 }
 
-/** Compact page title used by every admin screen. */
+/** Page title of every admin screen: the same `PageHeader` as the rest of the application, so administration reads like any other page. */
 export function SectionHeader({ title, description, actions }: { title: ReactNode; description?: ReactNode; actions?: ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-      <div className="min-w-0">
-        <h1 className="text-[17px] font-semibold leading-tight">{title}</h1>
-        {description && <div className="text-[13px] text-muted mt-0.5 max-w-2xl">{description}</div>}
-      </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
-    </div>
-  );
+  return <PageHeader title={title} subtitle={description} actions={actions} />;
 }
 
 export function NotAllowed() {

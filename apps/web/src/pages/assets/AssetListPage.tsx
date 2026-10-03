@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus, Upload, Download, Server, Boxes, ShieldCheck, FileSignature, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { get, download, buildQuery } from '@/api/client';
-import { PageHeader, Button, DataTable, Pagination, Badge, ListShell, FilterGroup, FilterOptions, FilterSelect, type AppliedFilter, type Column } from '@/components/ui';
+import { PageHeader, Button, DataTable, Pagination, Badge, ListShell, FilterGroup, FilterOptions, FilterSelect, type AppliedFilter, type Column , EmptyState } from '@/components/ui';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { Panel } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
@@ -232,7 +232,7 @@ export default function AssetListPage() {
         }
       >
         <div className="card overflow-hidden">
-          <DataTable columns={columns} rows={list.data?.items ?? []} loading={list.isLoading} onRowClick={(a) => navigate(`/assets/${a.id}`)} rowClassName={(a) => (a.warranty?.status === 'expired' && a.amc?.status === 'expired' ? 'row-rail-bad' : a.warranty?.status === 'expiring' || a.amc?.status === 'expiring' ? 'row-rail-warn' : undefined)} sort={{ key: state.sort, order: state.order as 'asc' | 'desc' }} onSort={onSort} dense />
+          <DataTable columns={columns} rows={list.data?.items ?? []} loading={list.isLoading} empty={<EmptyState icon={<Boxes className="h-5 w-5" />} title="No assets match" description="Change or reset the filters, or register equipment from the inventory." />} onRowClick={(a) => navigate(`/assets/${a.id}`)} rowClassName={(a) => (a.warranty?.status === 'expired' && a.amc?.status === 'expired' ? 'row-rail-bad' : a.warranty?.status === 'expiring' || a.amc?.status === 'expiring' ? 'row-rail-warn' : undefined)} sort={{ key: state.sort, order: state.order as 'asc' | 'desc' }} onSort={onSort} dense />
           <Pagination page={page} pageSize={pageSize} total={list.data?.total ?? 0} onPage={setPage} />
         </div>
       </ListShell>

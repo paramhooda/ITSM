@@ -177,7 +177,7 @@ export default function WhatsAppPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4 items-start">
+      <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_360px] gap-4 items-start">
         <div className="flex flex-col gap-4">
           <Card title="Connection" actions={<Toggle checked={form.enabled} onChange={(v) => setForm({ ...form, enabled: v })} label="Send WhatsApp notifications" />}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

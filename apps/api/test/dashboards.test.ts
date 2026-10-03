@@ -154,9 +154,9 @@ describe('dashboards', () => {
   });
 
   it('staff views honour the customer scope: every row belongs to the chosen customer', async () => {
-    const own = (rows: { customer_id?: unknown }[], id: string) => rows.every((r) => r.customer_id === id);
+    const own = (rows: unknown[], id: string) => rows.every((r) => (r as { customer_id?: unknown }).customer_id === id);
     const socA = await asAdmin((ctx) => soc(ctx, { customerId: ids.customerA }));
-    expect(sum(socA.series, 'opened')).toBeGreaterThanOrEqual(1);
+    expect(socA.series.reduce((n, r) => n + r.opened, 0)).toBeGreaterThanOrEqual(1);
     expect(own(socA.recent, ids.customerA) && own(socA.slaStatus.items, ids.customerA) && own(socA.escalations.items, ids.customerA)).toBe(true);
     expect(socA.byCustomer.every((c) => c.id === ids.customerA)).toBe(true);
     const socB = await asAdmin((ctx) => soc(ctx, { customerId: ids.customerB }));
