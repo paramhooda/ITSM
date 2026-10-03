@@ -7,7 +7,7 @@ import { writeAudit } from '@/core/audit';
 import { systemCtx } from '@/modules/tickets/common';
 import { findReport } from '@/modules/reports/registry';
 import { executeReport, queueReportEmail } from '@/modules/reports/service';
-import { advanceSchedule, type ScheduleRow } from '@/modules/reports/schedules';
+import { advanceSchedule, scheduleFormats, type ScheduleRow } from '@/modules/reports/schedules';
 import type { Tx } from '@/db/client';
 
 const SYSTEM_ACTOR = { userId: null, userName: 'system', source: 'system' };
@@ -69,7 +69,7 @@ export async function executeSchedule(scheduleId: string, opts: ExecuteOptions =
     : schedule.filters?.perCustomer === true
       ? (await withSystem((tx) => tx.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.isActive, true)).orderBy(schema.customers.name).limit(2000))).map((c) => c.id)
       : [null];
-  const formats = (schedule.format === 'both' ? ['csv', 'html'] : [schedule.format]) as ('csv' | 'html')[];
+  const formats = scheduleFormats(schedule.format);
   const email = schedule.delivery === 'email' || schedule.delivery === 'both';
   const portal = schedule.delivery === 'portal' || schedule.delivery === 'both';
   const { customerContacts: _cc, perCustomer: _pc, ...filters } = (schedule.filters ?? {}) as Record<string, unknown>;

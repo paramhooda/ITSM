@@ -11,11 +11,15 @@ import { logger } from '@/core/logger';
 import './definitions';
 import { requireReport, visibleReports, describeReport, isCustomerUser, MAX_REPORT_ROWS, type ReportDefinition, type ReportParams, type ReportResult } from './registry';
 import { resolveDateRange, todayIn, type DateRange } from './dates';
-import { renderCsv, renderHtml, summaryHtml } from './render';
+import { htmlToPdf, pdfAvailable } from '@/lib/pdf';
+import { renderCsv, renderHtml, renderXlsx, summaryHtml, brandColor, logoUrl } from './render';
 
 export const PREVIEW_MAX_ROWS = 5000;
 export type RunRow = typeof schema.reportRuns.$inferSelect;
-export type ReportFormat = 'json' | 'csv' | 'html';
+/** `json` previews in the UI; the others are stored as attachments of a run. */
+export const REPORT_FORMATS = ['json', 'csv', 'html', 'pdf', 'xlsx'] as const;
+export type ReportFormat = (typeof REPORT_FORMATS)[number];
+export const FILE_CONTENT_TYPES: Record<Exclude<ReportFormat, 'json'>, string> = { csv: 'text/csv', html: 'text/html', pdf: 'application/pdf', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
 
 export interface RunInput {
   reportKey: string;
@@ -33,7 +37,7 @@ export interface RunInput {
 export async function listDefinitions(ctx: Ctx) {
   if (isCustomerUser(ctx) && !ctx.can('portal:reports', ctx.user.customerId)) throw new ForbiddenError('Missing permission: portal:reports');
   const items = visibleReports(ctx).map(describeReport);
-  return { items, customerId: isCustomerUser(ctx) ? ctx.user.customerId : null, canManage: !isCustomerUser(ctx) && ctx.can('reports:manage') };
+  return { items, customerId: isCustomerUser(ctx) ? ctx.user.customerId : null, canManage: !isCustomerUser(ctx) && ctx.can('reports:manage'), formats: [...REPORT_FORMATS], pdf: await pdfAvailable() };
 }
 
 // ---------------------------------------------------------------- parameter normalization
@@ -89,10 +93,14 @@ export function normalizeParams(ctx: Ctx, def: ReportDefinition, raw: Record<str
 
 // ---------------------------------------------------------------- execution
 
-async function platformName(tx: Tx) {
-  const [row] = await tx.select({ value: schema.systemSettings.value }).from(schema.systemSettings).where(eq(schema.systemSettings.key, 'platform.name')).limit(1);
-  return typeof row?.value === 'string' && row.value ? row.value : 'Progression';
+/** `platform.name`, `platform.logo_url` and `platform.brand_color` from system settings. */
+export async function brandSettings(tx: Tx) {
+  const rows = await tx.select({ key: schema.systemSettings.key, value: schema.systemSettings.value }).from(schema.systemSettings).where(inArray(schema.systemSettings.key, ['platform.name', 'platform.logo_url', 'platform.brand_color']));
+  const get = (k: string) => rows.find((r) => r.key === k)?.value;
+  const name = get('platform.name');
+  return { platformName: typeof name === 'string' && name ? name : 'Progression', logoUrl: logoUrl(get('platform.logo_url')), brandColor: brandColor(get('platform.brand_color')) };
 }
+const platformName = async (tx: Tx) => (await brandSettings(tx)).platformName;
 
 async function customerName(tx: Tx, id: string | null) {
   if (!id) return null;
@@ -136,7 +144,8 @@ export async function executeReport(ctx: Ctx, input: RunInput): Promise<Executio
   const def = requireReport(ctx, input.reportKey, customerId);
   const { params, range } = normalizeParams(ctx, def, raw, input.timezone);
   const format = input.format ?? 'json';
-  if (!['json', 'csv', 'html'].includes(format)) throw new ValidationError('format must be json, csv or html');
+  if (!(REPORT_FORMATS as readonly string[]).includes(format)) throw new ValidationError(`format must be one of ${REPORT_FORMATS.join(', ')}`);
+  if (format === 'pdf' && !(await pdfAvailable())) throw new ValidationError('PDF output is not available on this server: Chromium is not installed (see docs/OPERATIONS.md, Reports)');
   const started = new Date();
   const result = await def.run(ctx, params);
   if (result.rows.length > MAX_REPORT_ROWS) {
@@ -153,10 +162,13 @@ export async function executeReport(ctx: Ctx, input: RunInput): Promise<Executio
     .values({ scheduleId: input.scheduleId ?? null, reportKey: def.key, customerId: params.customerId, name, parameters: { ...params, dateRange: range.preset, period: range.label }, format, status: 'running', portalVisible, requestedBy: input.requestedBy === undefined ? (ctx.user.apiKeyId || ctx.user.isSystem ? null : ctx.user.id) : input.requestedBy, startedAt: started })
     .returning();
   try {
-    const brand = await platformName(ctx.tx);
-    const buffer = format === 'csv' ? renderCsv(result) : Buffer.from(renderHtml(result, { reportName: def.name, description: def.description, platformName: brand, customerName: cname, period: range.label, generatedAt: new Date(), generatedBy: ctx.user.isSystem ? 'scheduled report' : ctx.user.name, parameters: params }), 'utf8');
+    const brand = await brandSettings(ctx.tx);
+    // parameters shown on the file: the ones that differ from the definition's defaults
+    const shown = Object.fromEntries(Object.entries(params).filter(([k, v]) => def.parameters.find((x) => x.key === k)?.default !== v));
+    const meta = { reportName: def.name, description: def.description, ...brand, customerName: cname, period: range.label, generatedAt: new Date(), generatedBy: ctx.user.isSystem ? 'scheduled report' : ctx.user.name, parameters: shown, cover: def.cover === true };
+    const buffer = format === 'csv' ? renderCsv(result) : format === 'xlsx' ? await renderXlsx(result, meta) : format === 'pdf' ? await htmlToPdf(renderHtml(result, { ...meta, cover: true })) : Buffer.from(renderHtml(result, meta), 'utf8');
     const filename = `${slug(def.name)}${cname ? `_${slug(cname)}` : ''}_${range.from}_${range.to}.${format}`;
-    const attachment = await storeReportFile(ctx, run, buffer, filename, format === 'csv' ? 'text/csv' : 'text/html');
+    const attachment = await storeReportFile(ctx, run, buffer, filename, FILE_CONTENT_TYPES[format]);
     const [done] = await ctx.tx.update(schema.reportRuns).set({ status: 'completed', attachmentId: attachment.id, rowCount: result.rows.length, finishedAt: new Date() }).where(eq(schema.reportRuns.id, run.id)).returning();
     await ctx.audit({ entityType: 'report_run', entityId: run.id, entityLabel: name, action: 'create', customerId: params.customerId, metadata: { reportKey: def.key, format, rowCount: result.rows.length, scheduleId: input.scheduleId ?? null, portalVisible, period: range.label } });
     return { def, params, range, result, run: done, attachment };

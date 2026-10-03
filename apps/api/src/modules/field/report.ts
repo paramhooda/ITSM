@@ -4,6 +4,7 @@ import { schema } from '@/db/client';
 import { ConflictError } from '@/core/errors';
 import { escapeHtml } from '@/lib/templates';
 import { createAttachment } from '@/modules/attachments/service';
+import { htmlToPdf, pdfAvailable } from '@/lib/pdf';
 import { getVisit } from './service';
 import { requireExecute, loadVisit } from './common';
 
@@ -92,8 +93,11 @@ export async function generateVisitReport(ctx: Ctx, id: string) {
   const view = await getVisit(ctx, id);
   const html = renderVisitReport(view);
   const stamp = new Date();
-  const filename = `${v.number}-report-${stamp.toISOString().slice(0, 10)}.html`;
-  const attachment = await createAttachment(ctx, { entityType: 'field_visit', entityId: v.id, filename, contentType: 'text/html', buffer: Buffer.from(html, 'utf8'), customerId: v.customerId, customerVisible: true, docType: 'report', title: `Visit report ${v.number}` });
+  // a real PDF when Chromium is installed (docs/OPERATIONS.md, Reports); the printable HTML otherwise
+  const pdf = await pdfAvailable();
+  const filename = `${v.number}-report-${stamp.toISOString().slice(0, 10)}.${pdf ? 'pdf' : 'html'}`;
+  const buffer = pdf ? await htmlToPdf(html) : Buffer.from(html, 'utf8');
+  const attachment = await createAttachment(ctx, { entityType: 'field_visit', entityId: v.id, filename, contentType: pdf ? 'application/pdf' : 'text/html', buffer, customerId: v.customerId, customerVisible: true, docType: 'report', title: `Visit report ${v.number}` });
   await ctx.tx.update(schema.fieldVisits).set({ reportGeneratedAt: stamp, updatedAt: stamp }).where(eq(schema.fieldVisits.id, v.id));
   await ctx.audit({ entityType: 'field_visit', entityId: v.id, entityLabel: v.number, action: 'report.generate', customerId: v.customerId, metadata: { attachmentId: attachment.id, filename } });
   return { attachment, reportGeneratedAt: stamp };

@@ -7,6 +7,8 @@ const schema = z.object({
   PORT: z.coerce.number().default(8080),
   HOST: z.string().default('0.0.0.0'),
   APP_URL: z.string().default('http://localhost:8080'),
+  /** Chromium binary for PDF output; the container's Playwright build is found without it. */
+  PDF_CHROMIUM_PATH: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
   DATABASE_URL: z.string(),
   DATABASE_ADMIN_URL: z.string().optional(),

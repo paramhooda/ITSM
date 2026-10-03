@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Field, Select, Input, Textarea, Checkbox, Toggle, Button } from '@/components/ui';
 import { useCustomersLookup, useEngineers } from '@/hooks/useLookups';
 import { ParameterForm } from './ParameterForm';
-import { DATE_PRESETS, FREQUENCIES, type ReportDefinition, type Schedule } from './types';
+import { DATE_PRESETS, FREQUENCIES, SCHEDULE_FORMATS, type ReportDefinition, type Schedule } from './types';
 
 export interface SchedulePayload {
   name: string;
@@ -28,7 +28,7 @@ const browserTz = () => {
   }
 };
 
-export function ScheduleForm({ definitions, initial, onSubmit, onCancel, saving }: { definitions: ReportDefinition[]; initial?: Partial<Schedule> & { filters?: Record<string, unknown> }; onSubmit: (p: SchedulePayload) => void; onCancel: () => void; saving?: boolean }) {
+export function ScheduleForm({ definitions, initial, onSubmit, onCancel, saving, pdf = true }: { definitions: ReportDefinition[]; initial?: Partial<Schedule> & { filters?: Record<string, unknown> }; onSubmit: (p: SchedulePayload) => void; onCancel: () => void; saving?: boolean; pdf?: boolean }) {
   const customers = useCustomersLookup();
   const engineers = useEngineers();
   const [name, setName] = useState(initial?.name ?? '');
@@ -88,7 +88,7 @@ export function ScheduleForm({ definitions, initial, onSubmit, onCancel, saving 
         {frequency === 'cron' ? <Field label="Cron expression" required hint="minute hour day month weekday (at most hourly)"><Input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 6 * * 1-5" className="font-mono" /></Field> : <div />}
         <Field label="Timezone" required hint="IANA name, e.g. Asia/Kolkata"><Input value={timezone} onChange={(e) => setTimezone(e.target.value)} /></Field>
         <Field label="Period covered" required><Select value={dateRange} onChange={(e) => setDateRange(e.target.value)} options={DATE_PRESETS.filter((p) => p.value !== 'custom')} /></Field>
-        <Field label="Format" required><Select value={format} onChange={(e) => setFormat(e.target.value)} options={[{ value: 'html', label: 'HTML (printable)' }, { value: 'csv', label: 'CSV' }, { value: 'both', label: 'HTML + CSV' }]} /></Field>
+        <Field label="Format" required><Select value={format} onChange={(e) => setFormat(e.target.value)} options={SCHEDULE_FORMATS(pdf)} /></Field>
         <Field label="Delivery" required hint="Portal makes the run visible to the customer's portal users"><Select value={delivery} onChange={(e) => setDelivery(e.target.value)} options={[{ value: 'email', label: 'Email' }, { value: 'portal', label: 'Customer portal' }, { value: 'both', label: 'Email + portal' }]} /></Field>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -64,7 +64,7 @@ function PastVisit({ v, onAcknowledge, highlighted }: { v: PortalVisit; onAcknow
   async function report() {
     if (!v.reportAttachmentId) return;
     try {
-      await download(`/attachments/${v.reportAttachmentId}/download`, v.reportFilename ?? `${v.number}-report.pdf`);
+      await download(`/attachments/${v.reportAttachmentId}/download`, v.reportFilename ?? `${v.number}-report.html`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Download failed');
     }

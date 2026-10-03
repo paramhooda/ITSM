@@ -18,7 +18,7 @@ export interface AppEntry {
   portal?: boolean;
 }
 
-export type PageEntity = 'ticket' | 'customer' | 'contract' | 'asset' | 'ci' | 'field_visit' | 'kb_article' | 'sla_policy' | 'discovery_source' | 'discovery_run' | 'discovery_finding';
+export type PageEntity = 'ticket' | 'customer' | 'contract' | 'asset' | 'ci' | 'field_visit' | 'kb_article' | 'sla_policy' | 'discovery_source' | 'discovery_run' | 'discovery_finding' | 'cab_meeting';
 
 export interface AppPage {
   /** Stable key such as `tickets.list`. */

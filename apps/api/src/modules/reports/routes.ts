@@ -5,13 +5,14 @@ import { h } from '@/core/context';
 import * as svc from './service';
 import * as sch from './schedules';
 import { scheduleInput, schedulePatch } from './schedules';
+import { REPORT_FORMATS } from './service';
 
 const idParam = z.object({ id: z.string().uuid() });
 const tags = ['reports'];
 const uuid = z.string().uuid();
 const boolQuery = z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean());
 
-const runBody = z.object({ reportKey: z.string().min(1).max(100), parameters: z.record(z.string(), z.unknown()).default({}), format: z.enum(['json', 'csv', 'html']).default('json'), portalVisible: z.boolean().optional() });
+const runBody = z.object({ reportKey: z.string().min(1).max(100), parameters: z.record(z.string(), z.unknown()).default({}), format: z.enum(REPORT_FORMATS).default('json'), portalVisible: z.boolean().optional() });
 const runsQuery = z.object({ reportKey: z.string().max(100).optional(), customerId: uuid.optional(), scheduleId: uuid.optional(), status: z.string().max(20).optional(), page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) });
 const schedulesQuery = z.object({ customerId: uuid.optional(), reportKey: z.string().max(100).optional(), isActive: boolQuery.optional() });
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);

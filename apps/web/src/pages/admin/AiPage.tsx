@@ -49,6 +49,7 @@ const FEATURE_LABELS: Record<string, string> = {
   problem_clusters: 'Problem clusters',
   triage: 'Triage on arrival (classify, owner, duplicates)',
   sentiment: 'Customer sentiment on comments',
+  recommendations: 'Service review recommendations',
 };
 const fmt = (n: number) => n.toLocaleString('en-GB');
 const compact = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}k` : fmt(n));

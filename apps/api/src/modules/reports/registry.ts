@@ -73,6 +73,8 @@ export interface ReportDefinition {
   portal: boolean;
   parameters: ReportParameter[];
   defaultDateRange?: DateRangePreset;
+  /** Open HTML and PDF output with a branded cover page (review packs). */
+  cover?: boolean;
   run(ctx: Ctx, params: ReportParams): Promise<ReportResult>;
 }
 
@@ -122,4 +124,5 @@ export const describeReport = (d: ReportDefinition) => ({
   portal: d.portal,
   parameters: d.parameters,
   defaultDateRange: d.defaultDateRange ?? 'last_30_days',
+  cover: d.cover === true,
 });

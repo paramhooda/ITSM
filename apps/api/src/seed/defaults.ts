@@ -265,6 +265,8 @@ async function seedCatalogItems(tx: Tx) {
 async function seedSystemSettings(tx: Tx) {
   const defaults: Record<string, { value: unknown; description: string }> = {
     'platform.name': { value: 'Progression', description: 'Product name shown in the UI and emails' },
+    'platform.logo_url': { value: '', description: 'Logo on report covers and PDF headers: an https URL or an inline data:image URI (empty shows the platform name)' },
+    'platform.brand_color': { value: '#0f172a', description: 'Hex colour for report headers, Excel header rows and PDF covers' },
     'tickets.auto_close_days': { value: 5, description: 'Days after resolution before a ticket is automatically closed' },
     'tickets.reopen_window_days': { value: 14, description: 'Days after closure a customer may reopen a ticket' },
     'tickets.default_sla_policy_fallback': { value: true, description: 'Apply the default SLA policy when no contract policy applies' },
@@ -277,7 +279,7 @@ async function seedSystemSettings(tx: Tx) {
     'audit.retention_months': { value: 36, description: 'Months to retain audit log partitions' },
     'events.retention_months': { value: 12, description: 'Months to retain integration event partitions' },
     'ai.assistant.enabled': { value: true, description: 'Kill switch for Grady: off stops every chat and AI feature at once' },
-    'ai.disabled_features': { value: [], description: 'AI features switched off (assistant, summarize, classify, assign, similar, suggest_kb, resolution, draft, duplicates, change_impact, problem_clusters)' },
+    'ai.disabled_features': { value: [], description: 'AI features switched off (assistant, summarize, classify, assign, similar, suggest_kb, resolution, draft, duplicates, change_impact, problem_clusters, triage, sentiment, recommendations)' },
     'ai.autonomy': { value: 'confirm_all', description: 'confirm_all: every change waits for confirmation; auto_low: low-risk internal writes (work notes, watching, tasks, links) apply at once' },
     'ai.effort': { value: 'low', description: 'Reasoning effort for the assistant (low, medium, high) on models that support it' },
     'ai.daily_token_budget': { value: 250000, description: 'Tokens one person may spend on the assistant per day (0 = unlimited)' },

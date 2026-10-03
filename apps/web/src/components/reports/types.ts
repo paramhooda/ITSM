@@ -1,6 +1,9 @@
 export type ParameterType = 'customer' | 'daterange' | 'select' | 'multiselect' | 'boolean' | 'text' | 'number';
 export interface ReportParameter { key: string; label: string; type: ParameterType; options?: { value: string; label: string }[]; optionType?: string; required?: boolean; default?: unknown; help?: string }
-export interface ReportDefinition { key: string; name: string; description: string; category: string; permissions: string[]; portal: boolean; parameters: ReportParameter[]; defaultDateRange: string }
+export interface ReportDefinition { key: string; name: string; description: string; category: string; permissions: string[]; portal: boolean; parameters: ReportParameter[]; defaultDateRange: string; cover?: boolean }
+/** File outputs of a run (json is the on-screen preview). */
+export type FileFormat = 'csv' | 'html' | 'pdf' | 'xlsx';
+export const SCHEDULE_FORMATS = (pdf: boolean) => [{ value: 'html', label: 'HTML (printable)' }, { value: 'csv', label: 'CSV' }, { value: 'xlsx', label: 'Excel' }, { value: 'pdf', label: pdf ? 'PDF' : 'PDF (needs Chromium on the server)' }, { value: 'both', label: 'HTML + CSV' }, { value: 'pack', label: pdf ? 'PDF + Excel (review pack)' : 'PDF + Excel (needs Chromium on the server)' }];
 export interface ReportColumn { key: string; label: string; type?: 'date' | 'datetime' | 'number' | 'pct' | 'minutes' | 'text' | 'boolean' }
 export interface ReportChart { type: 'bar' | 'line'; title: string; data: Record<string, unknown>[]; x: string; y: string | string[]; labels?: Record<string, string> }
 export interface ReportSection { title: string; columns: ReportColumn[]; rows: Record<string, unknown>[] }

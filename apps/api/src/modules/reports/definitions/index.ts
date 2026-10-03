@@ -5,3 +5,4 @@ import './contracts';
 import './operations';
 import './inventory';
 import './audit';
+import './service-review';

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Play, Download, FileText, CalendarClock, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react';
+import { Play, Download, FileText, FileSpreadsheet, Printer, CalendarClock, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader, Tabs, Card, Button, Drawer, DataTable, Badge, Pagination, Select, ConfirmDialog, LoadingBlock, EmptyState, type Column } from '@/components/ui';
 import { get, post, patch, del, download, ApiError } from '@/api/client';
@@ -13,7 +13,7 @@ import { ParameterForm, type ParamValues } from '@/components/reports/ParameterF
 import { ReportPreview } from '@/components/reports/ReportPreview';
 import { ScheduleForm, type SchedulePayload } from '@/components/reports/ScheduleForm';
 import { RunsTable } from '@/components/reports/RunsTable';
-import { FREQUENCIES, type ReportDefinition, type RunPreview, type ReportRun, type Schedule, type Paginated } from '@/components/reports/types';
+import { FREQUENCIES, type ReportDefinition, type RunPreview, type ReportRun, type Schedule, type Paginated, type FileFormat } from '@/components/reports/types';
 
 type Tab = 'run' | 'schedules' | 'history';
 
@@ -24,7 +24,7 @@ export default function ReportsPage() {
   const canManage = !isCustomer && can('reports:manage');
   const { state, set, page, pageSize, setPage } = useListState({ tab: 'run' });
   const tab = (['run', 'schedules', 'history'].includes(state.tab) ? state.tab : 'run') as Tab;
-  const defs = useQuery({ queryKey: ['reports', 'definitions'], queryFn: () => get<{ items: ReportDefinition[]; customerId: string | null; canManage: boolean }>('/reports/definitions'), staleTime: 5 * 60_000 });
+  const defs = useQuery({ queryKey: ['reports', 'definitions'], queryFn: () => get<{ items: ReportDefinition[]; customerId: string | null; canManage: boolean; pdf: boolean }>('/reports/definitions'), staleTime: 5 * 60_000 });
   const tabs = useMemo(() => [{ key: 'run' as Tab, label: 'Run a report' }, ...(canManage ? [{ key: 'schedules' as Tab, label: 'Schedules' }] : []), { key: 'history' as Tab, label: 'History' }], [canManage]);
   const [scheduleDraft, setScheduleDraft] = useState<Partial<Schedule> | null>(null);
   return (
@@ -32,8 +32,8 @@ export default function ReportsPage() {
       <PageHeader title="Reports" subtitle={isCustomer ? 'Service reports for your organization' : 'Ad-hoc reporting, scheduled customer reports and history'} />
       <Tabs tabs={tabs} value={tab} onChange={(t) => set({ tab: t }, false)} className="mb-4" />
       {defs.isPending && <LoadingBlock />}
-      {defs.data && tab === 'run' && <RunTab definitions={defs.data.items} isCustomer={!!isCustomer} canManage={canManage} initialKey={state.report} onSaveAsSchedule={(d) => { setScheduleDraft(d); set({ tab: 'schedules' }, false); }} />}
-      {defs.data && tab === 'schedules' && canManage && <SchedulesTab definitions={defs.data.items} draft={scheduleDraft} clearDraft={() => setScheduleDraft(null)} />}
+      {defs.data && tab === 'run' && <RunTab definitions={defs.data.items} isCustomer={!!isCustomer} canManage={canManage} pdf={defs.data.pdf} initialKey={state.report} onSaveAsSchedule={(d) => { setScheduleDraft(d); set({ tab: 'schedules' }, false); }} />}
+      {defs.data && tab === 'schedules' && canManage && <SchedulesTab definitions={defs.data.items} pdf={defs.data.pdf} draft={scheduleDraft} clearDraft={() => setScheduleDraft(null)} />}
       {defs.data && tab === 'history' && <HistoryTab definitions={defs.data.items} isCustomer={!!isCustomer} canManage={canManage} page={page} pageSize={pageSize} setPage={setPage} filters={{ reportKey: state.reportKey, customerId: state.customerId }} setFilters={(f) => set(f)} />}
     </div>
   );
@@ -41,7 +41,7 @@ export default function ReportsPage() {
 
 // ---------------------------------------------------------------- run
 
-function RunTab({ definitions, isCustomer, canManage, initialKey, onSaveAsSchedule }: { definitions: ReportDefinition[]; isCustomer: boolean; canManage: boolean; initialKey?: string; onSaveAsSchedule: (d: Partial<Schedule>) => void }) {
+function RunTab({ definitions, isCustomer, canManage, pdf, initialKey, onSaveAsSchedule }: { definitions: ReportDefinition[]; isCustomer: boolean; canManage: boolean; pdf: boolean; initialKey?: string; onSaveAsSchedule: (d: Partial<Schedule>) => void }) {
   const qc = useQueryClient();
   const [key, setKey] = useState<string | null>(initialKey && definitions.some((d) => d.key === initialKey) ? initialKey : definitions[0]?.key ?? null);
   const [params, setParams] = useState<ParamValues>({});
@@ -57,7 +57,7 @@ function RunTab({ definitions, isCustomer, canManage, initialKey, onSaveAsSchedu
     onError: (e: ApiError) => toast.error(e.message),
   });
   const file = useMutation({
-    mutationFn: (format: 'csv' | 'html') => post<ReportRun>('/reports/run', { reportKey: key, parameters: params, format }),
+    mutationFn: (format: FileFormat) => post<ReportRun>('/reports/run', { reportKey: key, parameters: params, format }),
     onSuccess: async (r) => {
       qc.invalidateQueries({ queryKey: ['reports', 'runs'] });
       if (r.attachmentId) await download(`/attachments/${r.attachmentId}/download`, r.filename ?? `${r.name}.${r.format}`);
@@ -78,8 +78,10 @@ function RunTab({ definitions, isCustomer, canManage, initialKey, onSaveAsSchedu
             <ParameterForm definition={def} value={params} onChange={setParams} hide={isCustomer ? ['customer'] : []} />
             <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-default">
               <Button icon={<Play className="h-4 w-4" />} loading={run.isPending} onClick={() => run.mutate()}>Run</Button>
-              <Button variant="outline" icon={<Download className="h-4 w-4" />} loading={file.isPending && file.variables === 'csv'} onClick={() => file.mutate('csv')}>Download CSV</Button>
-              <Button variant="outline" icon={<FileText className="h-4 w-4" />} loading={file.isPending && file.variables === 'html'} onClick={() => file.mutate('html')}>Download HTML</Button>
+              <Button variant="outline" icon={<Printer className="h-4 w-4" />} loading={file.isPending && file.variables === 'pdf'} disabled={!pdf || file.isPending} title={pdf ? 'A4 PDF with a cover page' : 'PDF output needs Chromium on the server (see Operations)'} onClick={() => file.mutate('pdf')}>Download PDF</Button>
+              <Button variant="outline" icon={<FileSpreadsheet className="h-4 w-4" />} loading={file.isPending && file.variables === 'xlsx'} disabled={file.isPending} title="Excel workbook: one sheet per part" onClick={() => file.mutate('xlsx')}>Download Excel</Button>
+              <Button variant="outline" icon={<Download className="h-4 w-4" />} loading={file.isPending && file.variables === 'csv'} disabled={file.isPending} onClick={() => file.mutate('csv')}>Download CSV</Button>
+              <Button variant="outline" icon={<FileText className="h-4 w-4" />} loading={file.isPending && file.variables === 'html'} disabled={file.isPending} onClick={() => file.mutate('html')}>Download HTML</Button>
               {canManage && (
                 <Button variant="ghost" icon={<CalendarClock className="h-4 w-4" />} onClick={() => onSaveAsSchedule({ reportKey: def.key, name: `${def.name} – weekly`, customerId: (params.customerId as string) || null, dateRange: typeof params.dateRange === 'string' && params.dateRange !== 'custom' ? params.dateRange : 'last_7_days', filters: Object.fromEntries(Object.entries(params).filter(([k]) => !['customerId', 'dateRange', 'from', 'to'].includes(k))) })}>
                   Save as schedule
@@ -98,7 +100,7 @@ function RunTab({ definitions, isCustomer, canManage, initialKey, onSaveAsSchedu
 
 // ---------------------------------------------------------------- schedules
 
-function SchedulesTab({ definitions, draft, clearDraft }: { definitions: ReportDefinition[]; draft: Partial<Schedule> | null; clearDraft: () => void }) {
+function SchedulesTab({ definitions, pdf, draft, clearDraft }: { definitions: ReportDefinition[]; pdf: boolean; draft: Partial<Schedule> | null; clearDraft: () => void }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['reports', 'schedules'], queryFn: () => get<{ items: Schedule[] }>('/reports/schedules') });
   const [editing, setEditing] = useState<Partial<Schedule> | null>(draft);
@@ -165,7 +167,7 @@ function SchedulesTab({ definitions, draft, clearDraft }: { definitions: ReportD
         <DataTable columns={columns} rows={q.data?.items ?? []} loading={q.isPending} empty={<EmptyState title="No scheduled reports" description="Create a schedule to deliver reports to customers and managers automatically." action={<Button onClick={() => setEditing({})}>New schedule</Button>} />} />
       </Card>
       <Drawer open={!!editing} onClose={close} title={editing?.id ? 'Edit schedule' : 'New schedule'} width="max-w-2xl">
-        {editing && <ScheduleForm definitions={definitions} initial={editing} saving={save.isPending} onCancel={close} onSubmit={(p) => save.mutate(p)} />}
+        {editing && <ScheduleForm definitions={definitions} pdf={pdf} initial={editing} saving={save.isPending} onCancel={close} onSubmit={(p) => save.mutate(p)} />}
       </Drawer>
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={() => deleting && remove.mutate(deleting.id)} title="Delete schedule?" description={`"${deleting?.name}" will no longer run. Past report runs are kept.`} confirmLabel="Delete" danger loading={remove.isPending} />
     </div>

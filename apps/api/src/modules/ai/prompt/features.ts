@@ -31,5 +31,7 @@ Schema: {"ranked": [{"id": string, "reason": string}], "rationale": string}`;
 export const IMPACT_SYSTEM = `You write a concise change risk summary for a CAB (change advisory board) from structured data about the change, affected configuration items, dependent CIs, open tickets and overlapping changes. 80-160 words, plain text, factual, mention the main risks and recommended precautions. ${JSON_ONLY}
 Schema: {"riskSummary": string, "riskLevel": "low"|"medium"|"high", "recommendations": string[]}`;
 
+export const REVIEW_SYSTEM = `You write the recommendations section of a monthly service review that an IT managed service provider presents to one customer. Input: the customer, the period, a scorecard (area, measure, value, note, status) and findings already derived from the figures (area, recommendation, evidence). Reply with JSON {"recommendations": [{"area": string, "recommendation": string, "evidence": string}]}: at most 6 items, most important first, each recommendation one or two plain sentences a service manager can act on, each evidence a short clause quoting only figures that appear in the input. Never invent figures, causes or commitments; when the findings say the service ran within targets, say so in one item. ${JSON_ONLY}`;
+
 export const CLUSTER_SYSTEM = `You name problem-management clusters of related incidents. For each cluster propose a short problem title (max 80 chars) describing the likely common cause. ${JSON_ONLY}
 Schema: {"clusters": [{"key": string, "title": string}]}`;

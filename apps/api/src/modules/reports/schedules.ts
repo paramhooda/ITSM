@@ -7,12 +7,17 @@ import type { Tx } from '@/db/client';
 import { NotFoundError, ValidationError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { enqueue } from '@/jobs/queues';
+import { pdfAvailable } from '@/lib/pdf';
 import { findReport, requireReport, isCustomerUser } from './registry';
 import { DATE_RANGE_PRESETS, isValidTimezone } from './dates';
 
 export const FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'cron'] as const;
 export type Frequency = (typeof FREQUENCIES)[number];
-export const FORMATS = ['csv', 'html', 'both'] as const;
+/** `both` is CSV + HTML; `pack` is PDF + Excel (the review pack). */
+export const FORMATS = ['csv', 'html', 'pdf', 'xlsx', 'both', 'pack'] as const;
+export type ScheduleFormat = (typeof FORMATS)[number];
+/** The files one schedule run produces. */
+export const scheduleFormats = (format: string): ('csv' | 'html' | 'pdf' | 'xlsx')[] => (format === 'both' ? ['csv', 'html'] : format === 'pack' ? ['pdf', 'xlsx'] : format === 'csv' || format === 'html' || format === 'pdf' || format === 'xlsx' ? [format] : ['html']);
 export const DELIVERIES = ['email', 'portal', 'both'] as const;
 
 export type ScheduleRow = typeof schema.reportSchedules.$inferSelect;
@@ -70,7 +75,7 @@ export function computeNextRun(s: { frequency: string; cronExpression?: string |
   }
 }
 
-function validate(ctx: Ctx, input: Partial<ScheduleInput>, existing?: ScheduleRow) {
+async function validate(ctx: Ctx, input: Partial<ScheduleInput>, existing?: ScheduleRow) {
   const reportKey = input.reportKey ?? existing?.reportKey;
   if (!reportKey) throw new ValidationError('reportKey is required');
   const def = findReport(reportKey);
@@ -90,6 +95,7 @@ function validate(ctx: Ctx, input: Partial<ScheduleInput>, existing?: ScheduleRo
   if (!isValidTimezone(timezone)) throw new ValidationError(`Unknown timezone: ${timezone}`);
   const format = input.format ?? existing?.format;
   if (format && !(FORMATS as readonly string[]).includes(format)) throw new ValidationError('Invalid format');
+  if (format && scheduleFormats(format).includes('pdf') && !(await pdfAvailable())) throw new ValidationError('PDF output is not available on this server: Chromium is not installed (see docs/OPERATIONS.md, Reports)');
   return { def, customerId, frequency, cronExpression, timezone };
 }
 
@@ -138,7 +144,7 @@ export async function getSchedule(ctx: Ctx, id: string) {
 export async function createSchedule(ctx: Ctx, input: ScheduleInput) {
   ctx.require('reports:manage');
   if (isCustomerUser(ctx)) throw new ValidationError('Schedules are managed by the service provider');
-  const { customerId, frequency, cronExpression, timezone } = validate(ctx, input);
+  const { customerId, frequency, cronExpression, timezone } = await validate(ctx, input);
   if (!input.recipients.length && !input.recipientUserIds.length && !input.filters.customerContacts && input.delivery === 'email') throw new ValidationError('At least one recipient is required for email delivery');
   const nextRunAt = input.isActive ? computeNextRun({ frequency, cronExpression, timezone }) : null;
   const [row] = await ctx.tx
@@ -152,7 +158,7 @@ export async function createSchedule(ctx: Ctx, input: ScheduleInput) {
 export async function updateSchedule(ctx: Ctx, id: string, patch: Partial<ScheduleInput>) {
   ctx.require('reports:manage');
   const before = await loadSchedule(ctx, id);
-  const { customerId, frequency, cronExpression, timezone } = validate(ctx, patch, before);
+  const { customerId, frequency, cronExpression, timezone } = await validate(ctx, patch, before);
   const merged = { ...before, ...patch, customerId, frequency, cronExpression, timezone };
   const scheduleChanged = ['frequency', 'cronExpression', 'timezone', 'isActive'].some((k) => k in patch);
   const nextRunAt = !merged.isActive ? null : scheduleChanged || !before.nextRunAt ? computeNextRun(merged) : before.nextRunAt;
