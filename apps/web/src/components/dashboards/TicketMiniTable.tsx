@@ -6,6 +6,8 @@ import { fmtDuration, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { TicketRow, SlaCompact } from './types';
 import { TICKET_CATEGORY_COLORS } from '@/lib/statusColors';
+import { RiskBadge, SentimentBadge, isUnhappy } from '@/components/tickets/RiskBadge';
+import type { RiskLevel, Sentiment } from '@/components/tickets/types';
 
 export type TicketColumn = 'customer' | 'site' | 'priority' | 'severity' | 'status' | 'category' | 'ci' | 'sla' | 'assignee' | 'age' | 'resolved' | 'activity' | 'due' | 'visit';
 
@@ -58,6 +60,8 @@ export function TicketMiniTable({ rows, columns = ['customer', 'priority', 'stat
                 <Link to={link(t.id)} className="text-[12.5px] font-medium text-brand-700 hover:underline">{t.number}</Link>
                 {t.is_major && <Badge color="red" className="ml-1.5">Major</Badge>}
                 {t.escalation_level > 0 && <Badge color="orange" className="ml-1.5">Esc {t.escalation_level}</Badge>}
+                {!isCustomer && t.breach_risk === 'high' && <RiskBadge risk={{ level: t.breach_risk as RiskLevel, score: 0, reason: '' }} compact className="ml-1.5" />}
+                {!isCustomer && isUnhappy(t.last_sentiment as Sentiment) && <SentimentBadge sentiment={t.last_sentiment as Sentiment} compact className="ml-1.5 align-text-bottom" />}
                 <div className="truncate text-[13px] text-default" title={t.title}>{t.title}</div>
               </td>
               {has('customer') && !isCustomer && <td className="text-muted whitespace-nowrap max-w-[160px] truncate"><Link to={`/customers/${t.customer_id}`} className="hover:underline">{t.customer_name ?? '—'}</Link></td>}

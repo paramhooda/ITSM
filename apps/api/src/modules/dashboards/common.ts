@@ -30,6 +30,8 @@ export const AGE_BUCKET = sql`CASE WHEN now() - t.created_at < interval '4 hours
 /** Compact ticket columns used by dashboard lists. */
 export const TICKET_LIST_COLS = sql`t.id, t.number, t.type, t.title, t.customer_id, cu.name AS customer_name, pr.label AS priority, pr.color AS priority_color, pr.level AS priority_level,
   st.label AS status, st.color AS status_color, st.status_category, cat.label AS category, t.assignee_id, asg.name AS assignee, tm.name AS team, t.created_at, t.updated_at, t.resolved_at, t.last_activity_at, t.escalation_level, t.is_major, t.scope_status`;
+/** The staff lists add the breach forecast and the customer's last mood (never sent to portal users). */
+export const TICKET_LIST_COLS_STAFF = sql`${TICKET_LIST_COLS}, t.breach_risk, t.last_sentiment`;
 export const TICKET_LIST_JOINS = sql`LEFT JOIN customers cu ON cu.id = t.customer_id LEFT JOIN config_options pr ON pr.id = t.priority_id LEFT JOIN config_options st ON st.id = t.status_id LEFT JOIN config_options cat ON cat.id = t.category_id LEFT JOIN users asg ON asg.id = t.assignee_id LEFT JOIN teams tm ON tm.id = t.assigned_team_id`;
 
 // ---------------------------------------------------------------- daily metric series (rollups + live)

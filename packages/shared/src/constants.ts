@@ -101,6 +101,7 @@ export const NOTIFICATION_EVENTS = [
   'report.delivered', 'user.password_reset', 'user.welcome',
   'incident.major_declared', 'incident.major_update', 'incident.major_resolved', 'incident.major_update_due',
   'page.sent', 'page.acknowledged', 'page.expired',
+  'ticket.sentiment_negative',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

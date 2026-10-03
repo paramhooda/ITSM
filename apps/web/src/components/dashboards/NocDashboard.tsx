@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ErrorBlock } from '@/components/ui';
-import { Activity, Flame, Timer, UserX, PhoneCall, AlertTriangle } from 'lucide-react';
+import { Activity, Flame, Timer, UserX, PhoneCall, AlertTriangle, Gauge } from 'lucide-react';
 import { get } from '@/api/client';
 import { fmtNumber, relativeTime, fmtDuration } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -17,7 +17,7 @@ import type { TicketRow, Breakdown } from './types';
 
 interface Noc {
   generatedAt: string;
-  totals: { open: number; openIncidents: number; breached: number; atRisk: number; unassigned: number; major: number; escalated: number; openedToday: number; resolvedToday: number; mttrTodayMinutes: number | null };
+  totals: { open: number; openIncidents: number; breached: number; atRisk: number; unassigned: number; major: number; escalated: number; openedToday: number; resolvedToday: number; mttrTodayMinutes: number | null; highRisk?: number; mediumRisk?: number; unhappy?: number };
   openIncidents: Breakdown[];
   criticalOpen: TicketRow[];
   slaAtRisk: { atRisk: number; breached: number; items: TicketRow[] };
@@ -93,8 +93,10 @@ export function NocDashboard({ days = 30, customerId = '' }: { days?: number; cu
           { label: 'Open incidents', value: fmtNumber(t.openIncidents), icon: <Activity className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened · ${fmtNumber(t.resolvedToday)} resolved today`, spark: d.series.map((s) => s.incidents), sparkLabel: `Incidents opened per day, last ${days} days`, to: '/tickets?type=incident&open=true' },
           { label: 'P1 / P2 open', value: fmtNumber(p1p2), icon: <Flame className="h-4 w-4" />, tone: p1p2 > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.major)} major · ${fmtNumber(t.escalated)} escalated` },
           { label: 'SLA at risk', value: fmtNumber(t.atRisk), icon: <Timer className="h-4 w-4" />, tone: t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} already breached`, spark: d.series.map((s) => s.breaches), sparkLabel: `SLA breaches per day, last ${days} days`, to: '/tickets?open=true&slaState=breached' },
+          { label: 'Likely to breach', value: fmtNumber(t.highRisk ?? 0), icon: <Gauge className="h-4 w-4" />, tone: (t.highRisk ?? 0) > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.mediumRisk ?? 0)} medium risk · ${fmtNumber(t.unhappy ?? 0)} unhappy customers`, to: '/tickets?open=true&breachRisk=high' },
           { label: 'Unassigned', value: fmtNumber(t.unassigned), icon: <UserX className="h-4 w-4" />, tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', to: '/tickets?open=true&unassigned=true' },
         ]}
+        columns={5}
       />
       <div className={cn('grid grid-cols-1 gap-6', (d.majorIncidents?.length ?? 0) > 0 && 'xl:grid-cols-2')}>
         {(d.majorIncidents?.length ?? 0) > 0 && <MajorIncidentsPanel items={d.majorIncidents} />}

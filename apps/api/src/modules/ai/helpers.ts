@@ -227,6 +227,8 @@ export const compactTicket = (ctx: Ctx, t: ListItem) => ({
   scope: t.scopeStatus,
   isMajor: t.isMajor,
   sla: t.sla ? { metric: t.sla.metric, state: t.sla.state, breached: t.sla.breached, dueAt: iso(t.sla.dueAt), remainingMinutes: t.sla.remainingMinutes } : null,
+  breachRisk: t.breachRisk ? { level: t.breachRisk.level, score: t.breachRisk.score, reason: t.breachRisk.reason } : null,
+  customerSentiment: t.lastSentiment?.sentiment ?? null,
   dueAt: iso(t.dueAt),
   createdAt: iso(t.createdAt),
   resolvedAt: iso(t.resolvedAt),

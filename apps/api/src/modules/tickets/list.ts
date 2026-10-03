@@ -6,6 +6,8 @@ import type { Ctx } from '@/core/context';
 import { ForbiddenError } from '@/core/errors';
 import { countRows, searchFts } from '@/core/query';
 import { slaSummariesFor, worstSla, slaStateFilterSql } from '@/modules/sla/engine';
+import type { RiskLevel } from '@/modules/sla/risk';
+import type { Sentiment } from '@/modules/ai/sentiment';
 import { TYPE_LABEL, csv, isCustomerUser, loadTicket, optionMap, toLabel } from './common';
 import type { ListQuery, StatsQuery } from './schemas';
 import { toDay, addDays, daysBetween } from '@/modules/reports/dates';
@@ -58,6 +60,9 @@ function buildWhere(ctx: Ctx, q: StatsQuery): SQL | undefined {
   if (q.slaState === 'breached') conds.push(slaStateFilterSql.breached);
   else if (q.slaState === 'at_risk') conds.push(slaStateFilterSql.atRisk);
   else if (q.slaState === 'ok') conds.push(slaStateFilterSql.ok);
+  if (q.breachRisk) conds.push(eq(T.breachRisk, q.breachRisk));
+  if (q.sentiment === 'unhappy') conds.push(inArray(T.lastSentiment, ['negative', 'angry']));
+  else if (q.sentiment) conds.push(eq(T.lastSentiment, q.sentiment));
   if (q.createdFrom) conds.push(gte(T.createdAt, new Date(q.createdFrom)));
   if (q.createdTo) {
     const to = new Date(q.createdTo);
@@ -140,6 +145,11 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
       approvalStatus: T.approvalStatus,
       catalogItemId: T.catalogItemId,
       securitySeverityId: T.securitySeverityId,
+      breachRisk: T.breachRisk,
+      breachRiskScore: T.breachRiskScore,
+      breachRiskReason: T.breachRiskReason,
+      lastSentiment: T.lastSentiment,
+      lastSentimentAt: T.lastSentimentAt,
     })
     .from(T)
     .leftJoin(st, eq(st.id, T.statusId))
@@ -155,6 +165,7 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
     .limit(q.pageSize)
     .offset((q.page - 1) * q.pageSize);
   const slas = await slaSummariesFor(ctx.tx, rows.map((r) => r.id));
+  const staff = !isCustomerUser(ctx);
   const items = rows.map((r) => ({
     id: r.id,
     number: r.number,
@@ -191,6 +202,9 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
     catalogItemId: r.catalogItemId,
     securitySeverityId: r.securitySeverityId,
     sla: worstSla(slas.get(r.id)),
+    // Staff only: the risk forecast and the customer's mood are internal signals.
+    breachRisk: staff && r.breachRisk ? { level: r.breachRisk as RiskLevel, score: r.breachRiskScore ?? 0, reason: r.breachRiskReason ?? '' } : null,
+    lastSentiment: staff && r.lastSentiment && r.lastSentiment !== 'n/a' ? { sentiment: r.lastSentiment as Sentiment, at: r.lastSentimentAt } : null,
   }));
   return { items, total, page: q.page, pageSize: q.pageSize };
 }
@@ -251,6 +265,8 @@ export async function ticketStats(ctx: Ctx, q: StatsQuery) {
       overdue: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${isNotNull(T.dueAt)} AND ${T.dueAt} < now())::int`,
       mine: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${T.assigneeId} = ${ctx.user.id}::uuid)::int`,
       major: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${T.isMajor} = true)::int`,
+      highRisk: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${T.breachRisk} = 'high')::int`,
+      unhappy: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${T.lastSentiment} IN ('negative', 'angry'))::int`,
       createdToday: sql<number>`count(*) FILTER (WHERE ${T.createdAt} >= ${todayStart})::int`,
       resolvedToday: sql<number>`count(*) FILTER (WHERE ${T.resolvedAt} >= ${todayStart})::int`,
     })

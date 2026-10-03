@@ -63,6 +63,8 @@ export const queryTicketsSchema = z.object({
   site: z.string().max(200).optional().describe('Site name or code (needs a customer)'),
   scope: z.enum(['in_scope', 'out_of_scope', 'unknown']).optional(),
   slaState: z.enum(['breached', 'at_risk', 'ok']).optional(),
+  breachRisk: z.enum(['high', 'medium', 'low']).optional().describe('Forecast of an SLA breach (scored every few minutes from the clock, how long similar tickets take and who is working on it); staff only'),
+  sentiment: z.enum(['unhappy', 'angry', 'negative', 'neutral', 'positive']).optional().describe("Mood of the customer's last comment; 'unhappy' = negative or angry; staff only"),
   isMajor: z.boolean().optional(),
   createdWithinDays: z.number().int().min(1).max(3650).optional().describe('Only tickets raised in the last N days'),
   createdFrom: z.string().max(30).optional().describe('ISO date (inclusive)'),
@@ -103,6 +105,9 @@ const resolved = (q: TicketQueryInput, names: { customer?: string | null; assign
   if (q.slaState === 'breached') parts.push('with a breached SLA');
   else if (q.slaState === 'at_risk') parts.push('with an SLA at risk');
   else if (q.slaState === 'ok') parts.push('with SLAs on track');
+  if (q.breachRisk) parts.push(`at ${q.breachRisk} risk of an SLA breach`);
+  if (q.sentiment === 'unhappy') parts.push('whose customer sounded unhappy in the last comment');
+  else if (q.sentiment) parts.push(`whose customer sounded ${q.sentiment} in the last comment`);
   if (q.createdWithinDays) parts.push(`raised in the last ${q.createdWithinDays} day${q.createdWithinDays === 1 ? '' : 's'}`);
   else if (q.createdFrom && q.createdTo) parts.push(`raised between ${q.createdFrom} and ${q.createdTo}`);
   else if (q.createdFrom) parts.push(`raised since ${q.createdFrom}`);
@@ -132,6 +137,8 @@ async function toListQuery(ctx: Ctx, input: TicketQueryInput) {
     unassigned: input.unassigned ? true : undefined,
     scopeStatus: input.scope,
     slaState: input.slaState,
+    breachRisk: isCustomerUser(ctx) ? undefined : input.breachRisk,
+    sentiment: isCustomerUser(ctx) ? undefined : input.sentiment,
     isMajor: input.isMajor,
     createdFrom: input.createdWithinDays ? new Date(Date.now() - input.createdWithinDays * 86_400_000).toISOString() : input.createdFrom,
     createdTo: input.createdWithinDays ? undefined : input.createdTo,

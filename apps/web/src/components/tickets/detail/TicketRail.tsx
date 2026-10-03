@@ -2,16 +2,17 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Building2, Users, BookOpen, Copy, Eye, EyeOff, X, Mail, Phone } from 'lucide-react';
+import { Building2, Users, BookOpen, Copy, Eye, EyeOff, X, Mail, Phone, Gauge } from 'lucide-react';
 import { Select, Avatar, Badge } from '@/components/ui';
 import { RailCard, RailRows } from '@/components/record';
 import { useEngineers } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
 import { get } from '@/api/client';
-import { fmtDate } from '@/lib/format';
+import { fmtDate, relativeTime } from '@/lib/format';
 import { truncate } from '@/lib/utils';
 import { ticketsApi, qk, itemsOf } from '../api';
 import { SlaCard } from '../SlaCard';
+import { RiskBadge, SentimentBadge } from '../RiskBadge';
 import { TicketStatusBadge, TypeBadge } from '../TicketStatusBadge';
 import type { TicketDetail } from '../types';
 import { TicketAiPanel } from '@/components/ai/TicketAiPanel';
@@ -50,6 +51,17 @@ export function TicketDetailsRail({ ticket }: { ticket: TicketDetail }) {
         />
       </RailCard>
       <SlaCard slas={ticket.slas} policyName={ticket.slaPolicy?.name} />
+      {!isCustomer && (ticket.breachRisk || ticket.lastSentiment) && (
+        <RailCard title={<><Gauge className="h-3.5 w-3.5 text-subtle" /> Outlook</>}>
+          <RailRows
+            rows={[
+              { label: 'Breach risk', value: ticket.breachRisk ? <span className="inline-flex items-center gap-1.5"><RiskBadge risk={ticket.breachRisk} /><span className="text-subtle text-[11.5px] tabular-nums">{ticket.breachRisk.score}/100</span></span> : null },
+              { label: 'Why', value: ticket.breachRisk?.reason ? <span className="text-[12px] text-muted">{ticket.breachRisk.reason}</span> : null, hidden: !ticket.breachRisk?.reason },
+              { label: 'Customer mood', value: ticket.lastSentiment ? <span className="inline-flex items-center gap-1.5"><SentimentBadge sentiment={ticket.lastSentiment.sentiment} />{ticket.lastSentiment.at && <span className="text-subtle text-[11.5px]">{relativeTime(ticket.lastSentiment.at)}</span>}</span> : null },
+            ]}
+          />
+        </RailCard>
+      )}
       <RailCard
         title={<><Users className="h-3.5 w-3.5 text-subtle" /> People</>}
         action={p.watch ? <button onClick={() => watch.mutate({ remove: ticket.isWatching })} className="text-[12px] text-brand-700 hover:underline inline-flex items-center gap-1">{ticket.isWatching ? <><EyeOff className="h-3 w-3" /> Unwatch</> : <><Eye className="h-3 w-3" /> Watch</>}</button> : undefined}

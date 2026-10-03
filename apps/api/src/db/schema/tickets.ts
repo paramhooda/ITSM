@@ -1,4 +1,5 @@
 import { pgTable, text, boolean, uuid, jsonb, index, uniqueIndex, integer, timestamp, primaryKey } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { id, timestamps, ticketTypeEnum, scopeStatusEnum, tsvector, searchExpr } from './_common';
 import { customers, sites, contacts } from './customers';
 import { configOptions, approvalWorkflows } from './config';
@@ -88,10 +89,19 @@ export const tickets = pgTable('tickets', {
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).defaultNow().notNull(),
+  /** Breach risk of the worst open SLA clock, refreshed every few minutes by the risk-score job: low | medium | high (null when no clock runs). */
+  breachRisk: text('breach_risk'),
+  breachRiskScore: integer('breach_risk_score'),
+  breachRiskReason: text('breach_risk_reason'),
+  breachRiskAt: timestamp('breach_risk_at', { withTimezone: true }),
+  /** Sentiment of the latest customer comment: positive | neutral | negative | angry. */
+  lastSentiment: text('last_sentiment'),
+  lastSentimentAt: timestamp('last_sentiment_at', { withTimezone: true }),
   searchVector: tsvector('search_vector').generatedAlwaysAs(searchExpr('number', 'title', 'description', 'external_ref')),
   ...timestamps,
 }, (t) => [
   uniqueIndex('tickets_number_idx').on(t.number),
+  index('tickets_breach_risk_idx').on(t.breachRisk).where(sql`${t.breachRisk} IS NOT NULL`),
   index('tickets_customer_created_idx').on(t.customerId, t.createdAt),
   index('tickets_status_idx').on(t.statusId),
   index('tickets_assignee_idx').on(t.assigneeId),
@@ -115,6 +125,9 @@ export const ticketComments = pgTable('ticket_comments', {
   body: text('body').notNull(),
   source: text('source').notNull().default('ui'),
   minutesSpent: integer('minutes_spent'),
+  /** Customer comments only: positive | neutral | negative | angry and a -100..100 score, set by the comment-sentiment job. */
+  sentiment: text('sentiment'),
+  sentimentScore: integer('sentiment_score'),
   editedAt: timestamp('edited_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [index('ticket_comments_ticket_idx').on(t.ticketId, t.createdAt)]);

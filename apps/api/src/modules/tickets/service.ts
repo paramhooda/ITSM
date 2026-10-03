@@ -6,6 +6,8 @@ import { enqueue } from '@/jobs/queues';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { applySlas, markAcknowledged, slaSummary, worstSla } from '@/modules/sla/engine';
+import type { RiskLevel } from '@/modules/sla/risk';
+import type { Sentiment } from '@/modules/ai/sentiment';
 import { nextTicketNumber } from './numbers';
 import { classifyScope, contractForTicket } from './scope';
 import { evaluateAssignment } from './assignment';
@@ -344,6 +346,9 @@ export async function getTicket(ctx: Ctx, id: string) {
     slaPolicy: slaPolicyId ? { id: slaPolicyId, name: policies.find((p) => p.id === slaPolicyId)?.name ?? null } : null,
     slas,
     sla: worstSla(slas),
+    // Staff only: the breach forecast and the customer's mood are internal signals.
+    breachRisk: !customer && t.breachRisk ? { level: t.breachRisk as RiskLevel, score: t.breachRiskScore ?? 0, reason: t.breachRiskReason ?? '', at: t.breachRiskAt } : null,
+    lastSentiment: !customer && t.lastSentiment && t.lastSentiment !== 'n/a' ? { sentiment: t.lastSentiment as Sentiment, at: t.lastSentimentAt } : null,
     watchers: watchers.map((w) => ({ id: w.userId, name: w.name, email: w.email })),
     isWatching: watchers.some((w) => w.userId === ctx.user.id),
     cis,
@@ -361,12 +366,13 @@ export async function getTicket(ctx: Ctx, id: string) {
 }
 
 function stripInternal(t: TicketRow) {
-  const { customFields: _cf, integrationEventId: _ie, externalRef: _er, searchVector: _sv, ...rest } = t;
+  const { customFields: _cf, integrationEventId: _ie, externalRef: _er, ...rest } = stripVector(t);
   return rest;
 }
 
+/** Drops the search vector and the raw risk/sentiment columns (exposed as objects above, staff only). */
 function stripVector(t: TicketRow) {
-  const { searchVector: _sv, ...rest } = t;
+  const { searchVector: _sv, breachRisk: _br, breachRiskScore: _bs, breachRiskReason: _bre, breachRiskAt: _ba, lastSentiment: _ls, lastSentimentAt: _la, ...rest } = t;
   return rest;
 }
 

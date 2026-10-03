@@ -392,13 +392,19 @@ export interface SlaCompact {
   paused: boolean;
 }
 
-/** Worst open metric (breached first, then highest consumption); falls back to the worst completed one. */
-export function worstSla(summaries: SlaMetricSummary[] | undefined): SlaCompact | null {
+/** The worst open metric (breached first, then highest consumption); falls back to the worst completed one. */
+export function worstSummary(summaries: SlaMetricSummary[] | undefined): SlaMetricSummary | null {
   if (!summaries?.length) return null;
   const open = summaries.filter((s) => (s.state === 'running' || s.state === 'paused' || s.state === 'breached') && !s.completedAt);
   const pool = open.length ? open : summaries.filter((s) => s.state !== 'cancelled');
   if (!pool.length) return null;
-  const pick = [...pool].sort((a, b) => Number(b.breached) - Number(a.breached) || b.pctConsumed - a.pctConsumed)[0]!;
+  return [...pool].sort((a, b) => Number(b.breached) - Number(a.breached) || b.pctConsumed - a.pctConsumed)[0]!;
+}
+
+/** Compact shape of the worst metric for list rows. */
+export function worstSla(summaries: SlaMetricSummary[] | undefined): SlaCompact | null {
+  const pick = worstSummary(summaries);
+  if (!pick) return null;
   return { metric: pick.metric, state: pick.state, dueAt: pick.dueAt, pctConsumed: pick.pctConsumed, remainingMinutes: pick.remainingMinutes, breached: pick.breached, paused: pick.state === 'paused' };
 }
 

@@ -36,7 +36,7 @@ export const CORE: ReturnType<typeof define>[] = [
   define({
     name: 'query_tickets',
     toolset: 'core',
-    description: "The one way to answer questions about tickets: how many (mode 'count'), by priority/status/customer/team/engineer/service (mode 'breakdown' + groupBy), or which ones (mode 'list'). The result's `facts` lines carry the exact figures and say what was counted; quote them. Unless the user says otherwise, tickets means open tickets (new, in progress or pending).",
+    description: "The one way to answer questions about tickets: how many (mode 'count'), by priority/status/customer/team/engineer/service (mode 'breakdown' + groupBy), or which ones (mode 'list'). Staff can also ask which tickets are likely to breach (breachRisk) or where the customer sounded unhappy (sentiment). The result's `facts` lines carry the exact figures and say what was counted; quote them. Unless the user says otherwise, tickets means open tickets (new, in progress or pending).",
     inputSchema: queryTicketsSchema,
     requires: ['tickets:read'],
     portal: ['portal:tickets'],

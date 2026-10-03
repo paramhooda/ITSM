@@ -20,6 +20,9 @@ Schema: {"suggestions": [{"source": "ticket"|"kb", "ref": string (ticket number 
 export const RESOLUTION_NOTES_SYSTEM = `You write the resolution notes of an IT ticket for the customer, from the engineer's work notes and the ticket facts. Plain text, 40-120 words, three short parts: what was wrong, what was done, how it was verified or what the customer should do if it recurs. No internal names, hostnames or tooling unless the customer already saw them; never invent causes or steps that are not in the notes. ${JSON_ONLY}
 Schema: {"notes": string}`;
 
+export const SENTIMENT_SYSTEM = `You judge the tone of a customer's message to an IT service desk. Label it positive, neutral, negative or angry (angry = hostile, threatening to escalate or cancel, shouting). Score from -100 (furious) to 100 (delighted). Use only the message. ${JSON_ONLY}
+Schema: {"sentiment": "positive"|"neutral"|"negative"|"angry", "score": number, "reason": string (one short clause)}`;
+
 export const RERANK_SYSTEM = `You rank candidate items by relevance to a ticket. Return the ids in order of relevance with a one-line reason. ${JSON_ONLY}
 Schema: {"ranked": [{"id": string, "reason": string}], "rationale": string}`;
 

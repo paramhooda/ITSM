@@ -3,6 +3,7 @@ import { registerProcessor, registerSchedule } from '../workers';
 import { withSystem, type Tx } from '@/db/client';
 import { logger } from '@/core/logger';
 import { triageTicket } from '@/modules/ai/triage';
+import { analyseComment, sweepUnlabelled } from '@/modules/ai/sentiment';
 
 /**
  * Assistant housekeeping: conversations older than the retention setting are
@@ -37,5 +38,26 @@ registerProcessor({
     if (!ticketId) return;
     const out = await triageTicket(ticketId);
     logger.info(out, out.skipped ? 'ticket triage skipped' : 'ticket triaged');
+  },
+});
+
+/** After a customer comment: label its tone (see modules/ai/sentiment.ts); a sweep every 10 minutes catches lost jobs. */
+registerProcessor({
+  queue: 'ai',
+  jobName: 'comment-sentiment',
+  processor: async (job) => {
+    const commentId = String((job.data as { commentId?: string }).commentId ?? '');
+    if (!commentId) return;
+    const out = await analyseComment(commentId);
+    if (out.sentiment === 'negative' || out.sentiment === 'angry') logger.info(out, 'unhappy customer comment');
+  },
+});
+registerSchedule({ queue: 'ai', jobName: 'sentiment-sweep', pattern: '*/10 * * * *' });
+registerProcessor({
+  queue: 'ai',
+  jobName: 'sentiment-sweep',
+  processor: async () => {
+    const labelled = await sweepUnlabelled();
+    if (labelled) logger.info({ labelled }, 'sentiment sweep labelled comments');
   },
 });

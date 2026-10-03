@@ -33,6 +33,9 @@ export interface TicketRow {
   is_major: boolean;
   scope_status: string;
   sla?: SlaCompact | null;
+  /** Staff lists only: the breach forecast and the customer's last mood. */
+  breach_risk?: string | null;
+  last_sentiment?: string | null;
   ci_name?: string | null;
   ci_id?: string | null;
   severity?: string | null;

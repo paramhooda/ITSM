@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Bookmark, Trash2, Share2, AlertTriangle, Flame, ChevronDown, Inbox, Timer, UserX, UserCheck } from 'lucide-react';
+import { Plus, Bookmark, Trash2, Share2, AlertTriangle, Flame, ChevronDown, Inbox, Timer, UserX, UserCheck, Gauge } from 'lucide-react';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { TrendChart } from '@/components/dashboards/TrendChart';
 import { BreakdownBar, type BreakdownItem } from '@/components/dashboards/BreakdownBar';
@@ -14,13 +14,14 @@ import { useLookups, useEngineers, useCustomersLookup } from '@/hooks/useLookups
 import { useAuthStore } from '@/stores/auth';
 import { relativeTime, fmtDateTime, fmtNumber, fmtDate } from '@/lib/format';
 import { dotClass } from '@/lib/utils';
-import { TICKET_CATEGORY_COLORS, PRIORITY_LEVEL_COLORS, SCOPE_COLORS } from '@/lib/statusColors';
+import { TICKET_CATEGORY_COLORS, PRIORITY_LEVEL_COLORS, SCOPE_COLORS, BREACH_RISK_COLORS, SENTIMENT_COLORS } from '@/lib/statusColors';
 import { DOMAINS } from '@itsm/shared';
 import { ticketsApi, qk, itemsOf } from '@/components/tickets/api';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { ScopeBadge } from '@/components/tickets/ScopeBadge';
 import { SlaIndicator, slaTone } from '@/components/tickets/SlaIndicator';
+import { RiskBadge, SentimentBadge, isUnhappy } from '@/components/tickets/RiskBadge';
 import type { TicketListRow, TicketType, SavedView } from '@/components/tickets/types';
 
 type Tab = 'all' | TicketType;
@@ -49,6 +50,16 @@ const SLA_OPTIONS = [
   { value: 'at_risk', label: 'At risk', color: 'amber' },
   { value: 'ok', label: 'On track', color: 'green' },
 ];
+const RISK_OPTIONS = [
+  { value: 'high', label: 'Likely to breach' },
+  { value: 'medium', label: 'Medium risk' },
+  { value: 'low', label: 'Low risk' },
+];
+const SENTIMENT_OPTIONS = [
+  { value: 'unhappy', label: 'Unhappy or angry', color: 'red' },
+  { value: 'neutral', label: 'Neutral', color: 'slate' },
+  { value: 'positive', label: 'Happy', color: 'green' },
+];
 /** The assignee key carries either one of these views or an engineer id. */
 const ASSIGNEE_VIEWS = [
   { value: 'me', label: 'Assigned to me' },
@@ -57,7 +68,7 @@ const ASSIGNEE_VIEWS = [
 ];
 const DOMAIN_LABELS: Record<string, string> = { general: 'General', noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk' };
 /** Every filter the page owns; sort/order live beside them in the URL but are not filters. */
-const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId'];
+const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId'];
 const DEFAULTS = { statusCategory: 'new,open,pending', sort: 'lastActivityAt', order: 'desc' };
 /**
  * Parameters that dashboards and record pages link with (`mine=true`, `open=true`,
@@ -118,7 +129,7 @@ export default function TicketListPage() {
     const p: Record<string, unknown> = {};
     if (state.q) p.q = state.q;
     if (tab !== 'all') p.type = tab;
-    for (const k of ['customerId', 'statusCategory', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'createdFrom', 'createdTo', 'domain', 'categoryId', 'securitySeverityId'] as const) if (state[k]) p[k] = state[k];
+    for (const k of ['customerId', 'statusCategory', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'domain', 'categoryId', 'securitySeverityId'] as const) if (state[k]) p[k] = state[k];
     if (state.isMajor === 'true') p.isMajor = 'true';
     if (assigneeFilter === 'me') p.mine = 'true';
     else if (assigneeFilter === 'unassigned') p.unassigned = 'true';
@@ -242,6 +253,18 @@ export default function TicketListPage() {
     { key: 'priority', header: 'Priority', sortable: true, width: '110px', render: (r) => <PriorityBadge priority={r.priority} compact /> },
     { key: 'status', header: 'Status', sortable: true, width: '140px', render: (r) => <TicketStatusBadge status={r.status} /> },
     { key: 'dueAt', header: 'SLA', sortable: true, width: '120px', render: (r) => <SlaIndicator sla={r.sla} /> },
+    {
+      key: 'risk',
+      header: 'Risk',
+      width: '100px',
+      render: (r) => (
+        <span className="inline-flex items-center gap-1.5">
+          <RiskBadge risk={r.breachRisk} compact quiet />
+          {isUnhappy(r.lastSentiment?.sentiment) && <SentimentBadge sentiment={r.lastSentiment?.sentiment} compact />}
+          {!r.breachRisk && !isUnhappy(r.lastSentiment?.sentiment) && <span className="text-subtle text-xs">—</span>}
+        </span>
+      ),
+    },
     { key: 'scope', header: 'Scope', width: '110px', render: (r) => <ScopeBadge status={r.scopeStatus} short={false} /> },
     {
       key: 'assignee',
@@ -308,6 +331,8 @@ export default function TicketListPage() {
   if (state.securitySeverityId) addApplied('securitySeverityId', `Security severity: ${byId(state.securitySeverityId)?.label ?? '…'}`);
   if (state.scopeStatus) addApplied('scopeStatus', `Scope: ${SCOPE_OPTIONS.find((o) => o.value === state.scopeStatus)?.label ?? state.scopeStatus}`);
   if (state.slaState) addApplied('slaState', `SLA: ${SLA_OPTIONS.find((o) => o.value === state.slaState)?.label ?? state.slaState}`);
+  if (state.breachRisk) addApplied('breachRisk', `Breach risk: ${RISK_OPTIONS.find((o) => o.value === state.breachRisk)?.label ?? state.breachRisk}`);
+  if (state.sentiment) addApplied('sentiment', `Customer mood: ${SENTIMENT_OPTIONS.find((o) => o.value === state.sentiment)?.label ?? state.sentiment}`);
   if (state.createdFrom || state.createdTo) addApplied('created', `Created: ${dateRangeLabel(state.createdFrom, state.createdTo)}`, ['createdFrom', 'createdTo']);
   if (state.isMajor === 'true') addApplied('isMajor', 'Major incidents only');
 
@@ -335,6 +360,12 @@ export default function TicketListPage() {
       </FilterGroup>
       <FilterGroup label="SLA">
         <FilterOptions options={SLA_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(o.color) }))} value={state.slaState} onChange={(v) => set({ slaState: v as string | undefined })} />
+      </FilterGroup>
+      <FilterGroup label="Breach risk" hint="Forecast from the clock, how long similar tickets take and who owns it" defaultOpen={!!state.breachRisk}>
+        <FilterOptions options={RISK_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(BREACH_RISK_COLORS[o.value]) }))} value={state.breachRisk} onChange={(v) => set({ breachRisk: v as string | undefined })} />
+      </FilterGroup>
+      <FilterGroup label="Customer mood" hint="From the customer's last comment" defaultOpen={!!state.sentiment}>
+        <FilterOptions options={SENTIMENT_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(SENTIMENT_COLORS[o.value] ?? o.color) }))} value={state.sentiment} onChange={(v) => set({ sentiment: v as string | undefined })} />
       </FilterGroup>
       <FilterGroup label="Created">
         <FilterDateRange from={state.createdFrom} to={state.createdTo} onChange={(r) => set({ createdFrom: r.from, createdTo: r.to })} />
@@ -456,11 +487,13 @@ export default function TicketListPage() {
             id="tickets"
             loading={stats.isLoading}
             summary={s ? `${fmtNumber(s.total)} tickets match` : undefined}
+            columns={5}
             kpis={
               s
                 ? [
                     { label: 'Open tickets', value: fmtNumber(s.open), icon: <Inbox className="h-4 w-4" />, hint: `${fmtNumber(s.createdToday)} opened today · ${fmtNumber(s.resolvedToday)} resolved`, spark: series.map((d) => d.opened), sparkLabel: 'Tickets opened per day', onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: undefined, assignee: undefined }), scrollTo: true },
                     { label: 'SLA breached', value: fmtNumber(s.breached), tone: s.breached > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: `${fmtNumber(s.atRisk)} at risk · ${fmtNumber(s.overdue)} overdue`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: state.slaState === 'breached' ? undefined : 'breached' }), scrollTo: true, active: state.slaState === 'breached' },
+                    { label: 'Likely to breach', value: fmtNumber(s.highRisk ?? 0), tone: (s.highRisk ?? 0) > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: `${fmtNumber(s.unhappy ?? 0)} unhappy customer${s.unhappy === 1 ? '' : 's'}`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, breachRisk: state.breachRisk === 'high' ? undefined : 'high' }), scrollTo: true, active: state.breachRisk === 'high' },
                     { label: 'Unassigned', value: fmtNumber(s.unassigned), tone: s.unassigned > 0 ? 'warn' : 'good', icon: <UserX className="h-4 w-4" />, hint: `${fmtNumber(s.major)} major open`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: assigneeFilter === 'unassigned' ? undefined : 'unassigned' }), scrollTo: true, active: assigneeFilter === 'unassigned' },
                     { label: 'Assigned to me', value: fmtNumber(s.mine), icon: <UserCheck className="h-4 w-4" />, hint: `${fmtNumber(s.dueToday)} due today · ${fmtNumber(s.pendingApprovals)} awaiting approval`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: assigneeFilter === 'me' ? undefined : 'me' }), scrollTo: true, active: assigneeFilter === 'me' },
                   ]

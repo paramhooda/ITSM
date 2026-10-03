@@ -65,6 +65,12 @@ export function ticketAttention(t: TicketDetail, now: Clock, act: TicketAttentio
     .filter((s) => s.state === 'running' && s.remainingMinutes >= 0 && (s.warned || s.remainingMinutes < s.targetMinutes * 0.25))
     .sort((a, b) => a.remainingMinutes - b.remainingMinutes)[0];
   if (atRisk) items.push({ key: 'sla-at-risk', tone: 'warn', text: `${atRisk.label} SLA at risk · ${fmtDuration(atRisk.remainingMinutes)} left` });
+  // The forecast: the risk job rates the ticket likely to breach although no clock says so yet (a breached or at-risk clock already says it louder).
+  if (t.breachRisk?.level === 'high' && !breached.length && !atRisk) items.push({ key: 'breach-risk', tone: 'warn', text: `Likely to breach · ${t.breachRisk.reason}`, action: call('Escalate', act.onEscalate) });
+  // The customer's mood: an unhappy last comment deserves a reply before anything else on the ticket.
+  if (t.lastSentiment && (t.lastSentiment.sentiment === 'negative' || t.lastSentiment.sentiment === 'angry')) {
+    items.push({ key: 'sentiment', tone: t.lastSentiment.sentiment === 'angry' ? 'bad' : 'warn', text: `The customer sounded ${t.lastSentiment.sentiment === 'angry' ? 'angry' : 'unhappy'}${t.lastSentiment.at ? ` ${ago(t.lastSentiment.at, now)}` : ''}`, action: call('Reply', act.onNudge) });
+  }
 
   // Major incident: the stakeholder update cadence is the promise the team made; say when it slips.
   if (t.isMajor) {

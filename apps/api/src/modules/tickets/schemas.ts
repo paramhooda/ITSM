@@ -243,6 +243,8 @@ export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   domain: z.string().max(40).optional(),
   scopeStatus: z.enum(SCOPE_STATUSES).optional(),
   slaState: z.enum(['breached', 'at_risk', 'ok']).optional(),
+  breachRisk: z.enum(['high', 'medium', 'low']).optional(),
+  sentiment: z.enum(['unhappy', 'angry', 'negative', 'neutral', 'positive']).optional(),
   createdFrom: z.string().optional(),
   createdTo: z.string().optional(),
   unassigned: boolQ,

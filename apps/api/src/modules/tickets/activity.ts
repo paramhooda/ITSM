@@ -1,4 +1,5 @@
 import { eq, and, inArray, asc, desc, or, ilike, ne } from 'drizzle-orm';
+import { enqueue } from '@/jobs/queues';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
@@ -48,6 +49,8 @@ export async function addComment(ctx: Ctx, ticketId: string, input: CommentInput
   // A customer reply ends an "awaiting customer" wait: the ticket goes back to the service desk and the SLA clocks resume.
   if (customer) updated = (await resumeAfterCustomerReply(ctx, updated)) ?? updated;
   if (kind !== 'work_note') await notifyTicketEvent(ctx, customer ? 'ticket.customer_comment' : 'ticket.engineer_comment', updated, { comment: input.body });
+  // The tone of a customer's words is judged a moment later in the worker (the row must be committed first).
+  if (customer) void enqueue('ai', 'comment-sentiment', { commentId: comment.id }, { delay: 1500, jobId: `sentiment-${comment.id}` });
   return comment;
 }
 

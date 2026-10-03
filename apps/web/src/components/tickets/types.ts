@@ -46,6 +46,21 @@ export interface SlaMetricSummary {
   breachedAt: string | null;
 }
 
+export type RiskLevel = 'low' | 'medium' | 'high';
+export type Sentiment = 'positive' | 'neutral' | 'negative' | 'angry';
+/** Breach forecast written by the risk job (staff only; null until scored or when the clocks are done). */
+export interface BreachRisk {
+  level: RiskLevel;
+  score: number;
+  reason: string;
+  at?: string | null;
+}
+/** Mood of the customer's last comment (staff only). */
+export interface SentimentFlag {
+  sentiment: Sentiment;
+  at: string | null;
+}
+
 export interface TicketListRow {
   id: string;
   number: string;
@@ -77,6 +92,8 @@ export interface TicketListRow {
   lastActivityAt: string;
   approvalStatus: string | null;
   sla: SlaCompact | null;
+  breachRisk: BreachRisk | null;
+  lastSentiment: SentimentFlag | null;
 }
 
 export interface TicketStats {
@@ -100,6 +117,10 @@ export interface TicketStats {
   createdToday: number;
   resolvedToday: number;
   pendingApprovals: number;
+  /** Open tickets the risk job rates as likely to breach. */
+  highRisk: number;
+  /** Open tickets whose customer sounded negative or angry in the last comment. */
+  unhappy: number;
 }
 
 export interface UserLite {
@@ -407,6 +428,8 @@ export interface TicketDetail {
   slaPolicy: { id: string; name: string | null } | null;
   slas: SlaMetricSummary[];
   sla: SlaCompact | null;
+  breachRisk?: BreachRisk | null;
+  lastSentiment?: SentimentFlag | null;
   watchers: UserLite[];
   isWatching: boolean;
   cis: { id: string; name: string; hostname: string | null; ipAddress: string | null; status: string; role: string; typeId: string }[];
