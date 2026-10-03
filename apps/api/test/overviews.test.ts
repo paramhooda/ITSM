@@ -158,7 +158,10 @@ describe.skipIf(!hasDb)('module overviews (database)', () => {
 
     const all = await asAdmin((ctx) => assetsOverview(ctx));
     expect(all.total).toBeGreaterThanOrEqual(4);
-    expect(all.byCustomer.find((b) => b.key === ids.customerA)?.count).toBe(3);
+    // The customer bucket list is the top eight; other suites may hold customers with more assets, in which case A is simply not among them.
+    const mine = all.byCustomer.find((b) => b.key === ids.customerA);
+    if (mine) expect(mine.count).toBe(3);
+    else expect(all.byCustomer.every((b) => b.count >= 3)).toBe(true);
     expect(all.byCustomer.length).toBeLessThanOrEqual(8);
     expect(all.expiringSoon.some((e) => e.id === ids.b1)).toBe(true);
   });

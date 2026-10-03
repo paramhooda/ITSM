@@ -192,7 +192,8 @@ describe('contracts, scope and entitlements', () => {
   });
 
   describe('consumption and threshold notifications', () => {
-    const outboxCount = (event: string) => withSystem(async (tx) => (await tx.select({ n: sql<number>`count(*)::int` }).from(schema.notifications).where(and(eq(schema.notifications.event, event), eq(schema.notifications.entityId, ids.quarterly))))[0].n);
+    // One row per recipient: count the administrator's own, so users other suites create cannot change the figure.
+    const outboxCount = (event: string) => withSystem(async (tx) => (await tx.select({ n: sql<number>`count(*)::int` }).from(schema.notifications).where(and(eq(schema.notifications.event, event), eq(schema.notifications.entityId, ids.quarterly), eq(schema.notifications.userId, admin.id))))[0].n);
 
     it('queues the threshold notification once per window and the exhausted one once', async () => {
       const first = await as((ctx) => ent.recordConsumption(ctx, ids.quarterly, { quantity: 2, notes: 'two visits' }));
@@ -236,7 +237,7 @@ describe('contracts, scope and entitlements', () => {
       expect(row.status).toBe('expiring');
       const milestones = await withSystem((tx) => tx.select({ m: schema.contractNotifications.milestone }).from(schema.contractNotifications).where(eq(schema.contractNotifications.contractId, soon.id)));
       expect(milestones.map((m) => m.m)).toEqual(expect.arrayContaining(['expiring:90', 'expiring:7', 'missing_documents']));
-      const count = () => withSystem(async (tx) => (await tx.select({ n: sql<number>`count(*)::int` }).from(schema.notifications).where(and(eq(schema.notifications.event, 'contract.expiring'), eq(schema.notifications.entityId, soon.id))))[0].n);
+      const count = () => withSystem(async (tx) => (await tx.select({ n: sql<number>`count(*)::int` }).from(schema.notifications).where(and(eq(schema.notifications.event, 'contract.expiring'), eq(schema.notifications.entityId, soon.id), eq(schema.notifications.userId, admin.id))))[0].n);
       expect(await count()).toBe(1);
       await runContractsDaily();
       expect(await count()).toBe(1);

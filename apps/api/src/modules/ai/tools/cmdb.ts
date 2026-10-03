@@ -9,7 +9,7 @@ import { discoveryOverview, listFindings, applyFindingById, ignoreFinding } from
 import { listEvents, createTicketFromEvent } from '@/modules/integrations/service';
 import { portalCis } from '@/modules/portal/service';
 import { define, type PreviewDetail } from './types';
-import { isCustomerUser, ticketLink, trunc, iso, resolveCustomerId, resolveCi, resolveTeam, UUID_RE } from '../helpers';
+import { isCustomerUser, ticketLink, trunc, iso, resolveCustomerId, resolveCi, resolveTeam, forCustomer, UUID_RE } from '../helpers';
 
 /** CMDB tools: configuration items, relationships, business services, impact, discovery findings and monitoring events. */
 
@@ -100,7 +100,7 @@ export const CMDB: ReturnType<typeof define>[] = [
       const customerId = await resolveCustomerId(ctx, input.customer);
       const res = await listCisFull(ctx, { page: 1, pageSize: limit, q: input.q, customerId, typeKey: input.typeKey, status: input.status as never, criticality: input.criticality, environment: input.environment, stale: input.stale, unowned: input.unowned, sort: 'name', order: 'asc' } as never);
       const items = res.items as unknown as { id: string; name: string; typeName: string | null; hostname: string | null; ipAddress: string | null; customerName: string | null; siteName: string | null; status: string; criticality: string; environment: string | null; ownerTeamName?: string | null; lastSeenAt: Date | null }[];
-      return { total: res.total, facts: [`${res.total} configuration item(s)${input.customer ? ` for ${input.customer}` : ''}${input.typeKey ? ` of type ${input.typeKey}` : ''}${input.stale ? ' not seen for 30 days' : ''}${input.unowned ? ' without an owner team' : ''}`], items: items.map((c) => ({ name: c.name, type: c.typeName, hostname: c.hostname, ipAddress: c.ipAddress, customer: c.customerName, site: c.siteName, status: c.status, criticality: c.criticality, environment: c.environment, ownerTeam: c.ownerTeamName ?? null, lastSeenAt: iso(c.lastSeenAt), link: ciLink(c.id) })) };
+      return { total: res.total, facts: [`${res.total} configuration item(s)${await forCustomer(ctx, customerId)}${input.typeKey ? ` of type ${input.typeKey}` : ''}${input.stale ? ' not seen for 30 days' : ''}${input.unowned ? ' without an owner team' : ''}`], items: items.map((c) => ({ name: c.name, type: c.typeName, hostname: c.hostname, ipAddress: c.ipAddress, customer: c.customerName, site: c.siteName, status: c.status, criticality: c.criticality, environment: c.environment, ownerTeam: c.ownerTeamName ?? null, lastSeenAt: iso(c.lastSeenAt), link: ciLink(c.id) })) };
     },
     summary: (_i, result) => `Listed ${(result as { items: unknown[] }).items.length} configuration items`,
   }),
@@ -149,7 +149,7 @@ export const CMDB: ReturnType<typeof define>[] = [
       const customerId = await resolveCustomerId(ctx, input.customer);
       if (!input.service) {
         const res = await listBusinessServices(ctx, customerId);
-        return { facts: [`${res.items.length} business service(s)${input.customer ? ` for ${input.customer}` : ''}, ${res.items.filter((s) => s.health !== 'good').length} with open incidents`], items: res.items.map((s) => ({ name: s.name, customer: s.customerName, status: s.status, criticality: s.criticality, tier: s.tier, owner: s.owner, dependencies: s.dependencies, openIncidents: s.openIncidents, health: s.health, link: `/cmdb/services/${s.id}` })) };
+        return { facts: [`${res.items.length} business service(s)${await forCustomer(ctx, customerId)}, ${res.items.filter((s) => s.health !== 'good').length} with open incidents`], items: res.items.map((s) => ({ name: s.name, customer: s.customerName, status: s.status, criticality: s.criticality, tier: s.tier, owner: s.owner, dependencies: s.dependencies, openIncidents: s.openIncidents, health: s.health, link: `/cmdb/services/${s.id}` })) };
       }
       const hit = await resolveCi(ctx, input.service, customerId);
       const map = (await serviceMap(ctx, hit.id)) as unknown as { nodes: { id: string; name: string; typeName?: string; type?: string; criticality?: string; status?: string; depth?: number; layer?: number }[]; edges: unknown[]; truncated?: boolean };
@@ -198,7 +198,7 @@ export const CMDB: ReturnType<typeof define>[] = [
       const items = res.items as unknown as Record<string, unknown>[];
       return {
         total: res.total,
-        facts: [`${res.total} event(s) in the last ${input.days ?? 7} days${input.customer ? ` for ${input.customer}` : ''}${input.host ? ` from ${input.host}` : ''}`],
+        facts: [`${res.total} event(s) in the last ${input.days ?? 7} days${await forCustomer(ctx, customerId)}${input.host ? ` from ${input.host}` : ''}`],
         items: items.map((e) => ({ id: e.id, receivedAt: iso(e.receivedAt as Date), integration: e.integrationName ?? e.integrationType ?? null, severity: e.severity ?? null, status: e.status ?? null, host: e.host ?? e.ipAddress ?? null, message: trunc(String(e.message ?? ''), 300), processing: e.processingStatus ?? null, note: trunc(String(e.processingNote ?? ''), 160) || null, customer: e.customerName ?? null, ticket: e.ticketNumber ?? null, ticketLink: e.ticketId ? ticketLink(ctx, String(e.ticketId)) : null })),
         link: '/admin/integrations',
       };

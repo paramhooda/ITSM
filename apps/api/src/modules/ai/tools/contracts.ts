@@ -10,7 +10,7 @@ import { customerScope } from '@/modules/contracts/scope';
 import { slaCompliance, listPolicies, type ComplianceGroupBy } from '@/modules/sla/policies';
 import { define } from './types';
 import { ticketRef } from './core';
-import { isCustomerUser, period, resolveCustomerId, resolveContract, resolveTicket, customerName } from '../helpers';
+import { isCustomerUser, period, resolveCustomerId, resolveContract, resolveTicket, customerName, forCustomer } from '../helpers';
 
 /** Contract tools: contracts, entitlements, scope, service levels and compliance (customer users see their own organisation only). */
 
@@ -74,7 +74,7 @@ export const CONTRACTS: ReturnType<typeof define>[] = [
       const res = await listContracts(ctx, { page: 1, pageSize: input.limit ?? 20, sort: 'endDate', order: 'asc', customerId, status: input.status ? [input.status] : undefined, expiringWithinDays: input.expiringWithinDays, q: input.q });
       return {
         total: res.total,
-        facts: [`${res.total} contract(s)${input.status ? ` with status ${input.status}` : ''}${input.expiringWithinDays !== undefined ? ` expiring within ${input.expiringWithinDays} days` : ''}${input.customer ? ` for ${input.customer}` : ''}`],
+        facts: [`${res.total} contract(s)${input.status ? ` with status ${input.status}` : ''}${input.expiringWithinDays !== undefined ? ` expiring within ${input.expiringWithinDays} days` : ''}${await forCustomer(ctx, customerId)}`],
         items: res.items.map((c) => ({ id: c.id, number: c.number, name: c.name, customer: c.customerName, status: c.status, type: c.typeLabel, startDate: c.startDate, endDate: c.endDate, renewalDate: c.renewalDate, daysToExpiry: c.daysToExpiry, autoRenew: c.autoRenew, services: c.serviceNames, entitlements: c.entitlements, link: `/contracts/${c.id}` })),
       };
     },
@@ -137,9 +137,10 @@ export const CONTRACTS: ReturnType<typeof define>[] = [
     run: async (ctx, input) => {
       const id = (await resolveCustomerId(ctx, input.customer, true))!;
       const ents = await customerEntitlements(ctx, id);
-      return { customerId: id, facts: [`${ents.length} entitlement(s)${ents.filter((e) => e.utilization.exhausted).length ? `, ${ents.filter((e) => e.utilization.exhausted).length} exhausted` : ''}`], items: ents.map((e) => ({ name: e.name, type: e.typeLabel, service: e.serviceName, unit: e.unit, contract: e.contractNumber, period: e.utilization.period, periodStart: e.utilization.periodStart, periodEnd: e.utilization.periodEnd, quantity: e.utilization.quantity, used: e.utilization.used, remaining: e.utilization.remaining, pct: e.utilization.pct, overThreshold: e.utilization.overThreshold, exhausted: e.utilization.exhausted })) };
+      const scope = await forCustomer(ctx, id);
+      return { customerId: id, customer: scope.replace(/^ for /, ''), facts: [`${ents.length} entitlement(s)${scope}${ents.filter((e) => e.utilization.exhausted).length ? `, ${ents.filter((e) => e.utilization.exhausted).length} exhausted` : ''}`], items: ents.map((e) => ({ name: e.name, type: e.typeLabel, service: e.serviceName, unit: e.unit, contract: e.contractNumber, period: e.utilization.period, periodStart: e.utilization.periodStart, periodEnd: e.utilization.periodEnd, quantity: e.utilization.quantity, used: e.utilization.used, remaining: e.utilization.remaining, pct: e.utilization.pct, overThreshold: e.utilization.overThreshold, exhausted: e.utilization.exhausted })) };
     },
-    summary: (input, result) => `Read ${(result as { items: unknown[] }).items.length} entitlements${input.customer ? ` for ${input.customer}` : ''}`,
+    summary: (_i, result) => `Read ${(result as { items: unknown[] }).items.length} entitlements for ${(result as { customer: string }).customer}`,
   }),
 
   define({

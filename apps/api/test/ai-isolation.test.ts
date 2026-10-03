@@ -136,6 +136,64 @@ describe('every portal-reachable tool answers for the user’s own organisation 
     for (const forbidden of ['list_customers', 'get_customer', 'get_ci', 'ci_history', 'impact_analysis', 'my_workload', 'problem_candidates', 'engineer_directory', 'out_of_scope_work', 'top_services_by_incidents']) expect(names).not.toContain(forbidden);
   });
 
+  it('every portal-offered tool, asked for Beta by name, number, id or code, returns no Beta identifier (reads) and previews Alpha only or refuses (actions)', async () => {
+    const beta = [BETA, BETA_CODE, numbers.b1!, ids.b, ids.contractB, ids.siteB, `ISO-B-${S}`, `Beta visits ${S}`, `Beta firewall PM ${S}`, `ISO-FV-${S}`, `Beta site visit ${S}`, 'Beta profile', ticketIds[2]!];
+    const VALUES: Record<string, unknown> = { customer: BETA, ticket: numbers.b1, child: numbers.b1, target: numbers.b1, duplicateOf: numbers.b1, ref: numbers.b1, contract: `ISO-B-${S}`, visit: `ISO-FV-${S}`, article: `Firewall VPN guide for Beta ${S}`, asset: `BETA-${S}`, ci: `beta-fw-${S}`, q: `Beta ${S}`, question: 'where are the Beta tickets', kind: 'ticket', to: '/portal/tickets', title: `Beta probe ${S}`, description: 'probe', body: 'probe', comment: 'probe', note: 'probe', notes: 'probe', reason: 'probe', decision: 'approved', type: 'incident', helpful: true, quantity: 1, entitlement: `Beta visits ${S}`, site: `Beta HQ ${S}`, service: `Firewall Service ${S}`, name: `Beta ${S}`, view: 'management', toolset: 'tickets', mode: 'list', rating: 5, days: 30, limit: 5 };
+    const inner = (t: unknown): unknown => {
+      let cur = t as { def?: { innerType?: unknown; type?: string }; unwrap?: () => unknown };
+      for (let i = 0; i < 4 && cur?.def && (cur.def.type === 'optional' || cur.def.type === 'default' || cur.def.type === 'nullable'); i++) cur = (cur.unwrap ? cur.unwrap() : cur.def.innerType) as typeof cur;
+      return cur;
+    };
+    const fill = (tool: AiTool): Record<string, unknown> => {
+      const shape = ((tool.inputSchema as z.ZodObject<z.ZodRawShape>).shape ?? {}) as Record<string, z.ZodTypeAny>;
+      const out: Record<string, unknown> = {};
+      for (const [k, def] of Object.entries(shape)) {
+        if (k in VALUES) {
+          out[k] = VALUES[k];
+          continue;
+        }
+        const base = inner(def) as { def?: { type?: string; entries?: Record<string, string> } };
+        const optional = (def as { def?: { type?: string } }).def?.type === 'optional';
+        if (optional) continue;
+        const kind = base.def?.type;
+        if (kind === 'enum') out[k] = Object.keys(base.def?.entries ?? {})[0];
+        else if (kind === 'string') out[k] = 'probe';
+        else if (kind === 'number') out[k] = 1;
+        else if (kind === 'boolean') out[k] = false;
+        else if (kind === 'array') out[k] = [];
+        else if (kind === 'object') out[k] = {};
+      }
+      return out;
+    };
+    const offered = await asAlpha(async (ctx) => availableTools(ctx));
+    expect(offered.length).toBeGreaterThanOrEqual(30);
+    const checked: string[] = [];
+    const refused: string[] = [];
+    for (const t of offered) {
+      if (t.name === 'enable_toolset') continue;
+      const input = fill(t);
+      const parsed = t.inputSchema.safeParse(input);
+      if (!parsed.success) {
+        refused.push(`${t.name} (input: ${parsed.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; ')})`);
+        continue;
+      }
+      const run = t.action ? (ctx: Ctx) => t.preview!(ctx, parsed.data as never) : (ctx: Ctx) => t.run(ctx, parsed.data as never);
+      const result = await asAlpha(run).then((v) => ({ ok: true as const, v }), (e: Error) => ({ ok: false as const, e }));
+      if (!result.ok) {
+        refused.push(`${t.name} (${result.e.message.slice(0, 80)})`);
+        continue;
+      }
+      const out = text(result.v);
+      for (const needle of beta) expect(out, `${t.name} leaked "${needle}"`).not.toContain(needle);
+      checked.push(t.name);
+    }
+    // At least the self-service core answered (with Alpha's data); refusals are fine, leaks are not.
+    expect(checked, refused.join('\n')).toEqual(expect.arrayContaining(['search', 'knowledge_search', 'list_contracts', 'entitlement_usage', 'customer_scope', 'sla_compliance', 'list_visits', 'list_assets', 'pm_programs', 'list_services', 'list_catalog_items']));
+    // Beta's site, ticket or article are refused by the resolvers rather than redirected to Alpha's records.
+    for (const name of ['query_tickets', 'reopen_ticket', 'add_comment', 'get_article']) expect(refused.some((r) => r.startsWith(name)), `${name}\n${refused.join('\n')}`).toBe(true);
+    expect(checked.length + refused.length).toBe(offered.length - 1);
+  });
+
   it('search finds Alpha’s ticket and never Beta’s, even with Beta’s exact ticket number', async () => {
     const tool = toolByName('search')!;
     const byWords = (await asAlpha((ctx) => tool.run(ctx, { q: `Firewall failover ${S}`, types: ['ticket', 'kb'], limit: 20 }))) as { hits: { title: string; type: string }[] };

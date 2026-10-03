@@ -8,7 +8,7 @@ import { listPrograms, listOccurrences, scheduleOccurrence, pmSummary } from '@/
 import { portalMaintenance, acknowledgePortalVisit } from '@/modules/portal/service';
 import { define, type PreviewDetail } from './types';
 import { ticketRef } from './core';
-import { isCustomerUser, ticketLink, trunc, iso, dayStr, parseWhen, resolveCustomerId, resolveVisit, resolveTicket, resolveSite, resolveService, resolveContract, resolveEngineer, resolveTeam, resolveOption, customerName } from '../helpers';
+import { isCustomerUser, ticketLink, trunc, iso, dayStr, parseWhen, resolveCustomerId, resolveVisit, resolveTicket, resolveSite, resolveService, resolveContract, resolveEngineer, resolveTeam, resolveOption, customerName, forCustomer } from '../helpers';
 
 /** Field service tools: visits, the engineer calendar, preventive maintenance (customer users see their own visits and maintenance). */
 
@@ -57,7 +57,7 @@ export const FIELD: ReturnType<typeof define>[] = [
       const statuses = input.status?.length ? input.status : OPEN;
       const res = await listVisits(ctx, { page: 1, pageSize: input.limit ?? 20, customerId, status: statuses.join(','), engineerId: engineer?.id, from: input.from, to: input.to, q: input.q, sort: 'scheduledStart', order: 'asc' } as never);
       const items = res.items as unknown as VisitListItem[];
-      return { total: res.total, facts: [`${res.total} visit(s) with status ${statuses.join('/')}${input.customer ? ` for ${input.customer}` : ''}${engineer ? ` assigned to ${engineer.name}` : ''}`], items: items.map((v) => compactVisit(ctx, v)) };
+      return { total: res.total, facts: [`${res.total} visit(s) with status ${statuses.join('/')}${await forCustomer(ctx, customerId)}${engineer ? ` assigned to ${engineer.name}` : ''}`], items: items.map((v) => compactVisit(ctx, v)) };
     },
     summary: (_i, result) => `Listed ${(result as { items: unknown[] }).items.length} field visits`,
   }),
@@ -167,7 +167,7 @@ export const FIELD: ReturnType<typeof define>[] = [
       const keys = ['name', 'customerName', 'siteName', 'serviceName', 'frequency', 'startDate', 'endDate', 'requiresSiteVisit', 'assignedTeamName', 'assignedEngineerName', 'checklistCount', 'nextPlannedDate', 'nextDue', 'lastCompletedAt', 'planned', 'scheduled', 'completed', 'missed', 'overdue'];
       return {
         total: res.total,
-        facts: [`${res.total} active maintenance program(s)${input.customer ? ` for ${input.customer}` : ''}; ${summary.counts.completed ?? 0} completed and ${summary.overdue.length} overdue occurrence(s) in the period`],
+        facts: [`${res.total} active maintenance program(s)${await forCustomer(ctx, customerId)}; ${summary.counts.completed ?? 0} completed and ${summary.overdue.length} overdue occurrence(s) in the period`],
         programs: items.map((p) => ({ ...Object.fromEntries(keys.filter((k) => p[k] !== undefined).map((k) => [k, p[k]])), ...(isCustomerUser(ctx) ? {} : { link: `/pm/programs/${p.id}` }) })),
         summary: { counts: summary.counts, onTimePct: summary.onTimePct, completionPct: summary.completionPct },
         overdue: (summary.overdue as unknown as Record<string, unknown>[]).slice(0, 10).map((o) => ({ program: o.programName, plannedDate: o.plannedDate, status: o.status, site: o.siteName })),

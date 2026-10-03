@@ -3,7 +3,7 @@ import { ASSET_LIFECYCLE } from '@itsm/shared';
 import { listAssetsMin, expiringAssets, getAsset, assetSummary, changeLifecycle, allowedLifecycleTransitions } from '@/modules/assets/service';
 import { portalAssets, portalAssetsOverview } from '@/modules/portal/service';
 import { define } from './types';
-import { isCustomerUser, ticketLink, iso, resolveCustomerId, resolveAsset } from '../helpers';
+import { isCustomerUser, ticketLink, iso, resolveCustomerId, resolveAsset, forCustomer } from '../helpers';
 
 /** Asset tools: inventory, coverage (warranty, AMC) and lifecycle. */
 
@@ -28,10 +28,10 @@ export const ASSETS: ReturnType<typeof define>[] = [
       }
       if (input.expiring) {
         const res = await expiringAssets(ctx, { days: input.expiringWithinDays ?? 90, kind: input.expiring, customerId, limit: input.limit ?? 20 });
-        return { kind: res.kind, days: res.days, facts: [`${res.items.length} asset(s) with ${res.kind} expiring within ${res.days} days${input.customer ? ` for ${input.customer}` : ''}`], items: res.items.map((a) => ({ tag: a.tag, name: a.name, customer: a.customerName, site: a.siteName, model: a.model, serialNumber: a.serialNumber, warrantyEnd: a.warrantyEnd, amcEnd: a.amcEnd, lifecycle: a.lifecycleStage, coverage: a.coverage.status, link: `/assets/${a.id}` })) };
+        return { kind: res.kind, days: res.days, facts: [`${res.items.length} asset(s) with ${res.kind} expiring within ${res.days} days${await forCustomer(ctx, customerId)}`], items: res.items.map((a) => ({ tag: a.tag, name: a.name, customer: a.customerName, site: a.siteName, model: a.model, serialNumber: a.serialNumber, warrantyEnd: a.warrantyEnd, amcEnd: a.amcEnd, lifecycle: a.lifecycleStage, coverage: a.coverage.status, link: `/assets/${a.id}` })) };
       }
       const res = await listAssetsMin(ctx, { page: 1, pageSize: input.limit ?? 20, q: input.q, customerId } as never);
-      return { total: res.total, facts: [`${res.total} asset(s)${input.q ? ` matching "${input.q}"` : ''}${input.customer ? ` for ${input.customer}` : ''}`], items: res.items.map((a) => ({ tag: a.tag, name: a.name, serialNumber: a.serialNumber, link: `/assets/${a.id}` })) };
+      return { total: res.total, facts: [`${res.total} asset(s)${input.q ? ` matching "${input.q}"` : ''}${await forCustomer(ctx, customerId)}`], items: res.items.map((a) => ({ tag: a.tag, name: a.name, serialNumber: a.serialNumber, link: `/assets/${a.id}` })) };
     },
     summary: (input, result) => `Listed ${(result as { items: unknown[] }).items.length} assets${input.expiring ? ` with ${input.expiring} expiring` : ''}`,
   }),
@@ -88,9 +88,10 @@ export const ASSETS: ReturnType<typeof define>[] = [
       }
       const customerId = await resolveCustomerId(ctx, input.customer);
       const s = await assetSummary(ctx, customerId);
-      return { ...s, facts: [`${s.total} asset(s)${input.customer ? ` for ${input.customer}` : ''}: ${s.warrantyExpiring90} with warranty expiring within 90 days, ${s.warrantyExpired} with warranty expired, ${s.amcExpiring90} with AMC expiring within 90 days, ${s.amcExpired} with AMC expired, ${s.inRepair} in repair`], link: '/assets' };
+      const scope = await forCustomer(ctx, customerId);
+      return { ...s, customer: scope.replace(/^ for /, '') || null, facts: [`${s.total} asset(s)${scope}: ${s.warrantyExpiring90} with warranty expiring within 90 days, ${s.warrantyExpired} with warranty expired, ${s.amcExpiring90} with AMC expiring within 90 days, ${s.amcExpired} with AMC expired, ${s.inRepair} in repair`], link: '/assets' };
     },
-    summary: (input) => `Read the asset summary${input.customer ? ` for ${input.customer}` : ''}`,
+    summary: (_i, result) => `Read the asset summary${(result as { customer?: string | null }).customer ? ` for ${(result as { customer: string }).customer}` : ''}`,
   }),
 
   define({

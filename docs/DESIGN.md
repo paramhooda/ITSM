@@ -32,6 +32,7 @@ A click always shows the matching records. On a list page the tile toggles its f
 - `DataTable` with `dense` on lists, clickable rows open the record, identifiers in mono, the tinted header, pagination in the card footer.
 - Loading uses `LoadingBlock` / `KpiSkeleton`, empty uses `EmptyState` with an icon and one next step, errors use `ErrorBlock` with retry.
 - Enter animations run once when a page mounts, never when a filter changes.
+- The assistant panel (`components/grady/`) never opens a dialog: a proposal is a card inside the thread (preview, change lines, record count, tier, expiry, Confirm primary and Cancel outline, bound to the server's action id), progress is one quiet line per tool, feedback is two thumbs under the reply with a one-line note in place, and navigation the assistant performs is announced with a toast. The window stays mounted while minimised.
 
 ## Checking it
 

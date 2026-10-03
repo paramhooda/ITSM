@@ -290,5 +290,8 @@ export async function customerName(ctx: Ctx, id: string): Promise<string> {
   return c.name;
 }
 
+/** " for <customer name>" from the resolved id (never the model's wording), for facts lines. */
+export const forCustomer = async (ctx: Ctx, customerId?: string | null): Promise<string> => (customerId ? ` for ${await customerName(ctx, customerId)}` : '');
+
 /** Knowledge pages are shared by both shells. */
 export const articleLink = (_ctx: Ctx, id: string) => `/knowledge/${id}`;
