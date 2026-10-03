@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ErrorBlock, Badge } from '@/components/ui';
+import { ErrorBlock, Badge, Select } from '@/components/ui';
 import { get } from '@/api/client';
 import { fmtDuration, fmtNumber, fmtDateTime, relativeTime, fmtDate } from '@/lib/format';
 import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
@@ -8,7 +9,7 @@ import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
 import { TicketMiniTable } from './TicketMiniTable';
-import { Panel, KpiSkeleton, Skeleton, RowList, type RowItem } from './Panel';
+import { Panel, KpiSkeleton, Skeleton, RowList, Segmented, type RowItem } from './Panel';
 import type { TicketRow } from './types';
 
 interface Engineer {
@@ -30,8 +31,10 @@ interface Engineer {
   watched: TicketRow[];
 }
 
-export function EngineerDashboard({ days = 30 }: { days?: number }) {
-  const q = useQuery({ queryKey: ['dashboards', 'engineer', days], queryFn: () => get<Engineer>('/dashboards/engineer', { days }), refetchInterval: 120_000, placeholderData: (p) => p });
+export function EngineerDashboard({ days = 30, customerId = '' }: { days?: number; customerId?: string }) {
+  const [resolvedView, setResolvedView] = useState<'daily' | 'weekly'>('daily');
+  const [teamFilter, setTeamFilter] = useState('');
+  const q = useQuery({ queryKey: ['dashboards', 'engineer', days, customerId], queryFn: () => get<Engineer>('/dashboards/engineer', { days, customerId: customerId || undefined }), refetchInterval: 120_000, placeholderData: (p) => p });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
   if (!d)
@@ -51,7 +54,10 @@ export function EngineerDashboard({ days = 30 }: { days?: number }) {
     ...d.today.tasks.map((k) => ({ key: `k-${k.id}`, href: `/tickets/${k.ticket_id}`, primary: k.title, secondary: `Task on ${k.ticket_number}`, right: k.due_at ? relativeTime(k.due_at) : '' })),
   ];
   const queueTotal = d.teamQueues.reduce((s, t) => s + t.unassigned, 0);
-  const resolvedFlow = d.series.some((s) => s.resolved) ? d.series : [];
+  const resolvedDaily = d.series.some((s) => s.resolved) ? d.series : [];
+  // Weekly rollup: ISO-week buckets labelled by their Monday, so a 90-day period reads as 13 bars instead of 90.
+  const resolvedFlow = resolvedView === 'weekly' ? Object.values(resolvedDaily.reduce<Record<string, { day: string; resolved: number }>>((acc, s) => { const dt = new Date(`${s.day}T00:00:00`); const monday = new Date(dt); monday.setDate(dt.getDate() - ((dt.getDay() + 6) % 7)); const key = monday.toISOString().slice(0, 10); acc[key] = acc[key] ?? { day: key, resolved: 0 }; acc[key].resolved += s.resolved; return acc; }, {})) : resolvedDaily;
+  const teamRows = teamFilter ? d.teamQueues.filter((t) => t.id === teamFilter) : d.teamQueues;
   // Priority colours follow the level (P1 red → P5 slate); the API orders the queue P1 first.
   const queueByPriority = d.assigned.byPriority.map((p) => ({ label: p.label, value: p.count, color: PRIORITY_LEVEL_COLORS[p.level] ?? p.color, href: p.id ? `/tickets?mine=true&open=true&priorityId=${p.id}` : '/tickets?mine=true&open=true' }));
   return (
@@ -80,7 +86,7 @@ export function EngineerDashboard({ days = 30 }: { days?: number }) {
         </Panel>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="Resolved by me" subtitle={`Tickets you resolved per day, last ${days} days`} className="xl:col-span-2" to="/tickets?mine=true&statusCategory=resolved" toLabel="Resolved tickets">
+        <Panel title="Resolved by me" subtitle={`Tickets you resolved per ${resolvedView === 'weekly' ? 'week' : 'day'}, last ${days} days`} className="xl:col-span-2" to="/tickets?mine=true&statusCategory=resolved" toLabel="Resolved tickets" action={<Segmented size="sm" options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }]} value={resolvedView} onChange={setResolvedView} />}>
           <TrendChart data={resolvedFlow} x="day" kind="bar" series={[{ key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={160} />
         </Panel>
         <Panel title="My queue by priority" subtitle="Open tickets assigned to you" to="/tickets?mine=true&open=true">
@@ -88,11 +94,11 @@ export function EngineerDashboard({ days = 30 }: { days?: number }) {
         </Panel>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="Team queues" subtitle="Unassigned tickets in teams you belong to">
+        <Panel title="Team queues" subtitle="Unassigned tickets in teams you belong to" action={d.teamQueues.length > 1 ? <Select className="h-7 py-0 text-[12px] w-40" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} placeholder="All my teams" options={d.teamQueues.map((t) => ({ value: t.id, label: t.name }))} aria-label="Team" /> : undefined}>
           <RowList
             dense
             empty="You are not a member of any team"
-            items={d.teamQueues.map((t) => ({ key: t.id, href: `/tickets?teamId=${t.id}&unassigned=true&open=true`, primary: t.name, secondary: `${fmtNumber(t.open)} open${t.breached ? ` · ${t.breached} breached` : ''}`, right: <span className={t.unassigned > 0 ? 'text-amber-600 font-medium' : ''}>{fmtNumber(t.unassigned)} unassigned</span> }))}
+            items={teamRows.map((t) => ({ key: t.id, href: `/tickets?teamId=${t.id}&unassigned=true&open=true`, primary: t.name, secondary: `${fmtNumber(t.open)} open${t.breached ? ` · ${t.breached} breached` : ''}`, right: <span className={t.unassigned > 0 ? 'text-amber-600 font-medium' : ''}>{fmtNumber(t.unassigned)} unassigned</span> }))}
           />
         </Panel>
         <Panel title="Watched tickets" subtitle="Updates in the last 24 hours" padded={false}>

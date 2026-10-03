@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Badge, ErrorBlock, Select } from '@/components/ui';
@@ -29,7 +30,13 @@ interface Management {
 
 const tail = <T,>(arr: T[], n: number) => arr.slice(Math.max(0, arr.length - n));
 
+type AttentionSort = 'breaches' | 'major' | 'scope';
+
 export function ManagementDashboard({ days, customerId }: { days: number; customerId: string }) {
+  // Local chart filters: client-side views of data already on the page (the period and scope are global).
+  const [flowView, setFlowView] = useState<'flow' | 'breaches'>('flow');
+  const [attentionSort, setAttentionSort] = useState<AttentionSort>('breaches');
+  const [allServices, setAllServices] = useState(false);
   const q = useQuery({ queryKey: ['dashboards', 'management', days, customerId], queryFn: () => get<Management>('/dashboards/management', { days, customerId: customerId || undefined }), placeholderData: (p) => p, staleTime: 30_000 });
   const d = q.data;
   const k = d?.kpis ?? {};
@@ -37,6 +44,8 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
   if (!d) return <KpiSkeleton />;
   const compliance = k.slaCompliancePct;
   const needsAttention = [...d.byCustomer].filter((c) => c.slaBreached > 0 || c.out_of_scope > 0 || c.major > 0).sort((a, b) => b.slaBreached - a.slaBreached || b.major - a.major || b.out_of_scope - a.out_of_scope).slice(0, 5);
+  // Sorted copy for the local control; computed after the early returns, so no hook here.
+  const attentionRows = [...needsAttention].sort((a, b) => (attentionSort === 'major' ? b.major - a.major || b.slaBreached - a.slaBreached : attentionSort === 'scope' ? b.out_of_scope - a.out_of_scope || b.slaBreached - a.slaBreached : b.slaBreached - a.slaBreached || b.major - a.major));
   const custQ = customerId ? `&customerId=${customerId}` : '';
   const sparkDays = Math.min(d.series.length, days <= 7 ? 7 : 14);
   const recent = tail(d.series, sparkDays);
@@ -90,8 +99,12 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel className="xl:col-span-2 rise-in rise-in-2" title="Ticket flow" subtitle={`Opened and resolved per day, ${d.period.from} to ${d.period.to}`} to={`/reports?tab=run&report=ticket_volume`} toLabel="Ticket volume report">
-          <TrendChart data={d.series} x="day" kind="area" series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={250} />
+        <Panel className="xl:col-span-2 rise-in rise-in-2" title="Ticket flow" subtitle={`${flowView === 'flow' ? 'Opened and resolved' : 'SLA breaches'} per day, ${d.period.from} to ${d.period.to}`} to={`/reports?tab=run&report=ticket_volume`} toLabel="Ticket volume report" action={<Segmented size="sm" options={[{ value: 'flow', label: 'Flow' }, { value: 'breaches', label: 'Breaches' }]} value={flowView} onChange={setFlowView} />}>
+          {flowView === 'flow' ? (
+            <TrendChart data={d.series} x="day" kind="area" series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={250} />
+          ) : (
+            <TrendChart data={d.series} x="day" kind="bar" series={[{ key: 'breaches', label: 'SLA breaches', color: '#dc2626' }]} height={250} />
+          )}
         </Panel>
         <Panel className="rise-in rise-in-3" title="Service levels" subtitle="Resolution targets in the period" to={`/reports?tab=run&report=sla_performance`} toLabel="SLA report">
           <SlaGauge pct={compliance} met={k.resolutionMet ?? 0} breached={k.resolutionBreached ?? 0} />
@@ -107,10 +120,10 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Panel className="rise-in rise-in-3" title="Needs attention" subtitle="Customers with breaches, major incidents or out-of-scope work" to={`/reports?tab=run&report=sla_performance`} toLabel="SLA report" padded>
+        <Panel className="rise-in rise-in-3" title="Needs attention" subtitle="Customers with breaches, major incidents or out-of-scope work" to={`/reports?tab=run&report=sla_performance`} toLabel="SLA report" padded action={<Segmented size="sm" options={[{ value: 'breaches', label: 'Breaches' }, { value: 'major', label: 'Major' }, { value: 'scope', label: 'Out of scope' }]} value={attentionSort} onChange={setAttentionSort} />}>
           <RowList
             empty="No customer needs attention right now"
-            items={needsAttention.map((c) => ({
+            items={attentionRows.map((c) => ({
               key: c.id,
               href: `/customers/${c.id}`,
               primary: c.name,
@@ -124,8 +137,8 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             }))}
           />
         </Panel>
-        <Panel className="rise-in rise-in-3" title="Service health" subtitle="Tickets by service in the period, breaches in red" to="/services" toLabel="Service catalog">
-          <BreakdownBar items={d.byService.slice(0, 6).map((s) => ({ label: s.name, value: s.tickets, secondary: s.breaches, href: s.id ? `/tickets?serviceId=${s.id}` : undefined }))} emptyText="No tickets in this period" />
+        <Panel className="rise-in rise-in-3" title="Service health" subtitle="Tickets by service in the period, breaches in red" to="/services" toLabel="Service catalog" action={d.byService.length > 6 ? <Segmented size="sm" options={[{ value: 'top', label: 'Top 6' }, { value: 'all', label: `All ${d.byService.length}` }]} value={allServices ? 'all' : 'top'} onChange={(v) => setAllServices(v === 'all')} /> : undefined}>
+          <BreakdownBar items={d.byService.slice(0, allServices ? undefined : 6).map((s) => ({ label: s.name, value: s.tickets, secondary: s.breaches, href: s.id ? `/tickets?serviceId=${s.id}` : undefined }))} emptyText="No tickets in this period" />
         </Panel>
         <Panel className="rise-in rise-in-4" title="Expiring contracts" subtitle={`${fmtNumber(d.expiringContractsTotal)} ending within 90 days · ${fmtNumber(k.contractsActive)} active`} to="/contracts?expiringWithinDays=90">
           <ExpiringContracts items={d.expiringContracts.slice(0, 5)} />

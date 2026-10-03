@@ -12,7 +12,7 @@ import { withSystem, closeDb, schema, type Tx } from '@/db/client';
 import { runAs, type Ctx } from '@/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '@/core/principal';
 import { createTicket, resolveTicket } from '@/modules/tickets/service';
-import { customer, soc, amc, engineer } from '@/modules/dashboards/service';
+import { customer, soc, amc, engineer, noc } from '@/modules/dashboards/service';
 import { toDay, addDays } from '@/modules/reports/dates';
 
 const suffix = Math.random().toString(36).slice(2, 8);
@@ -151,6 +151,28 @@ describe('dashboards', () => {
     expect(typeof d.sla30d.met).toBe('number');
     expect(typeof d.sla30d.breached).toBe('number');
     expect(d.sla30d.compliancePct === null || typeof d.sla30d.compliancePct === 'number').toBe(true);
+  });
+
+  it('staff views honour the customer scope: every row belongs to the chosen customer', async () => {
+    const own = (rows: { customer_id?: unknown }[], id: string) => rows.every((r) => r.customer_id === id);
+    const socA = await asAdmin((ctx) => soc(ctx, { customerId: ids.customerA }));
+    expect(sum(socA.series, 'opened')).toBeGreaterThanOrEqual(1);
+    expect(own(socA.recent, ids.customerA) && own(socA.slaStatus.items, ids.customerA) && own(socA.escalations.items, ids.customerA)).toBe(true);
+    expect(socA.byCustomer.every((c) => c.id === ids.customerA)).toBe(true);
+    const socB = await asAdmin((ctx) => soc(ctx, { customerId: ids.customerB }));
+    expect(own(socB.recent, ids.customerB)).toBe(true);
+    expect(socB.totals.open).toBe(socB.recent.filter((r) => r.status_category && !['resolved', 'closed', 'cancelled'].includes(String(r.status_category))).length);
+    const amcB = await asAdmin((ctx) => amc(ctx, { customerId: ids.customerB }));
+    expect(own(amcB.queue.items, ids.customerB)).toBe(true);
+    expect(amcB.kpis.open).toBe(amcB.queue.items.length);
+    const nocB = await asAdmin((ctx) => noc(ctx, { customerId: ids.customerB }));
+    expect(own(nocB.criticalOpen, ids.customerB) && own(nocB.unassigned.items, ids.customerB) && own(nocB.slaAtRisk.items, ids.customerB) && own(nocB.recentlyResolved, ids.customerB)).toBe(true);
+    const nocAll = await asAdmin((ctx) => noc(ctx));
+    expect(nocAll.totals.open).toBeGreaterThanOrEqual(nocB.totals.open);
+    const engB = await asAdmin((ctx) => engineer(ctx, { customerId: ids.customerB }));
+    expect(own(engB.assigned.items, ids.customerB) && own(engB.watched, ids.customerB)).toBe(true);
+    // A portal user cannot widen the scope to another customer.
+    await expect(asPortal((ctx) => customer(ctx, { customerId: ids.customerB }))).resolves.toMatchObject({ customer: { id: ids.customerA } });
   });
 
   it('engineer(): my resolved-per-day series over the default 30 days and the queue by priority', async () => {

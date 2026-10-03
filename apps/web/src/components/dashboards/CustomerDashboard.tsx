@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorBlock, Badge, ProgressBar } from '@/components/ui';
@@ -10,7 +11,7 @@ import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
 import { SlaGauge } from './SlaGauge';
 import { TicketMiniTable } from './TicketMiniTable';
-import { Panel, KpiSkeleton, Skeleton, RowList, type RowItem } from './Panel';
+import { Panel, KpiSkeleton, Skeleton, RowList, Segmented, type RowItem } from './Panel';
 import type { TicketRow } from './types';
 
 interface SlaBlock { totals: { met: number; breached: number; running: number; compliancePct: number | null; avgElapsedMinutes: number | null }; groups: { key: string; label: string; met: number; breached: number; running: number; compliancePct: number | null }[] }
@@ -33,6 +34,7 @@ interface Customer {
 
 export function CustomerDashboard({ customerId, days = 30 }: { customerId?: string; days?: number }) {
   const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
+  const [upcomingView, setUpcomingView] = useState<'both' | 'visits' | 'pm'>('both');
   const q = useQuery({ queryKey: ['dashboards', 'customer', customerId ?? 'me', days], queryFn: () => get<Customer>('/dashboards/customer', { customerId, days }), placeholderData: (p) => p, staleTime: 30_000 });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
@@ -51,8 +53,8 @@ export function CustomerDashboard({ customerId, days = 30 }: { customerId?: stri
   const ticketsHref = isCustomer ? '/portal/tickets' : `/tickets?customerId=${d.customer.id}`;
   const openTickets = d.recentTickets.filter((r) => r.status_category && !['resolved', 'closed', 'cancelled'].includes(r.status_category));
   const upcoming: RowItem[] = [
-    ...d.scheduledVisits.map((v) => ({ key: `v-${v.id}`, href: isCustomer ? `/portal/maintenance?visit=${v.id}` : `/field/${v.id}`, primary: v.title, secondary: `Site visit${v.site ? ` · ${v.site}` : ''}${v.engineer ? ` · ${v.engineer}` : ''}`, right: v.scheduled_start ? fmtDateTime(v.scheduled_start) : 'to be scheduled' })),
-    ...d.upcomingMaintenance.map((m) => ({ key: `m-${m.id}`, href: isCustomer ? `/portal/maintenance?occurrence=${m.id}` : '/maintenance', primary: m.program, secondary: `Preventive maintenance${m.site ? ` · ${m.site}` : ''}${m.engineer ? ` · ${m.engineer}` : ''}`, right: fmtDate(m.scheduled_date ?? m.planned_date) })),
+    ...(upcomingView === 'pm' ? [] : d.scheduledVisits).map((v) => ({ key: `v-${v.id}`, href: isCustomer ? `/portal/maintenance?visit=${v.id}` : `/field/${v.id}`, primary: v.title, secondary: `Site visit${v.site ? ` · ${v.site}` : ''}${v.engineer ? ` · ${v.engineer}` : ''}`, right: v.scheduled_start ? fmtDateTime(v.scheduled_start) : 'to be scheduled' })),
+    ...(upcomingView === 'visits' ? [] : d.upcomingMaintenance).map((m) => ({ key: `m-${m.id}`, href: isCustomer ? `/portal/maintenance?occurrence=${m.id}` : '/maintenance', primary: m.program, secondary: `Preventive maintenance${m.site ? ` · ${m.site}` : ''}${m.engineer ? ` · ${m.engineer}` : ''}`, right: fmtDate(m.scheduled_date ?? m.planned_date) })),
   ].slice(0, 6);
   // A period with nothing opened or resolved shows the chart's empty text rather than a flat line.
   const flow = d.series.some((s) => s.opened || s.resolved) ? d.series : [];
@@ -111,7 +113,7 @@ export function CustomerDashboard({ customerId, days = 30 }: { customerId?: stri
         </Panel>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="Upcoming maintenance & visits" subtitle="Next 30 days" to={isCustomer ? '/portal/maintenance' : '/maintenance'}>
+        <Panel title="Upcoming maintenance & visits" subtitle="Next 30 days" to={isCustomer ? '/portal/maintenance' : '/maintenance'} action={<Segmented size="sm" options={[{ value: 'both', label: 'Both' }, { value: 'visits', label: 'Visits' }, { value: 'pm', label: 'Maintenance' }]} value={upcomingView} onChange={setUpcomingView} />}>
           <RowList dense items={upcoming} empty="Nothing scheduled in the next 30 days" />
         </Panel>
         <Panel title="Contracts" subtitle="Active agreements and renewal dates" to={isCustomer ? '/portal/services' : `/contracts?customerId=${d.customer.id}`}>

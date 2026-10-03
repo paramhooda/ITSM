@@ -88,22 +88,20 @@ export default function DashboardPage() {
     );
   }
   const meta = META[tab];
+  const customerId = state.customerId ?? '';
   return (
     <div>
       <DashboardHero title={tab === 'engineer' ? greeting(user.name) : meta.title} subtitle={meta.subtitle} right={tabs.length > 1 ? <Segmented options={tabs.map((t) => ({ value: t, label: META[t].label }))} value={tab} onChange={pick} /> : undefined}>
         {period}
-        {tab === 'management' && (
-          <>
-            <span className="text-[12px] text-subtle ml-2 mr-1">Scope</span>
-            <Select className="w-56 h-8 py-0 text-[12.5px] bg-white" value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value }, false)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
-          </>
-        )}
+        {/* Global scope: every panel on every staff view follows it. */}
+        <span className="text-[12px] text-subtle ml-2 mr-1">Scope</span>
+        <Select className="w-56 h-8 py-0 text-[12.5px] bg-white" value={customerId} onChange={(e) => set({ customerId: e.target.value }, false)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} aria-label="Customer scope" />
       </DashboardHero>
-      {tab === 'management' && <ManagementDashboard days={days} customerId={state.customerId ?? ''} />}
-      {tab === 'noc' && <NocDashboard days={days} />}
-      {tab === 'soc' && <SocDashboard days={days} />}
-      {tab === 'amc' && <AmcDashboard days={days} />}
-      {tab === 'engineer' && <EngineerDashboard days={days} />}
+      {tab === 'management' && <ManagementDashboard days={days} customerId={customerId} />}
+      {tab === 'noc' && <NocDashboard days={days} customerId={customerId} />}
+      {tab === 'soc' && <SocDashboard days={days} customerId={customerId} />}
+      {tab === 'amc' && <AmcDashboard days={days} customerId={customerId} />}
+      {tab === 'engineer' && <EngineerDashboard days={days} customerId={customerId} />}
     </div>
   );
 }

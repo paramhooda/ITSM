@@ -5,7 +5,7 @@ import { CalendarDays, CalendarRange, AlertTriangle, Clock, ClipboardCheck } fro
 import { PageHeader, ModuleNav, Select, ErrorBlock, Badge, Avatar } from '@/components/ui';
 import { FIELD_MODULES } from '@/layouts/modules';
 import { KpiGrid } from '@/components/dashboards/KpiGrid';
-import { Panel, RowList, Stat, KpiSkeleton, Skeleton } from '@/components/dashboards/Panel';
+import { Panel, RowList, Stat, KpiSkeleton, Skeleton, Segmented } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { TrendChart } from '@/components/dashboards/TrendChart';
 import { useForwardListParams } from '@/hooks/useForwardListParams';
@@ -16,6 +16,7 @@ import { overviewApi, ovKeys, withQuery, ymd } from '@/components/overview/api';
 
 /** Field Service home: today and this week, what is late or unowned, engineer load, maintenance due. */
 export default function FieldOverviewPage() {
+  const [workView, setWorkView] = useState<'both' | 'visits' | 'pm'>('both');
   const forwarding = useForwardListParams('/field/visits');
   const navigate = useNavigate();
   const customers = useCustomersLookup();
@@ -61,8 +62,8 @@ export default function FieldOverviewPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Second series uses kit slot 6 (validated pair with blue); slot 2 orange fails the 3:1 contrast check on bars. */}
-        <Panel title="Completed work" subtitle="Site visits and preventive maintenance completed per day, last 30 days" className="lg:col-span-2" to={visits({ status: 'completed' })} toLabel="Completed visits">
-          {d ? <TrendChart data={work} x="day" kind="bar" series={[{ key: 'visitsCompleted', label: 'Visits completed' }, { key: 'pmCompleted', label: 'Maintenance completed', color: '#1a7f37' }]} height={220} /> : <Skeleton rows={6} />}
+        <Panel title="Completed work" subtitle={`${workView === 'visits' ? 'Site visits' : workView === 'pm' ? 'Preventive maintenance' : 'Site visits and preventive maintenance'} completed per day, last 30 days`} className="lg:col-span-2" to={visits({ status: 'completed' })} toLabel="Completed visits" action={<Segmented size="sm" options={[{ value: 'both', label: 'Both' }, { value: 'visits', label: 'Visits' }, { value: 'pm', label: 'Maintenance' }]} value={workView} onChange={setWorkView} />}>
+          {d ? <TrendChart data={work} x="day" kind="bar" series={[...(workView !== 'pm' ? [{ key: 'visitsCompleted', label: 'Visits completed' }] : []), ...(workView !== 'visits' ? [{ key: 'pmCompleted', label: 'Maintenance completed', color: '#1a7f37' }] : [])]} height={220} /> : <Skeleton rows={6} />}
         </Panel>
         <Panel title="Visits by status" subtitle="Open and recent visits · click to filter" to={visits()} toLabel="Visits">
           {d ? <BreakdownBar dense items={d.byStatus.filter((b) => b.count > 0).map((b) => ({ label: b.label || titleCase(b.key), value: b.count, color: b.color ?? VISIT_STATUS_COLORS[b.key] ?? 'slate', href: visits({ status: b.key }) }))} emptyText="No visits yet" /> : <Skeleton rows={5} />}

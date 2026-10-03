@@ -38,9 +38,10 @@ const statusItems = (rows: { status: string; count: number }[], colors: Record<s
   rows.filter((r) => r.count > 0).map((r) => ({ label: statusLabel(r.status), value: r.count, color: colors[r.status] ?? 'slate', href: href(r.status) }));
 
 /** AMC / field service view: an AMC ticket work queue first, visits and maintenance beside it. */
-export function AmcDashboard({ days = 30 }: { days?: number }) {
-  const q = useQuery({ queryKey: ['dashboards', 'amc', days], queryFn: () => get<Amc>('/dashboards/amc', { days }), refetchInterval: 120_000, placeholderData: (p) => p });
+export function AmcDashboard({ days = 30, customerId = '' }: { days?: number; customerId?: string }) {
+  const q = useQuery({ queryKey: ['dashboards', 'amc', days, customerId], queryFn: () => get<Amc>('/dashboards/amc', { days, customerId: customerId || undefined }), refetchInterval: 120_000, placeholderData: (p) => p });
   const [filter, setFilter] = useState<Filter>('all');
+  const [workView, setWorkView] = useState<'both' | 'visits' | 'pm'>('both');
   const d = q.data;
   const rows = useMemo(() => {
     const items = d?.queue.items ?? [];
@@ -110,8 +111,8 @@ export function AmcDashboard({ days = 30 }: { days?: number }) {
       </Panel>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Second series uses kit slot 6 (validated pair with blue); slot 2 orange fails the 3:1 contrast check on bars. */}
-        <Panel title="Completed work" subtitle={`Site visits and preventive maintenance completed per day, last ${days} days`} className="xl:col-span-2" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report">
-          <TrendChart data={work} x="day" kind="bar" stacked={false} series={[{ key: 'visitsCompleted', label: 'Visits completed' }, { key: 'pmCompleted', label: 'Maintenance completed', color: '#1a7f37' }]} height={220} />
+        <Panel title="Completed work" subtitle={`${workView === 'visits' ? 'Site visits' : workView === 'pm' ? 'Preventive maintenance' : 'Site visits and preventive maintenance'} completed per day, last ${days} days`} className="xl:col-span-2" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report" action={<Segmented size="sm" options={[{ value: 'both', label: 'Both' }, { value: 'visits', label: 'Visits' }, { value: 'pm', label: 'Maintenance' }]} value={workView} onChange={setWorkView} />}>
+          <TrendChart data={work} x="day" kind="bar" stacked={false} series={[...(workView !== 'pm' ? [{ key: 'visitsCompleted', label: 'Visits completed' }] : []), ...(workView !== 'visits' ? [{ key: 'pmCompleted', label: 'Maintenance completed', color: '#1a7f37' }] : [])]} height={220} />
         </Panel>
         <Panel title={`Service levels · ${days} days`} subtitle="Resolution targets on AMC tickets opened in the period">
           <SlaGauge pct={d.sla30d.compliancePct} met={d.sla30d.met} breached={d.sla30d.breached} label="Targets met" />

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ErrorBlock } from '@/components/ui';
@@ -10,7 +11,7 @@ import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
 import { TicketMiniTable } from './TicketMiniTable';
 import { WorkloadList, type WorkloadItem } from './WorkloadList';
-import { Panel, KpiSkeleton, Stat, Updated } from './Panel';
+import { Panel, KpiSkeleton, Stat, Updated, Segmented } from './Panel';
 import type { TicketRow, Breakdown } from './types';
 
 interface Noc {
@@ -63,13 +64,22 @@ function MajorIncidentsPanel({ items }: { items: Noc['majorIncidents'] }) {
   );
 }
 
-export function NocDashboard({ days = 30 }: { days?: number }) {
-  const q = useQuery({ queryKey: ['dashboards', 'noc', days], queryFn: () => get<Noc>('/dashboards/noc', { days }), refetchInterval: 60_000, placeholderData: (p) => p });
+export function NocDashboard({ days = 30, customerId = '' }: { days?: number; customerId?: string }) {
+  // Local chart filters (client-side views of the data on the page).
+  const [criticalView, setCriticalView] = useState<'all' | 'p1' | 'major'>('all');
+  const [riskOrder, setRiskOrder] = useState<'deadline' | 'priority'>('deadline');
+  const [allEngineers, setAllEngineers] = useState(false);
+  const [allCategories, setAllCategories] = useState(false);
+  const q = useQuery({ queryKey: ['dashboards', 'noc', days, customerId], queryFn: () => get<Noc>('/dashboards/noc', { days, customerId: customerId || undefined }), refetchInterval: 60_000, placeholderData: (p) => p });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
   if (!d) return <KpiSkeleton />;
   const t = d.totals;
   const p1p2 = d.openIncidents.filter((p) => (p.level ?? 99) <= 2).reduce((s, p) => s + p.count, 0);
+  const criticalRows = criticalView === 'p1' ? d.criticalOpen.filter((r) => r.priority_level === 1) : criticalView === 'major' ? d.criticalOpen.filter((r) => r.is_major) : d.criticalOpen;
+  const riskRows = riskOrder === 'priority' ? [...d.slaAtRisk.items].sort((a, b) => (a.priority_level ?? 99) - (b.priority_level ?? 99) || (a.sla?.remainingMinutes ?? 0) - (b.sla?.remainingMinutes ?? 0)) : d.slaAtRisk.items;
+  const categoryRows = allCategories ? d.byCategory : d.byCategory.slice(0, 10);
+  const half = Math.ceil(categoryRows.length / 2);
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between -mt-2">
@@ -85,9 +95,9 @@ export function NocDashboard({ days = 30 }: { days?: number }) {
         ]}
       />
       {(d.majorIncidents?.length ?? 0) > 0 && <MajorIncidentsPanel items={d.majorIncidents} />}
-      <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" to="/tickets?open=true&priorityId=&type=incident" toLabel="All incidents" padded={false}>
+      <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" to="/tickets?open=true&priorityId=&type=incident" toLabel="All incidents" padded={false} action={<Segmented size="sm" options={[{ value: 'all', label: 'All' }, { value: 'p1', label: 'P1' }, { value: 'major', label: 'Major' }]} value={criticalView} onChange={setCriticalView} />}>
         <div className="px-5">
-          <TicketMiniTable rows={d.criticalOpen} max={8} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee']} empty="No P1/P2 or major incidents open" />
+          <TicketMiniTable rows={criticalRows} max={8} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee']} empty="No P1/P2 or major incidents open" />
         </div>
       </Panel>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -99,19 +109,19 @@ export function NocDashboard({ days = 30 }: { days?: number }) {
             <Stat label="Ticket rate" value={d.monitoringEvents24h.total ? `${Math.round((d.monitoringEvents24h.ticketsCreated / d.monitoringEvents24h.total) * 100)}%` : '—'} />
           </div>
         </Panel>
-        <Panel title="At risk or breached" subtitle="Soonest SLA deadline first" to="/tickets?open=true&slaState=breached" toLabel="All breached" padded={false}>
+        <Panel title="At risk or breached" subtitle={riskOrder === 'deadline' ? 'Soonest SLA deadline first' : 'Highest priority first'} to="/tickets?open=true&slaState=breached" toLabel="All breached" padded={false} action={<Segmented size="sm" options={[{ value: 'deadline', label: 'Deadline' }, { value: 'priority', label: 'Priority' }]} value={riskOrder} onChange={setRiskOrder} />}>
           <div className="px-5">
-            <TicketMiniTable rows={d.slaAtRisk.items} max={6} columns={['customer', 'priority', 'sla']} empty="Every open ticket is within SLA" />
+            <TicketMiniTable rows={riskRows} max={6} columns={['customer', 'priority', 'sla']} empty="Every open ticket is within SLA" />
           </div>
         </Panel>
-        <Panel title="Engineer load" subtitle="Open tickets per engineer in NOC, infrastructure and network teams">
-          <WorkloadList items={d.engineerWorkload.slice(0, 8)} />
+        <Panel title="Engineer load" subtitle="Open tickets per engineer in NOC, infrastructure and network teams" action={d.engineerWorkload.length > 8 ? <Segmented size="sm" options={[{ value: 'top', label: 'Top 8' }, { value: 'all', label: `All ${d.engineerWorkload.length}` }]} value={allEngineers ? 'all' : 'top'} onChange={(v) => setAllEngineers(v === 'all')} /> : undefined}>
+          <WorkloadList items={allEngineers ? d.engineerWorkload : d.engineerWorkload.slice(0, 8)} />
         </Panel>
       </div>
-      <Panel title="Open by category" subtitle="NOC categories, breaches in red" to="/tickets?open=true" toLabel="All open">
+      <Panel title="Open by category" subtitle="NOC categories, breaches in red" to="/tickets?open=true" toLabel="All open" action={d.byCategory.length > 10 ? <Segmented size="sm" options={[{ value: 'top', label: 'Top 10' }, { value: 'all', label: `All ${d.byCategory.length}` }]} value={allCategories ? 'all' : 'top'} onChange={(v) => setAllCategories(v === 'all')} /> : undefined}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
-          <BreakdownBar items={d.byCategory.slice(0, 5).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="No open NOC tickets" />
-          <BreakdownBar items={d.byCategory.slice(5, 10).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="" max={Math.max(1, ...d.byCategory.map((c) => c.count))} />
+          <BreakdownBar items={categoryRows.slice(0, half).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="No open NOC tickets" />
+          <BreakdownBar items={categoryRows.slice(half).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="" max={Math.max(1, ...d.byCategory.map((c) => c.count))} />
         </div>
       </Panel>
     </div>

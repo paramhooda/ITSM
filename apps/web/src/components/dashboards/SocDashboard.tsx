@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorBlock, Badge } from '@/components/ui';
 import { ShieldAlert, Siren, Timer, Radio } from 'lucide-react';
@@ -7,7 +8,7 @@ import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
 import { TicketMiniTable } from './TicketMiniTable';
-import { Panel, KpiSkeleton, Skeleton, Stat, Updated, RowList } from './Panel';
+import { Panel, KpiSkeleton, Skeleton, Stat, Updated, RowList, Segmented } from './Panel';
 import type { TicketRow, Breakdown } from './types';
 
 interface Soc {
@@ -26,8 +27,10 @@ interface Soc {
   series: { day: string; opened: number; resolved: number; breaches: number }[];
 }
 
-export function SocDashboard({ days = 30 }: { days?: number }) {
-  const q = useQuery({ queryKey: ['dashboards', 'soc', days], queryFn: () => get<Soc>('/dashboards/soc', { days }), refetchInterval: 60_000, placeholderData: (p) => p });
+export function SocDashboard({ days = 30, customerId = '' }: { days?: number; customerId?: string }) {
+  const [flowView, setFlowView] = useState<'flow' | 'breaches'>('flow');
+  const [allCustomers, setAllCustomers] = useState(false);
+  const q = useQuery({ queryKey: ['dashboards', 'soc', days, customerId], queryFn: () => get<Soc>('/dashboards/soc', { days, customerId: customerId || undefined }), refetchInterval: 60_000, placeholderData: (p) => p });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
   if (!d)
@@ -57,8 +60,12 @@ export function SocDashboard({ days = 30 }: { days?: number }) {
         ]}
       />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="Security incident flow" subtitle={`Opened and resolved per day, last ${days} days`} className="xl:col-span-2" to="/tickets?domain=soc" toLabel="All security incidents">
-          <TrendChart data={flow} x="day" kind="area" series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={220} />
+        <Panel title="Security incident flow" subtitle={`${flowView === 'flow' ? 'Opened and resolved' : 'SLA breaches'} per day, last ${days} days`} className="xl:col-span-2" to="/tickets?domain=soc" toLabel="All security incidents" action={<Segmented size="sm" options={[{ value: 'flow', label: 'Flow' }, { value: 'breaches', label: 'Breaches' }]} value={flowView} onChange={setFlowView} />}>
+          {flowView === 'flow' ? (
+            <TrendChart data={flow} x="day" kind="area" series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={220} />
+          ) : (
+            <TrendChart data={d.series.some((s) => s.breaches) ? d.series : []} x="day" kind="bar" series={[{ key: 'breaches', label: 'SLA breaches', color: '#dc2626' }]} height={220} />
+          )}
         </Panel>
         <Panel title="Open by severity" subtitle="Security severity of open incidents">
           <BreakdownBar items={d.bySeverity.map((s) => ({ label: s.label, value: s.count, secondary: s.breached, color: s.color, href: s.id ? `/tickets?domain=soc&open=true&securitySeverityId=${s.id}` : undefined }))} emptyText="No open security incidents" />
@@ -79,11 +86,11 @@ export function SocDashboard({ days = 30 }: { days?: number }) {
             <TicketMiniTable rows={d.escalations.items} max={6} columns={['customer', 'severity', 'sla', 'assignee']} empty="No active escalations" />
           </div>
         </Panel>
-        <Panel title="By customer" subtitle="Open security incidents per customer">
+        <Panel title="By customer" subtitle="Open security incidents per customer" action={d.byCustomer.length > 6 ? <Segmented size="sm" options={[{ value: 'top', label: 'Top 6' }, { value: 'all', label: `All ${d.byCustomer.length}` }]} value={allCustomers ? 'all' : 'top'} onChange={(v) => setAllCustomers(v === 'all')} /> : undefined}>
           <RowList
             empty="No open security incidents"
             dense
-            items={d.byCustomer.slice(0, 6).map((c) => ({
+            items={d.byCustomer.slice(0, allCustomers ? undefined : 6).map((c) => ({
               key: c.id,
               href: `/tickets?domain=soc&open=true&customerId=${c.id}`,
               primary: c.name,
