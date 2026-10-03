@@ -73,8 +73,8 @@ export function CustomerDashboard({ customerId, days = 30 }: { customerId?: stri
     <div className="flex flex-col gap-6">
       <KpiGrid
         items={[
-          { label: 'Open tickets', value: fmtNumber(t.open), hint: `${fmtNumber(t.byType.incident ?? 0)} incidents · ${fmtNumber(t.byType.request ?? 0)} requests`, onClick: () => (window.location.href = ticketsHref) },
-          { label: 'Awaiting your reply', value: fmtNumber(t.awaitingReply), tone: t.awaitingReply > 0 ? 'warn' : 'good', hint: t.awaitingApproval ? `${t.awaitingApproval} awaiting your approval` : 'nothing waiting on you', onClick: () => (window.location.href = isCustomer ? '/portal/tickets?status=awaiting' : ticketsHref) },
+          { label: 'Open tickets', value: fmtNumber(t.open), hint: `${fmtNumber(t.byType.incident ?? 0)} incidents · ${fmtNumber(t.byType.request ?? 0)} requests`, to: ticketsHref },
+          { label: 'Awaiting your reply', value: fmtNumber(t.awaitingReply), tone: t.awaitingReply > 0 ? 'warn' : 'good', hint: t.awaitingApproval ? `${t.awaitingApproval} awaiting your approval` : 'nothing waiting on you', to: isCustomer ? '/portal/tickets?status=awaiting' : ticketsHref },
           { label: `Resolved · ${days} days`, value: fmtNumber(t.resolved30d), hint: `${fmtNumber(t.opened30d)} opened in the same period` },
           { label: `SLA compliance · ${days} days`, value: sla === null ? '—' : `${sla}%`, tone: sla === null ? 'default' : sla >= 95 ? 'good' : sla >= 85 ? 'warn' : 'bad', hint: `${slaBlock.totals.met} met · ${slaBlock.totals.breached} breached` },
         ]}

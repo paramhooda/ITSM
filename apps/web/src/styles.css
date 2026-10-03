@@ -48,10 +48,6 @@
   --shadow-pop: 0 20px 50px -16px rgba(9, 9, 11, 0.28), 0 0 0 1px rgba(9, 9, 11, 0.05);
   --radius-card: 12px;
   --radius-control: 8px;
-  /* Colour accents: a blue→violet brand gradient for primary actions and highlights, soft washes for hero surfaces. */
-  --grad-brand: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
-  --grad-brand-soft: linear-gradient(135deg, rgba(37, 99, 235, 0.14) 0%, rgba(124, 58, 237, 0.12) 50%, rgba(236, 72, 153, 0.08) 100%);
-  --grad-toolbar: linear-gradient(180deg, #f9f9fb 0%, #f3f3f6 100%);
   color-scheme: light;
 }
 
@@ -138,20 +134,9 @@ textarea {
 @utility shadow-raised { box-shadow: var(--shadow-raised); }
 @utility shadow-pop { box-shadow: var(--shadow-pop); }
 @utility tnum { font-variant-numeric: tabular-nums; }
-@utility bg-grad-brand { background-image: var(--grad-brand); }
-@utility bg-grad-brand-soft { background-image: var(--grad-brand-soft); }
-@utility text-grad-brand {
-  background-image: var(--grad-brand);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-/* Hero wash: three soft colour pools in the corners of a white surface. */
-@utility bg-hero {
-  background-image:
-    radial-gradient(900px 260px at 0% 0%, rgba(37, 99, 235, 0.16), transparent 62%),
-    radial-gradient(700px 240px at 100% 0%, rgba(124, 58, 237, 0.14), transparent 60%),
-    radial-gradient(600px 220px at 55% 110%, rgba(16, 185, 129, 0.10), transparent 60%);
+/* Hero wash: one faint pool of the accent in the top-left corner of a white surface; barely there on purpose. */
+@utility hero-wash {
+  background-image: radial-gradient(720px 220px at 0% 0%, rgba(37, 99, 235, 0.06), transparent 55%);
 }
 /* Subtle dotted backdrop used behind hero surfaces (login, empty states). */
 @utility bg-dots {
@@ -169,8 +154,8 @@ textarea {
     padding: 8px;
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    background: var(--grad-toolbar);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(9, 9, 11, 0.03);
+    background: var(--surface-2);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
   }
   .filter-bar .input {
     background: #fff;
@@ -215,7 +200,7 @@ textarea {
     min-width: 16px;
     padding: 0 4px;
     border-radius: 999px;
-    background: var(--grad-brand);
+    background: var(--accent);
     color: #fff;
     font-size: 10.5px;
     font-weight: 600;

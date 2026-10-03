@@ -55,7 +55,7 @@ export default function CmdbOverviewPage() {
                 { label: 'Critical', value: fmtNumber(d.totals.critical), tone: d.totals.critical ? 'bad' : 'good', icon: <AlertOctagon className="h-4 w-4" />, hint: `${fmtNumber(d.totals.openIncidents)} open tickets on CIs`, onClick: () => toCis('criticality=critical') },
                 { label: 'Stale', value: fmtNumber(d.totals.stale), tone: d.totals.stale ? 'warn' : 'good', icon: <EyeOff className="h-4 w-4" />, hint: 'discovered, not seen for 30 days', onClick: () => toCis('stale=true') },
                 { label: 'Without relationships', value: fmtNumber(d.totals.withoutRelationships), tone: d.totals.withoutRelationships ? 'warn' : 'good', icon: <Link2 className="h-4 w-4" />, hint: 'active CIs no map can reach', onClick: () => toCis('withoutRelationships=true&status=active') },
-                { label: 'Findings to review', value: fmtNumber(d.discovery.pendingFindings), tone: d.discovery.pendingFindings ? 'warn' : 'good', icon: <Radar className="h-4 w-4" />, hint: `${fmtNumber(d.discovery.newFindings)} new devices · ${fmtNumber(d.discovery.activeSources)} active sources`, onClick: () => navigate('/cmdb/discovery/findings') },
+                { label: 'Findings to review', value: fmtNumber(d.discovery.pendingFindings), tone: d.discovery.pendingFindings ? 'warn' : 'good', icon: <Radar className="h-4 w-4" />, hint: `${fmtNumber(d.discovery.newFindings)} new devices · ${fmtNumber(d.discovery.activeSources)} active sources`, to: '/cmdb/discovery/findings' },
               ]
             : []
         }

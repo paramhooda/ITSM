@@ -50,11 +50,11 @@ export default function FieldOverviewPage() {
         <KpiGrid
           columns={5}
           items={[
-            { label: 'Today', value: fmtNumber(d.today.scheduled + d.today.inProgress), tone: d.today.inProgress ? 'accent' : 'default', icon: <CalendarDays className="h-4 w-4" />, hint: `${fmtNumber(d.today.inProgress)} on site · ${fmtNumber(d.today.completed)} completed`, onClick: () => navigate(visits({ status: 'scheduled,in_progress', from: today, to: today })) },
-            { label: 'This week', value: fmtNumber(d.week.scheduled), icon: <CalendarRange className="h-4 w-4" />, hint: `${fmtNumber(d.week.completed)} completed · ${fmtNumber(d.week.cancelled)} cancelled`, onClick: () => navigate(withQuery('/field/calendar', { customerId: cid })) },
-            { label: 'Overdue', value: fmtNumber(d.overdue), tone: d.overdue ? 'bad' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'scheduled time passed, not started', onClick: () => navigate(visits({ status: 'requested,scheduled', to: today })) },
-            { label: 'Awaiting acknowledgement', value: fmtNumber(d.awaitingAcknowledgement), tone: d.awaitingAcknowledgement ? 'warn' : 'good', icon: <Clock className="h-4 w-4" />, hint: 'completed, no customer sign-off', onClick: () => navigate(visits({ status: 'completed', unacknowledged: 'true' })) },
-            { label: 'PM due this month', value: fmtNumber(d.pm.dueThisMonth), tone: d.pm.overdue ? 'warn' : 'default', icon: <ClipboardCheck className="h-4 w-4" />, hint: `${fmtNumber(d.pm.overdue)} overdue · ${fmtNumber(d.pm.completedThisMonth)} done`, onClick: () => navigate(maintenance({ from: monthStart, to: monthEnd })) },
+            { label: 'Today', value: fmtNumber(d.today.scheduled + d.today.inProgress), tone: d.today.inProgress ? 'accent' : 'default', icon: <CalendarDays className="h-4 w-4" />, hint: `${fmtNumber(d.today.inProgress)} on site · ${fmtNumber(d.today.completed)} completed`, to: visits({ status: 'scheduled,in_progress', from: today, to: today }) },
+            { label: 'This week', value: fmtNumber(d.week.scheduled), icon: <CalendarRange className="h-4 w-4" />, hint: `${fmtNumber(d.week.completed)} completed · ${fmtNumber(d.week.cancelled)} cancelled`, to: withQuery('/field/calendar', { customerId: cid }) },
+            { label: 'Overdue', value: fmtNumber(d.overdue), tone: d.overdue ? 'bad' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'scheduled time passed, not started', to: visits({ status: 'requested,scheduled', to: today }) },
+            { label: 'Awaiting acknowledgement', value: fmtNumber(d.awaitingAcknowledgement), tone: d.awaitingAcknowledgement ? 'warn' : 'good', icon: <Clock className="h-4 w-4" />, hint: 'completed, no customer sign-off', to: visits({ status: 'completed', unacknowledged: 'true' }) },
+            { label: 'PM due this month', value: fmtNumber(d.pm.dueThisMonth), tone: d.pm.overdue ? 'warn' : 'default', icon: <ClipboardCheck className="h-4 w-4" />, hint: `${fmtNumber(d.pm.overdue)} overdue · ${fmtNumber(d.pm.completedThisMonth)} done`, to: maintenance({ from: monthStart, to: monthEnd }) },
           ]}
         />
       )}

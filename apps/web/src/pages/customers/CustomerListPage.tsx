@@ -163,9 +163,9 @@ export default function CustomerListPage() {
               sm
                 ? [
                     { label: 'Customers', value: fmtNumber(sm.total), icon: <Building2 className="h-4 w-4" />, hint: `${fmtNumber(sm.active)} active · ${fmtNumber(sm.inactive)} inactive` },
-                    { label: 'Open tickets', value: fmtNumber(sm.openTickets), icon: <Ticket className="h-4 w-4" />, hint: 'across the customers shown', onClick: () => navigate('/tickets') },
-                    { label: 'SLA breached', value: fmtNumber(sm.breachedTickets), tone: sm.breachedTickets > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: 'open tickets past an SLA target', onClick: () => navigate('/tickets?slaState=breached') },
-                    { label: 'Contracts expiring · 60d', value: fmtNumber(sm.contractsExpiring60), tone: sm.contractsExpiring60 > 0 ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: 'renewals to start now', onClick: () => navigate('/contracts?expiringWithinDays=60') },
+                    { label: 'Open tickets', value: fmtNumber(sm.openTickets), icon: <Ticket className="h-4 w-4" />, hint: 'across the customers shown', to: '/tickets' },
+                    { label: 'SLA breached', value: fmtNumber(sm.breachedTickets), tone: sm.breachedTickets > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: 'open tickets past an SLA target', to: '/tickets?slaState=breached' },
+                    { label: 'Contracts expiring · 60d', value: fmtNumber(sm.contractsExpiring60), tone: sm.contractsExpiring60 > 0 ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: 'renewals to start now', to: '/contracts?expiringWithinDays=60' },
                   ]
                 : []
             }

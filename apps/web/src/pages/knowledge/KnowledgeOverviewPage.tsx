@@ -41,10 +41,10 @@ export default function KnowledgeOverviewPage() {
       {d && (
         <KpiGrid
           items={[
-            { label: 'Articles', value: fmtNumber(d.total), icon: <BookOpen className="h-4 w-4" />, hint: `${fmtNumber(d.byStatus.find((b) => b.key === 'published')?.count ?? 0)} published · ${fmtNumber(d.withoutCategory)} uncategorised`, onClick: () => navigate(articles()) },
-            { label: 'Drafts', value: fmtNumber(d.drafts), tone: d.drafts ? 'warn' : 'default', icon: <PenLine className="h-4 w-4" />, hint: 'waiting to be published', onClick: () => navigate(articles({ status: 'draft' })) },
-            { label: 'Needs review', value: fmtNumber(needsReview), tone: d.expired ? 'bad' : needsReview ? 'warn' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: `${fmtNumber(d.stale)} stale · ${fmtNumber(d.expired)} expired · ${fmtNumber(d.expiringSoon30d)} expiring`, onClick: () => navigate(articles({ status: 'published', sort: 'updatedAt', order: 'asc' })) },
-            { label: 'Views · 30d', value: fmtNumber(d.viewsLast30d), icon: <Eye className="h-4 w-4" />, hint: 'article opens by staff and customers', onClick: () => navigate(articles({ sort: 'viewCount', order: 'desc' })) },
+            { label: 'Articles', value: fmtNumber(d.total), icon: <BookOpen className="h-4 w-4" />, hint: `${fmtNumber(d.byStatus.find((b) => b.key === 'published')?.count ?? 0)} published · ${fmtNumber(d.withoutCategory)} uncategorised`, to: articles() },
+            { label: 'Drafts', value: fmtNumber(d.drafts), tone: d.drafts ? 'warn' : 'default', icon: <PenLine className="h-4 w-4" />, hint: 'waiting to be published', to: articles({ status: 'draft' }) },
+            { label: 'Needs review', value: fmtNumber(needsReview), tone: d.expired ? 'bad' : needsReview ? 'warn' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: `${fmtNumber(d.stale)} stale · ${fmtNumber(d.expired)} expired · ${fmtNumber(d.expiringSoon30d)} expiring`, to: articles({ status: 'published', sort: 'updatedAt', order: 'asc' }) },
+            { label: 'Views · 30d', value: fmtNumber(d.viewsLast30d), icon: <Eye className="h-4 w-4" />, hint: 'article opens by staff and customers', to: articles({ sort: 'viewCount', order: 'desc' }) },
           ]}
         />
       )}

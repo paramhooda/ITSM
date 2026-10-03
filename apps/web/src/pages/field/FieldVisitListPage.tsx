@@ -197,10 +197,10 @@ export default function FieldVisitListPage() {
             kpis={
               tiles
                 ? [
-                    { label: 'Scheduled this week', value: fmtNumber(tiles.scheduledThisWeek), icon: <CalendarDays className="h-4 w-4" />, hint: `${fmtNumber(tiles.requested)} requested, not yet scheduled`, onClick: () => navigate('/field/calendar') },
-                    { label: 'On site now', value: fmtNumber(tiles.inProgress), tone: tiles.inProgress ? 'warn' : 'default', icon: <Wrench className="h-4 w-4" />, hint: tiles.overdue ? `${fmtNumber(tiles.overdue)} overdue` : 'nothing overdue', onClick: () => set({ status: 'in_progress', overdue: undefined }) },
-                    { label: 'Completed this month', value: fmtNumber(tiles.completedThisMonth), tone: 'good', icon: <BadgeCheck className="h-4 w-4" />, hint: summary.data?.avgWorkMinutes ? `avg ${fmtDuration(summary.data.avgWorkMinutes)} on site` : undefined, onClick: () => set({ status: 'completed', from: ymd(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to: undefined }) },
-                    { label: 'Pending acknowledgement', value: fmtNumber(tiles.pendingAcknowledgement), tone: tiles.pendingAcknowledgement ? 'warn' : 'good', icon: <Clock className="h-4 w-4" />, hint: 'completed, awaiting customer sign-off', onClick: () => set({ status: 'completed', unacknowledged: 'true' }) },
+                    { label: 'Scheduled this week', value: fmtNumber(tiles.scheduledThisWeek), icon: <CalendarDays className="h-4 w-4" />, hint: `${fmtNumber(tiles.requested)} requested, not yet scheduled`, to: '/field/calendar' },
+                    { label: 'On site now', value: fmtNumber(tiles.inProgress), tone: tiles.inProgress ? 'warn' : 'default', icon: <Wrench className="h-4 w-4" />, hint: tiles.overdue ? `${fmtNumber(tiles.overdue)} overdue` : 'nothing overdue', onClick: () => set({ status: 'in_progress', overdue: undefined }), scrollTo: true, active: state.status === 'in_progress' },
+                    { label: 'Completed this month', value: fmtNumber(tiles.completedThisMonth), tone: 'good', icon: <BadgeCheck className="h-4 w-4" />, hint: summary.data?.avgWorkMinutes ? `avg ${fmtDuration(summary.data.avgWorkMinutes)} on site` : undefined, onClick: () => set({ status: 'completed', from: ymd(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to: undefined }), scrollTo: true, active: state.status === 'completed' && state.unacknowledged !== 'true' },
+                    { label: 'Pending acknowledgement', value: fmtNumber(tiles.pendingAcknowledgement), tone: tiles.pendingAcknowledgement ? 'warn' : 'good', icon: <Clock className="h-4 w-4" />, hint: 'completed, awaiting customer sign-off', onClick: () => set({ status: 'completed', unacknowledged: 'true' }), scrollTo: true, active: state.status === 'completed' && state.unacknowledged === 'true' },
                   ]
                 : []
             }

@@ -50,10 +50,10 @@ export function SocDashboard({ days = 30 }: { days?: number }) {
       </div>
       <KpiGrid
         items={[
-          { label: 'Open security incidents', value: fmtNumber(t.open), icon: <ShieldAlert className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened today`, spark: recent.map((s) => s.opened), sparkLabel: 'Security incidents opened per day, last 14 days', onClick: () => (window.location.href = '/tickets?domain=soc&open=true') },
+          { label: 'Open security incidents', value: fmtNumber(t.open), icon: <ShieldAlert className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened today`, spark: recent.map((s) => s.opened), sparkLabel: 'Security incidents opened per day, last 14 days', to: '/tickets?domain=soc&open=true' },
           { label: 'Critical / high', value: fmtNumber(t.criticalHigh), icon: <Siren className="h-4 w-4" />, tone: t.criticalHigh > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.escalated)} escalated` },
           { label: 'SLA at risk', value: fmtNumber(t.atRisk + t.breached), icon: <Timer className="h-4 w-4" />, tone: t.breached > 0 ? 'bad' : t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} breached · ${fmtNumber(t.unassigned)} unassigned`, spark: recent.map((s) => s.breaches), sparkLabel: 'Security SLA breaches per day, last 14 days' },
-          { label: 'SIEM events · 24h', value: fmtNumber(d.siemEvents24h.total), icon: <Radio className="h-4 w-4" />, hint: `${fmtNumber(d.siemEvents24h.ticketsCreated)} became tickets`, onClick: () => (window.location.href = '/admin/integrations') },
+          { label: 'SIEM events · 24h', value: fmtNumber(d.siemEvents24h.total), icon: <Radio className="h-4 w-4" />, hint: `${fmtNumber(d.siemEvents24h.ticketsCreated)} became tickets`, to: '/admin/integrations' },
         ]}
       />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

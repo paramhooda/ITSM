@@ -85,10 +85,10 @@ export default function FindingsPage() {
             kpis={
               s
                 ? [
-                    { label: 'To review', value: fmtNumber(pending), tone: pending ? 'warn' : 'good', icon: <ClipboardList className="h-4 w-4" />, hint: 'pending your decision', onClick: () => set({ status: 'pending', diffStatus: undefined }) },
-                    { label: 'New devices', value: fmtNumber(s.byDiff.new ?? 0), tone: (s.byDiff.new ?? 0) ? 'accent' : 'default', icon: <Sparkles className="h-4 w-4" />, hint: 'no matching CI yet', onClick: () => set({ status: 'pending', diffStatus: 'new' }) },
-                    { label: 'Changed', value: fmtNumber(s.byDiff.changed ?? 0), tone: (s.byDiff.changed ?? 0) ? 'warn' : 'default', icon: <RefreshCw className="h-4 w-4" />, hint: 'differs from the CI on record', onClick: () => set({ status: 'pending', diffStatus: 'changed' }) },
-                    { label: 'Applied', value: fmtNumber(s.byStatus.applied ?? 0), tone: 'good', icon: <CheckCircle2 className="h-4 w-4" />, hint: `${fmtNumber(s.byStatus.ignored ?? 0)} ignored`, onClick: () => set({ status: 'applied', diffStatus: undefined }) },
+                    { label: 'To review', value: fmtNumber(pending), tone: pending ? 'warn' : 'good', icon: <ClipboardList className="h-4 w-4" />, hint: 'pending your decision', onClick: () => set({ status: 'pending', diffStatus: undefined }), scrollTo: true, active: state.status === 'pending' && !state.diffStatus },
+                    { label: 'New devices', value: fmtNumber(s.byDiff.new ?? 0), tone: (s.byDiff.new ?? 0) ? 'accent' : 'default', icon: <Sparkles className="h-4 w-4" />, hint: 'no matching CI yet', onClick: () => set({ status: 'pending', diffStatus: 'new' }), scrollTo: true, active: state.status === 'pending' && state.diffStatus === 'new' },
+                    { label: 'Changed', value: fmtNumber(s.byDiff.changed ?? 0), tone: (s.byDiff.changed ?? 0) ? 'warn' : 'default', icon: <RefreshCw className="h-4 w-4" />, hint: 'differs from the CI on record', onClick: () => set({ status: 'pending', diffStatus: 'changed' }), scrollTo: true, active: state.status === 'pending' && state.diffStatus === 'changed' },
+                    { label: 'Applied', value: fmtNumber(s.byStatus.applied ?? 0), tone: 'good', icon: <CheckCircle2 className="h-4 w-4" />, hint: `${fmtNumber(s.byStatus.ignored ?? 0)} ignored`, onClick: () => set({ status: 'applied', diffStatus: undefined }), scrollTo: true, active: state.status === 'applied' },
                   ]
                 : []
             }

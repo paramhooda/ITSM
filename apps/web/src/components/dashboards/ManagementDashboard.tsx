@@ -52,7 +52,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedToday)} resolved`,
             spark: recent.map((s) => s.opened),
             sparkLabel: `Tickets opened per day, last ${sparkDays} days`,
-            onClick: () => (window.location.href = `/tickets?open=true${custQ}`),
+            to: `/tickets?open=true${custQ}`,
           },
           {
             label: `SLA compliance · ${days}d`,
@@ -74,7 +74,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             hint: `${fmtNumber(k.slaBreaches)} in period`,
             spark: recent.map((s) => s.breaches),
             sparkLabel: `SLA breaches per day, last ${sparkDays} days`,
-            onClick: () => (window.location.href = `/tickets?open=true&slaState=breached${custQ}`),
+            to: `/tickets?open=true&slaState=breached${custQ}`,
           },
           {
             label: `Resolved · ${days}d`,
@@ -84,7 +84,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             hint: `${fmtDuration(k.mttrMinutes)} mean time to resolve`,
             spark: recent.map((s) => s.resolved),
             sparkLabel: `Tickets resolved per day, last ${sparkDays} days`,
-            onClick: () => (window.location.href = `/tickets?status=resolved${custQ}`),
+            to: `/tickets?status=resolved${custQ}`,
           },
         ]}
       />

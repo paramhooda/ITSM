@@ -277,7 +277,7 @@ export default function ProfilePage() {
                 <Input type="password" autoComplete="new-password" value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} required />
               </Field>
               <div className="sm:col-span-3 flex justify-end">
-                <Button type="submit" variant="secondary" loading={changePassword.isPending}>
+                <Button type="submit" variant="outline" loading={changePassword.isPending}>
                   Update password
                 </Button>
               </div>

@@ -31,7 +31,7 @@ export function Tooltip({ label, children, side = 'right', className, delay = 12
       {children}
       {pos &&
         createPortal(
-          <div role="tooltip" className="fixed z-[70] pointer-events-none rounded-md bg-[#18181b] px-2 py-1.5 text-[12px] font-medium leading-none text-white shadow-[0_4px_12px_rgba(9,9,11,0.18)] whitespace-nowrap fade-in" style={{ left: pos.x, top: pos.y, transform }}>
+          <div role="tooltip" className="fixed z-[70] pointer-events-none rounded-md bg-primary px-2 py-1.5 text-[12px] font-medium leading-none text-white shadow-[0_4px_12px_rgba(9,9,11,0.18)] whitespace-nowrap fade-in" style={{ left: pos.x, top: pos.y, transform }}>
             {label}
           </div>,
           document.body,

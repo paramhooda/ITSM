@@ -51,10 +51,10 @@ export default function DiscoveryOverviewPage() {
         kpis={
           d
             ? [
-                { label: 'Sources', value: `${fmtNumber(d.sources.active)}/${fmtNumber(d.sources.total)}`, icon: <Radar className="h-4 w-4" />, hint: `${fmtNumber(d.sources.scheduled)} on a schedule`, onClick: () => navigate('/cmdb/discovery/sources') },
-                { label: 'Runs in progress', value: fmtNumber(active), tone: active ? 'accent' : 'default', icon: <Play className="h-4 w-4" />, hint: `${fmtNumber(d.runs.completed7d)} completed · ${fmtNumber(d.runs.failed7d)} failed in 7 days`, onClick: () => navigate('/cmdb/discovery/runs') },
-                { label: 'To review', value: fmtNumber(d.findings.pending), tone: d.findings.pending ? 'warn' : 'good', icon: <ClipboardList className="h-4 w-4" />, hint: `${fmtNumber(d.findings.pendingNew)} new devices · ${fmtNumber(d.findings.pendingChanged)} changed`, onClick: () => navigate('/cmdb/discovery/findings?status=pending') },
-                { label: 'Applied · 7 days', value: fmtNumber(d.findings.applied7d), tone: 'good', icon: <CheckCircle2 className="h-4 w-4" />, hint: `${fmtNumber(d.findings.ignored7d)} ignored`, onClick: () => navigate('/cmdb/discovery/findings?status=applied') },
+                { label: 'Sources', value: `${fmtNumber(d.sources.active)}/${fmtNumber(d.sources.total)}`, icon: <Radar className="h-4 w-4" />, hint: `${fmtNumber(d.sources.scheduled)} on a schedule`, to: '/cmdb/discovery/sources' },
+                { label: 'Runs in progress', value: fmtNumber(active), tone: active ? 'accent' : 'default', icon: <Play className="h-4 w-4" />, hint: `${fmtNumber(d.runs.completed7d)} completed · ${fmtNumber(d.runs.failed7d)} failed in 7 days`, to: '/cmdb/discovery/runs' },
+                { label: 'To review', value: fmtNumber(d.findings.pending), tone: d.findings.pending ? 'warn' : 'good', icon: <ClipboardList className="h-4 w-4" />, hint: `${fmtNumber(d.findings.pendingNew)} new devices · ${fmtNumber(d.findings.pendingChanged)} changed`, to: '/cmdb/discovery/findings?status=pending' },
+                { label: 'Applied · 7 days', value: fmtNumber(d.findings.applied7d), tone: 'good', icon: <CheckCircle2 className="h-4 w-4" />, hint: `${fmtNumber(d.findings.ignored7d)} ignored`, to: '/cmdb/discovery/findings?status=applied' },
               ]
             : []
         }

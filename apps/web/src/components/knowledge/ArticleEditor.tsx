@@ -180,7 +180,7 @@ export function ArticleEditor({ open, onClose, article, defaults, onSaved }: { o
           <Button variant="ghost" onClick={onClose} disabled={save.isPending}>
             Cancel
           </Button>
-          <Button variant="secondary" onClick={() => save.mutate(false)} loading={save.isPending}>
+          <Button variant="outline" onClick={() => save.mutate(false)} loading={save.isPending}>
             {article ? 'Save' : 'Save draft'}
           </Button>
           {(!article || article.status !== 'published') && (

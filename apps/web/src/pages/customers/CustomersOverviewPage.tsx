@@ -54,11 +54,11 @@ export default function CustomersOverviewPage() {
         <KpiGrid
           columns={5}
           items={[
-            { label: 'Customers', value: fmtNumber(d.total), icon: <Building2 className="h-4 w-4" />, hint: `${fmtNumber(d.inactive)} inactive`, onClick: () => navigate(accounts({ isActive: 'all' })) },
-            { label: 'Active', value: fmtNumber(d.active), tone: 'good', icon: <BadgeCheck className="h-4 w-4" />, hint: 'receiving services', onClick: () => navigate(accounts()) },
-            { label: 'New · 90d', value: fmtNumber(d.newLast90d), icon: <UserPlus className="h-4 w-4" />, hint: 'onboarded this quarter', onClick: () => navigate(accounts({ sort: 'createdAt', order: 'desc', isActive: 'all' })) },
-            { label: 'Contracts expiring · 60d', value: fmtNumber(d.contractsExpiring60d), tone: d.contractsExpiring60d ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: 'renewals to start now', onClick: () => navigate('/contracts/list?expiringWithinDays=60') },
-            { label: 'Entitlements over limit', value: fmtNumber(d.entitlementsOverThreshold), tone: d.entitlementsOverThreshold ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: 'usage past the warning threshold', onClick: () => navigate('/contracts/entitlements?status=over_threshold') },
+            { label: 'Customers', value: fmtNumber(d.total), icon: <Building2 className="h-4 w-4" />, hint: `${fmtNumber(d.inactive)} inactive`, to: accounts({ isActive: 'all' }) },
+            { label: 'Active', value: fmtNumber(d.active), tone: 'good', icon: <BadgeCheck className="h-4 w-4" />, hint: 'receiving services', to: accounts() },
+            { label: 'New · 90d', value: fmtNumber(d.newLast90d), icon: <UserPlus className="h-4 w-4" />, hint: 'onboarded this quarter', to: accounts({ sort: 'createdAt', order: 'desc', isActive: 'all' }) },
+            { label: 'Contracts expiring · 60d', value: fmtNumber(d.contractsExpiring60d), tone: d.contractsExpiring60d ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: 'renewals to start now', to: '/contracts/list?expiringWithinDays=60' },
+            { label: 'Entitlements over limit', value: fmtNumber(d.entitlementsOverThreshold), tone: d.entitlementsOverThreshold ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: 'usage past the warning threshold', to: '/contracts/entitlements?status=over_threshold' },
           ]}
         />
       )}

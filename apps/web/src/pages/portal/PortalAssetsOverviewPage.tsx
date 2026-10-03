@@ -42,10 +42,10 @@ export default function PortalAssetsOverviewPage() {
       {d && (
         <KpiGrid
           items={[
-            { label: 'Total assets', value: fmtNumber(d.total), icon: <Boxes className="h-4 w-4" />, hint: `across ${fmtNumber(d.bySite.length)} ${d.bySite.length === 1 ? 'site' : 'sites'}`, onClick: () => navigate(inventory()) },
-            { label: 'Warranty ending · 90 d', value: fmtNumber(warrantyEnding), tone: warrantyEnding ? 'warn' : 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: `${fmtNumber(d.warranty.d30)} within 30 days`, onClick: () => navigate(inventory({ expiring: 'warranty90' })) },
-            { label: 'AMC ending · 90 d', value: fmtNumber(amcEnding), tone: amcEnding ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(d.amc.d30)} within 30 days`, onClick: () => navigate(inventory({ expiring: 'amc90' })) },
-            { label: 'Expired cover', value: fmtNumber(expired), tone: expired ? 'bad' : 'good', icon: <ShieldOff className="h-4 w-4" />, hint: `${fmtNumber(d.warranty.expired)} warranty · ${fmtNumber(d.amc.expired)} AMC`, onClick: () => navigate(inventory({ expiring: 'expired' })) },
+            { label: 'Total assets', value: fmtNumber(d.total), icon: <Boxes className="h-4 w-4" />, hint: `across ${fmtNumber(d.bySite.length)} ${d.bySite.length === 1 ? 'site' : 'sites'}`, to: inventory() },
+            { label: 'Warranty ending · 90 d', value: fmtNumber(warrantyEnding), tone: warrantyEnding ? 'warn' : 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: `${fmtNumber(d.warranty.d30)} within 30 days`, to: inventory({ expiring: 'warranty90' }) },
+            { label: 'AMC ending · 90 d', value: fmtNumber(amcEnding), tone: amcEnding ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(d.amc.d30)} within 30 days`, to: inventory({ expiring: 'amc90' }) },
+            { label: 'Expired cover', value: fmtNumber(expired), tone: expired ? 'bad' : 'good', icon: <ShieldOff className="h-4 w-4" />, hint: `${fmtNumber(d.warranty.expired)} warranty · ${fmtNumber(d.amc.expired)} AMC`, to: inventory({ expiring: 'expired' }) },
           ]}
         />
       )}

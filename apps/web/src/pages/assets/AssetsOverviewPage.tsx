@@ -46,11 +46,11 @@ export default function AssetsOverviewPage() {
         <KpiGrid
           columns={5}
           items={[
-            { label: 'Total assets', value: fmtNumber(d.total), icon: <Boxes className="h-4 w-4" />, hint: `${fmtNumber(d.withCi)} linked to a CI`, onClick: () => navigate(inventory()) },
-            { label: 'Without CI', value: fmtNumber(d.withoutCi), tone: d.withoutCi ? 'warn' : 'good', icon: <Unlink className="h-4 w-4" />, hint: 'not tracked in the CMDB', onClick: () => navigate(inventory({ hasCi: 'false' })) },
-            { label: 'Warranty ending · 90d', value: fmtNumber(d.warranty.d30 + d.warranty.d90), tone: d.warranty.d30 + d.warranty.d90 ? 'warn' : 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: `${fmtNumber(d.warranty.expired)} already expired`, onClick: () => navigate(coverage('warranty')) },
-            { label: 'AMC ending · 90d', value: fmtNumber(d.amc.d30 + d.amc.d90), tone: d.amc.d30 + d.amc.d90 ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(d.amc.expired)} already expired`, onClick: () => navigate(coverage('amc')) },
-            { label: 'Added · 30d', value: fmtNumber(d.addedLast30d), icon: <PackagePlus className="h-4 w-4" />, hint: 'new in the register', onClick: () => navigate(inventory({ sort: 'createdAt', order: 'desc' })) },
+            { label: 'Total assets', value: fmtNumber(d.total), icon: <Boxes className="h-4 w-4" />, hint: `${fmtNumber(d.withCi)} linked to a CI`, to: inventory() },
+            { label: 'Without CI', value: fmtNumber(d.withoutCi), tone: d.withoutCi ? 'warn' : 'good', icon: <Unlink className="h-4 w-4" />, hint: 'not tracked in the CMDB', to: inventory({ hasCi: 'false' }) },
+            { label: 'Warranty ending · 90d', value: fmtNumber(d.warranty.d30 + d.warranty.d90), tone: d.warranty.d30 + d.warranty.d90 ? 'warn' : 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: `${fmtNumber(d.warranty.expired)} already expired`, to: coverage('warranty') },
+            { label: 'AMC ending · 90d', value: fmtNumber(d.amc.d30 + d.amc.d90), tone: d.amc.d30 + d.amc.d90 ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(d.amc.expired)} already expired`, to: coverage('amc') },
+            { label: 'Added · 30d', value: fmtNumber(d.addedLast30d), icon: <PackagePlus className="h-4 w-4" />, hint: 'new in the register', to: inventory({ sort: 'createdAt', order: 'desc' }) },
           ]}
         />
       )}

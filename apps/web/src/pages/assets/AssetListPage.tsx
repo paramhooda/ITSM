@@ -202,10 +202,10 @@ export default function AssetListPage() {
             kpis={
               sm
                 ? [
-                    { label: 'Total assets', value: fmtNumber(sm.total), icon: <Boxes className="h-4 w-4" />, hint: `${fmtNumber(sm.withCi)} linked to CIs`, onClick: () => set({ expiring: undefined, lifecycleStage: undefined }) },
-                    { label: 'Warranty expiring · 90d', value: fmtNumber(sm.warrantyExpiring90), tone: sm.warrantyExpiring90 ? 'warn' : 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: `${fmtNumber(sm.warrantyExpired)} already expired`, onClick: () => set({ expiring: state.expiring === 'warranty90' ? undefined : 'warranty90' }) },
-                    { label: 'AMC expiring · 90d', value: fmtNumber(sm.amcExpiring90), tone: sm.amcExpiring90 ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(sm.amcExpired)} already expired`, onClick: () => set({ expiring: state.expiring === 'amc90' ? undefined : 'amc90' }) },
-                    { label: 'In repair', value: fmtNumber(sm.inRepair), tone: sm.inRepair ? 'bad' : 'good', icon: <Wrench className="h-4 w-4" />, hint: 'out of service right now', onClick: () => set({ lifecycleStage: state.lifecycleStage === 'in_repair' ? undefined : 'in_repair' }) },
+                    { label: 'Total assets', value: fmtNumber(sm.total), icon: <Boxes className="h-4 w-4" />, hint: `${fmtNumber(sm.withCi)} linked to CIs`, onClick: () => set({ expiring: undefined, lifecycleStage: undefined }), scrollTo: true },
+                    { label: 'Warranty expiring · 90d', value: fmtNumber(sm.warrantyExpiring90), tone: sm.warrantyExpiring90 ? 'warn' : 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: `${fmtNumber(sm.warrantyExpired)} already expired`, onClick: () => set({ expiring: state.expiring === 'warranty90' ? undefined : 'warranty90' }), scrollTo: true, active: state.expiring === 'warranty90' },
+                    { label: 'AMC expiring · 90d', value: fmtNumber(sm.amcExpiring90), tone: sm.amcExpiring90 ? 'warn' : 'good', icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(sm.amcExpired)} already expired`, onClick: () => set({ expiring: state.expiring === 'amc90' ? undefined : 'amc90' }), scrollTo: true, active: state.expiring === 'amc90' },
+                    { label: 'In repair', value: fmtNumber(sm.inRepair), tone: sm.inRepair ? 'bad' : 'good', icon: <Wrench className="h-4 w-4" />, hint: 'out of service right now', onClick: () => set({ lifecycleStage: state.lifecycleStage === 'in_repair' ? undefined : 'in_repair' }), scrollTo: true, active: state.lifecycleStage === 'in_repair' },
                   ]
                 : []
             }

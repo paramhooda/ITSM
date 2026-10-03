@@ -1,6 +1,8 @@
 import { useId, type ReactNode } from 'react';
-import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowDownRight, ArrowUpRight, ArrowUpRight as ArrowOut, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { scrollToResults } from '@/components/ui/ListShell';
 import type { Delta } from './types';
 
 export type Tone = 'default' | 'good' | 'warn' | 'bad' | 'accent';
@@ -17,15 +19,20 @@ export interface KpiItem {
   spark?: (number | null)[];
   sparkLabel?: string;
   icon?: ReactNode;
+  /** Quick filter on the page's own list: toggles a filter in place (pair with `active` and `scrollTo`). */
   onClick?: () => void;
+  /** Link tile: opens the list that holds the matching records (overview pages and dashboards). */
+  to?: string;
+  /** The tile's filter is in effect: ring and brand border, so the band and the bar agree. */
+  active?: boolean;
+  /** After `onClick`, scroll the page's results into view so the effect of the click is visible. */
+  scrollTo?: boolean;
 }
 
 const TONE_TEXT: Record<Tone, string> = { default: 'text-default', good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600', accent: 'text-brand-600' };
 const TONE_HEX: Record<Tone, string> = { default: '#2563eb', good: '#16a34a', warn: '#f59e0b', bad: '#dc2626', accent: '#2563eb' };
 /** Tinted square behind a tile icon: the one touch of colour on neutral tiles. */
 const TONE_CHIP: Record<Tone, string> = { default: 'bg-brand-50 text-brand-600', good: 'bg-emerald-50 text-emerald-600', warn: 'bg-amber-50 text-amber-600', bad: 'bg-red-50 text-red-600', accent: 'bg-violet-50 text-violet-600' };
-/** A soft colour pool in the tile's top-right corner, tinted by tone: the tile reads as "good", "warn" or "bad" before the number does. */
-const TONE_GLOW: Record<Tone, string> = { default: 'rgba(37, 99, 235, 0.11)', good: 'rgba(16, 185, 129, 0.14)', warn: 'rgba(245, 158, 11, 0.16)', bad: 'rgba(239, 68, 68, 0.13)', accent: 'rgba(124, 58, 237, 0.14)' };
 
 export function DeltaBadge({ delta, lowerIsBetter, compact }: { delta?: Delta | null; lowerIsBetter?: boolean; compact?: boolean }) {
   if (!delta || delta.deltaPct === null) return <span className="text-subtle inline-flex items-center gap-1 text-[12px]"><Minus className="h-3 w-3" />{!compact && 'no prior data'}</span>;
@@ -79,20 +86,21 @@ export function Sparkline({ data, color = '#2563eb', width = 96, height = 36, cl
   );
 }
 
-export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBetter, spark, sparkLabel, icon, onClick, className }: KpiItem & { className?: string }) {
-  const clickable = !!onClick;
-  return (
-    <div
-      className={cn('card p-5 flex flex-col gap-3 min-w-0 relative overflow-hidden', clickable && 'cursor-pointer hover:border-strong hover:shadow-raised transition-[box-shadow,border-color]', className)}
-      style={{ backgroundImage: `radial-gradient(180px 110px at 100% 0%, ${TONE_GLOW[tone]}, transparent 70%)` }}
-      onClick={onClick}
-      role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onKeyDown={clickable ? (e) => (e.key === 'Enter' || e.key === ' ') && onClick?.() : undefined}
-    >
+export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBetter, spark, sparkLabel, icon, onClick, to, active, scrollTo, className }: KpiItem & { className?: string }) {
+  const isLink = !!to;
+  const clickable = isLink || !!onClick;
+  const handle = () => {
+    onClick?.();
+    if (scrollTo) scrollToResults();
+  };
+  const body = (
+    <>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[13px] text-muted font-medium truncate">{label}</span>
-        {icon && <span className={cn('inline-flex h-7 w-7 items-center justify-center rounded-lg shrink-0 border border-current/10', TONE_CHIP[tone])}>{icon}</span>}
+        <span className="flex items-center gap-1.5 shrink-0">
+          {isLink && <ArrowOut className="h-3.5 w-3.5 text-subtle opacity-0 -translate-x-0.5 translate-y-0.5 transition-all group-hover:opacity-100 group-hover:translate-x-0 group-hover:translate-y-0" aria-hidden />}
+          {icon && <span className={cn('inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/10', TONE_CHIP[tone])}>{icon}</span>}
+        </span>
       </div>
       <div className="flex items-center justify-between gap-4">
         <div className={cn('text-[30px] leading-none font-semibold tracking-[-0.03em] tnum min-w-0 truncate', TONE_TEXT[tone])}>{value}</div>
@@ -102,8 +110,17 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
         {delta !== undefined && <DeltaBadge delta={delta} lowerIsBetter={lowerIsBetter} compact />}
         {hint && <span className="truncate">{hint}</span>}
       </div>
-    </div>
+    </>
   );
+  const cls = cn(
+    'card p-5 flex flex-col gap-3 min-w-0 relative text-left',
+    clickable && 'group cursor-pointer hover:border-strong hover:shadow-raised transition-[box-shadow,border-color]',
+    active && 'border-brand-400 ring-2 ring-brand-500/25 hover:border-brand-500',
+    className,
+  );
+  if (isLink) return <Link to={to!} className={cls} title={typeof hint === 'string' ? hint : undefined}>{body}</Link>;
+  if (clickable) return <button type="button" className={cls} onClick={handle} aria-pressed={active} data-active={active || undefined}>{body}</button>;
+  return <div className={cls}>{body}</div>;
 }
 
 /** Hero row of at most four KPIs; the number is the chart, the sparkline is the context. */

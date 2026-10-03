@@ -2,7 +2,8 @@ import { useMemo, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Flame, PhoneCall, AlertTriangle, ClipboardList, CheckCircle2, Siren } from 'lucide-react';
-import { PageHeader, DataTable, Pagination, EmptyState, ErrorBlock, Badge, StatTile, ListShell, FilterGroup, FilterOptions, FilterSelect, type AppliedFilter, type Column } from '@/components/ui';
+import { PageHeader, DataTable, Pagination, EmptyState, ErrorBlock, Badge, ListShell, FilterGroup, FilterOptions, FilterSelect, type AppliedFilter, type Column } from '@/components/ui';
+import { KpiGrid } from '@/components/dashboards/KpiGrid';
 import { useListState } from '@/hooks/useListState';
 import { useCustomersLookup } from '@/hooks/useLookups';
 import { OPERATIONS_MODULES } from '@/layouts/modules';
@@ -113,12 +114,14 @@ export default function MajorIncidentsPage() {
         onClear={() => set({ status: undefined, customerId: undefined, q: undefined })}
         insights={
           summary && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatTile label="Active now" value={summary.active} tone={summary.active ? 'bad' : 'good'} icon={<Flame className="h-4 w-4" />} onClick={() => set({ status: 'active' })} />
-              <StatTile label="Update overdue" value={summary.overdue} tone={summary.overdue ? 'bad' : 'default'} icon={<AlertTriangle className="h-4 w-4" />} hint="stakeholders waiting" />
-              <StatTile label="Awaiting review" value={summary.awaitingReview} tone={summary.awaitingReview ? 'warn' : 'default'} icon={<ClipboardList className="h-4 w-4" />} onClick={() => set({ status: 'resolved' })} hint="resolved, no post-incident review yet" />
-              <StatTile label="Resolved · 30 days" value={summary.resolved30d} icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => set({ status: 'all' })} />
-            </div>
+            <KpiGrid
+              items={[
+                { label: 'Active now', value: summary.active, tone: summary.active ? 'bad' : 'good', icon: <Flame className="h-4 w-4" />, hint: 'bridge open, updates on a cadence', onClick: () => set({ status: 'active' }), active: (state.status || 'active') === 'active', scrollTo: true },
+                { label: 'Update overdue', value: summary.overdue, tone: summary.overdue ? 'bad' : 'default', icon: <AlertTriangle className="h-4 w-4" />, hint: 'stakeholders waiting' },
+                { label: 'Awaiting review', value: summary.awaitingReview, tone: summary.awaitingReview ? 'warn' : 'default', icon: <ClipboardList className="h-4 w-4" />, hint: 'resolved, no post-incident review yet', onClick: () => set({ status: state.status === 'resolved' ? undefined : 'resolved' }), active: state.status === 'resolved', scrollTo: true },
+                { label: 'Resolved · 30 days', value: summary.resolved30d, icon: <CheckCircle2 className="h-4 w-4" />, hint: 'everything, including reviews done', onClick: () => set({ status: state.status === 'all' ? undefined : 'all' }), active: state.status === 'all', scrollTo: true },
+              ]}
+            />
           )
         }
         count={data ? `${data.total} major incident${data.total === 1 ? '' : 's'}` : undefined}

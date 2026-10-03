@@ -48,8 +48,18 @@ export interface ListShellProps {
   className?: string;
 }
 
-/** Which pill is open: one popover at a time across the bar. */
-const BarContext = createContext<{ openKey: string | null; setOpenKey: (k: string | null) => void } | null>(null);
+/** Which pill is open (one popover at a time) and which pills are in effect (for the count line). */
+const BarContext = createContext<{ openKey: string | null; setOpenKey: (k: string | null) => void; report: (id: string, label: string | null) => void } | null>(null);
+
+/**
+ * Scrolls the page's results (the list under the filter bar) into view. Stat tiles and
+ * breakdown rows that filter in place call it so the effect of a click is always visible.
+ */
+export function scrollToResults() {
+  if (typeof document === 'undefined') return;
+  const el = document.querySelector<HTMLElement>('[data-results]');
+  el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 type PillSummary = { label: ReactNode; count: number } | null;
 interface PillApi {
@@ -62,14 +72,24 @@ const PillContext = createContext<PillApi | null>(null);
 
 export function ListShell({ modules, filters, search, activeCount = 0, onClear, applied = [], quick, insights, toolbar, count, children, className }: ListShellProps) {
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const report = (id: string, label: string | null) =>
+    setLabels((prev) => {
+      if (label === null ? !(id in prev) : prev[id] === label) return prev;
+      const next = { ...prev };
+      if (label === null) delete next[id];
+      else next[id] = label;
+      return next;
+    });
   const hasBar = !!filters || !!search;
   const active = Math.max(activeCount, applied.length);
+  const inEffect = Object.values(labels);
   return (
     <div className={cn('flex flex-col', className)}>
       {modules && <ModuleNav items={modules} />}
       <div className="min-w-0 flex flex-col gap-3">
         {hasBar && (
-          <BarContext.Provider value={{ openKey, setOpenKey }}>
+          <BarContext.Provider value={{ openKey, setOpenKey, report }}>
             <div className="filter-bar" role="toolbar" aria-label="Filters" data-testid="filter-bar">
               {search && <SearchInput value={search.value} onChange={search.onChange} placeholder={search.placeholder ?? 'Search…'} className="w-full sm:w-64 shrink-0" />}
               {filters && <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">{filters}</div>}
@@ -90,11 +110,22 @@ export function ListShell({ modules, filters, search, activeCount = 0, onClear, 
         {(count || active > 0) && (
           <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted" data-testid="applied-filters">
             {count && <span>{count}</span>}
-            {active > 0 && <span className="text-subtle">· {active} filter{active === 1 ? '' : 's'} in effect</span>}
+            {active > 0 && (
+              <span className="text-subtle">
+                · filtered by {inEffect.length ? inEffect.join(', ') : `${active} filter${active === 1 ? '' : 's'}`}
+              </span>
+            )}
+            {active > 0 && onClear && (
+              <button type="button" onClick={onClear} className="text-brand-700 hover:underline">
+                Reset
+              </button>
+            )}
           </div>
         )}
         {insights}
-        {children}
+        <div data-results className="scroll-mt-4 flex flex-col gap-3">
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -131,6 +162,11 @@ export function FilterGroup({ label, children, hint, className }: { label: React
   }, [open]);
   const active = !!summary && summary.count > 0;
   const name = textOf(label, 'Filter');
+  useEffect(() => {
+    bar?.report(id, active ? name : null);
+    return () => bar?.report(id, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, name]);
   return (
     <div ref={ref} className={cn('relative', className)}>
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" className={cn('filter-pill', active && 'filter-pill-active', open && 'filter-pill-open')} data-testid="filter-pill" data-active={active || undefined}>

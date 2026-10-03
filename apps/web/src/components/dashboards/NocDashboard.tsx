@@ -78,10 +78,10 @@ export function NocDashboard({ days = 30 }: { days?: number }) {
       </div>
       <KpiGrid
         items={[
-          { label: 'Open incidents', value: fmtNumber(t.openIncidents), icon: <Activity className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened · ${fmtNumber(t.resolvedToday)} resolved today`, spark: d.series.map((s) => s.incidents), sparkLabel: `Incidents opened per day, last ${days} days`, onClick: () => (window.location.href = '/tickets?type=incident&open=true') },
+          { label: 'Open incidents', value: fmtNumber(t.openIncidents), icon: <Activity className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened · ${fmtNumber(t.resolvedToday)} resolved today`, spark: d.series.map((s) => s.incidents), sparkLabel: `Incidents opened per day, last ${days} days`, to: '/tickets?type=incident&open=true' },
           { label: 'P1 / P2 open', value: fmtNumber(p1p2), icon: <Flame className="h-4 w-4" />, tone: p1p2 > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.major)} major · ${fmtNumber(t.escalated)} escalated` },
-          { label: 'SLA at risk', value: fmtNumber(t.atRisk), icon: <Timer className="h-4 w-4" />, tone: t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} already breached`, spark: d.series.map((s) => s.breaches), sparkLabel: `SLA breaches per day, last ${days} days`, onClick: () => (window.location.href = '/tickets?open=true&slaState=breached') },
-          { label: 'Unassigned', value: fmtNumber(t.unassigned), icon: <UserX className="h-4 w-4" />, tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', onClick: () => (window.location.href = '/tickets?open=true&unassigned=true') },
+          { label: 'SLA at risk', value: fmtNumber(t.atRisk), icon: <Timer className="h-4 w-4" />, tone: t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} already breached`, spark: d.series.map((s) => s.breaches), sparkLabel: `SLA breaches per day, last ${days} days`, to: '/tickets?open=true&slaState=breached' },
+          { label: 'Unassigned', value: fmtNumber(t.unassigned), icon: <UserX className="h-4 w-4" />, tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', to: '/tickets?open=true&unassigned=true' },
         ]}
       />
       {(d.majorIncidents?.length ?? 0) > 0 && <MajorIncidentsPanel items={d.majorIncidents} />}

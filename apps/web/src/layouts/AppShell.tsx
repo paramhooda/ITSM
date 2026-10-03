@@ -103,7 +103,7 @@ export function SidebarNav({ items, label }: { items: NavItem[]; label?: string 
                     )
                   }
                 >
-                  <item.icon className={cn('h-[17px] w-[17px] shrink-0', item.tint)} strokeWidth={1.9} />
+                  <item.icon className={cn('h-[17px] w-[17px] shrink-0', !appActive && item.tint)} strokeWidth={1.9} />
                   {!collapsed && <span className="truncate flex-1">{item.label}</span>}
                   {!collapsed && children.length > 0 && (
                     <button

@@ -160,7 +160,7 @@ function AiConnectionCard({ canTest, embedded }: { canTest: boolean; embedded?: 
   const c = status.data?.configured;
   const result: AiTestResult | undefined = test.data;
   const body = (
-    <div className={cn('flex flex-col gap-3', embedded ? 'px-4 py-3 border-b border-default bg-[#fafafa]' : 'p-5')}>
+    <div className={cn('flex flex-col gap-3', embedded ? 'px-4 py-3 border-b border-default bg-app' : 'p-5')}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13px] font-medium flex items-center gap-2"><Sparkles className="h-4 w-4 text-subtle" /> Assistant connection</div>

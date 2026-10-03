@@ -138,9 +138,9 @@ export default function TeamsPage() {
               summary={`${fmtNumber(dir.data.totals.teams)} teams · ${fmtNumber(dir.data.totals.people)} people`}
               kpis={[
                 { label: 'Teams', value: fmtNumber(dir.data.totals.teams), hint: `${fmtNumber(dir.data.totals.people)} people · ${fmtNumber(dir.data.totals.multiTeam)} in more than one team`, icon: <UsersRound className="h-4 w-4" /> },
-                { label: 'Open work in teams', value: fmtNumber(dir.data.totals.open), hint: 'tickets assigned to a team', icon: <Ticket className="h-4 w-4" />, onClick: () => navigate('/tickets') },
-                { label: 'Waiting for an owner', value: fmtNumber(dir.data.totals.unassigned), tone: dir.data.totals.unassigned > 0 ? 'warn' : 'good', hint: 'in a team queue, nobody assigned', icon: <Users className="h-4 w-4" />, onClick: () => navigate('/tickets?assignee=unassigned') },
-                { label: 'Breached in teams', value: fmtNumber(dir.data.totals.breached), tone: dir.data.totals.breached > 0 ? 'bad' : 'good', hint: 'open tickets past an SLA target', icon: <AlertTriangle className="h-4 w-4" />, onClick: () => navigate('/tickets?slaState=breached') },
+                { label: 'Open work in teams', value: fmtNumber(dir.data.totals.open), hint: 'tickets assigned to a team', icon: <Ticket className="h-4 w-4" />, to: '/tickets' },
+                { label: 'Waiting for an owner', value: fmtNumber(dir.data.totals.unassigned), tone: dir.data.totals.unassigned > 0 ? 'warn' : 'good', hint: 'in a team queue, nobody assigned', icon: <Users className="h-4 w-4" />, to: '/tickets?assignee=unassigned' },
+                { label: 'Breached in teams', value: fmtNumber(dir.data.totals.breached), tone: dir.data.totals.breached > 0 ? 'bad' : 'good', hint: 'open tickets past an SLA target', icon: <AlertTriangle className="h-4 w-4" />, to: '/tickets?slaState=breached' },
               ]}
               panels={
                 <>

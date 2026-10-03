@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Layers, Users, Ticket, Activity, Server, ShieldCheck, Wrench, Headset, Briefcase, Cloud, Network, Database, FolderTree, Settings2, Pencil } from 'lucide-react';
@@ -10,6 +10,7 @@ import { Stat } from '@/components/dashboards/Panel';
 import { get } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useListState } from '@/hooks/useListState';
+import { scrollToResults } from '@/components/ui/ListShell';
 import { cn, colorClass, dotClass } from '@/lib/utils';
 import { DOMAIN_COLORS } from '@/lib/statusColors';
 import { fmtDate, fmtNumber } from '@/lib/format';
@@ -32,6 +33,11 @@ export default function ServiceCatalogPage() {
   const canManage = can('services:manage');
   const canConfig = can('admin:config');
   const { state, set } = useListState();
+  // Sections rise in once, when the page mounts; a filter change re-renders them in place.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+  }, []);
   const q = state.q ?? '';
   const domain = state.domain ?? '';
   const showInactive = state.inactive === 'true';
@@ -85,7 +91,10 @@ export default function ServiceCatalogPage() {
                   ...((data?.uncategorised.length ?? 0) > 0 ? [{ value: 'uncategorised', label: 'Uncategorised', count: data!.uncategorised.length }] : []),
                 ]}
                 value={line || undefined}
-                onChange={(v) => set({ line: v as string | undefined }, false)}
+                onChange={(v) => {
+                  set({ line: v as string | undefined }, false);
+                  scrollToResults();
+                }}
                 emptyLabel={catalog.isLoading ? 'Loading…' : 'No service lines'}
               />
             </FilterGroup>
@@ -104,17 +113,17 @@ export default function ServiceCatalogPage() {
               summary={`${fmtNumber(data.totals.services)} offerings in ${fmtNumber(allCategories.length)} service lines`}
               kpis={[
                 { label: 'Service offerings', value: fmtNumber(data.totals.services), hint: `${fmtNumber(allCategories.length)} service lines`, icon: <Layers className="h-4 w-4" /> },
-                { label: 'Subscribed customers', value: fmtNumber(data.totals.subscribedCustomers), hint: 'customers with an active contract', icon: <Users className="h-4 w-4" />, onClick: () => navigate('/contracts') },
-                { label: 'Open tickets', value: fmtNumber(data.totals.openTickets), hint: 'across all services', icon: <Ticket className="h-4 w-4" />, onClick: () => navigate('/tickets') },
+                { label: 'Subscribed customers', value: fmtNumber(data.totals.subscribedCustomers), hint: 'View in Contracts', icon: <Users className="h-4 w-4" />, to: '/contracts/list?status=active,expiring' },
+                { label: 'Open tickets', value: fmtNumber(data.totals.openTickets), hint: 'View in Tickets', icon: <Ticket className="h-4 w-4" />, to: '/tickets?open=true' },
                 { label: 'Incidents · 30 days', value: fmtNumber(data.totals.incidents30d), tone: data.totals.incidents30d > 0 ? 'warn' : 'default', hint: 'incidents raised against a service', icon: <Activity className="h-4 w-4" /> },
               ]}
               panels={
                 <>
                   <Panel title="Offerings by service line" subtitle="Click a line to browse it">
-                    <BreakdownBar dense items={[...allCategories].sort((a, b) => categoryCount(b) - categoryCount(a)).map((c) => ({ label: c.label, value: categoryCount(c), color: c.color ?? null, active: line === c.key }))} onSelect={(i) => { const c = allCategories.find((x) => x.label === i.label); if (c) set({ line: line === c.key ? undefined : c.key }, false); }} emptyText="No service lines" />
+                    <BreakdownBar dense scrollTo items={[...allCategories].sort((a, b) => categoryCount(b) - categoryCount(a)).map((c) => ({ label: c.label, value: categoryCount(c), color: c.color ?? null, active: line === c.key }))} onSelect={(i) => { const c = allCategories.find((x) => x.label === i.label); if (c) set({ line: line === c.key ? undefined : c.key }, false); }} emptyText="No service lines" />
                   </Panel>
                   <Panel title="By domain" subtitle="Click to filter">
-                    <BreakdownBar dense items={DOMAINS.map((d) => ({ label: DOMAIN_LABEL[d] ?? d, value: allServices.filter((sv) => sv.domain === d).length, color: DOMAIN_COLORS[d] ?? null, active: domain === d })).filter((i) => i.value > 0)} onSelect={(i) => { const d = DOMAINS.find((x) => (DOMAIN_LABEL[x] ?? x) === i.label); if (d) set({ domain: domain === d ? undefined : d }, false); }} />
+                    <BreakdownBar dense scrollTo items={DOMAINS.map((d) => ({ label: DOMAIN_LABEL[d] ?? d, value: allServices.filter((sv) => sv.domain === d).length, color: DOMAIN_COLORS[d] ?? null, active: domain === d })).filter((i) => i.value > 0)} onSelect={(i) => { const d = DOMAINS.find((x) => (DOMAIN_LABEL[x] ?? x) === i.label); if (d) set({ domain: domain === d ? undefined : d }, false); }} />
                   </Panel>
                 </>
               }
@@ -130,7 +139,7 @@ export default function ServiceCatalogPage() {
         {data && (categories.length > 0 || uncategorised.length > 0) && (
           <div className="flex flex-col gap-8 min-w-0">
             {categories.map((c, i) => (
-              <section key={c.id} id={`cat-${c.key}`} className={cn('scroll-mt-6 rise-in', `rise-in-${Math.min(4, i + 1)}`)}>
+              <section key={c.id} id={`cat-${c.key}`} className={cn('scroll-mt-6', !mounted.current && 'rise-in', !mounted.current && `rise-in-${Math.min(4, i + 1)}`)}>
                 <header className="flex items-start gap-3.5 mb-4">
                   <CategoryIcon icon={c.icon} color={c.color} />
                   <div className="min-w-0">

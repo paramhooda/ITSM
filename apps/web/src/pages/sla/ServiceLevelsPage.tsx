@@ -100,8 +100,8 @@ export default function ServiceLevelsPage() {
               summary={`${fmtNumber(totals.policies)} policies · compliance ${fmtPct(c?.compliancePct ?? null, 1)} over 30 days`}
               kpis={[
                 { label: 'SLA policies', value: fmtNumber(totals.policies), hint: `${fmtNumber(totals.active)} active`, icon: <ShieldCheck className="h-4 w-4" /> },
-                { label: 'Contracts mapped', value: fmtNumber(totals.contracts), hint: 'contract and service-level mappings', icon: <FileSignature className="h-4 w-4" />, onClick: () => navigate('/contracts') },
-                { label: 'Services with a default', value: fmtNumber(totals.services), hint: 'policy applied when a contract sets none', icon: <Layers className="h-4 w-4" />, onClick: () => navigate('/services') },
+                { label: 'Contracts mapped', value: fmtNumber(totals.contracts), hint: 'contract and service-level mappings', icon: <FileSignature className="h-4 w-4" />, to: '/contracts' },
+                { label: 'Services with a default', value: fmtNumber(totals.services), hint: 'policy applied when a contract sets none', icon: <Layers className="h-4 w-4" />, to: '/services' },
                 { label: 'Compliance · 30 days', value: fmtPct(c?.compliancePct ?? null, 1), tone, hint: c ? `${fmtNumber(c.met)} met · ${fmtNumber(c.breached)} breached · ${fmtNumber(c.overdueRunning)} overdue now` : 'All metrics, all customers', icon: <CalendarClock className="h-4 w-4" /> },
               ]}
               panels={
@@ -250,7 +250,7 @@ function PolicyCard({ policy: p, canEdit, initiallyOpen, className }: { policy: 
           </div>
         )}
       </div>
-      <div className="mt-auto px-5 py-3 border-t border-default bg-[#fafafa] rounded-b-[12px] flex items-center justify-between gap-3 text-[12.5px]">
+      <div className="mt-auto px-5 py-3 border-t border-default bg-app rounded-b-[12px] flex items-center justify-between gap-3 text-[12.5px]">
         <span className="text-muted truncate">{usageSummary(p.usage)}</span>
         {canEdit ? (
           <Link to={slaAdminPath(p.id)} className="inline-flex items-center gap-1 text-default font-medium hover:underline shrink-0"><Pencil className="h-3 w-3" /> Edit in Administration</Link>

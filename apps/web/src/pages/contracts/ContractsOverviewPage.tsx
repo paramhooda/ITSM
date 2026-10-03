@@ -61,11 +61,11 @@ export default function ContractsOverviewPage() {
         <KpiGrid
           columns={5}
           items={[
-            { label: 'Active contracts', value: fmtNumber(d.byStatus.filter((b) => b.key === 'active' || b.key === 'expiring').reduce((n, b) => n + b.count, 0)), icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(d.total)} in total`, onClick: () => navigate(list({ status: 'active,expiring' })) },
-            { label: 'Expiring · 30d', value: fmtNumber(d.expiring.d30), tone: d.expiring.d30 ? 'bad' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(d.expiring.d60)} within 60 days`, onClick: () => navigate(list({ expiringWithinDays: '30' })) },
-            { label: 'Expiring · 90d', value: fmtNumber(d.expiring.d90), tone: d.expiring.d90 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: 'renewals to plan', onClick: () => navigate(list({ expiringWithinDays: '90' })) },
-            { label: 'Expired', value: fmtNumber(d.expiring.expired), tone: d.expiring.expired ? 'bad' : 'good', icon: <CalendarX2 className="h-4 w-4" />, hint: 'past the end date, not renewed', onClick: () => navigate(list({ status: 'expired' })) },
-            { label: 'Entitlements exhausted', value: fmtNumber(d.entitlements.exhausted), tone: d.entitlements.exhausted ? 'bad' : 'good', icon: <Ban className="h-4 w-4" />, hint: `${fmtNumber(d.entitlements.overThreshold)} over threshold`, onClick: () => navigate(entitlements({ status: 'exhausted' })) },
+            { label: 'Active contracts', value: fmtNumber(d.byStatus.filter((b) => b.key === 'active' || b.key === 'expiring').reduce((n, b) => n + b.count, 0)), icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(d.total)} in total`, to: list({ status: 'active,expiring' }) },
+            { label: 'Expiring · 30d', value: fmtNumber(d.expiring.d30), tone: d.expiring.d30 ? 'bad' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(d.expiring.d60)} within 60 days`, to: list({ expiringWithinDays: '30' }) },
+            { label: 'Expiring · 90d', value: fmtNumber(d.expiring.d90), tone: d.expiring.d90 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: 'renewals to plan', to: list({ expiringWithinDays: '90' }) },
+            { label: 'Expired', value: fmtNumber(d.expiring.expired), tone: d.expiring.expired ? 'bad' : 'good', icon: <CalendarX2 className="h-4 w-4" />, hint: 'past the end date, not renewed', to: list({ status: 'expired' }) },
+            { label: 'Entitlements exhausted', value: fmtNumber(d.entitlements.exhausted), tone: d.entitlements.exhausted ? 'bad' : 'good', icon: <Ban className="h-4 w-4" />, hint: `${fmtNumber(d.entitlements.overThreshold)} over threshold`, to: entitlements({ status: 'exhausted' }) },
           ]}
         />
       )}

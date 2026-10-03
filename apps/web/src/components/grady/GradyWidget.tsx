@@ -38,7 +38,7 @@ const md = {
       <table className="w-full text-[11.5px] border-collapse">{children}</table>
     </div>
   ),
-  thead: ({ children }: { children?: ReactNode }) => <thead className="bg-[#fafafa]">{children}</thead>,
+  thead: ({ children }: { children?: ReactNode }) => <thead className="bg-app">{children}</thead>,
   th: ({ children }: { children?: ReactNode }) => <th className="text-left font-medium text-muted px-2 py-1.5">{children}</th>,
   td: ({ children }: { children?: ReactNode }) => <td className="px-2 py-1.5 border-t border-default align-top leading-[1.4] [&>a]:whitespace-nowrap">{children}</td>,
 };
@@ -129,7 +129,7 @@ function GradyWindow({ onClose }: { onClose: () => void }) {
   const upstream = err instanceof ApiError && (err.code === 'ai_upstream' || err.code === 'ai_disabled');
 
   return (
-    <div className="fixed z-50 bottom-4 right-4 w-[min(500px,calc(100vw-2rem))] h-[min(700px,calc(100vh-2rem))] flex flex-col rounded-2xl border border-default bg-[#fafafa] shadow-pop scale-in overflow-hidden" role="dialog" aria-label="Grady, service assistant">
+    <div className="fixed z-50 bottom-4 right-4 w-[min(500px,calc(100vw-2rem))] h-[min(700px,calc(100vh-2rem))] flex flex-col rounded-2xl border border-default bg-app shadow-pop scale-in overflow-hidden" role="dialog" aria-label="Grady, service assistant">
       {/* header */}
       <div className="flex items-center gap-3 px-4 h-[60px] bg-white border-b border-default shrink-0">
         {historyOpen ? (

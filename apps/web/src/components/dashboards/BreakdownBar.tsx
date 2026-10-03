@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useChartTheme, optionHex } from './chartTheme';
 import { fmtNumber } from '@/lib/format';
+import { scrollToResults } from '@/components/ui/ListShell';
 
 export interface BreakdownItem {
   label: string;
@@ -17,7 +18,7 @@ export interface BreakdownItem {
 }
 
 /** Horizontal bar list for categorical breakdowns (identity → one colour unless the entity carries its own). */
-export function BreakdownBar({ items, emptyText = 'Nothing to show', max, dense, onSelect }: { items: BreakdownItem[]; emptyText?: string; max?: number; dense?: boolean; /** Click handler (rows render as buttons); `href` wins when both are set. */ onSelect?: (item: BreakdownItem) => void }) {
+export function BreakdownBar({ items, emptyText = 'Nothing to show', max, dense, onSelect, scrollTo }: { items: BreakdownItem[]; emptyText?: string; max?: number; dense?: boolean; /** Click handler (rows render as buttons); `href` wins when both are set. */ onSelect?: (item: BreakdownItem) => void; /** After `onSelect`, scroll the page's results into view (list pages). */ scrollTo?: boolean }) {
   const t = useChartTheme();
   if (!items.length) return <div className="text-[13px] text-subtle py-4 text-center">{emptyText}</div>;
   const top = max ?? Math.max(1, ...items.map((i) => i.value));
@@ -43,7 +44,13 @@ export function BreakdownBar({ items, emptyText = 'Nothing to show', max, dense,
             {i.href ? (
               <Link to={i.href} className="block rounded-md hover:bg-surface-2 px-1 -mx-1 py-0.5">{row}</Link>
             ) : onSelect ? (
-              <button type="button" onClick={() => onSelect(i)} aria-pressed={i.active} className={cn('block w-full text-left rounded-md hover:bg-surface-2 px-1 -mx-1 py-0.5', i.active && 'bg-surface-2')}>{row}</button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect(i);
+                  if (scrollTo) scrollToResults();
+                }}
+                aria-pressed={i.active} className={cn('block w-full text-left rounded-md hover:bg-surface-2 px-1 -mx-1 py-0.5', i.active && 'bg-surface-2')}>{row}</button>
             ) : (
               <div className="px-1 -mx-1 py-0.5">{row}</div>
             )}

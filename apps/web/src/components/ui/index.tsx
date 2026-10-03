@@ -1,5 +1,6 @@
 import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes, type ReactNode, useEffect, useId, useRef, useState, type HTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { X, Loader2, Search, ChevronLeft, ChevronRight, Inbox, AlertTriangle, Check, SlidersHorizontal } from 'lucide-react';
 import { cn, colorClass } from '@/lib/utils';
 
@@ -15,7 +16,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<Variant, string> = {
-  primary: 'bg-grad-brand text-white hover:brightness-110 shadow-[0_1px_2px_rgba(37,99,235,0.35),inset_0_1px_0_rgba(255,255,255,0.18)]',
+  primary: 'bg-primary text-white hover:bg-[var(--primary-hover)] shadow-[0_1px_2px_rgba(9,9,11,0.2),inset_0_1px_0_rgba(255,255,255,0.12)]',
+  /** Retired alias of `outline`; kept so old call sites render the same. */
   secondary: 'bg-white text-default border border-default hover:bg-surface-2 hover:border-strong shadow-[0_1px_2px_rgba(9,9,11,0.04)]',
   outline: 'bg-white text-default border border-default hover:bg-surface-2 hover:border-strong shadow-[0_1px_2px_rgba(9,9,11,0.04)]',
   ghost: 'bg-transparent text-muted hover:bg-surface-2 hover:text-default',
@@ -417,18 +419,24 @@ export function KeyValue({ items, columns = 2, className }: { items: { label: Re
 }
 
 // ------------------------------------------------------------------ Stat tile
-export function StatTile({ label, value, hint, tone, onClick, icon, className }: { label: ReactNode; value: ReactNode; hint?: ReactNode; tone?: 'default' | 'good' | 'warn' | 'bad'; onClick?: () => void; icon?: ReactNode; className?: string }) {
+/** Compact stat: a quiet card for counts. `to` makes it a link to the matching records; `onClick` with `active` makes it an in-place filter. */
+export function StatTile({ label, value, hint, tone, onClick, to, active, icon, className }: { label: ReactNode; value: ReactNode; hint?: ReactNode; tone?: 'default' | 'good' | 'warn' | 'bad'; onClick?: () => void; to?: string; active?: boolean; icon?: ReactNode; className?: string }) {
   const toneClass = { default: 'text-default', good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600' }[tone ?? 'default'];
-  return (
-    <div className={cn('card p-5 flex flex-col gap-1.5', onClick && 'cursor-pointer hover:border-strong hover:shadow-raised transition-[box-shadow,border-color]', className)} onClick={onClick}>
+  const clickable = !!onClick || !!to;
+  const cls = cn('card p-5 flex flex-col gap-1.5 text-left', clickable && 'cursor-pointer hover:border-strong hover:shadow-raised transition-[box-shadow,border-color]', active && 'border-brand-400 ring-2 ring-brand-500/25', className);
+  const body = (
+    <>
       <div className="flex items-center justify-between text-[13px] text-muted font-medium">
         <span>{label}</span>
         {icon && <span className="text-subtle">{icon}</span>}
       </div>
       <div className={cn('text-[28px] leading-none font-semibold tracking-[-0.03em] tnum', toneClass)}>{value}</div>
       {hint && <div className="text-[12px] text-subtle mt-0.5">{hint}</div>}
-    </div>
+    </>
   );
+  if (to) return <Link to={to} className={cls}>{body}</Link>;
+  if (onClick) return <button type="button" className={cls} onClick={onClick} aria-pressed={active}>{body}</button>;
+  return <div className={cls}>{body}</div>;
 }
 
 // ------------------------------------------------------------------ Avatar

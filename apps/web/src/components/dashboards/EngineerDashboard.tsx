@@ -58,7 +58,7 @@ export function EngineerDashboard({ days = 30 }: { days?: number }) {
     <div className="flex flex-col gap-6">
       <KpiGrid
         items={[
-          { label: 'Assigned to me', value: fmtNumber(d.assigned.total), tone: d.assigned.breached > 0 ? 'bad' : 'default', hint: d.assigned.breached > 0 ? `${fmtNumber(d.assigned.breached)} SLA breached` : 'all within SLA', onClick: () => (window.location.href = '/tickets?mine=true&open=true') },
+          { label: 'Assigned to me', value: fmtNumber(d.assigned.total), tone: d.assigned.breached > 0 ? 'bad' : 'default', hint: d.assigned.breached > 0 ? `${fmtNumber(d.assigned.breached)} SLA breached` : 'all within SLA', to: '/tickets?mine=true&open=true' },
           { label: 'Due within 4 hours', value: fmtNumber(dueIn4h), tone: dueIn4h > 0 ? 'warn' : 'good', hint: 'by SLA remaining' },
           { label: 'Approvals waiting', value: fmtNumber(d.approvalsPending), tone: d.approvalsPending > 0 ? 'warn' : 'default', hint: 'requests and changes for you to decide' },
           { label: 'Today', value: fmtNumber(todayItems.length), hint: `${d.today.visits.length} visits · ${d.today.pmOccurrences.length} maintenance · ${d.today.dueTickets.length} due` },

@@ -150,7 +150,7 @@ export function EventsTab({ integrations }: { integrations: Integration[] }) {
                   { label: 'Events received', value: fmtNumber(st.total), icon: <Activity className="h-4 w-4" />, hint: `${fmtNumber(st.activeIntegrations)} active integrations`, spark: st.byDay.map((d) => d.total), sparkLabel: 'Events per day' },
                   { label: 'Tickets created', value: fmtNumber(st.ticketsCreated), icon: <Ticket className="h-4 w-4" />, hint: `${fmtNumber(st.openTickets)} still open`, spark: st.byDay.map((d) => d.ticketsCreated), sparkLabel: 'Tickets created per day' },
                   { label: 'Deduplicated', value: fmtNumber(st.deduplicated), tone: 'good', icon: <Copy className="h-4 w-4" />, hint: `${fmtPct(st.dedupRate, 0)} of events folded into existing tickets` },
-                  { label: 'Needs attention', value: fmtNumber(st.errors + st.unresolvedCustomer), tone: st.errors + st.unresolvedCustomer > 0 ? 'warn' : 'good', icon: <Building2 className="h-4 w-4" />, hint: `${fmtNumber(st.unresolvedCustomer)} without a customer · ${fmtNumber(st.errors)} errors`, onClick: () => set({ unresolvedOnly: state.unresolvedOnly ? undefined : 'true' }) },
+                  { label: 'Needs attention', value: fmtNumber(st.errors + st.unresolvedCustomer), tone: st.errors + st.unresolvedCustomer > 0 ? 'warn' : 'good', icon: <Building2 className="h-4 w-4" />, hint: `${fmtNumber(st.unresolvedCustomer)} without a customer · ${fmtNumber(st.errors)} errors`, onClick: () => set({ unresolvedOnly: state.unresolvedOnly ? undefined : 'true' }), scrollTo: true, active: !!state.unresolvedOnly },
                 ]
               : []
           }

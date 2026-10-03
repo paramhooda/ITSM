@@ -82,16 +82,16 @@ export default function OverviewPage() {
         </div>
       )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {canUsers && <StatTile label="Users" value={val(users)} icon={<Users className="h-4 w-4" />} onClick={() => navigate('/admin/users')} />}
-        {canUsers && <StatTile label="Roles" value={val(roles)} icon={<Shield className="h-4 w-4" />} onClick={() => navigate('/admin/roles')} />}
-        {canUsers && <StatTile label="Teams" value={val(teams)} icon={<UsersRound className="h-4 w-4" />} onClick={() => navigate('/admin/teams')} />}
-        {canConfig && <StatTile label="Option list entries" value={val(options)} hint={`${OPTION_TYPES.length} configurable lists`} icon={<ListChecks className="h-4 w-4" />} onClick={() => navigate('/admin/options')} />}
-        {canConfig && <StatTile label="SLA policies" value={val(sla)} icon={<Timer className="h-4 w-4" />} onClick={() => navigate('/admin/sla')} />}
-        {canConfig && <StatTile label="Catalog items" value={val(catalog)} hint="active request types" icon={<ClipboardList className="h-4 w-4" />} onClick={() => navigate('/admin/catalog')} />}
+        {canUsers && <StatTile label="Users" value={val(users)} icon={<Users className="h-4 w-4" />} to={'/admin/users'} />}
+        {canUsers && <StatTile label="Roles" value={val(roles)} icon={<Shield className="h-4 w-4" />} to={'/admin/roles'} />}
+        {canUsers && <StatTile label="Teams" value={val(teams)} icon={<UsersRound className="h-4 w-4" />} to={'/admin/teams'} />}
+        {canConfig && <StatTile label="Option list entries" value={val(options)} hint={`${OPTION_TYPES.length} configurable lists`} icon={<ListChecks className="h-4 w-4" />} to={'/admin/options'} />}
+        {canConfig && <StatTile label="SLA policies" value={val(sla)} icon={<Timer className="h-4 w-4" />} to={'/admin/sla'} />}
+        {canConfig && <StatTile label="Catalog items" value={val(catalog)} hint="active request types" icon={<ClipboardList className="h-4 w-4" />} to={'/admin/catalog'} />}
         {can('admin:system', 'admin:config') && (
-          <StatTile label="Notification outbox" value={outbox.isError ? '—' : outbox.isLoading ? '…' : pending} hint={outbox.data ? `${sent} sent · ${failed} failed` : 'pending messages'} tone={failed > 0 ? 'bad' : pending > 50 ? 'warn' : 'default'} icon={<Mail className="h-4 w-4" />} onClick={() => navigate('/admin/outbox')} />
+          <StatTile label="Notification outbox" value={outbox.isError ? '—' : outbox.isLoading ? '…' : pending} hint={outbox.data ? `${sent} sent · ${failed} failed` : 'pending messages'} tone={failed > 0 ? 'bad' : pending > 50 ? 'warn' : 'default'} icon={<Mail className="h-4 w-4" />} to={'/admin/outbox'} />
         )}
-        {can('admin:audit') && <StatTile label="Audit activity" value={auditCount} hint="last 7 days" icon={<History className="h-4 w-4" />} onClick={() => navigate('/admin/audit')} />}
+        {can('admin:audit') && <StatTile label="Audit activity" value={auditCount} hint="last 7 days" icon={<History className="h-4 w-4" />} to={'/admin/audit'} />}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
         <div className="card p-4">

@@ -11,16 +11,15 @@ export function PeriodPicker({ days, onChange, size = 'sm' }: { days: number; on
 }
 
 /**
- * The dashboard header: a soft colour wash with the greeting or view title, the date,
- * the view switcher on the right and the period (and scope) controls on a second line.
- * The same band heads the staff dashboards and the customer portal home.
+ * The dashboard header: a white card with a faint accent wash, the greeting or view title,
+ * the date, the view switcher on the right and the global filters (period, scope) on a
+ * second line. The same band heads the staff dashboards and the customer portal home;
+ * nothing else uses it.
  */
 export function DashboardHero({ title, subtitle, right, children, className }: { title: ReactNode; subtitle?: ReactNode; right?: ReactNode; children?: ReactNode; className?: string }) {
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
   return (
-    <section className={cn('relative overflow-hidden rounded-2xl border border-default bg-surface bg-hero mb-6 shadow-card', className)} data-testid="dashboard-hero">
-      <div className="absolute inset-0 bg-dots opacity-40 pointer-events-none" aria-hidden />
-      <div className="absolute -top-28 -right-20 h-64 w-64 rounded-full bg-grad-brand opacity-[0.14] blur-3xl pointer-events-none" aria-hidden />
+    <section className={cn('relative overflow-hidden rounded-xl border border-default bg-surface hero-wash mb-6 shadow-card', className)} data-testid="dashboard-hero">
       <div className="relative flex flex-wrap items-end justify-between gap-4 px-6 pt-5 pb-4">
         <div className="min-w-0">
           <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-muted">
@@ -33,7 +32,7 @@ export function DashboardHero({ title, subtitle, right, children, className }: {
         {right && <div className="flex flex-wrap items-center gap-2 shrink-0">{right}</div>}
       </div>
       {children && (
-        <div className="relative flex flex-wrap items-center gap-2 px-6 py-2.5 border-t border-[rgba(9,9,11,0.06)] bg-white/55">
+        <div className="relative flex flex-wrap items-center gap-2 px-6 py-2.5 border-t border-default bg-surface-2/50" data-testid="dashboard-filters">
           <span className="text-[12px] text-subtle mr-1">Period</span>
           {children}
         </div>
