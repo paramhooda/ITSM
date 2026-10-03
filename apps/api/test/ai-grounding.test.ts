@@ -17,7 +17,7 @@ import { withSystem, closeDb, schema } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { createTicket, resolveTicket } from '../src/modules/tickets/service';
-import type { AiProvider, ChatOptions, ChatResponse } from '../src/lib/ai';
+import { systemText, type AiProvider, type ChatOptions, type ChatResponse } from '../src/lib/ai';
 import { availableTools, toolByName, ALL_TOOLS } from '../src/modules/ai/tools';
 import { runTicketQuery, type TicketQueryResult } from '../src/modules/ai/query';
 import { groundAnswer, factsOf } from '../src/modules/ai/ground';
@@ -52,7 +52,7 @@ function scripted(calls: { name: string; input: Record<string, unknown> }[], ans
     model: 'fake-1',
     seen,
     async chat(opts: ChatOptions): Promise<ChatResponse> {
-      seen.push(opts);
+      seen.push({ ...opts, system: systemText(opts.system) });
       const last = opts.messages[opts.messages.length - 1]!;
       if (last.role === 'user') return { text: '', toolCalls: calls.map((c, i) => ({ id: `c${i}`, name: c.name, input: c.input })), stopReason: 'tool_use', usage: { inputTokens: 1, outputTokens: 1 } };
       const results: Record<string, string> = {};

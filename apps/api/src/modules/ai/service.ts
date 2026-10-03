@@ -8,15 +8,17 @@ import { AppError, NotFoundError, ForbiddenError, ValidationError } from '@/core
 import { aiProvider, aiEnabled, AiUpstreamError, type AiProvider, type ChatMessage, type ToolCall } from '@/lib/ai';
 import { loadTicket } from '@/modules/tickets/common';
 import { listTickets } from '@/modules/tickets/list';
-import { availableTools, toolDefinitions, toolByName, toolAvailable, tierOf, isCustomerUser, listQuery, type AiTool } from './tools';
-import { buildSystemPrompt, describeScope, PROMPT_VERSION } from './prompts';
+import { matchRoute } from '@itsm/shared';
+import { availableTools, availableToolsets, toolDefinitions, toolByName, toolAvailable, tierOf, previewDetail, isCustomerUser, listQuery, TOOLSET_KEYS, type AiTool, type Who, type ToolsetKey } from './tools';
+import { buildSystemPrompt, describeScope, PROMPT_VERSION, skillsFor } from './prompt';
+import { resolveToolsets, enableToolset, stickyOf, BASE_SETS, TOOLSETS, type ToolsetState } from './toolsets';
 import { fenceToolResult, fenceAnswer, collectSeen, type TenantFence } from './fence';
 import { factsOf, groundAnswer } from './ground';
 import { compactForTrace, redactKeys, scrubResult, inputHash } from './redact';
 import { wrapUntrusted, stripMarkers, sanitizeText } from './untrusted';
 import { loadAiSettings, assertAssistantEnabled, assertDailyBudget, AiDisabledError, AI_FEATURES, featureEnabled, type AiSettings } from './guards';
 import { logger } from '@/core/logger';
-import type { ChatContext } from './schemas';
+import { SKILLS, type ChatContext, type SkillKey } from './schemas';
 
 export { AiDisabledError } from './guards';
 
@@ -128,9 +130,13 @@ export async function status(ctx: Ctx) {
   const p = provider();
   const settings = await loadAiSettings(ctx.tx);
   const tools = availableTools(ctx);
+  const offered = availableToolsets(ctx);
   const on = enabled() && settings.assistantEnabled && !settings.disabledFeatures.includes('assistant');
   return {
     enabled: on && ctx.can('ai:use'),
+    promptVersion: PROMPT_VERSION,
+    toolsets: offered.map((k) => ({ key: k, label: TOOLSETS[k].label, description: TOOLSETS[k].description })),
+    skills: skillsFor({ customer: isCustomerUser(ctx), toolsets: offered }).map((sk) => ({ key: sk.key, title: sk.title, when: sk.when })),
     assistantEnabled: settings.assistantEnabled,
     provider: p.name,
     model: p.model || null,
@@ -138,7 +144,7 @@ export async function status(ctx: Ctx) {
     features: AI_FEATURES.filter((f) => featureEnabled(settings, f)),
     autonomy: settings.autonomy,
     canAct: ctx.can('ai:act'),
-    tools: tools.map((t) => ({ name: t.name, action: t.action, tier: tierOf(t) })),
+    tools: tools.map((t) => ({ name: t.name, action: t.action, tier: tierOf(t), toolset: t.toolset })),
     suggestions: ctx.can('ai:use') ? await examplePrompts(ctx) : [],
   };
 }
@@ -212,6 +218,9 @@ export interface PendingAction {
   /** Validated input with secret-looking keys redacted (action tools never carry secrets). */
   input: Record<string, unknown>;
   preview: string;
+  /** The exact changes (bulk, multi-field) and the number of records touched (destructive). */
+  lines?: string[];
+  count?: number;
   createdAt: string;
   expiresAt: string;
 }
@@ -226,10 +235,10 @@ export function readPending(context: Record<string, unknown> | null | undefined)
   if (!p || typeof p !== 'object' || typeof p.id !== 'string' || typeof p.tool !== 'string' || typeof p.preview !== 'string' || typeof p.createdAt !== 'string') return null;
   const expiresAt = typeof p.expiresAt === 'string' ? p.expiresAt : new Date(new Date(p.createdAt).getTime() + PENDING_ACTION_TTL_MS).toISOString();
   if (Date.now() > new Date(expiresAt).getTime()) return null;
-  return { id: p.id, tool: p.tool, tier: typeof p.tier === 'string' ? p.tier : 'write', input: (p.input ?? {}) as Record<string, unknown>, preview: p.preview, createdAt: p.createdAt, expiresAt };
+  return { id: p.id, tool: p.tool, tier: typeof p.tier === 'string' ? p.tier : 'write', input: (p.input ?? {}) as Record<string, unknown>, preview: p.preview, ...(Array.isArray(p.lines) ? { lines: p.lines.map(String) } : {}), ...(typeof p.count === 'number' ? { count: p.count } : {}), createdAt: p.createdAt, expiresAt };
 }
-export type PublicPending = { id: string; tool: string; tier: string; preview: string; expiresAt: string };
-const publicPending = (p: PendingAction | null): PublicPending | null => (p ? { id: p.id, tool: p.tool, tier: p.tier, preview: p.preview, expiresAt: p.expiresAt } : null);
+export type PublicPending = { id: string; tool: string; tier: string; preview: string; lines?: string[]; count?: number; expiresAt: string };
+const publicPending = (p: PendingAction | null): PublicPending | null => (p ? { id: p.id, tool: p.tool, tier: p.tier, preview: p.preview, ...(p.lines ? { lines: p.lines } : {}), ...(p.count !== undefined ? { count: p.count } : {}), expiresAt: p.expiresAt } : null);
 const withoutPending = (context: Record<string, unknown> | null | undefined) => {
   const { pendingAction: _p, ...rest } = context ?? {};
   return rest;
@@ -307,8 +316,23 @@ export type PublicMessage = ReturnType<typeof publicMessage>;
 
 // ---------------------------------------------------------------- context description
 
-/** Resolves the UI context into one line for the prompt, through the service layer (so nothing leaks). */
+/** The page the user is on, from the application map: label, route and the allowlisted filters it carries. */
+function describePage(page: ChatContext['page'] | null | undefined): string | null {
+  if (!page?.pathname) return null;
+  const hit = matchRoute(page.pathname.split('?')[0]!);
+  if (!hit || hit.page.hidden) return null;
+  const allowed = hit.page.filters ?? [];
+  const filters = Object.entries(page.query ?? {}).filter(([k, v]) => allowed.includes(k) && v).map(([k, v]) => `${k}=${sanitizeText(String(v), 80)}`);
+  return `Current page: ${hit.page.label} (${hit.page.route})${filters.length ? ` with filters ${filters.join(', ')}` : ''}. ${hit.page.purpose}`;
+}
+
+/** Resolves the UI context (page and record) into a few lines for the prompt, through the service layer (so nothing leaks). */
 export async function describeContext(ctx: Ctx, c: ChatContext | null | undefined): Promise<string | null> {
+  const lines = [describePage(c?.page), await describeEntity(ctx, c)].filter((x): x is string => !!x);
+  return lines.length ? lines.join('\n') : null;
+}
+
+async function describeEntity(ctx: Ctx, c: ChatContext | null | undefined): Promise<string | null> {
   const label = c?.label ? sanitizeText(String(c.label), 200) : null;
   if (!c?.entityType || !c.entityId) return label ? `User is viewing: ${label}` : null;
   try {
@@ -412,14 +436,15 @@ export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number, f
   try {
     if (tool.action && !opts.confirmed) {
       // Propose only: resolve the preview against real records, run nothing.
-      const preview = tool.preview ? await tool.preview(aiCtx(ctx), data) : `Run ${tool.name} with ${JSON.stringify(trace)}`;
+      const detail = previewDetail(tool.preview ? await tool.preview(aiCtx(ctx), data) : `Run ${tool.name} with ${JSON.stringify(trace)}`);
+      const preview = detail.text;
       await ctx.tx.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
       const createdAt = new Date();
-      const proposal: PendingAction = { id: randomUUID(), tool: tool.name, tier: tierOf(tool), input: redactKeys(data), preview, createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + PENDING_ACTION_TTL_MS).toISOString() };
+      const proposal: PendingAction = { id: randomUUID(), tool: tool.name, tier: tierOf(tool), input: redactKeys(data), preview, ...(detail.lines?.length ? { lines: detail.lines.slice(0, 40) } : {}), ...(detail.count !== undefined ? { count: detail.count } : {}), createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + PENDING_ACTION_TTL_MS).toISOString() };
       await audit('proposed', { actionId: proposal.id });
       return {
         record: { ...base, input: trace, ok: true, summary: `Proposed: ${preview}`, proposed: true },
-        content: JSON.stringify({ status: 'awaiting_confirmation', preview, instruction: 'Nothing has been done yet. Repeat this preview to the user in one sentence and end with "Shall I proceed?". The platform runs it only when they confirm; do not call this tool again for the same request.' }),
+        content: JSON.stringify({ status: 'awaiting_confirmation', preview, ...(detail.lines?.length ? { changes: detail.lines.slice(0, 40) } : {}), ...(detail.count !== undefined ? { count: detail.count } : {}), instruction: 'Nothing has been done yet. Repeat this preview to the user in one sentence and end with "Shall I proceed?". The platform runs it only when they confirm; do not call this tool again for the same request.' }),
         isError: false,
         proposal,
       };
@@ -489,6 +514,7 @@ export interface ChatResult {
 /** Progress events for a streamed turn (the panel shows them while the reply is being prepared). */
 export type TurnEvent =
   | { type: 'turn'; conversationId: string }
+  | { type: 'toolsets'; active: ToolsetKey[] }
   | { type: 'step'; status: 'start' | 'done' | 'error'; tool: string; summary: string; action: boolean };
 export type Emit = (event: TurnEvent) => void;
 
@@ -613,15 +639,24 @@ export async function chatTurn(p: Principal, meta: TurnMeta, input: ChatInput, e
     }
     // explicit timestamps + role tie-breaker: rows written in one transaction would otherwise share now()
     const rows = await ctx.tx.select().from(schema.aiMessages).where(eq(schema.aiMessages.conversationId, conv.id)).orderBy(desc(schema.aiMessages.createdAt), asc(schema.aiMessages.role)).limit(HISTORY_MESSAGES);
-    const tools = availableTools(ctx);
+    const skill = (input.skill && (SKILLS as readonly string[]).includes(input.skill) ? input.skill : null) as SkillKey | null;
+    const sets = resolveToolsets({ who: ctx, message: text, page: input.context?.page?.pathname ?? null, sticky: stickyOf(conv.context), skill });
     const screen = await describeContext(ctx, input.context);
-    const system = buildSystemPrompt({ ctx, tools, contextDescription: [screen, cancelledNote].filter(Boolean).join('\n') || null, customerScopeSummary: describeScope(ctx, organisation), organisation, autonomy: settings.autonomy });
-    return { rows: rows.reverse(), tools, system };
+    return { rows: rows.reverse(), sets, screen, cancelledNote, skill };
   });
+  // The prompt and the tool list need only the principal, so they are rebuilt outside any transaction when a toolset is enabled.
+  const who: Who = { user: p, can: (perm, customerId) => can(p, perm, customerId) };
+  const scope = describeScope(who, organisation);
+  const promptFor = (s: ToolsetState, t: AiTool[]) => buildSystemPrompt({ ctx: who, tools: t, toolsets: { active: s.active, offered: s.offered }, contextDescription: b.screen, notes: b.cancelledNote ? [b.cancelledNote] : [], customerScopeSummary: scope, organisation, autonomy: settings.autonomy, skill: b.skill });
+  let sets = b.sets;
+  let tools = availableTools(who, sets.active);
+  let built = promptFor(sets, tools);
+  let system = { stable: built.stable, volatile: built.volatile };
+  let definitions = toolDefinitions(tools);
+  let toolMap = new Map<string, AiTool>(tools.map((t) => [t.name, t]));
+  emit?.({ type: 'toolsets', active: sets.active });
   const messages = historyMessages(b.rows);
   if (!messages.length || messages[messages.length - 1]!.role !== 'user') messages.push({ role: 'user', content: text });
-  const definitions = toolDefinitions(b.tools);
-  const toolMap = new Map<string, AiTool>(b.tools.map((t) => [t.name, t]));
 
   // ---- the loop: model calls with no transaction open; each tool call is its own step
   const prov = provider();
@@ -648,7 +683,7 @@ export async function chatTurn(p: Principal, meta: TurnMeta, input: ChatInput, e
       let res;
       try {
         // Deterministic where the model allows it: the same question yields the same tool calls and wording.
-        res = await prov.chat({ system: b.system, messages, tools: definitions, maxTokens: CHAT_MAX_TOKENS, temperature: 0, effort: settings.effort, signal: abort.signal });
+        res = await prov.chat({ system, messages, tools: definitions, maxTokens: CHAT_MAX_TOKENS, temperature: 0, effort: settings.effort, signal: abort.signal });
       } catch (err) {
         if (abort.signal.aborted) {
           reply = 'I ran out of time for this request. Please narrow it or ask again.';
@@ -676,6 +711,23 @@ export async function chatTurn(p: Principal, meta: TurnMeta, input: ChatInput, e
       }
       messages.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls, raw: res.raw });
       for (const call of res.toolCalls) {
+        if (call.name === 'enable_toolset') {
+          // The meta-tool changes the tools offered on the next iteration; it never touches data.
+          const key = String((call.input as { toolset?: unknown } | undefined)?.toolset ?? '');
+          const valid = (TOOLSET_KEYS as readonly string[]).includes(key) && sets.offered.includes(key as ToolsetKey);
+          if (valid) {
+            sets = enableToolset(sets, key as ToolsetKey);
+            tools = availableTools(who, sets.active);
+            built = promptFor(sets, tools);
+            system = { stable: built.stable, volatile: built.volatile };
+            definitions = toolDefinitions(tools);
+            toolMap = new Map(tools.map((t) => [t.name, t]));
+            emit?.({ type: 'toolsets', active: sets.active });
+          }
+          records.push({ name: 'enable_toolset', input: { toolset: key }, action: false, ok: valid, summary: valid ? `Enabled the ${TOOLSETS[key as ToolsetKey].label} tools` : `Unknown tool group "${key.slice(0, 40)}"`, ...(valid ? {} : { error: 'unknown_toolset' }) });
+          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(valid ? { enabled: key, tools: tools.filter((t) => t.toolset === key).map((t) => t.name) } : { error: 'unknown_toolset', message: `No tool group "${key.slice(0, 40)}" is available to this user`, available: sets.offered }), isError: !valid });
+          continue;
+        }
         const tool = toolMap.get(call.name) ?? toolByName(call.name);
         if (proposal && tool?.action) {
           // One side effect at a time: a second action in the same turn waits for the first to be confirmed.
@@ -729,7 +781,7 @@ export async function chatTurn(p: Principal, meta: TurnMeta, input: ChatInput, e
       .insert(schema.aiMessages)
       .values({ conversationId: conv.id, customerId: conv.customerId, role: 'assistant', content: reply, toolCalls: records as unknown as Record<string, unknown>[], inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, durationMs, model, promptVersion: PROMPT_VERSION, createdAt: new Date(Math.max(Date.now(), started + 1)) })
       .returning();
-    const nextContext: Record<string, unknown> = { ...(input.context ? (input.context as Record<string, unknown>) : withoutPending(conv.context)), ...(proposal ? { pendingAction: proposal } : {}) };
+    const nextContext: Record<string, unknown> = { ...(input.context ? (input.context as Record<string, unknown>) : withoutPending(conv.context)), toolsets: sets.active.filter((k) => !BASE_SETS.includes(k)), ...(proposal ? { pendingAction: proposal } : {}) };
     await ctx.tx.update(schema.aiConversations).set({ updatedAt: new Date(), context: nextContext }).where(eq(schema.aiConversations.id, conv.id));
     await ctx.audit({
       entityType: 'ai_conversation',
@@ -737,7 +789,7 @@ export async function chatTurn(p: Principal, meta: TurnMeta, input: ChatInput, e
       entityLabel: 'chat',
       action: 'ai.chat',
       customerId: conv.customerId,
-      metadata: { messageId: assistant!.id, outcome, tools: records.map((r) => r.name), toolCalls: records.length, proposed: proposal?.id ?? null, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, durationMs, model, promptVersion: PROMPT_VERSION, fenced: fenced.removed, grounded: grounded.prepended, uiActions: uiActions.length },
+      metadata: { messageId: assistant!.id, outcome, tools: records.map((r) => r.name), toolCalls: records.length, proposed: proposal?.id ?? null, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, durationMs, model, promptVersion: PROMPT_VERSION, fenced: fenced.removed, grounded: grounded.prepended, uiActions: uiActions.length, toolsets: sets.active, skill: b.skill },
     });
     return { conversationId: conv.id, message: publicMessage(assistant!), usage, pendingAction: publicPending(proposal), uiActions };
   });

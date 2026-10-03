@@ -15,7 +15,7 @@ import { engineerDirectory } from '@/modules/iam/service';
  * that always stay within the caller's visibility, and the compact shapes that
  * keep tool results small enough for the model.
  */
-export const isCustomerUser = (ctx: Ctx) => ctx.user.userType === 'customer';
+export const isCustomerUser = (ctx: Pick<Ctx, 'user'>) => ctx.user.userType === 'customer';
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ticketLink = (ctx: Ctx, id: string) => (isCustomerUser(ctx) ? `/portal/tickets/${id}` : `/tickets/${id}`);
 export const trunc = (s: string | null | undefined, n: number) => (s ? (s.length > n ? `${s.slice(0, n)}…` : s) : s ?? null);
@@ -135,6 +135,78 @@ export async function resolveTeam(ctx: Ctx, ref?: string | null) {
   throw new ValidationError(`Team "${r}" is ambiguous: ${pick.map((t) => t.name).join(', ')}`);
 }
 
+/** Contract by number (CON-2026-0001 style) or id, within the caller's visibility (RLS). */
+export async function resolveContract(ctx: Ctx, ref: string) {
+  const r = ref.trim();
+  if (!r) throw new ValidationError('Contract reference is required');
+  const cond = UUID_RE.test(r) ? eq(schema.contracts.id, r) : ilike(schema.contracts.number, r);
+  const [row] = await ctx.tx.select({ id: schema.contracts.id, number: schema.contracts.number, name: schema.contracts.name, customerId: schema.contracts.customerId }).from(schema.contracts).where(cond).limit(1);
+  if (!row) throw new NotFoundError('Contract', `No contract matching "${r}" is visible to you`);
+  ctx.requireCustomer(row.customerId);
+  return row;
+}
+
+/** Field visit by number (FSV-… style) or id. */
+export async function resolveVisit(ctx: Ctx, ref: string) {
+  const r = ref.trim();
+  if (!r) throw new ValidationError('Visit reference is required');
+  const cond = UUID_RE.test(r) ? eq(schema.fieldVisits.id, r) : ilike(schema.fieldVisits.number, r);
+  const [row] = await ctx.tx.select({ id: schema.fieldVisits.id, number: schema.fieldVisits.number, title: schema.fieldVisits.title, customerId: schema.fieldVisits.customerId, status: schema.fieldVisits.status }).from(schema.fieldVisits).where(cond).limit(1);
+  if (!row) throw new NotFoundError('Field visit', `No visit matching "${r}" is visible to you`);
+  ctx.requireCustomer(row.customerId);
+  return row;
+}
+
+/** Knowledge article by number (KB-… style), id or exact title. */
+export async function resolveArticle(ctx: Ctx, ref: string) {
+  const r = ref.trim();
+  if (!r) throw new ValidationError('Article reference is required');
+  const cond = UUID_RE.test(r) ? eq(schema.kbArticles.id, r) : or(ilike(schema.kbArticles.number, r), ilike(schema.kbArticles.title, r));
+  const rows = await ctx.tx.select({ id: schema.kbArticles.id, number: schema.kbArticles.number, title: schema.kbArticles.title, status: schema.kbArticles.status }).from(schema.kbArticles).where(cond).limit(3);
+  if (rows.length === 1) return rows[0]!;
+  if (!rows.length) throw new NotFoundError('Knowledge article', `No article matching "${r}"`);
+  throw new ValidationError(`Article "${r}" is ambiguous: ${rows.map((a) => `${a.number} ${a.title}`).join(', ')}`);
+}
+
+/** Asset by tag, serial number, name or id (optionally within one customer). */
+export async function resolveAsset(ctx: Ctx, ref: string, customerId?: string) {
+  const r = ref.trim();
+  if (!r) throw new ValidationError('Asset reference is required');
+  const conds = [UUID_RE.test(r) ? eq(schema.assets.id, r) : or(ilike(schema.assets.tag, r), ilike(schema.assets.serialNumber, r), ilike(schema.assets.name, like(r)))];
+  if (customerId) conds.push(eq(schema.assets.customerId, customerId));
+  const rows = await ctx.tx.select({ id: schema.assets.id, tag: schema.assets.tag, name: schema.assets.name, customerId: schema.assets.customerId, lifecycleStage: schema.assets.lifecycleStage }).from(schema.assets).where(and(...conds)).limit(6);
+  const low = r.toLowerCase();
+  const exact = rows.filter((a) => a.tag.toLowerCase() === low || a.name.toLowerCase() === low);
+  const pick = exact.length === 1 ? exact : rows;
+  if (pick.length === 1) return pick[0]!;
+  if (!pick.length) throw new NotFoundError('Asset', `No asset matching "${r}" is visible to you`);
+  throw new ValidationError(`Asset "${r}" is ambiguous: ${pick.map((a) => `${a.tag} ${a.name}`).join(', ')}. Ask the user which one.`);
+}
+
+/** Any active person (staff or customer user) by "me", id, email or name. */
+export async function resolveUser(ctx: Ctx, ref?: string | null) {
+  const r = ref?.trim();
+  if (!r) return null;
+  if (r.toLowerCase() === 'me') return { id: ctx.user.id, name: ctx.user.name, email: ctx.user.email };
+  const cond = UUID_RE.test(r) ? eq(schema.users.id, r) : or(ilike(schema.users.email, r), ilike(schema.users.name, like(r)));
+  const rows = await ctx.tx.select({ id: schema.users.id, name: schema.users.name, email: schema.users.email }).from(schema.users).where(and(cond, eq(schema.users.status, 'active'))).limit(6);
+  const exact = rows.filter((u) => u.email.toLowerCase() === r.toLowerCase() || u.name.toLowerCase() === r.toLowerCase());
+  const pick = exact.length === 1 ? exact : rows;
+  if (pick.length === 1) return pick[0]!;
+  if (!pick.length) throw new NotFoundError('User', `No user matching "${r}"`);
+  throw new ValidationError(`User "${r}" is ambiguous: ${pick.map((u) => `${u.name} <${u.email}>`).join(', ')}`);
+}
+
+/** Parses a date or date-time the model produced; throws a clear error otherwise. */
+export function parseWhen(value: string | null | undefined, label = 'date'): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw new ValidationError(`Could not understand the ${label} "${value}"; use an ISO date such as 2026-10-14 or 2026-10-14T09:00`);
+  return d;
+}
+
+export const dayStr = (d: Date) => d.toISOString().slice(0, 10);
+
 // ---------------------------------------------------------------- compact shapes (keep tool results small)
 
 type ListItem = Awaited<ReturnType<typeof listTickets>>['items'][number];
@@ -209,3 +281,14 @@ export const period = (days: number) => new Date(Date.now() - days * 86_400_000)
 
 /** Fills the flag keys `ListQuery` requires (zod transforms make them required-but-undefined). */
 export const listQuery = (q: Partial<ListQuery>): ListQuery => ({ page: 1, pageSize: 20, order: 'desc', unassigned: undefined, mine: undefined, watching: undefined, isMajor: undefined, open: undefined, ...q });
+
+/** Display name of a customer the caller may see (used in previews). */
+export async function customerName(ctx: Ctx, id: string): Promise<string> {
+  ctx.requireCustomer(id);
+  const [c] = await ctx.tx.select({ name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, id)).limit(1);
+  if (!c) throw new NotFoundError('Customer');
+  return c.name;
+}
+
+/** Knowledge pages are shared by both shells. */
+export const articleLink = (_ctx: Ctx, id: string) => `/knowledge/${id}`;

@@ -9,7 +9,11 @@ export interface AiStatus {
   assistantEnabled?: boolean;
   autonomy?: 'confirm_all' | 'auto_low';
   canAct: boolean;
-  tools: { name: string; action: boolean; tier?: string }[];
+  tools: { name: string; action: boolean; tier?: string; toolset?: string }[];
+  /** Tool groups the user may enable (at least one tool available) and the playbooks the prompt carries for them. */
+  toolsets?: { key: string; label: string; description: string }[];
+  skills?: { key: string; title: string; when: string }[];
+  promptVersion?: string;
   suggestions: string[];
   /** What the server is configured with (no credentials). */
   configured?: { provider: string; model: string | null; baseUrl: string | null };
@@ -62,6 +66,9 @@ export interface PendingAction {
   tool: string;
   tier?: string;
   preview: string;
+  /** The exact changes (multi-field, bulk) and the number of records touched (destructive). */
+  lines?: string[];
+  count?: number;
   expiresAt?: string;
 }
 

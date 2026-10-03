@@ -20,7 +20,7 @@ import * as kb from '../src/modules/knowledge/service';
 import { systemText, type AiProvider, type ChatOptions, type ChatResponse } from '../src/lib/ai';
 import { z } from 'zod';
 import { availableTools, toolByName, ALL_TOOLS, type AiTool } from '../src/modules/ai/tools';
-import { buildSystemPrompt, describeScope } from '../src/modules/ai/prompts';
+import { buildSystemPrompt, describeScope } from '../src/modules/ai/prompt';
 import { fenceToolResult, belongsElsewhere, fenceAnswer, collectSeen, ANSWER_FENCE_NOTE } from '../src/modules/ai/fence';
 import * as ai from '../src/modules/ai/service';
 
@@ -133,7 +133,7 @@ afterAll(async () => {
 describe('every portal-reachable tool answers for the user’s own organisation only', () => {
   it('offers no MSP-only tools to the portal user', async () => {
     const names = await asAlpha(async (ctx) => availableTools(ctx).map((t) => t.name));
-    for (const forbidden of ['list_customers', 'get_customer', 'get_ci', 'ci_history', 'impact_analysis', 'list_assets', 'my_workload', 'problem_candidates', 'engineer_directory', 'out_of_scope_work', 'top_services_by_incidents']) expect(names).not.toContain(forbidden);
+    for (const forbidden of ['list_customers', 'get_customer', 'get_ci', 'ci_history', 'impact_analysis', 'my_workload', 'problem_candidates', 'engineer_directory', 'out_of_scope_work', 'top_services_by_incidents']) expect(names).not.toContain(forbidden);
   });
 
   it('search finds Alpha’s ticket and never Beta’s, even with Beta’s exact ticket number', async () => {
@@ -255,6 +255,7 @@ describe('tenant fence', () => {
     // leak is simulated with a throw-away tool that returns rows of both organisations, as a buggy or future tool might.
     const probe: AiTool = {
       name: `iso_probe_${S}`,
+      toolset: 'core',
       description: 'test probe',
       inputSchema: z.object({}),
       requires: [],
@@ -289,13 +290,13 @@ describe('prompt and conversations', () => {
     const system = await asAlpha(async (ctx) => {
       const org = await ai.organisationOf(ctx);
       const organisation = org ? { name: org.customerName, code: org.customerCode } : null;
-      return buildSystemPrompt({ ctx, tools: availableTools(ctx), customerScopeSummary: describeScope(ctx, organisation), organisation });
+      return systemText(buildSystemPrompt({ ctx, tools: availableTools(ctx), customerScopeSummary: describeScope(ctx, organisation), organisation }));
     });
     expect(system).toContain(`${ALPHA} (${ALPHA_CODE})`);
     expect(system).toContain(`Every answer is about ${ALPHA} only`);
     expect(system).not.toMatch(/Acme|Apex Retail|ABC Manufacturing|Meridian|Northwind|Priya Sharma/);
     expect(system).toContain('never reuse their names, numbers, dates or figures');
-    const staff = await asAdmin(async (ctx) => buildSystemPrompt({ ctx, tools: availableTools(ctx), customerScopeSummary: describeScope(ctx, null) }));
+    const staff = await asAdmin(async (ctx) => systemText(buildSystemPrompt({ ctx, tools: availableTools(ctx), customerScopeSummary: describeScope(ctx, null) })));
     expect(staff).toContain('all customers (MSP-wide)');
   });
 

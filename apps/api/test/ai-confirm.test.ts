@@ -17,7 +17,7 @@ import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { createTicket } from '../src/modules/tickets/service';
 import { AppError } from '../src/core/errors';
-import type { AiProvider, ChatOptions, ChatResponse } from '../src/lib/ai';
+import { systemText, type AiProvider, type ChatOptions, type ChatResponse } from '../src/lib/ai';
 import * as ai from '../src/modules/ai/service';
 
 const S = Math.random().toString(36).slice(2, 8);
@@ -37,7 +37,7 @@ function scripted(calls: { name: string; input: Record<string, unknown> }[], ans
     model: 'fake-1',
     seen,
     async chat(opts: ChatOptions): Promise<ChatResponse> {
-      seen.push(opts);
+      seen.push({ ...opts, system: systemText(opts.system) });
       const last = opts.messages[opts.messages.length - 1]!;
       if (last.role === 'user') return { text: '', toolCalls: calls.map((c, i) => ({ id: `c${i}`, name: c.name, input: c.input })), stopReason: 'tool_use', usage: { inputTokens: 1, outputTokens: 1 } };
       const results: Record<string, string> = {};

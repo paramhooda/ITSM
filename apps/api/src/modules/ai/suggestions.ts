@@ -13,8 +13,8 @@ import { suggest as kbSuggest, getArticle } from '@/modules/knowledge/service';
 import { impact as ciImpact } from '@/modules/cmdb/service';
 import { llmJson, enabled, asSteps, type Steps } from './service';
 import { assertFeature } from './guards';
-import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, MAJOR_UPDATE_SYSTEM, RESOLUTION_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompts';
-import { compactDetail, compactTimeline, ticketLink } from './tools';
+import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, MAJOR_UPDATE_SYSTEM, RESOLUTION_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompt';
+import { compactDetail, compactTimeline, ticketLink } from './helpers';
 
 /**
  * AI-assisted ITSM features. Every result is stored as an `ai_suggestions`
@@ -174,7 +174,7 @@ type ClassifyInput = { title: string; description?: string | null; type?: string
 type Gathered = Awaited<ReturnType<typeof gatherClassification>>;
 
 /** Step 1 (database): the option lists and the deterministic heuristic, which is also the fallback. */
-async function gatherClassification(ctx: Ctx, input: ClassifyInput) {
+export async function gatherClassification(ctx: Ctx, input: ClassifyInput) {
   const [categories, subcategories, impacts, urgencies, priorities] = await Promise.all([optionsOfType(ctx.tx, 'ticket_category'), optionsOfType(ctx.tx, 'ticket_subcategory'), optionsOfType(ctx.tx, 'ticket_impact'), optionsOfType(ctx.tx, 'ticket_urgency'), optionsOfType(ctx.tx, 'ticket_priority')]);
   const active = (o: OptionRow) => o.isActive;
   const cats = categories.filter(active);
@@ -296,7 +296,7 @@ export async function classifyDraft(who: Who, input: { title: string; descriptio
 
 export const recommendAssignment = (who: Who, ticketId: string) => asSteps(who).tx((ctx) => recommendAssignmentIn(ctx, ticketId));
 
-async function recommendAssignmentIn(ctx: Ctx, ticketId: string) {
+export async function recommendAssignmentIn(ctx: Ctx, ticketId: string) {
   await assertFeature(ctx, 'assign');
   const { row, detail } = await readTicket(ctx, ticketId);
   if (isCustomerUser(ctx)) throw new ForbiddenError();
@@ -557,7 +557,7 @@ function fallbackMajorUpdate(d: Detail, audience: 'customer' | 'internal', n: nu
 
 export const duplicateCheck = (who: Who, ticketId: string) => asSteps(who).tx((ctx) => duplicateCheckIn(ctx, ticketId));
 
-async function duplicateCheckIn(ctx: Ctx, ticketId: string) {
+export async function duplicateCheckIn(ctx: Ctx, ticketId: string) {
   await assertFeature(ctx, 'duplicates');
   const { row } = await readTicket(ctx, ticketId);
   const conds = [sql`x.id <> ${row.id}::uuid`, sql`x.customer_id = ${row.customerId}::uuid`, sql`x.type = ${row.type}`, sql`s.status_category IN ('new','open','pending')`];

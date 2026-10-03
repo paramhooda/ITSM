@@ -5,7 +5,7 @@ import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { AppError } from '../src/core/errors';
 import { createTicket, resolveTicket } from '../src/modules/tickets/service';
-import { AiUpstreamError, type AiProvider, type ChatOptions, type ChatResponse } from '../src/lib/ai';
+import { AiUpstreamError, systemText, type AiProvider, type ChatOptions, type ChatResponse } from '../src/lib/ai';
 import { availableTools, toolAvailable, toolByName, toolJsonSchema, ALL_TOOLS, ACTION_TOOLS } from '../src/modules/ai/tools';
 import * as ai from '../src/modules/ai/service';
 import * as sug from '../src/modules/ai/suggestions';
@@ -347,7 +347,7 @@ describe('tool loop with a fake provider', () => {
     readonly model = 'fake-1';
     calls: ChatOptions[] = [];
     async chat(opts: ChatOptions): Promise<ChatResponse> {
-      this.calls.push(opts);
+      this.calls.push({ ...opts, system: systemText(opts.system) });
       const last = opts.messages[opts.messages.length - 1]!;
       if (last.role === 'user') {
         expect(opts.tools?.some((t) => t.name === 'query_tickets')).toBe(true);
