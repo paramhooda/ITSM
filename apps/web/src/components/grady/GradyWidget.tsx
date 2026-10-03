@@ -333,7 +333,7 @@ function GradyWindow({ open, onClose }: { open: boolean; onClose: () => void }) 
                 <Settings2 className="h-4 w-4 mt-px shrink-0" />
                 <div>
                   <div className="font-medium">Grady is not connected to an AI provider yet.</div>
-                  <div className="text-amber-800/90 mt-0.5">{isAdmin ? <>Set the provider and key for the deployment, then use <Link to="/admin/settings" className="underline">Test connection</Link>.</> : 'Ask an administrator to configure the assistant.'}</div>
+                  <div className="text-amber-800/90 mt-0.5">{isAdmin ? <>Set the provider and key for the deployment, then use <Link to="/admin/ai" className="underline">Test connection</Link>.</> : 'Ask an administrator to configure the assistant.'}</div>
                 </div>
               </div>
             )}
@@ -379,7 +379,7 @@ function GradyWindow({ open, onClose }: { open: boolean; onClose: () => void }) 
                 <AlertTriangle className="h-4 w-4 mt-px shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div>{errorText}</div>
-                  {upstream && isAdmin && <div className="mt-1 text-red-600/80">Check <Link to="/admin/settings" className="underline">Administration → Settings</Link> and use Test connection.</div>}
+                  {upstream && isAdmin && <div className="mt-1 text-red-600/80">Check <Link to="/admin/ai" className="underline">Administration → AI assistant</Link> and use Test connection.</div>}
                 </div>
                 {chat.lastSent && <button className="underline shrink-0" onClick={() => chat.retry()}>Retry</button>}
               </div>

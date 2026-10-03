@@ -71,6 +71,7 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     label: 'System',
     items: [
       { to: '/admin/settings', label: 'Settings', perm: ['admin:system', 'admin:config'] },
+      { to: '/admin/ai', label: 'AI assistant', perm: ['admin:system', 'admin:config'] },
       { to: '/admin/outbox', label: 'Notification outbox', perm: ['admin:system', 'admin:config'] },
       { to: '/admin/whatsapp', label: 'WhatsApp', perm: ['admin:system', 'admin:config'] },
       { to: '/admin/audit', label: 'Audit log', perm: ['admin:audit'] },

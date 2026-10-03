@@ -9,7 +9,6 @@ import type { AiProvider, ChatOptions, ChatResponse } from '../src/lib/ai';
 class ScriptedProvider implements AiProvider {
   name = 'scripted';
   model = 'scripted';
-  baseUrl = null;
   calls: ChatOptions[] = [];
   async chat(opts: ChatOptions): Promise<ChatResponse> {
     this.calls.push(opts);

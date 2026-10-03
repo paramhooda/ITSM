@@ -33,6 +33,7 @@ const RolesPage = page(() => import('./RolesPage'));
 const TeamsPage = page(() => import('./TeamsPage'));
 const ApiKeysPage = page(() => import('./ApiKeysPage'));
 const SettingsPage = page(() => import('./SettingsPage'));
+const AiPage = page(() => import('./AiPage'));
 const OutboxPage = page(() => import('./OutboxPage'));
 const WhatsAppPage = page(() => import('./WhatsAppPage'));
 const AuditPage = page(() => import('./AuditPage'));
@@ -75,6 +76,7 @@ export default function AdminPage() {
           <Route path="teams" element={<Guarded perm={USERS}><TeamsPage /></Guarded>} />
           <Route path="api-keys" element={<Guarded perm={['integrations:manage']}><ApiKeysPage /></Guarded>} />
           <Route path="settings" element={<Guarded perm={['admin:system', 'admin:config']}><SettingsPage /></Guarded>} />
+          <Route path="ai" element={<Guarded perm={['admin:system', 'admin:config']}><AiPage /></Guarded>} />
           <Route path="outbox" element={<Guarded perm={['admin:system', 'admin:config']}><OutboxPage /></Guarded>} />
           <Route path="whatsapp" element={<Guarded perm={['admin:system', 'admin:config']}><WhatsAppPage /></Guarded>} />
           <Route path="audit" element={<Guarded perm={['admin:audit']}><AuditPage /></Guarded>} />

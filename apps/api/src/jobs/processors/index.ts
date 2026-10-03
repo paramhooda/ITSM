@@ -13,3 +13,4 @@ import './discovery';
 import './integrations';
 import './metrics';
 import './major';
+import './ai';

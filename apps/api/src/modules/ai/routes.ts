@@ -6,6 +6,7 @@ import { AppError, UnauthorizedError } from '@/core/errors';
 import { logger } from '@/core/logger';
 import * as svc from './service';
 import * as sug from './suggestions';
+import * as admin from './admin';
 import { chatBodySchema, feedbackBodySchema, idParam, decideBodySchema, draftUpdateBodySchema, classifyDraftBodySchema, problemClustersQuerySchema, suggestionsQuerySchema, type ChatBody, type ClassifyDraftBody } from './schemas';
 
 /**
@@ -72,6 +73,11 @@ export default async function routes(app: FastifyInstance) {
     const body = req.body as z.infer<typeof feedbackBodySchema>;
     return svc.feedback(ctx, id(req), body.rating, body.note ?? null);
   }));
+
+  // ---- administration: settings and usage (read for admin:config, write for admin:system)
+  r.get('/ai/admin/settings', { preHandler: app.auth('admin:system', 'admin:config'), schema: { tags } }, h((ctx) => admin.getAiSettings(ctx)));
+  r.put('/ai/admin/settings', { preHandler: app.auth('admin:system'), schema: { tags, body: admin.aiSettingsBodySchema } }, h((ctx, req) => admin.updateAiSettings(ctx, req.body as admin.AiSettingsBody)));
+  r.get('/ai/admin/usage', { preHandler: app.auth('admin:system', 'admin:config'), schema: { tags, querystring: admin.usageQuerySchema } }, h((ctx, req) => admin.usage(ctx, req.query as { days: number })));
 
   // ---- AI-assisted ITSM (ai:use + tickets:read / portal:tickets enforced in the service; each feature has its own switch)
   r.post('/ai/tickets/:id/summarize', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.summarize(steps(req), id(req)));
