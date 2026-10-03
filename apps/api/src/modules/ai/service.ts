@@ -1,24 +1,31 @@
 import { randomUUID } from 'node:crypto';
 import { eq, and, desc, asc, sql } from 'drizzle-orm';
 import { schema } from '@/db/client';
-import { buildCtx, type Ctx } from '@/core/context';
-import { AppError, NotFoundError, ForbiddenError } from '@/core/errors';
+import { buildCtx, runAs, type Ctx, type CtxMeta } from '@/core/context';
+import type { Principal } from '@/core/principal';
+import { can } from '@/core/authz';
+import { AppError, NotFoundError, ForbiddenError, ValidationError } from '@/core/errors';
 import { aiProvider, aiEnabled, AiUpstreamError, type AiProvider, type ChatMessage, type ToolCall } from '@/lib/ai';
-import { getSetting } from '@/modules/config/service';
 import { loadTicket } from '@/modules/tickets/common';
 import { listTickets } from '@/modules/tickets/list';
-import { availableTools, toolDefinitions, toolByName, toolAvailable, stripSecrets, isCustomerUser, listQuery } from './tools';
-import { buildSystemPrompt, describeScope } from './prompts';
+import { availableTools, toolDefinitions, toolByName, toolAvailable, tierOf, isCustomerUser, listQuery, type AiTool } from './tools';
+import { buildSystemPrompt, describeScope, PROMPT_VERSION } from './prompts';
 import { fenceToolResult, fenceAnswer, collectSeen, type TenantFence } from './fence';
 import { factsOf, groundAnswer } from './ground';
+import { compactForTrace, redactKeys, scrubResult, inputHash } from './redact';
+import { wrapUntrusted, stripMarkers, sanitizeText } from './untrusted';
+import { loadAiSettings, assertAssistantEnabled, assertDailyBudget, AiDisabledError, AI_FEATURES, featureEnabled, type AiSettings } from './guards';
 import { logger } from '@/core/logger';
 import type { ChatContext } from './schemas';
+
+export { AiDisabledError } from './guards';
 
 /** Hard limits that keep a conversation turn bounded. */
 export const MAX_TOOL_ITERATIONS = 8;
 export const MAX_TOOL_RESULT_CHARS = 6000;
 export const HISTORY_MESSAGES = 20;
 const MAX_HISTORY_CHARS = 4000;
+const CHAT_MAX_TOKENS = 4096;
 
 // ---------------------------------------------------------------- provider (injectable for tests)
 
@@ -30,11 +37,41 @@ export const setProviderForTests = (p: AiProvider | null) => {
 export const provider = (): AiProvider => override ?? aiProvider();
 export const enabled = () => (override ? override.name !== 'none' : aiEnabled());
 
-export class AiDisabledError extends AppError {
-  constructor() {
-    super(503, 'The AI assistant is not configured (set AI_PROVIDER and credentials)', 'ai_disabled');
-  }
+// ---------------------------------------------------------------- steps: short transactions around model calls
+
+/** Who is asking, and the request this turn belongs to. */
+export interface TurnMeta {
+  requestId: string;
+  ip?: string | null;
+  userAgent?: string | null;
 }
+
+export const metaOf = (ctx: Ctx): TurnMeta => ({ requestId: ctx.requestId, ip: ctx.ip, userAgent: ctx.userAgent });
+
+/**
+ * One short tenant transaction with the assistant's identity: audit entries and
+ * comments written inside carry source = 'ai', and `auditMetadata` (the action
+ * id, the conversation id) is stamped on every audit row of its side effects.
+ * Model calls never happen inside one of these.
+ */
+export const aiStep = <T>(p: Principal, meta: TurnMeta, fn: (ctx: Ctx) => Promise<T>, auditMetadata?: Record<string, unknown>): Promise<T> =>
+  runAs(p, { requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent, source: 'ai', auditMetadata } satisfies Partial<CtxMeta>, fn);
+
+/**
+ * How a feature runs its database work: `tx` opens a short transaction per
+ * step. Built from a request (`stepsFor`) the steps are separate transactions
+ * so the model call between them holds no connection; built from an existing
+ * ctx (`stepsOf`) every step runs inside that ctx's transaction (tests, and
+ * tools that already run inside their own step).
+ */
+export interface Steps {
+  principal: Principal;
+  tx<T>(fn: (ctx: Ctx) => Promise<T>): Promise<T>;
+}
+export const stepsFor = (p: Principal, meta: TurnMeta): Steps => ({ principal: p, tx: (fn) => aiStep(p, meta, fn) });
+export const stepsOf = (ctx: Ctx): Steps => ({ principal: ctx.user, tx: (fn) => fn(ctx) });
+export const isSteps = (x: Ctx | Steps): x is Steps => typeof (x as Steps).tx === 'function';
+export const asSteps = (x: Ctx | Steps): Steps => (isSteps(x) ? x : stepsOf(x));
 
 /** Same principal and transaction, but audit entries and comments carry source = 'ai'. */
 export const aiCtx = (ctx: Ctx): Ctx => (ctx.source === 'ai' ? ctx : buildCtx(ctx.user, ctx.tx, { requestId: ctx.requestId, ip: ctx.ip, userAgent: ctx.userAgent, source: 'ai' }));
@@ -89,16 +126,19 @@ async function examplePrompts(ctx: Ctx): Promise<string[]> {
 
 export async function status(ctx: Ctx) {
   const p = provider();
-  const features = await getSetting<string[]>(ctx, 'ai.enabled_features', ['assistant', 'summarize', 'classify', 'similar', 'suggest_kb']);
+  const settings = await loadAiSettings(ctx.tx);
   const tools = availableTools(ctx);
+  const on = enabled() && settings.assistantEnabled && !settings.disabledFeatures.includes('assistant');
   return {
-    enabled: enabled() && ctx.can('ai:use'),
+    enabled: on && ctx.can('ai:use'),
+    assistantEnabled: settings.assistantEnabled,
     provider: p.name,
     model: p.model || null,
     configured: { provider: p.name, model: p.model || null, baseUrl: p.baseUrl ?? null },
-    features: Array.isArray(features) ? features : [],
+    features: AI_FEATURES.filter((f) => featureEnabled(settings, f)),
+    autonomy: settings.autonomy,
     canAct: ctx.can('ai:act'),
-    tools: tools.map((t) => ({ name: t.name, action: t.action })),
+    tools: tools.map((t) => ({ name: t.name, action: t.action, tier: tierOf(t) })),
     suggestions: ctx.can('ai:use') ? await examplePrompts(ctx) : [],
   };
 }
@@ -119,15 +159,18 @@ export interface AiTestResult {
   error?: { status: number; code: string; message: string };
 }
 
-export async function test(ctx: Ctx): Promise<AiTestResult> {
-  if (!ctx.can('admin:system') && !ctx.can('admin:config')) throw new ForbiddenError();
+/** Accepts a request ctx or a bare principal: the check needs no database access. */
+export async function test(who: Ctx | Principal): Promise<AiTestResult> {
+  const principal = 'user' in who ? who.user : who;
+  if (!can(principal, 'admin:system') && !can(principal, 'admin:config')) throw new ForbiddenError();
   const p = provider();
   const base = { provider: p.name, model: p.model || null, baseUrl: p.baseUrl ?? null };
   if (!enabled()) return { ok: false, ...base, latencyMs: 0, error: { status: 503, code: 'ai_disabled', message: 'The AI assistant is not configured: set AI_PROVIDER and the provider credentials, then restart the app.' } };
   const started = Date.now();
   try {
-    const res = await p.chat({ system: 'You are a connectivity check. Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }], maxTokens: 16 });
-    return { ok: true, ...base, latencyMs: Date.now() - started, reply: res.text.trim().slice(0, 200), usage: res.usage };
+    // Models that always think need room for it: a tiny max_tokens would return nothing.
+    const res = await p.chat({ system: 'You are a connectivity check. Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }], maxTokens: 256, effort: 'low' });
+    return { ok: true, ...base, latencyMs: Date.now() - started, reply: res.text.trim().slice(0, 200), usage: { inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens } };
   } catch (err) {
     const latencyMs = Date.now() - started;
     if (err instanceof AiUpstreamError) return { ok: false, ...base, latencyMs, error: { status: err.upstreamStatus ?? 502, code: err.code, message: err.upstreamMessage } };
@@ -149,21 +192,28 @@ export interface ToolCallRecord {
   fenced?: number;
   /** The action was only proposed (preview shown); it runs when the user confirms. */
   proposed?: boolean;
+  /** A low-risk write applied without confirmation (autonomy auto_low). */
+  auto?: boolean;
 }
 
 /**
  * Propose-then-commit. An action tool never runs on the turn the model calls it:
  * the call is stored on the conversation as a pending action with a resolved
  * preview, the model asks the user to confirm, and the next turn either commits
- * it (an explicit yes), drops it (a no), or drops it and carries on (anything
- * else). One pending action at a time, executed at most once, and it expires.
+ * it (a confirmation bound to its id, or an explicit typed yes), drops it (a
+ * no), or drops it and carries on (anything else). One pending action at a
+ * time, executed at most once (the conversation row is locked while it runs),
+ * and it expires.
  */
 export interface PendingAction {
   id: string;
   tool: string;
+  tier: string;
+  /** Validated input with secret-looking keys redacted (action tools never carry secrets). */
   input: Record<string, unknown>;
   preview: string;
   createdAt: string;
+  expiresAt: string;
 }
 export const PENDING_ACTION_TTL_MS = 30 * 60_000;
 /** A whole message that only says yes. "Yes, proceed." / "ok" / "go ahead" / "confirm". */
@@ -174,14 +224,22 @@ export const CANCEL_RE = /^\s*(?:no|nope|cancel|stop|abort|don'?t|do not|never ?
 export function readPending(context: Record<string, unknown> | null | undefined): PendingAction | null {
   const p = (context ?? {}).pendingAction as Partial<PendingAction> | undefined;
   if (!p || typeof p !== 'object' || typeof p.id !== 'string' || typeof p.tool !== 'string' || typeof p.preview !== 'string' || typeof p.createdAt !== 'string') return null;
-  if (Date.now() - new Date(p.createdAt).getTime() > PENDING_ACTION_TTL_MS) return null;
-  return { id: p.id, tool: p.tool, input: (p.input ?? {}) as Record<string, unknown>, preview: p.preview, createdAt: p.createdAt };
+  const expiresAt = typeof p.expiresAt === 'string' ? p.expiresAt : new Date(new Date(p.createdAt).getTime() + PENDING_ACTION_TTL_MS).toISOString();
+  if (Date.now() > new Date(expiresAt).getTime()) return null;
+  return { id: p.id, tool: p.tool, tier: typeof p.tier === 'string' ? p.tier : 'write', input: (p.input ?? {}) as Record<string, unknown>, preview: p.preview, createdAt: p.createdAt, expiresAt };
 }
-const publicPending = (p: PendingAction | null) => (p ? { id: p.id, tool: p.tool, preview: p.preview } : null);
+export type PublicPending = { id: string; tool: string; tier: string; preview: string; expiresAt: string };
+const publicPending = (p: PendingAction | null): PublicPending | null => (p ? { id: p.id, tool: p.tool, tier: p.tier, preview: p.preview, expiresAt: p.expiresAt } : null);
 const withoutPending = (context: Record<string, unknown> | null | undefined) => {
   const { pendingAction: _p, ...rest } = context ?? {};
   return rest;
 };
+
+export class StaleActionError extends AppError {
+  constructor(message = 'That proposal is no longer waiting: it was already decided or has expired. Ask again if you still want it.') {
+    super(409, message, 'stale_action');
+  }
+}
 
 /**
  * A conversation belongs to the user who started it. Customer users additionally
@@ -212,7 +270,7 @@ export async function listConversations(ctx: Ctx, limit = 20) {
     .where(mine)
     .orderBy(desc(schema.aiConversations.updatedAt))
     .limit(limit);
-  return { items: rows };
+  return { items: rows.map((r) => ({ ...r, context: withoutPending(r.context) })) };
 }
 
 export async function getConversation(ctx: Ctx, id: string) {
@@ -229,20 +287,36 @@ export async function deleteConversation(ctx: Ctx, id: string) {
   return { ok: true };
 }
 
+/** Thumbs up or down on one of the assistant's replies (the person's own conversation only). */
+export async function feedback(ctx: Ctx, messageId: string, rating: 'up' | 'down' | null, note?: string | null) {
+  const [m] = await ctx.tx
+    .select({ id: schema.aiMessages.id, conversationId: schema.aiMessages.conversationId, role: schema.aiMessages.role })
+    .from(schema.aiMessages)
+    .innerJoin(schema.aiConversations, eq(schema.aiConversations.id, schema.aiMessages.conversationId))
+    .where(and(eq(schema.aiMessages.id, messageId), eq(schema.aiConversations.userId, ctx.user.id)))
+    .limit(1);
+  if (!m || m.role !== 'assistant') throw new NotFoundError('Message');
+  await ctx.tx.update(schema.aiMessages).set({ feedback: rating, feedbackNote: note ? sanitizeText(note, 1000) : null }).where(eq(schema.aiMessages.id, m.id));
+  await ctx.audit({ entityType: 'ai_message', entityId: m.id, entityLabel: 'chat reply', action: 'ai.feedback', metadata: { conversationId: m.conversationId, rating, hasNote: !!note } });
+  return { id: m.id, feedback: rating };
+}
+
 type MessageRow = typeof schema.aiMessages.$inferSelect;
-const publicMessage = (m: MessageRow) => ({ id: m.id, role: m.role as 'user' | 'assistant', content: m.content, toolCalls: (m.toolCalls ?? []) as unknown as ToolCallRecord[], inputTokens: m.inputTokens, outputTokens: m.outputTokens, createdAt: m.createdAt });
+const publicMessage = (m: MessageRow) => ({ id: m.id, role: m.role as 'user' | 'assistant', content: m.content, toolCalls: (m.toolCalls ?? []) as unknown as ToolCallRecord[], inputTokens: m.inputTokens, outputTokens: m.outputTokens, feedback: (m.feedback ?? null) as 'up' | 'down' | null, createdAt: m.createdAt });
+export type PublicMessage = ReturnType<typeof publicMessage>;
 
 // ---------------------------------------------------------------- context description
 
 /** Resolves the UI context into one line for the prompt, through the service layer (so nothing leaks). */
 export async function describeContext(ctx: Ctx, c: ChatContext | null | undefined): Promise<string | null> {
-  if (!c?.entityType || !c.entityId) return c?.label ? `User is viewing: ${c.label}` : null;
+  const label = c?.label ? sanitizeText(String(c.label), 200) : null;
+  if (!c?.entityType || !c.entityId) return label ? `User is viewing: ${label}` : null;
   try {
     switch (c.entityType) {
       case 'ticket': {
         const t = await loadTicket(ctx, c.entityId);
         const [cust] = await ctx.tx.select({ name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, t.customerId)).limit(1);
-        return `User is viewing ticket ${t.number} ("${t.title.slice(0, 120)}", ${t.type}) for customer ${cust?.name ?? 'unknown'}. Use get_ticket with "${t.number}" for details.`;
+        return `User is viewing ticket ${t.number} ("${sanitizeText(t.title, 120)}", ${t.type}) for customer ${cust?.name ?? 'unknown'}. Use get_ticket with "${t.number}" for details.`;
       }
       case 'customer': {
         ctx.requireCustomer(c.entityId);
@@ -263,12 +337,12 @@ export async function describeContext(ctx: Ctx, c: ChatContext | null | undefine
         return `User is viewing contract ${k.number} (${k.name}) of customer ${cust?.name ?? ''}. Use list_contracts with customer "${cust?.name ?? ''}".`;
       }
       case 'kb_article':
-        return `User is viewing knowledge article ${c.label ?? ''}${c.title ? ` "${String(c.title).slice(0, 120)}"` : ''}.`;
+        return `User is viewing knowledge article ${label ?? ''}${c.title ? ` "${sanitizeText(String(c.title), 120)}"` : ''}.`;
       default:
-        return c.label ? `User is viewing ${c.entityType} "${c.label}".` : null;
+        return label ? `User is viewing ${sanitizeText(String(c.entityType), 40)} "${label}".` : null;
     }
   } catch {
-    return c.label ? `User is viewing: ${c.label}` : null;
+    return label ? `User is viewing: ${label}` : null;
   }
 }
 
@@ -285,50 +359,91 @@ function truncateResult(value: unknown): string {
   return `${text.slice(0, MAX_TOOL_RESULT_CHARS)}… [truncated: ${text.length - MAX_TOOL_RESULT_CHARS} more characters; narrow the query]`;
 }
 
+export interface ExecuteOptions {
+  /** Run the action (the user confirmed, or autonomy allows it) instead of proposing it. */
+  confirmed?: boolean;
+  /** The pending action being executed; stamped on the audit trail. */
+  actionId?: string;
+  conversationId?: string;
+  /** The write ran without confirmation under autonomy auto_low. */
+  auto?: boolean;
+}
+
+export interface ExecuteResult {
+  record: ToolCallRecord;
+  content: string;
+  isError: boolean;
+  proposal?: PendingAction;
+}
+
 /**
  * Validates and executes one tool call under a savepoint, so a failing tool
  * (permission denied, validation error, RLS violation) never aborts the
- * surrounding request transaction.
+ * surrounding transaction. Every call is audited as `ai.tool` with its outcome
+ * and an input fingerprint, never the input itself.
  */
-export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number, fence?: TenantFence | null, opts: { confirmed?: boolean } = {}): Promise<{ record: ToolCallRecord; content: string; isError: boolean; proposal?: PendingAction }> {
+export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number, fence?: TenantFence | null, opts: ExecuteOptions = {}): Promise<ExecuteResult> {
   const tool = toolByName(call.name);
-  const base = { name: call.name, input: stripSecrets(call.input ?? {}), action: tool?.action ?? false };
-  if (!tool) return { record: { ...base, ok: false, summary: `Unknown tool ${call.name}`, error: 'unknown_tool' }, content: JSON.stringify({ error: `Unknown tool "${call.name}"` }), isError: true };
-  if (!toolAvailable(ctx, tool)) return { record: { ...base, ok: false, summary: `${tool.name} not permitted`, error: 'forbidden' }, content: JSON.stringify({ error: 'forbidden', message: tool.action && !ctx.can('ai:act') ? 'The user has not enabled AI actions (ai:act).' : 'The user does not have permission for this tool.' }), isError: true };
+  const base = { name: call.name, input: compactForTrace(call.input ?? {}), action: tool?.action ?? false };
+  const audit = async (outcome: string, extra: Record<string, unknown> = {}) => {
+    try {
+      await aiCtx(ctx).audit({ entityType: 'ai_tool', entityId: opts.conversationId ?? null, entityLabel: call.name, action: 'ai.tool', metadata: { tool: call.name, tier: tool ? tierOf(tool) : null, outcome, inputHash: inputHash(call.input ?? {}), actionId: opts.actionId ?? null, conversationId: opts.conversationId ?? null, ...extra } });
+    } catch (err) {
+      logger.warn({ err, tool: call.name }, 'ai tool audit failed');
+    }
+  };
+  if (!tool) {
+    await audit('unknown_tool');
+    return { record: { ...base, ok: false, summary: `Unknown tool ${call.name}`, error: 'unknown_tool' }, content: JSON.stringify({ error: `Unknown tool "${call.name}"` }), isError: true };
+  }
+  if (!toolAvailable(ctx, tool)) {
+    await audit('forbidden');
+    return { record: { ...base, ok: false, summary: `${tool.name} not permitted`, error: 'forbidden' }, content: JSON.stringify({ error: 'forbidden', message: tool.action && !ctx.can('ai:act') ? 'The user has not enabled AI actions (ai:act).' : 'The user does not have permission for this tool.' }), isError: true };
+  }
   const parsed = tool.inputSchema.safeParse(call.input ?? {});
-  if (!parsed.success) return { record: { ...base, ok: false, summary: `${tool.name}: invalid input`, error: 'validation_error' }, content: JSON.stringify({ error: 'invalid_input', issues: parsed.error.issues.slice(0, 5).map((i) => ({ path: i.path.join('.'), message: i.message })) }), isError: true };
+  if (!parsed.success) {
+    await audit('invalid_input');
+    return { record: { ...base, ok: false, summary: `${tool.name}: invalid input`, error: 'validation_error' }, content: JSON.stringify({ error: 'invalid_input', issues: parsed.error.issues.slice(0, 5).map((i) => ({ path: i.path.join('.'), message: i.message })) }), isError: true };
+  }
+  const data = parsed.data as Record<string, unknown>;
+  const trace = compactForTrace(data);
   const sp = `ai_tool_${index}`;
   await ctx.tx.execute(sql.raw(`SAVEPOINT ${sp}`));
   try {
     if (tool.action && !opts.confirmed) {
       // Propose only: resolve the preview against real records, run nothing.
-      const preview = tool.preview ? await tool.preview(aiCtx(ctx), parsed.data) : `Run ${tool.name} with ${JSON.stringify(stripSecrets(parsed.data as Record<string, unknown>))}`;
+      const preview = tool.preview ? await tool.preview(aiCtx(ctx), data) : `Run ${tool.name} with ${JSON.stringify(trace)}`;
       await ctx.tx.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
-      const proposal: PendingAction = { id: randomUUID(), tool: tool.name, input: parsed.data as Record<string, unknown>, preview, createdAt: new Date().toISOString() };
+      const createdAt = new Date();
+      const proposal: PendingAction = { id: randomUUID(), tool: tool.name, tier: tierOf(tool), input: redactKeys(data), preview, createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + PENDING_ACTION_TTL_MS).toISOString() };
+      await audit('proposed', { actionId: proposal.id });
       return {
-        record: { ...base, input: stripSecrets(parsed.data as Record<string, unknown>), ok: true, summary: `Proposed: ${preview}`, proposed: true },
+        record: { ...base, input: trace, ok: true, summary: `Proposed: ${preview}`, proposed: true },
         content: JSON.stringify({ status: 'awaiting_confirmation', preview, instruction: 'Nothing has been done yet. Repeat this preview to the user in one sentence and end with "Shall I proceed?". The platform runs it only when they confirm; do not call this tool again for the same request.' }),
         isError: false,
         proposal,
       };
     }
-    const raw = await tool.run(aiCtx(ctx), parsed.data);
+    const raw = await tool.run(aiCtx(ctx), data);
     await ctx.tx.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
-    // Customer users: nothing that names another organisation reaches the model, whatever the tool returned.
+    // Secrets never reach the model; customer users never see another organisation (the fence reads the structure, so it runs
+    // before people-written text is marked as data).
+    const scrubbed = scrubResult(raw);
     const guard = fence === undefined ? await organisationOf(ctx) : fence;
-    const fenced = guard ? fenceToolResult(raw, guard) : { value: raw, dropped: 0 };
-    const result = fenced.value;
+    const fenced = guard ? fenceToolResult(scrubbed, guard) : { value: scrubbed, dropped: 0 };
+    const result = wrapUntrusted(fenced.value);
     if (fenced.dropped > 0) {
       logger.warn({ tool: tool.name, dropped: fenced.dropped, userId: ctx.user.id, customerId: guard?.customerId, requestId: ctx.requestId }, 'ai tenant fence removed records of another organisation');
       await ctx.audit({ entityType: 'ai_tool', entityId: ctx.user.id, entityLabel: tool.name, action: 'ai.tenant_fence', customerId: guard?.customerId ?? null, metadata: { tool: tool.name, dropped: fenced.dropped } });
     }
     let summary: string;
     try {
-      summary = tool.summary(parsed.data, result);
+      summary = tool.summary(data, raw);
     } catch {
       summary = `Ran ${tool.name}`;
     }
-    return { record: { ...base, input: stripSecrets(parsed.data as Record<string, unknown>), ok: true, summary, ...(fenced.dropped ? { fenced: fenced.dropped } : {}) }, content: truncateResult(result), isError: false };
+    await audit('ok', { fenced: fenced.dropped, auto: !!opts.auto });
+    return { record: { ...base, input: trace, ok: true, summary, ...(fenced.dropped ? { fenced: fenced.dropped } : {}), ...(opts.auto ? { auto: true } : {}) }, content: truncateResult(result), isError: false };
   } catch (err) {
     try {
       await ctx.tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${sp}`));
@@ -339,7 +454,9 @@ export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number, f
     const e = err as AppError;
     const code = e instanceof AppError ? e.code : 'error';
     const message = e instanceof AppError ? e.message : 'The tool failed unexpectedly';
-    return { record: { ...base, ok: false, summary: `${tool.name} failed: ${message.slice(0, 160)}`, error: code }, content: JSON.stringify({ error: code, message }), isError: true };
+    if (!(e instanceof AppError)) logger.error({ err, tool: tool.name, requestId: ctx.requestId }, 'ai tool failed unexpectedly');
+    await audit('error', { error: code });
+    return { record: { ...base, input: trace, ok: false, summary: `${tool.name} failed: ${message.slice(0, 160)}`, error: code }, content: JSON.stringify({ error: code, message }), isError: true };
   }
 }
 
@@ -347,9 +464,33 @@ export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number, f
 
 export interface ChatInput {
   conversationId?: string | null;
-  message: string;
+  message?: string | null;
   context?: ChatContext | null;
+  /** A decision on the held action, bound to its id (the panel's Confirm / Cancel buttons). */
+  confirm?: { actionId: string; decision: 'confirm' | 'cancel' } | null;
+  skill?: string | null;
 }
+
+/** Something the web should do after the reply (navigation, a prefilled form); produced by UI tools. */
+export interface UiAction {
+  type: 'navigate';
+  to: string;
+  label?: string;
+}
+
+export interface ChatResult {
+  conversationId: string;
+  message: PublicMessage;
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
+  pendingAction: PublicPending | null;
+  uiActions: UiAction[];
+}
+
+/** Progress events for a streamed turn (the panel shows them while the reply is being prepared). */
+export type TurnEvent =
+  | { type: 'turn'; conversationId: string }
+  | { type: 'step'; status: 'start' | 'done' | 'error'; tool: string; summary: string; action: boolean };
+export type Emit = (event: TurnEvent) => void;
 
 /** Builds the provider history from stored messages (text only; tool traces are not replayed). */
 function historyMessages(rows: MessageRow[]): ChatMessage[] {
@@ -370,122 +511,248 @@ function historyMessages(rows: MessageRow[]): ChatMessage[] {
   return out;
 }
 
-export async function chat(ctx: Ctx, input: ChatInput) {
-  ctx.require('ai:use');
+const parseLink = (content: string): string | undefined => {
+  try {
+    return (JSON.parse(content) as { link?: string }).link;
+  } catch {
+    return undefined;
+  }
+};
+const parseFailure = (content: string): string => {
+  try {
+    return (JSON.parse(content) as { message?: string }).message ?? 'it failed';
+  } catch {
+    return 'it failed';
+  }
+};
+
+/** Runs one turn for a request ctx (tests and callers that already hold a ctx). The turn opens its own short transactions. */
+export const chat = (ctx: Ctx, input: ChatInput): Promise<ChatResult> => chatTurn(ctx.user, metaOf(ctx), input);
+
+/**
+ * One conversation turn. Model calls run outside any database transaction;
+ * every persistence step and every tool call opens a short tenant transaction
+ * of its own, so a slow model never pins a connection.
+ */
+export async function chatTurn(p: Principal, meta: TurnMeta, input: ChatInput, emit?: Emit): Promise<ChatResult> {
+  if (!can(p, 'ai:use')) throw new ForbiddenError('Missing permission: ai:use');
   if (!enabled()) throw new AiDisabledError();
-  const p = provider();
-  // Customer users are bound to exactly one organisation for the whole turn: prompt, tools and stored conversation.
-  const org = await organisationOf(ctx);
-
-  // conversation
-  let conv: typeof schema.aiConversations.$inferSelect | undefined;
-  if (input.conversationId) {
-    [conv] = await ctx.tx.select().from(schema.aiConversations).where(own(ctx, input.conversationId)).limit(1);
-    if (!conv) throw new NotFoundError('Conversation');
-  } else {
-    [conv] = await ctx.tx.insert(schema.aiConversations).values({ userId: ctx.user.id, customerId: isCustomerUser(ctx) ? ctx.user.customerId : null, title: input.message.replace(/\s+/g, ' ').trim().slice(0, 60), context: (input.context ?? {}) as Record<string, unknown> }).returning();
-  }
-  await ctx.tx.insert(schema.aiMessages).values({ conversationId: conv!.id, customerId: conv!.customerId, role: 'user', content: input.message, createdAt: new Date() });
-
-  // A pending action is decided by this message before the model sees anything: commit, cancel, or drop and carry on.
-  const pending = readPending(conv!.context);
-  let cancelledNote: string | null = null;
-  if (pending) {
-    const finish = async (text: string, records: ToolCallRecord[]) => {
-      const [assistant] = await ctx.tx
-        .insert(schema.aiMessages)
-        .values({ conversationId: conv!.id, customerId: conv!.customerId, role: 'assistant', content: text, toolCalls: records as unknown as Record<string, unknown>[], inputTokens: 0, outputTokens: 0, createdAt: new Date(Date.now() + 1) })
-        .returning();
-      await ctx.tx.update(schema.aiConversations).set({ updatedAt: new Date(), context: withoutPending(conv!.context) }).where(eq(schema.aiConversations.id, conv!.id));
-      return { conversationId: conv!.id, message: publicMessage(assistant!), usage: { inputTokens: 0, outputTokens: 0 }, pendingAction: null };
-    };
-    if (CONFIRM_RE.test(input.message)) {
-      const r = await executeToolCall(ctx, { id: pending.id, name: pending.tool, input: pending.input }, 0, org, { confirmed: true });
-      let link: string | undefined;
-      try {
-        link = (JSON.parse(r.content) as { link?: string }).link;
-      } catch {
-        /* no link */
-      }
-      const failure = r.isError ? ((): string => { try { return (JSON.parse(r.content) as { message?: string }).message ?? 'it failed'; } catch { return 'it failed'; } })() : null;
-      return finish(r.isError ? `I could not do that: ${failure}` : `Done: ${r.record.summary}${link ? ` ([open](${link}))` : ''}.`, [r.record]);
-    }
-    if (CANCEL_RE.test(input.message)) return finish('OK, I have not done that.', []);
-    cancelledNote = `The earlier proposal "${pending.preview}" was not confirmed and is now cancelled. If the user is adjusting it, propose again with the new details.`;
-    await ctx.tx.update(schema.aiConversations).set({ context: withoutPending(conv!.context) }).where(eq(schema.aiConversations.id, conv!.id));
-  }
-
-  // history (last N messages including the one just stored)
-  // explicit timestamps + role tie-breaker: rows written in one transaction would otherwise share now()
-  const rows = await ctx.tx.select().from(schema.aiMessages).where(eq(schema.aiMessages.conversationId, conv!.id)).orderBy(desc(schema.aiMessages.createdAt), asc(schema.aiMessages.role)).limit(HISTORY_MESSAGES);
-  const messages = historyMessages(rows.reverse());
-  if (!messages.length || messages[messages.length - 1]!.role !== 'user') messages.push({ role: 'user', content: input.message });
-
-  const tools = availableTools(ctx);
-  const organisation = org ? { name: org.customerName, code: org.customerCode } : null;
-  const screen = await describeContext(ctx, input.context);
-  const system = buildSystemPrompt({ ctx, tools, contextDescription: [screen, cancelledNote].filter(Boolean).join('\n') || null, customerScopeSummary: describeScope(ctx, organisation), organisation });
-  const definitions = toolDefinitions(tools);
-
   const started = Date.now();
-  const records: ToolCallRecord[] = [];
-  const usage = { inputTokens: 0, outputTokens: 0 };
-  const facts: string[] = [];
-  let proposal: PendingAction | null = null;
-  let text = '';
-  let toolCallCount = 0;
-  for (let i = 0; i <= MAX_TOOL_ITERATIONS; i++) {
-    // Temperature 0: the same question yields the same tool calls and the same wording.
-    const res = await p.chat({ system, messages, tools: definitions, maxTokens: 1500, temperature: 0 });
-    usage.inputTokens += res.usage.inputTokens;
-    usage.outputTokens += res.usage.outputTokens;
-    if (!res.toolCalls.length) {
-      text = res.text;
-      break;
+  const typed = (input.message ?? '').trim();
+  const text = typed || (input.confirm ? (input.confirm.decision === 'confirm' ? 'Yes, go ahead.' : 'No, cancel that.') : '');
+  if (!text) throw new ValidationError('A message is required');
+
+  // ---- step A: guards, the conversation, the user's message, the held action
+  const a = await aiStep(p, meta, async (ctx) => {
+    const settings = await loadAiSettings(ctx.tx);
+    assertAssistantEnabled(settings, enabled());
+    await assertDailyBudget(ctx, settings);
+    // Customer users are bound to exactly one organisation for the whole turn: prompt, tools and stored conversation.
+    const org = await organisationOf(ctx);
+    let conv: typeof schema.aiConversations.$inferSelect | undefined;
+    if (input.conversationId) {
+      [conv] = await ctx.tx.select().from(schema.aiConversations).where(own(ctx, input.conversationId)).limit(1);
+      if (!conv) throw new NotFoundError('Conversation');
+    } else {
+      if (input.confirm) throw new StaleActionError();
+      [conv] = await ctx.tx.insert(schema.aiConversations).values({ userId: ctx.user.id, customerId: isCustomerUser(ctx) ? ctx.user.customerId : null, title: sanitizeText(text.replace(/\s+/g, ' '), 60), context: (input.context ?? {}) as Record<string, unknown> }).returning();
     }
-    if (i === MAX_TOOL_ITERATIONS) {
-      text = res.text || 'I reached the limit of tool calls for one message. Please narrow the request or ask again.';
-      break;
-    }
-    messages.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls });
-    for (const call of res.toolCalls) {
-      if (proposal && toolByName(call.name)?.action) {
-        // One side effect at a time: a second action in the same turn waits for the first to be confirmed.
-        const content = JSON.stringify({ error: 'one_action_at_a_time', message: `"${proposal.preview}" is waiting for the user's confirmation; ask for that first.` });
-        records.push({ name: call.name, input: stripSecrets(call.input ?? {}), action: true, ok: false, summary: `${call.name} deferred until the pending action is confirmed`, error: 'one_action_at_a_time' });
-        messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content, isError: true });
-        continue;
-      }
-      const r = await executeToolCall(ctx, call, toolCallCount++, org);
-      records.push(r.record);
-      if (r.proposal) proposal = r.proposal;
-      if (!r.isError) facts.push(...factsOf(r.content));
-      messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: r.content, isError: r.isError });
-    }
-  }
-  if (!text.trim()) text = records.length ? 'Done. ' + records.map((r) => r.summary).join('; ') : 'I could not produce an answer. Please rephrase the question.';
-  // The system's figures come first whenever the reply does not state them itself.
-  const grounded = groundAnswer(text, facts);
-  if (grounded.prepended) logger.info({ userId: ctx.user.id, requestId: ctx.requestId, facts: facts.length }, 'ai answer did not state the computed figure; facts prepended');
-  text = grounded.text;
-  if (org) {
-    // Customer users: the answer may only cite what this conversation has shown them (earlier messages, this turn's tool results).
-    const seen = collectSeen([...rows.map((m) => m.content), ...messages.filter((m) => m.role === 'tool').map((m) => (m as { content: string }).content)]);
-    const fenced = fenceAnswer(text, seen);
-    if (fenced.removed > 0) {
-      logger.warn({ removed: fenced.removed, userId: ctx.user.id, customerId: org.customerId, requestId: ctx.requestId }, 'ai answer fence removed references the user was never shown');
-      await ctx.audit({ entityType: 'ai_answer', entityId: conv!.id, entityLabel: 'chat', action: 'ai.answer_fence', customerId: org.customerId, metadata: { removed: fenced.removed } });
-      text = fenced.text;
-    }
+    const pending = readPending(conv!.context);
+    // A button decision must name the action the conversation is holding; anything else is stale.
+    if (input.confirm && (!pending || pending.id !== input.confirm.actionId)) throw new StaleActionError();
+    const [userMessage] = await ctx.tx.insert(schema.aiMessages).values({ conversationId: conv!.id, customerId: conv!.customerId, role: 'user', content: text, createdAt: new Date() }).returning({ id: schema.aiMessages.id });
+    return { settings, org, conv: conv!, pending, userMessageId: userMessage!.id };
+  });
+  const { settings, org, conv } = a;
+  emit?.({ type: 'turn', conversationId: conv.id });
+  const organisation = org ? { name: org.customerName, code: org.customerCode } : null;
+
+  // ---- step C: the held action is decided by this message before the model sees anything
+  const decision: 'confirm' | 'cancel' | null = input.confirm ? input.confirm.decision : a.pending ? (CONFIRM_RE.test(text) ? 'confirm' : CANCEL_RE.test(text) ? 'cancel' : null) : null;
+  if (a.pending && decision) {
+    const actionId = a.pending.id;
+    return aiStep(
+      p,
+      meta,
+      async (ctx) => {
+        // The row lock makes "exactly once" hold even for two simultaneous confirmations.
+        const [locked] = await ctx.tx.select().from(schema.aiConversations).where(own(ctx, conv.id)).for('update');
+        const pending = readPending(locked?.context);
+        const finish = async (reply: string, records: ToolCallRecord[], outcome: string) => {
+          const [assistant] = await ctx.tx
+            .insert(schema.aiMessages)
+            .values({ conversationId: conv.id, customerId: conv.customerId, role: 'assistant', content: reply, toolCalls: records as unknown as Record<string, unknown>[], inputTokens: 0, outputTokens: 0, durationMs: Date.now() - started, createdAt: new Date(Date.now() + 1) })
+            .returning();
+          const context = { ...withoutPending(locked?.context ?? conv.context), lastAction: { id: actionId, outcome, at: new Date().toISOString() } };
+          await ctx.tx.update(schema.aiConversations).set({ updatedAt: new Date(), context }).where(eq(schema.aiConversations.id, conv.id));
+          await ctx.audit({ entityType: 'ai_conversation', entityId: conv.id, entityLabel: 'chat', action: 'ai.chat', customerId: conv.customerId, metadata: { messageId: assistant!.id, outcome, actionId, tools: records.map((r) => r.name), durationMs: Date.now() - started, inputTokens: 0, outputTokens: 0 } });
+          return { conversationId: conv.id, message: publicMessage(assistant!), usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }, pendingAction: null, uiActions: [] } satisfies ChatResult;
+        };
+        if (!pending || pending.id !== actionId) {
+          if (input.confirm) throw new StaleActionError();
+          return finish('That proposal is no longer waiting: it was already decided or has expired. Ask again if you still want it.', [], 'stale');
+        }
+        if (decision === 'cancel') return finish('OK, I have not done that.', [], 'cancelled');
+        emit?.({ type: 'step', status: 'start', tool: pending.tool, summary: pending.preview, action: true });
+        const r = await executeToolCall(ctx, { id: pending.id, name: pending.tool, input: pending.input }, 0, org, { confirmed: true, actionId: pending.id, conversationId: conv.id });
+        emit?.({ type: 'step', status: r.isError ? 'error' : 'done', tool: pending.tool, summary: r.record.summary, action: true });
+        const link = r.isError ? undefined : parseLink(r.content);
+        return finish(r.isError ? `I could not do that: ${parseFailure(r.content)}` : `Done: ${r.record.summary}${link ? ` ([open](${link}))` : ''}.`, [r.record], r.isError ? 'failed' : 'done');
+      },
+      { aiActionId: actionId, aiConversationId: conv.id },
+    );
   }
 
-  const [assistant] = await ctx.tx
-    .insert(schema.aiMessages)
-    .values({ conversationId: conv!.id, customerId: conv!.customerId, role: 'assistant', content: text, toolCalls: records as unknown as Record<string, unknown>[], inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, createdAt: new Date(Math.max(Date.now(), started + 1)) })
-    .returning();
-  const nextContext: Record<string, unknown> = { ...(input.context ? (input.context as Record<string, unknown>) : withoutPending(conv!.context)), ...(proposal ? { pendingAction: proposal } : {}) };
-  await ctx.tx.update(schema.aiConversations).set({ updatedAt: new Date(), context: nextContext }).where(eq(schema.aiConversations.id, conv!.id));
-  return { conversationId: conv!.id, message: publicMessage(assistant!), usage, pendingAction: publicPending(proposal) };
+  // ---- step B: history, screen, tools and the prompt
+  const b = await aiStep(p, meta, async (ctx) => {
+    let cancelledNote: string | null = null;
+    if (a.pending) {
+      // The user moved on: the proposal is dropped and the model is told, so it can re-propose with the new details.
+      cancelledNote = `The earlier proposal "${a.pending.preview}" was not confirmed and is now cancelled. If the user is adjusting it, propose again with the new details.`;
+      await ctx.tx.update(schema.aiConversations).set({ context: withoutPending(conv.context) }).where(eq(schema.aiConversations.id, conv.id));
+    }
+    // explicit timestamps + role tie-breaker: rows written in one transaction would otherwise share now()
+    const rows = await ctx.tx.select().from(schema.aiMessages).where(eq(schema.aiMessages.conversationId, conv.id)).orderBy(desc(schema.aiMessages.createdAt), asc(schema.aiMessages.role)).limit(HISTORY_MESSAGES);
+    const tools = availableTools(ctx);
+    const screen = await describeContext(ctx, input.context);
+    const system = buildSystemPrompt({ ctx, tools, contextDescription: [screen, cancelledNote].filter(Boolean).join('\n') || null, customerScopeSummary: describeScope(ctx, organisation), organisation, autonomy: settings.autonomy });
+    return { rows: rows.reverse(), tools, system };
+  });
+  const messages = historyMessages(b.rows);
+  if (!messages.length || messages[messages.length - 1]!.role !== 'user') messages.push({ role: 'user', content: text });
+  const definitions = toolDefinitions(b.tools);
+  const toolMap = new Map<string, AiTool>(b.tools.map((t) => [t.name, t]));
+
+  // ---- the loop: model calls with no transaction open; each tool call is its own step
+  const prov = provider();
+  const deadline = started + settings.turnTimeoutSeconds * 1000;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), Math.max(1000, deadline - Date.now()));
+  const records: ToolCallRecord[] = [];
+  const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+  const facts: string[] = [];
+  const toolContents: string[] = [];
+  const uiActions: UiAction[] = [];
+  let proposal: PendingAction | null = null;
+  let reply = '';
+  let outcome = 'answered';
+  let toolCallCount = 0;
+  let model = prov.model;
+  try {
+    for (let i = 0; i <= MAX_TOOL_ITERATIONS; i++) {
+      if (Date.now() > deadline) {
+        reply = 'I ran out of time for this request. Please narrow it or ask again.';
+        outcome = 'timeout';
+        break;
+      }
+      let res;
+      try {
+        // Deterministic where the model allows it: the same question yields the same tool calls and wording.
+        res = await prov.chat({ system: b.system, messages, tools: definitions, maxTokens: CHAT_MAX_TOKENS, temperature: 0, effort: settings.effort, signal: abort.signal });
+      } catch (err) {
+        if (abort.signal.aborted) {
+          reply = 'I ran out of time for this request. Please narrow it or ask again.';
+          outcome = 'timeout';
+          break;
+        }
+        throw err;
+      }
+      usage.inputTokens += res.usage.inputTokens;
+      usage.outputTokens += res.usage.outputTokens;
+      usage.cacheReadTokens += res.usage.cacheReadTokens ?? 0;
+      if (res.stopReason === 'refusal') {
+        reply = res.text.trim() || 'I cannot help with that request.';
+        outcome = 'refused';
+        break;
+      }
+      if (!res.toolCalls.length) {
+        reply = res.text;
+        break;
+      }
+      if (i === MAX_TOOL_ITERATIONS) {
+        reply = res.text || 'I reached the limit of tool calls for one message. Please narrow the request or ask again.';
+        outcome = 'tool_limit';
+        break;
+      }
+      messages.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls, raw: res.raw });
+      for (const call of res.toolCalls) {
+        const tool = toolMap.get(call.name) ?? toolByName(call.name);
+        if (proposal && tool?.action) {
+          // One side effect at a time: a second action in the same turn waits for the first to be confirmed.
+          const content = JSON.stringify({ error: 'one_action_at_a_time', message: `"${proposal.preview}" is waiting for the user's confirmation; ask for that first.` });
+          records.push({ name: call.name, input: compactForTrace(call.input ?? {}), action: true, ok: false, summary: `${call.name} deferred until the pending action is confirmed`, error: 'one_action_at_a_time' });
+          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content, isError: true });
+          continue;
+        }
+        const auto = !!tool && tool.action && tierOf(tool) === 'write_low' && settings.autonomy === 'auto_low';
+        emit?.({ type: 'step', status: 'start', tool: call.name, summary: tool ? tool.description.split('.')[0]!.slice(0, 80) : call.name, action: !!tool?.action });
+        const index = toolCallCount++;
+        const r = await aiStep(p, meta, (ctx) => executeToolCall(ctx, call, index, org, { confirmed: auto, auto, conversationId: conv.id }), { aiConversationId: conv.id });
+        emit?.({ type: 'step', status: r.isError ? 'error' : 'done', tool: call.name, summary: r.record.summary, action: !!tool?.action });
+        records.push(r.record);
+        if (r.proposal) proposal = r.proposal;
+        if (!r.isError) {
+          facts.push(...factsOf(r.content));
+          toolContents.push(r.content);
+          const ui = uiActionOf(r.content);
+          if (ui) uiActions.push(ui);
+        }
+        messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: r.content, isError: r.isError });
+      }
+    }
+  } catch (err) {
+    // The model failed: nothing to show, so the turn is undone (the question is not stored without an answer).
+    await aiStep(p, meta, (ctx) => ctx.tx.delete(schema.aiMessages).where(eq(schema.aiMessages.id, a.userMessageId))).catch(() => undefined);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!reply.trim()) reply = records.length ? 'Done. ' + records.map((r) => r.summary).join('; ') : 'I could not produce an answer. Please rephrase the question.';
+  reply = stripMarkers(reply);
+  // The system's figures come first whenever the reply does not state them itself.
+  const grounded = groundAnswer(reply, facts);
+  if (grounded.prepended) logger.info({ userId: p.id, requestId: meta.requestId, facts: facts.length }, 'ai answer did not state the computed figure; facts prepended');
+  reply = grounded.text;
+  // An answer may only link to records this conversation has shown; customer users may only name tickets it has shown.
+  const seen = collectSeen([...b.rows.map((m) => m.content), ...toolContents]);
+  const fenced = fenceAnswer(reply, seen, { numbers: !!org });
+  if (fenced.removed > 0) {
+    logger.warn({ removed: fenced.removed, userId: p.id, customerId: org?.customerId ?? null, requestId: meta.requestId }, 'ai answer fence removed references the user was never shown');
+    reply = fenced.text;
+  }
+
+  // ---- step D: the reply, the conversation state and the audit trail
+  return aiStep(p, meta, async (ctx) => {
+    if (fenced.removed > 0) await ctx.audit({ entityType: 'ai_answer', entityId: conv.id, entityLabel: 'chat', action: 'ai.answer_fence', customerId: org?.customerId ?? null, metadata: { removed: fenced.removed } });
+    const durationMs = Date.now() - started;
+    const [assistant] = await ctx.tx
+      .insert(schema.aiMessages)
+      .values({ conversationId: conv.id, customerId: conv.customerId, role: 'assistant', content: reply, toolCalls: records as unknown as Record<string, unknown>[], inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, durationMs, model, promptVersion: PROMPT_VERSION, createdAt: new Date(Math.max(Date.now(), started + 1)) })
+      .returning();
+    const nextContext: Record<string, unknown> = { ...(input.context ? (input.context as Record<string, unknown>) : withoutPending(conv.context)), ...(proposal ? { pendingAction: proposal } : {}) };
+    await ctx.tx.update(schema.aiConversations).set({ updatedAt: new Date(), context: nextContext }).where(eq(schema.aiConversations.id, conv.id));
+    await ctx.audit({
+      entityType: 'ai_conversation',
+      entityId: conv.id,
+      entityLabel: 'chat',
+      action: 'ai.chat',
+      customerId: conv.customerId,
+      metadata: { messageId: assistant!.id, outcome, tools: records.map((r) => r.name), toolCalls: records.length, proposed: proposal?.id ?? null, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, durationMs, model, promptVersion: PROMPT_VERSION, fenced: fenced.removed, grounded: grounded.prepended, uiActions: uiActions.length },
+    });
+    return { conversationId: conv.id, message: publicMessage(assistant!), usage, pendingAction: publicPending(proposal), uiActions };
+  });
+}
+
+/** UI tools return `{ uiAction: { type: 'navigate', to } }`; nothing else is executed by the web. */
+function uiActionOf(content: string): UiAction | null {
+  try {
+    const v = JSON.parse(content) as { uiAction?: { type?: string; to?: string; label?: string } };
+    const u = v?.uiAction;
+    if (u && u.type === 'navigate' && typeof u.to === 'string' && u.to.startsWith('/')) return { type: 'navigate', to: u.to, ...(u.label ? { label: u.label } : {}) };
+  } catch {
+    /* not an object */
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------- structured LLM helper (shared by suggestions)
@@ -502,14 +769,17 @@ export function extractJson(text: string): unknown {
 /**
  * One-shot structured call: system prompt + user content → parsed JSON.
  * Returns null when the provider is disabled or the response is unusable, so
- * callers fall back to deterministic logic.
+ * callers fall back to deterministic logic. Never holds a database connection:
+ * callers gather before and store after.
  */
 export async function llmJson<T>(system: string, user: string, validate: (v: unknown) => T, opts: { maxTokens?: number } = {}): Promise<{ data: T; usage: { inputTokens: number; outputTokens: number } } | null> {
   if (!enabled()) return null;
   try {
-    const res = await provider().chat({ system, messages: [{ role: 'user', content: user.length > 24_000 ? `${user.slice(0, 24_000)}…` : user }], maxTokens: opts.maxTokens ?? 1200, temperature: 0.1 });
-    return { data: validate(extractJson(res.text)), usage: res.usage };
+    const res = await provider().chat({ system, messages: [{ role: 'user', content: user.length > 24_000 ? `${user.slice(0, 24_000)}…` : user }], maxTokens: opts.maxTokens ?? 1200, temperature: 0.1, effort: 'low' });
+    return { data: validate(extractJson(res.text)), usage: { inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens } };
   } catch {
     return null;
   }
 }
+
+export type { AiSettings };

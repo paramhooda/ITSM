@@ -15,7 +15,8 @@ export interface ToolDefinition {
 
 export type ChatMessage =
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  /** `raw` carries the provider's own content blocks of an earlier reply (thinking blocks included) so a tool-use turn can be replayed verbatim. */
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; raw?: unknown }
   | { role: 'tool'; toolCallId: string; name: string; content: string; isError?: boolean };
 
 export interface ToolCall {
@@ -27,16 +28,33 @@ export interface ToolCall {
 export interface ChatResponse {
   text: string;
   toolCalls: ToolCall[];
-  stopReason: 'end' | 'tool_use' | 'max_tokens' | 'other';
-  usage: { inputTokens: number; outputTokens: number };
+  /** `refusal`: the provider's safety layer declined; the text (if any) is the user-facing explanation. */
+  stopReason: 'end' | 'tool_use' | 'max_tokens' | 'refusal' | 'other';
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+  /** Provider-specific content blocks to replay on the next request of the same turn. */
+  raw?: unknown;
 }
 
+/**
+ * The system prompt is either one string or two blocks: `stable` never changes
+ * between requests of the same role (identity, rules, style) and is cached by
+ * providers that support prompt caching; `volatile` carries the per-turn context.
+ */
+export type SystemPrompt = string | { stable: string; volatile: string };
+
+export const systemText = (s: SystemPrompt): string => (typeof s === 'string' ? s : `${s.stable}\n\n${s.volatile}`);
+
 export interface ChatOptions {
-  system: string;
+  system: SystemPrompt;
   messages: ChatMessage[];
   tools?: ToolDefinition[];
   maxTokens?: number;
+  /** Ignored by models that do not accept sampling parameters (Claude 4.7 and later). */
   temperature?: number;
+  /** Reasoning effort for models that support it; ignored elsewhere. */
+  effort?: 'low' | 'medium' | 'high';
+  /** Aborts the request (turn deadline). */
+  signal?: AbortSignal;
 }
 
 export interface AiProvider {

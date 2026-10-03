@@ -29,10 +29,20 @@ import { engineerDirectory } from '@/modules/iam/service';
  * do for the UI. Availability is filtered by the principal's permissions;
  * action tools additionally require `ai:act`.
  */
+/**
+ * How much a tool can change, and therefore when it may run:
+ * read: freely · write_low: internal, low-risk (auto-applied only under autonomy auto_low) ·
+ * write: needs confirmation · outbound: reaches people outside the platform, always confirmed ·
+ * admin: configuration, always confirmed · destructive: removes or cancels, always confirmed and the preview states the count.
+ */
+export type ToolTier = 'read' | 'write_low' | 'write' | 'outbound' | 'admin' | 'destructive';
+
 export interface AiTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
   description: string;
   inputSchema: S;
+  /** Defaults to 'write' for action tools and 'read' otherwise. */
+  tier?: ToolTier;
   /** MSP users: every listed permission is required. */
   requires: Permission[];
   /** Customer (portal) users: permissions required, or `null` when the tool is not offered in the portal. */
@@ -49,6 +59,7 @@ export interface AiTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
 }
 
 const define = <S extends z.ZodTypeAny>(t: AiTool<S>): AiTool => t as unknown as AiTool;
+export const tierOf = (t: AiTool): ToolTier => t.tier ?? (t.action ? 'write' : 'read');
 
 import { isCustomerUser, UUID_RE, ticketLink, trunc, iso, period, listQuery, resolveTicket, resolveCustomerId, resolveOption, resolveService, resolveSite, resolveCi, resolveEngineer, resolveTeam, compactTicket, compactDetail, compactTimeline } from './helpers';
 import { queryTicketsSchema, runTicketQuery, describeTicketQuery } from './query';
@@ -713,6 +724,7 @@ export const ACTION_TOOLS: AiTool[] = [
 
   define({
     name: 'link_tickets',
+    tier: 'write_low',
     description: 'Link two tickets of the same customer (related, duplicate_of, caused_by, blocks, child_of, problem_of, change_for, resolved_by).',
     inputSchema: z.object({ ticket: ticketRef, target: ticketRef.describe('The other ticket number or id'), linkType: z.enum(['related', 'duplicate_of', 'caused_by', 'blocks', 'child_of', 'problem_of', 'change_for', 'resolved_by']).optional() }),
     requires: ['tickets:update'],
@@ -757,10 +769,5 @@ export function toolJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
 
 export const toolDefinitions = (tools: AiTool[]): ToolDefinition[] => tools.map((t) => ({ name: t.name, description: t.description, inputSchema: toolJsonSchema(t.inputSchema) }));
 
-const SECRET_KEY = /(password|secret|token|api[_-]?key|authorization|credential)/i;
-/** Removes secret-looking keys before persisting tool inputs. */
-export function stripSecrets(input: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(input ?? {})) out[k] = SECRET_KEY.test(k) ? '[redacted]' : typeof v === 'string' && v.length > 2000 ? `${v.slice(0, 2000)}…` : v;
-  return out;
-}
+/** Removes secret-looking keys before persisting tool inputs (kept for compatibility; see redact.ts). */
+export { compactForTrace as stripSecrets } from './redact';

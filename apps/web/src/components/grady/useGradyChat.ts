@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUiStore } from '@/stores/ui';
-import { aiApi, aiQk, type AiMessage, type PendingAction } from '@/components/ai/api';
+import { ApiError } from '@/api/client';
+import { aiApi, aiQk, type AiMessage, type ChatBody, type PendingAction } from '@/components/ai/api';
 
 /** Fallback only: the server now reports a pending action explicitly; this reads older replies that asked in prose. */
 export function proposesAction(m: AiMessage | undefined) {
@@ -27,19 +28,27 @@ export function useGradyChat() {
   const messages = useQuery({ queryKey: aiQk.conversation(conversationId ?? ''), queryFn: () => aiApi.conversation(conversationId!), enabled: !!conversationId, retry: false });
 
   const send = useMutation({
-    mutationFn: (text: string) => aiApi.chat({ conversationId: conversationId ?? undefined, message: text, context: useContext && assistantContext ? assistantContext : undefined }),
-    onSuccess: (res, text) => {
+    mutationFn: (body: ChatBody) => aiApi.chat({ conversationId: conversationId ?? undefined, context: useContext && assistantContext ? assistantContext : undefined, ...body }),
+    onSuccess: (res, body) => {
       setConversationId(res.conversationId);
       setPendingAction(res.pendingAction ?? null);
       qc.setQueryData(aiQk.conversation(res.conversationId), (old: { id: string; title: string | null; messages: AiMessage[]; pendingAction?: PendingAction | null } | undefined) => {
-        const mine: AiMessage = { id: `local-${Date.now()}`, role: 'user', content: text, toolCalls: [], createdAt: new Date().toISOString() };
+        const content = body.message ?? (body.confirm?.decision === 'confirm' ? 'Yes, go ahead.' : 'No, cancel that.');
+        const mine: AiMessage = { id: `local-${Date.now()}`, role: 'user', content, toolCalls: [], createdAt: new Date().toISOString() };
         return { id: res.conversationId, title: old?.title ?? null, messages: [...(old?.messages ?? []), mine, res.message], pendingAction: res.pendingAction ?? null };
       });
       void qc.invalidateQueries({ queryKey: aiQk.conversation(res.conversationId) });
       void qc.invalidateQueries({ queryKey: aiQk.conversations });
-      if (res.message.toolCalls.some((t) => t.action && t.ok)) {
+      if (res.message.toolCalls.some((t) => t.action && t.ok && !t.proposed)) {
         void qc.invalidateQueries({ queryKey: ['tickets'] });
         void qc.invalidateQueries({ queryKey: ['approvals'] });
+      }
+    },
+    onError: (err) => {
+      // The held action was decided elsewhere or expired: reload the conversation so the panel shows the real state.
+      if (err instanceof ApiError && err.code === 'stale_action') {
+        setPendingAction(null);
+        if (conversationId) void qc.invalidateQueries({ queryKey: aiQk.conversation(conversationId) });
       }
     },
   });
@@ -58,10 +67,20 @@ export function useGradyChat() {
       const value = text.trim();
       if (!value || send.isPending || !enabled) return false;
       setLastSent(value);
-      send.mutate(value);
+      send.mutate({ message: value });
       return true;
     },
     [send, enabled],
+  );
+  /** Decides the held action by its id, so a stale button can never run something else. */
+  const confirm = useCallback(
+    (decision: 'confirm' | 'cancel') => {
+      const action = messages.data?.pendingAction ?? pendingAction;
+      if (!action || send.isPending || !enabled || !conversationId) return false;
+      send.mutate({ conversationId, confirm: { actionId: action.id, decision } });
+      return true;
+    },
+    [send, enabled, conversationId, messages.data?.pendingAction, pendingAction],
   );
 
   const list = messages.data?.messages ?? [];
@@ -82,10 +101,11 @@ export function useGradyChat() {
     title: messages.data?.title ?? null,
     messages: list,
     loadingMessages: messages.isLoading && !!conversationId,
-    pending: send.isPending ? send.variables : null,
+    pending: send.isPending ? (send.variables.message ?? (send.variables.confirm?.decision === 'confirm' ? 'Yes, go ahead.' : 'No, cancel that.')) : null,
     error: send.isError ? send.error : null,
     lastSent,
     submit,
+    confirm,
     retry: () => lastSent && submit(lastSent),
     reset: () => {
       setConversationId(null);

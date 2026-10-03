@@ -5,7 +5,7 @@ import { NullProvider, type AiProvider } from './provider';
 
 const OPENAI_DEFAULT_URL = 'https://api.openai.com/v1';
 const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
-const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-5-5';
+const ANTHROPIC_DEFAULT_MODEL = 'claude-opus-5-5';
 const looksLikeClaude = (m: string) => /^claude/i.test(m);
 const looksLikeOpenAi = (m: string) => /^(gpt|o\d|chatgpt)/i.test(m);
 

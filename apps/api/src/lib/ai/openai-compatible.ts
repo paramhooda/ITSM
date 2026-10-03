@@ -1,5 +1,9 @@
 import { logger } from '@/core/logger';
-import { AiUpstreamError, upstreamMessage, type AiProvider, type ChatOptions, type ChatResponse, type ToolCall } from './provider';
+import { AiUpstreamError, upstreamMessage, systemText, type AiProvider, type ChatOptions, type ChatResponse, type ToolCall } from './provider';
+
+const REQUEST_TIMEOUT_MS = 60_000;
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Models that only accept `max_completion_tokens` and the default temperature (OpenAI reasoning / gpt-5 families). */
 const COMPLETION_TOKENS_MODELS = /^(gpt-5|o\d)/i;
@@ -31,7 +35,7 @@ export class OpenAICompatibleProvider implements AiProvider {
   }
 
   private buildBody(opts: ChatOptions, completionTokens: boolean) {
-    const messages: Record<string, unknown>[] = [{ role: 'system', content: opts.system }];
+    const messages: Record<string, unknown>[] = [{ role: 'system', content: systemText(opts.system) }];
     for (const m of opts.messages) {
       if (m.role === 'user') messages.push({ role: 'user', content: m.content });
       else if (m.role === 'assistant') {
@@ -49,31 +53,50 @@ export class OpenAICompatibleProvider implements AiProvider {
     };
   }
 
-  private async post(body: unknown): Promise<Response> {
+  private async postOnce(body: unknown, signal: AbortSignal | undefined): Promise<Response> {
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     try {
       return await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}) },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
     } catch (err) {
-      const message = err instanceof Error ? (err.name === 'TimeoutError' ? 'timed out after 120s' : err.message) : String(err);
+      if (signal?.aborted) throw err; // the caller's deadline: not an upstream failure
+      const message = err instanceof Error ? (err.name === 'TimeoutError' ? `timed out after ${REQUEST_TIMEOUT_MS / 1000}s` : err.message) : String(err);
       logger.warn({ provider: this.name, model: this.model, baseUrl: this.baseUrl, err: message }, 'AI endpoint unreachable');
       throw new AiUpstreamError(this.name, null, message, this.model);
     }
   }
 
+  /** One attempt, then one retry on a network failure or a retryable status (honouring Retry-After up to 5 s). */
+  private async post(body: unknown, signal?: AbortSignal): Promise<Response> {
+    let first: Response;
+    try {
+      first = await this.postOnce(body, signal);
+    } catch (err) {
+      if (signal?.aborted || !(err instanceof AiUpstreamError)) throw err;
+      await sleep(1000);
+      return this.postOnce(body, signal);
+    }
+    if (!RETRY_STATUSES.has(first.status)) return first;
+    const after = Number(first.headers.get('retry-after'));
+    await sleep(Math.min(Number.isFinite(after) && after > 0 ? after * 1000 : 1000, 5000));
+    logger.info({ provider: this.name, model: this.model, status: first.status }, 'AI endpoint returned a retryable status; retrying once');
+    return this.postOnce(body, signal);
+  }
+
   async chat(opts: ChatOptions): Promise<ChatResponse> {
     let completionTokens = COMPLETION_TOKENS_MODELS.test(this.model);
-    let res = await this.post(this.buildBody(opts, completionTokens));
+    let res = await this.post(this.buildBody(opts, completionTokens), opts.signal);
     if (res.status === 400 && !completionTokens) {
       // Newer models and some proxies reject max_tokens / temperature: retry once in the modern shape.
       const text = await res.text();
       if (UNSUPPORTED_PARAM.test(text)) {
         logger.info({ provider: this.name, model: this.model }, 'AI endpoint rejected max_tokens/temperature; retrying with max_completion_tokens');
         completionTokens = true;
-        res = await this.post(this.buildBody(opts, true));
+        res = await this.post(this.buildBody(opts, true), opts.signal);
       } else {
         throw this.fail(res.status, text);
       }

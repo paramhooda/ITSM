@@ -32,8 +32,18 @@ export function tenantContextOf(p: Principal): TenantContext {
   };
 }
 
-export function buildCtx(p: Principal, tx: Tx, meta: { requestId: string; ip?: string | null; userAgent?: string | null; source?: Ctx['source'] }): Ctx {
+export interface CtxMeta {
+  requestId: string;
+  ip?: string | null;
+  userAgent?: string | null;
+  source?: Ctx['source'];
+  /** Merged into the metadata of every audit entry written through this ctx (the AI assistant stamps its action id on the side effects it causes). */
+  auditMetadata?: Record<string, unknown>;
+}
+
+export function buildCtx(p: Principal, tx: Tx, meta: CtxMeta): Ctx {
   const source = meta.source ?? (p.apiKeyId ? 'integration' : 'ui');
+  const stamp = meta.auditMetadata;
   const ctx: Ctx = {
     user: p,
     tx,
@@ -46,13 +56,13 @@ export function buildCtx(p: Principal, tx: Tx, meta: { requestId: string; ip?: s
     requireCustomer: (customerId) => requireCustomerAccess(p, customerId),
     canSeeCustomer: (customerId) => canSeeCustomer(p, customerId),
     audit: (entry) =>
-      writeAudit(tx, { userId: p.apiKeyId ? null : p.id, userName: p.name, source, ip: meta.ip, userAgent: meta.userAgent, requestId: meta.requestId }, entry),
+      writeAudit(tx, { userId: p.apiKeyId ? null : p.id, userName: p.name, source, ip: meta.ip, userAgent: meta.userAgent, requestId: meta.requestId }, stamp ? { ...entry, metadata: { ...stamp, ...(entry.metadata ?? {}) } } : entry),
   };
   return ctx;
 }
 
 /** Runs a service function with a tenant-scoped transaction for an authenticated principal. */
-export async function runAs<T>(p: Principal, meta: { requestId?: string; ip?: string | null; userAgent?: string | null; source?: Ctx['source'] }, fn: (ctx: Ctx) => Promise<T>): Promise<T> {
+export async function runAs<T>(p: Principal, meta: Partial<CtxMeta>, fn: (ctx: Ctx) => Promise<T>): Promise<T> {
   return withTenant(tenantContextOf(p), (tx) => fn(buildCtx(p, tx, { requestId: meta.requestId ?? 'internal', ...meta })));
 }
 

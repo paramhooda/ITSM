@@ -6,6 +6,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { OpenAICompatibleProvider, normaliseBaseUrl } from '../src/lib/ai/openai-compatible';
 import { AiUpstreamError, upstreamMessage } from '../src/lib/ai/provider';
+import { AnthropicProvider, modelProfile } from '../src/lib/ai/anthropic';
 
 const okBody = (content = 'OK') => JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1 } });
 const json = (status: number, body: string) => new Response(body, { status, headers: { 'content-type': 'application/json' } });
@@ -125,7 +126,7 @@ describe('OpenAICompatibleProvider', () => {
 });
 
 describe('resolveAiConfig', () => {
-  const base = { AI_PROVIDER: 'none' as const, AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: undefined, OPENAI_COMPATIBLE_BASE_URL: undefined, OPENAI_COMPATIBLE_API_KEY: undefined, OPENAI_API_KEY: undefined, OPENAI_BASE_URL: undefined };
+  const base = { AI_PROVIDER: 'none' as const, AI_MODEL: 'claude-opus-5-5', ANTHROPIC_API_KEY: undefined, OPENAI_COMPATIBLE_BASE_URL: undefined, OPENAI_COMPATIBLE_API_KEY: undefined, OPENAI_API_KEY: undefined, OPENAI_BASE_URL: undefined };
 
   it('stays disabled without any key', async () => {
     const { resolveAiConfig } = await import('../src/lib/ai/index');
@@ -153,8 +154,8 @@ describe('resolveAiConfig', () => {
 
   it('infers Anthropic from ANTHROPIC_API_KEY and rejects a GPT model for it', async () => {
     const { resolveAiConfig } = await import('../src/lib/ai/index');
-    expect(resolveAiConfig({ ...base, ANTHROPIC_API_KEY: 'ak' })).toMatchObject({ provider: 'anthropic', model: 'claude-sonnet-5-5' });
-    expect(resolveAiConfig({ ...base, AI_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'ak', AI_MODEL: 'gpt-4o' }).model).toBe('claude-sonnet-5-5');
+    expect(resolveAiConfig({ ...base, ANTHROPIC_API_KEY: 'ak' })).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5-5' });
+    expect(resolveAiConfig({ ...base, AI_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'ak', AI_MODEL: 'gpt-4o' }).model).toBe('claude-opus-5-5');
   });
 
   it('reports a misconfiguration instead of enabling a broken provider', async () => {
@@ -162,5 +163,65 @@ describe('resolveAiConfig', () => {
     const c = resolveAiConfig({ ...base, AI_PROVIDER: 'anthropic' });
     expect(c.provider).toBe('none');
     expect(c.notes[0]).toMatch(/ANTHROPIC_API_KEY is empty/);
+  });
+});
+
+describe('AnthropicProvider request shape', () => {
+  const tools = [
+    { name: 'a', description: 'first', inputSchema: { type: 'object', properties: {} } },
+    { name: 'b', description: 'last', inputSchema: { type: 'object', properties: {} } },
+  ];
+
+  it('knows which models accept sampling parameters and which take effort', () => {
+    expect(modelProfile('claude-opus-5-5')).toEqual({ sampling: false, effort: true });
+    expect(modelProfile('claude-sonnet-5-5')).toEqual({ sampling: false, effort: true });
+    expect(modelProfile('claude-fable-5-1')).toEqual({ sampling: false, effort: true });
+    expect(modelProfile('claude-opus-4-7')).toEqual({ sampling: false, effort: true });
+    expect(modelProfile('claude-opus-4-6')).toEqual({ sampling: true, effort: true });
+    expect(modelProfile('claude-sonnet-4-5')).toEqual({ sampling: true, effort: false });
+    expect(modelProfile('claude-sonnet-4-20250514')).toEqual({ sampling: true, effort: false });
+    expect(modelProfile('claude-haiku-4-5')).toEqual({ sampling: true, effort: false });
+    expect(modelProfile('claude-3-5-sonnet-20241022')).toEqual({ sampling: true, effort: false });
+  });
+
+  it('omits temperature and sets effort for Claude 5, with cache breakpoints on the stable system block and the last tool', () => {
+    const p = new AnthropicProvider('key', 'claude-opus-5-5');
+    const params = p.buildParams({ system: { stable: 'STABLE', volatile: 'VOLATILE' }, messages: [{ role: 'user', content: 'hi' }], tools, temperature: 0, effort: 'low', maxTokens: 100 });
+    expect(params).not.toHaveProperty('temperature');
+    expect(params.output_config).toEqual({ effort: 'low' });
+    expect(params.max_tokens).toBe(100);
+    expect(params.system).toEqual([
+      { type: 'text', text: 'STABLE', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: 'VOLATILE' },
+    ]);
+    expect(params.tools![0]).not.toHaveProperty('cache_control');
+    expect(params.tools![1]).toMatchObject({ name: 'b', cache_control: { type: 'ephemeral' } });
+  });
+
+  it('keeps temperature for models that accept it and caches a plain system string', () => {
+    const p = new AnthropicProvider('key', 'claude-sonnet-4-5');
+    const params = p.buildParams({ system: 'SYS', messages: [{ role: 'user', content: 'hi' }], temperature: 0, effort: 'low' });
+    expect(params.temperature).toBe(0);
+    expect(params).not.toHaveProperty('output_config');
+    expect(params.system).toEqual([{ type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } }]);
+    expect(params).not.toHaveProperty('tools');
+  });
+
+  it('replays the raw content blocks of an earlier reply so thinking blocks accompany their tool use', () => {
+    const p = new AnthropicProvider('key', 'claude-opus-5-5');
+    const raw = [
+      { type: 'thinking', thinking: '', signature: 'sig' },
+      { type: 'tool_use', id: 'tu1', name: 'a', input: {} },
+    ];
+    const params = p.buildParams({
+      system: 'S',
+      messages: [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'tu1', name: 'a', input: {} }], raw },
+        { role: 'tool', toolCallId: 'tu1', name: 'a', content: '{"ok":true}' },
+      ],
+    });
+    expect(params.messages[1]).toEqual({ role: 'assistant', content: raw });
+    expect(params.messages[2]).toEqual({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: '{"ok":true}', is_error: undefined }] });
   });
 });

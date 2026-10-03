@@ -9,7 +9,7 @@ export const aiConversations = pgTable('ai_conversations', {
   title: text('title'),
   context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
   ...timestamps,
-}, (t) => [index('ai_conversations_user_idx').on(t.userId, t.updatedAt)]);
+}, (t) => [index('ai_conversations_user_idx').on(t.userId, t.updatedAt), index('ai_conversations_updated_idx').on(t.updatedAt)]);
 
 export const aiMessages = pgTable('ai_messages', {
   id: id(),
@@ -20,8 +20,16 @@ export const aiMessages = pgTable('ai_messages', {
   toolCalls: jsonb('tool_calls').$type<Record<string, unknown>[]>().notNull().default([]),
   inputTokens: integer('input_tokens'),
   outputTokens: integer('output_tokens'),
+  /** Tokens served from the provider's prompt cache (a subset of the input). */
+  cacheReadTokens: integer('cache_read_tokens'),
+  durationMs: integer('duration_ms'),
+  model: text('model'),
+  promptVersion: text('prompt_version'),
+  /** 'up' | 'down' from the person who read the reply. */
+  feedback: text('feedback'),
+  feedbackNote: text('feedback_note'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [index('ai_messages_conversation_idx').on(t.conversationId, t.createdAt)]);
+}, (t) => [index('ai_messages_conversation_idx').on(t.conversationId, t.createdAt), index('ai_messages_created_idx').on(t.createdAt)]);
 
 /** AI recommendations are always explicit and reviewable; nothing is applied silently. */
 export const aiSuggestions = pgTable('ai_suggestions', {

@@ -17,7 +17,7 @@ import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/
 import { AppError } from '../src/core/errors';
 import { createTicket, resolveTicket } from '../src/modules/tickets/service';
 import * as kb from '../src/modules/knowledge/service';
-import type { AiProvider, ChatOptions, ChatResponse } from '../src/lib/ai';
+import { systemText, type AiProvider, type ChatOptions, type ChatResponse } from '../src/lib/ai';
 import { z } from 'zod';
 import { availableTools, toolByName, ALL_TOOLS, type AiTool } from '../src/modules/ai/tools';
 import { buildSystemPrompt, describeScope } from '../src/modules/ai/prompts';
@@ -305,7 +305,7 @@ describe('prompt and conversations', () => {
       readonly model = 'fake-1';
       systems: string[] = [];
       async chat(opts: ChatOptions): Promise<ChatResponse> {
-        this.systems.push(opts.system ?? '');
+        this.systems.push(systemText(opts.system));
         const last = opts.messages[opts.messages.length - 1]!;
         if (last.role === 'user') return { text: '', toolCalls: [{ id: 't1', name: 'get_ticket', input: { ticket: numbers.b1 } }, { id: 't2', name: 'list_tickets', input: { customer: BETA, openOnly: false } }], stopReason: 'tool_use', usage: { inputTokens: 1, outputTokens: 1 } };
         const results = opts.messages.filter((m) => m.role === 'tool') as { name: string; content: string; isError?: boolean }[];

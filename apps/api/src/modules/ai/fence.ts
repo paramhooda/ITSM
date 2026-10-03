@@ -90,7 +90,7 @@ export function fenceToolResult(value: unknown, fence: TenantFence): FenceOutcom
 // ---------------------------------------------------------------- answer fence (customer users)
 
 const TICKET_NUMBER_RE = /\b(?:INC|REQ|PRB|CHG)-\d{6}\b/g;
-const RECORD_LINK_RE = /\(\/(?:portal\/)?(?:tickets|contracts|assets|cmdb|knowledge)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[^)]*\)/gi;
+const RECORD_LINK_RE = /\(\/(?:portal\/)?(?:tickets|customers|contracts|assets|cmdb\/cis|cmdb|field|knowledge)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[^)]*\)/gi;
 
 /** Ticket numbers and record ids that this conversation has legitimately shown the user. */
 export interface SeenRecords {
@@ -108,27 +108,32 @@ export function collectSeen(texts: Iterable<string>, into: SeenRecords = { numbe
 }
 
 export const ANSWER_FENCE_NOTE = 'Some references were left out because they are not available to your organisation.';
+export const LINK_FENCE_NOTE = 'A link was left out because it did not match any record shown in this conversation.';
 
 /**
- * A customer user's answer may only cite tickets and records this conversation has
- * actually shown them. Anything else (an invented number, a link to a record the
- * tools never returned) is removed, and the reply says so once. Counts how many
- * references were removed so the caller can log it.
+ * An answer may only link to records this conversation has actually shown (for
+ * everyone), and a customer user's answer may only name tickets it has shown
+ * (ticket-number mode). Anything else (an invented number, a link to a record
+ * the tools never returned) is removed, and the reply says so once. Counts how
+ * many references were removed so the caller can log it.
  */
-export function fenceAnswer(text: string, seen: SeenRecords): { text: string; removed: number } {
+export function fenceAnswer(text: string, seen: SeenRecords, opts: { numbers?: boolean; note?: string } = {}): { text: string; removed: number } {
+  const numbers = opts.numbers ?? true;
   let removed = 0;
   let out = text.replace(RECORD_LINK_RE, (whole, id: string) => {
     if (seen.ids.has(id.toLowerCase())) return whole;
     removed += 1;
     return '';
   });
-  out = out.replace(TICKET_NUMBER_RE, (num) => {
-    if (seen.numbers.has(num.toUpperCase())) return num;
-    removed += 1;
-    return 'a ticket';
-  });
+  if (numbers) {
+    out = out.replace(TICKET_NUMBER_RE, (num) => {
+      if (seen.numbers.has(num.toUpperCase())) return num;
+      removed += 1;
+      return 'a ticket';
+    });
+  }
   if (!removed) return { text, removed };
   // Empty link labels left behind ("[a ticket]") read as plain text.
   out = out.replace(/\[([^\]]*)\](?=\s|$|\|)/g, '$1');
-  return { text: `${out.trimEnd()}\n\n${ANSWER_FENCE_NOTE}`, removed };
+  return { text: `${out.trimEnd()}\n\n${opts.note ?? (numbers ? ANSWER_FENCE_NOTE : LINK_FENCE_NOTE)}`, removed };
 }

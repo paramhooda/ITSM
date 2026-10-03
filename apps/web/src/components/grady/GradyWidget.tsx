@@ -127,6 +127,7 @@ function GradyWindow({ onClose }: { onClose: () => void }) {
   };
   const err = chat.error;
   const upstream = err instanceof ApiError && (err.code === 'ai_upstream' || err.code === 'ai_disabled');
+  const errorText = err instanceof ApiError && err.status === 429 ? (err.code === 'ai_budget_exceeded' ? err.message : 'Slow down a little: too many messages in the last minute. Try again shortly.') : err instanceof ApiError && err.code === 'stale_action' ? 'That proposal was already decided or has expired. Ask again if you still want it.' : (err as Error | null)?.message;
 
   return (
     <div className="fixed z-50 bottom-4 right-4 w-[min(500px,calc(100vw-2rem))] h-[min(700px,calc(100vh-2rem))] flex flex-col rounded-2xl border border-default bg-app shadow-pop scale-in overflow-hidden" role="dialog" aria-label="Grady, service assistant">
@@ -210,8 +211,8 @@ function GradyWindow({ onClose }: { onClose: () => void }) {
                   </div>
                 )}
                 <div className="flex gap-2">
-                  <Button size="sm" icon={<Check className="h-3.5 w-3.5" />} onClick={() => send('Yes, proceed.')}>Yes, go ahead</Button>
-                  <Button size="sm" variant="outline" icon={<X className="h-3.5 w-3.5" />} onClick={() => send('No, do not do that.')}>No</Button>
+                  <Button size="sm" icon={<Check className="h-3.5 w-3.5" />} onClick={() => (chat.pendingAction ? chat.confirm('confirm') : send('Yes, proceed.'))}>Yes, go ahead</Button>
+                  <Button size="sm" variant="outline" icon={<X className="h-3.5 w-3.5" />} onClick={() => (chat.pendingAction ? chat.confirm('cancel') : send('No, do not do that.'))}>No</Button>
                 </div>
               </div>
             )}
@@ -220,7 +221,7 @@ function GradyWindow({ onClose }: { onClose: () => void }) {
               <div className="rounded-xl border border-red-200/70 bg-red-50 text-red-700 p-3 text-[12.5px] flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-px shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div>{(err as Error).message}</div>
+                  <div>{errorText}</div>
                   {upstream && (can('admin:system') || can('admin:config')) && <div className="mt-1 text-red-600/80">Check <Link to="/admin/settings" className="underline">Administration → Settings</Link> and use Test connection.</div>}
                 </div>
                 {chat.lastSent && <button className="underline shrink-0" onClick={() => chat.retry()}>Retry</button>}

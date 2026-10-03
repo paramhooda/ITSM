@@ -6,8 +6,10 @@ export interface AiStatus {
   provider: string;
   model: string | null;
   features: string[];
+  assistantEnabled?: boolean;
+  autonomy?: 'confirm_all' | 'auto_low';
   canAct: boolean;
-  tools: { name: string; action: boolean }[];
+  tools: { name: string; action: boolean; tier?: string }[];
   suggestions: string[];
   /** What the server is configured with (no credentials). */
   configured?: { provider: string; model: string | null; baseUrl: string | null };
@@ -31,6 +33,10 @@ export interface ToolCallRecord {
   ok: boolean;
   action: boolean;
   error?: string;
+  /** The action was only proposed; it runs when the user confirms. */
+  proposed?: boolean;
+  /** A low-risk write applied without confirmation. */
+  auto?: boolean;
 }
 
 export interface AiMessage {
@@ -38,6 +44,7 @@ export interface AiMessage {
   role: 'user' | 'assistant';
   content: string;
   toolCalls: ToolCallRecord[];
+  feedback?: 'up' | 'down' | null;
   createdAt: string;
 }
 
@@ -53,7 +60,37 @@ export interface Conversation {
 export interface PendingAction {
   id: string;
   tool: string;
+  tier?: string;
   preview: string;
+  expiresAt?: string;
+}
+
+/** A decision on the held action, bound to its id (Confirm / Cancel buttons). */
+export interface ChatConfirm {
+  actionId: string;
+  decision: 'confirm' | 'cancel';
+}
+
+export interface ChatBody {
+  conversationId?: string | null;
+  message?: string;
+  context?: Record<string, unknown> | null;
+  confirm?: ChatConfirm | null;
+  skill?: string;
+}
+
+/** Something the web does after a reply (navigation); produced by UI tools on the server. */
+export interface UiAction {
+  type: 'navigate';
+  to: string;
+  label?: string;
+}
+
+export interface ChatReply {
+  conversationId: string;
+  message: AiMessage;
+  pendingAction: PendingAction | null;
+  uiActions?: UiAction[];
 }
 
 export type Tone = 'neutral' | 'formal' | 'friendly' | 'apologetic';
@@ -158,7 +195,8 @@ export const aiApi = {
   conversations: () => get<{ items: Conversation[] }>('/ai/conversations'),
   conversation: (id: string) => get<{ id: string; title: string | null; messages: AiMessage[]; pendingAction: PendingAction | null }>(`/ai/conversations/${id}`),
   deleteConversation: (id: string) => del(`/ai/conversations/${id}`),
-  chat: (body: { conversationId?: string | null; message: string; context?: Record<string, unknown> | null }) => post<{ conversationId: string; message: AiMessage; pendingAction: PendingAction | null }>('/ai/chat', body),
+  chat: (body: ChatBody) => post<ChatReply>('/ai/chat', body),
+  feedback: (messageId: string, rating: 'up' | 'down' | null, note?: string | null) => post<{ id: string; feedback: 'up' | 'down' | null }>(`/ai/messages/${messageId}/feedback`, { rating, note: note ?? null }),
   summarize: (id: string) => post<SummaryResult>(`/ai/tickets/${id}/summarize`),
   classify: (id: string) => post<ClassificationResult>(`/ai/tickets/${id}/classify`),
   classifyDraft: (body: { title: string; description?: string | null; customerId?: string; type?: string }) => post<DraftClassification>('/ai/classify-draft', body),

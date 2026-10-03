@@ -36,7 +36,7 @@ const schema = z.object({
   SMTP_FROM: z.string().default('MSP Service Desk <servicedesk@msp.local>'),
   AI_PROVIDER: z.enum(['anthropic', 'openai_compatible', 'none']).default('none'),
   ANTHROPIC_API_KEY: z.string().optional(),
-  AI_MODEL: z.string().default('claude-sonnet-5-5'),
+  AI_MODEL: z.string().default('claude-opus-5-5'),
   OPENAI_COMPATIBLE_BASE_URL: z.string().optional(),
   OPENAI_COMPATIBLE_API_KEY: z.string().optional(),
   /** Common aliases so a plain OpenAI setup works with the usual variable names. */
