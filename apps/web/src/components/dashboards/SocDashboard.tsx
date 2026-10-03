@@ -26,8 +26,8 @@ interface Soc {
   series: { day: string; opened: number; resolved: number; breaches: number }[];
 }
 
-export function SocDashboard() {
-  const q = useQuery({ queryKey: ['dashboards', 'soc'], queryFn: () => get<Soc>('/dashboards/soc'), refetchInterval: 60_000, placeholderData: (p) => p });
+export function SocDashboard({ days = 30 }: { days?: number }) {
+  const q = useQuery({ queryKey: ['dashboards', 'soc', days], queryFn: () => get<Soc>('/dashboards/soc', { days }), refetchInterval: 60_000, placeholderData: (p) => p });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
   if (!d)
@@ -57,7 +57,7 @@ export function SocDashboard() {
         ]}
       />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="Security incident flow" subtitle="Opened and resolved per day, last 30 days" className="xl:col-span-2" to="/tickets?domain=soc" toLabel="All security incidents">
+        <Panel title="Security incident flow" subtitle={`Opened and resolved per day, last ${days} days`} className="xl:col-span-2" to="/tickets?domain=soc" toLabel="All security incidents">
           <TrendChart data={flow} x="day" kind="area" series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={220} />
         </Panel>
         <Panel title="Open by severity" subtitle="Security severity of open incidents">

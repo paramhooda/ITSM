@@ -38,8 +38,8 @@ const statusItems = (rows: { status: string; count: number }[], colors: Record<s
   rows.filter((r) => r.count > 0).map((r) => ({ label: statusLabel(r.status), value: r.count, color: colors[r.status] ?? 'slate', href: href(r.status) }));
 
 /** AMC / field service view: an AMC ticket work queue first, visits and maintenance beside it. */
-export function AmcDashboard() {
-  const q = useQuery({ queryKey: ['dashboards', 'amc'], queryFn: () => get<Amc>('/dashboards/amc'), refetchInterval: 120_000, placeholderData: (p) => p });
+export function AmcDashboard({ days = 30 }: { days?: number }) {
+  const q = useQuery({ queryKey: ['dashboards', 'amc', days], queryFn: () => get<Amc>('/dashboards/amc', { days }), refetchInterval: 120_000, placeholderData: (p) => p });
   const [filter, setFilter] = useState<Filter>('all');
   const d = q.data;
   const rows = useMemo(() => {
@@ -110,10 +110,10 @@ export function AmcDashboard() {
       </Panel>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Second series uses kit slot 6 (validated pair with blue); slot 2 orange fails the 3:1 contrast check on bars. */}
-        <Panel title="Completed work" subtitle="Site visits and preventive maintenance completed per day, last 30 days" className="xl:col-span-2" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report">
+        <Panel title="Completed work" subtitle={`Site visits and preventive maintenance completed per day, last ${days} days`} className="xl:col-span-2" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report">
           <TrendChart data={work} x="day" kind="bar" stacked={false} series={[{ key: 'visitsCompleted', label: 'Visits completed' }, { key: 'pmCompleted', label: 'Maintenance completed', color: '#1a7f37' }]} height={220} />
         </Panel>
-        <Panel title="Service levels · 30 days" subtitle="Resolution targets on AMC tickets opened in the period">
+        <Panel title={`Service levels · ${days} days`} subtitle="Resolution targets on AMC tickets opened in the period">
           <SlaGauge pct={d.sla30d.compliancePct} met={d.sla30d.met} breached={d.sla30d.breached} label="Targets met" />
           <div className="mt-5 pt-4 border-t border-default grid grid-cols-2 gap-x-4 gap-y-4">
             <Stat label="Resolved this week" value={fmtNumber(k.resolvedThisWeek)} />

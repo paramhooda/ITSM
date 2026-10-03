@@ -103,7 +103,7 @@ export function SidebarNav({ items, label }: { items: NavItem[]; label?: string 
                     )
                   }
                 >
-                  <item.icon className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
+                  <item.icon className={cn('h-[17px] w-[17px] shrink-0', item.tint)} strokeWidth={1.9} />
                   {!collapsed && <span className="truncate flex-1">{item.label}</span>}
                   {!collapsed && children.length > 0 && (
                     <button
@@ -251,10 +251,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 flex items-center gap-2 px-4 md:px-6 border-b border-default bg-surface shrink-0">
           <BrandLogo className="md:hidden mr-1" />
-          <button onClick={() => setSearchOpen(true)} className="flex items-center gap-2.5 h-9 px-3 rounded-lg bg-white border border-default hover:border-strong text-muted text-[13px] w-full max-w-md transition-colors shadow-[0_1px_2px_rgba(9,9,11,0.03)]">
+          <button onClick={() => setSearchOpen(true)} className="flex items-center gap-2.5 h-9 px-3 rounded-lg bg-white border border-default hover:border-strong text-muted text-[13px] flex-1 min-w-0 max-w-md transition-colors shadow-[0_1px_2px_rgba(9,9,11,0.03)]">
             <Search className="h-4 w-4" />
             <span className="flex-1 text-left truncate">Search tickets, customers, assets, CIs…</span>
-            <Kbd>⌘K</Kbd>
+            <span className="hidden sm:inline-flex"><Kbd>⌘K</Kbd></span>
           </button>
           <div className="flex-1" />
           {can('tickets:create') && (

@@ -21,14 +21,17 @@ export interface NavItem {
   section?: string;
   /** Modules listed under the application when it is expanded. */
   children?: NavChild[];
+  /** Icon colour class: every application gets its own hue in the navigator. */
+  tint?: string;
 }
 
 export const MSP_NAV: NavItem[] = [
-  { to: '/', label: 'Dashboards', icon: LayoutDashboard },
+  { to: '/', label: 'Dashboards', icon: LayoutDashboard, tint: 'text-brand-600' },
   {
     to: '/tickets',
     label: 'Tickets',
     icon: Ticket,
+    tint: 'text-blue-600',
     perm: ['tickets:read'],
     area: 'tickets',
     section: 'Service desk',
@@ -48,6 +51,7 @@ export const MSP_NAV: NavItem[] = [
     to: '/operations',
     label: 'Operations',
     icon: Siren,
+    tint: 'text-red-600',
     perm: ['tickets:read'],
     area: 'operations',
     children: [{ to: '/operations/major-incidents', label: 'Major incidents' }],
@@ -56,6 +60,7 @@ export const MSP_NAV: NavItem[] = [
     to: '/customers',
     label: 'Customers',
     icon: Building2,
+    tint: 'text-violet-600',
     perm: ['customers:read'],
     area: 'customers',
     section: 'Accounts',
@@ -68,6 +73,7 @@ export const MSP_NAV: NavItem[] = [
     to: '/contracts',
     label: 'Contracts & Scope',
     icon: FileSignature,
+    tint: 'text-emerald-600',
     perm: ['contracts:read'],
     area: 'contracts',
     children: [
@@ -77,12 +83,13 @@ export const MSP_NAV: NavItem[] = [
       { to: '/sla', label: 'Service levels', perm: ['contracts:read', 'admin:config'] },
     ],
   },
-  { to: '/services', label: 'Service Catalog', icon: Layers, perm: ['services:read'], area: 'catalog' },
-  { to: '/teams', label: 'Teams', icon: UsersRound, perm: ['tickets:read', 'admin:users'], area: 'teams' },
+  { to: '/services', label: 'Service Catalog', icon: Layers, perm: ['services:read'], area: 'catalog', tint: 'text-cyan-600' },
+  { to: '/teams', label: 'Teams', icon: UsersRound, perm: ['tickets:read', 'admin:users'], area: 'teams', tint: 'text-pink-600' },
   {
     to: '/cmdb',
     label: 'Configuration (CMDB)',
     icon: Server,
+    tint: 'text-indigo-600',
     perm: ['cmdb:read'],
     area: 'cmdb',
     section: 'Infrastructure',
@@ -101,6 +108,7 @@ export const MSP_NAV: NavItem[] = [
     icon: Boxes,
     perm: ['assets:read'],
     area: 'assets',
+    tint: 'text-amber-600',
     children: [
       { to: '/assets', label: 'Overview' },
       { to: '/assets/inventory', label: 'Inventory' },
@@ -112,6 +120,7 @@ export const MSP_NAV: NavItem[] = [
     to: '/field',
     label: 'Field Service',
     icon: Wrench,
+    tint: 'text-orange-600',
     perm: ['field:read', 'pm:read'],
     area: 'field',
     section: 'Delivery',
@@ -128,24 +137,26 @@ export const MSP_NAV: NavItem[] = [
     icon: BookOpen,
     perm: ['kb:read'],
     area: 'knowledge',
+    tint: 'text-fuchsia-600',
     children: [
       { to: '/knowledge', label: 'Overview' },
       { to: '/knowledge/articles', label: 'Articles' },
       { to: '/knowledge/categories', label: 'Categories', perm: ['kb:manage'] },
     ],
   },
-  { to: '/reports', label: 'Reports', icon: BarChart3, perm: ['reports:run'], area: 'reports', section: 'Insight' },
-  { to: '/admin', label: 'Administration', icon: Settings, perm: ['admin:config', 'admin:users', 'admin:audit', 'admin:system', 'integrations:manage', 'integrations:events'], section: 'System' },
+  { to: '/reports', label: 'Reports', icon: BarChart3, perm: ['reports:run'], area: 'reports', section: 'Insight', tint: 'text-teal-600' },
+  { to: '/admin', label: 'Administration', icon: Settings, tint: 'text-zinc-500', perm: ['admin:config', 'admin:users', 'admin:audit', 'admin:system', 'integrations:manage', 'integrations:events'], section: 'System' },
 ];
 
 export const PORTAL_NAV: NavItem[] = [
-  { to: '/', label: 'Overview', icon: LayoutDashboard },
-  { to: '/portal/tickets', label: 'My Tickets', icon: Ticket, perm: ['portal:tickets'] },
-  { to: '/portal/approvals', label: 'Approvals', icon: ClipboardCheck, perm: ['portal:approve'] },
+  { to: '/', label: 'Overview', icon: LayoutDashboard, tint: 'text-brand-600' },
+  { to: '/portal/tickets', label: 'My Tickets', icon: Ticket, perm: ['portal:tickets'], tint: 'text-blue-600' },
+  { to: '/portal/approvals', label: 'Approvals', icon: ClipboardCheck, perm: ['portal:approve'], tint: 'text-amber-600' },
   {
     to: '/portal/services',
     label: 'Services & Contracts',
     icon: FileSignature,
+    tint: 'text-emerald-600',
     perm: ['portal:contracts'],
     children: [
       { to: '/portal/services', label: 'Services' },
@@ -158,6 +169,7 @@ export const PORTAL_NAV: NavItem[] = [
     label: 'Assets',
     icon: Boxes,
     perm: ['portal:assets'],
+    tint: 'text-amber-600',
     children: [
       { to: '/portal/assets', label: 'Overview' },
       { to: '/portal/assets/inventory', label: 'Inventory' },
@@ -168,15 +180,16 @@ export const PORTAL_NAV: NavItem[] = [
     to: '/portal/maintenance',
     label: 'Maintenance & Visits',
     icon: CalendarCheck,
+    tint: 'text-orange-600',
     perm: ['portal:access'],
     children: [
       { to: '/portal/maintenance', label: 'Upcoming' },
       { to: '/portal/maintenance/history', label: 'History' },
     ],
   },
-  { to: '/knowledge', label: 'Knowledge', icon: BookOpen, perm: ['portal:access'] },
-  { to: '/reports', label: 'Reports', icon: BarChart3, perm: ['portal:reports'] },
-  { to: '/portal/users', label: 'Users', icon: UsersRound, perm: ['portal:manage_users'] },
+  { to: '/knowledge', label: 'Knowledge', icon: BookOpen, perm: ['portal:access'], tint: 'text-fuchsia-600' },
+  { to: '/reports', label: 'Reports', icon: BarChart3, perm: ['portal:reports'], tint: 'text-teal-600' },
+  { to: '/portal/users', label: 'Users', icon: UsersRound, perm: ['portal:manage_users'], tint: 'text-pink-600' },
 ];
 
 type Can = (...perms: Permission[]) => boolean;

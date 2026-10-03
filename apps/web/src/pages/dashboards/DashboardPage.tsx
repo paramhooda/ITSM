@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { PageHeader, EmptyState } from '@/components/ui';
+import { EmptyState, Select } from '@/components/ui';
+import { useCustomersLookup } from '@/hooks/useLookups';
+import { DashboardHero, PeriodPicker } from '@/components/dashboards/Hero';
 import { useAuthStore } from '@/stores/auth';
 import { useListState } from '@/hooks/useListState';
 import { CustomerDashboard } from '@/components/dashboards/CustomerDashboard';
-import { ManagementDashboard, ManagementControls } from '@/components/dashboards/ManagementDashboard';
+import { ManagementDashboard } from '@/components/dashboards/ManagementDashboard';
 import { NocDashboard } from '@/components/dashboards/NocDashboard';
 import { SocDashboard } from '@/components/dashboards/SocDashboard';
 import { AmcDashboard } from '@/components/dashboards/AmcDashboard';
@@ -70,31 +72,38 @@ export default function DashboardPage() {
     }
   };
 
+  const customers = useCustomersLookup();
   if (!user) return null;
+  // The same 7 / 30 / 90-day period heads every home view, staff and customer alike.
+  const days = Number(state.days ?? 30) || 30;
+  const period = <PeriodPicker days={days} onChange={(d) => set({ days: d }, false)} />;
   if (user.userType === 'customer') {
     return (
       <div>
-        <PageHeader title={greeting(user.name)} subtitle="Your tickets, service levels, contracts and upcoming work" />
-        {can('portal:access') ? <CustomerDashboard /> : <EmptyState title="Portal access required" description="Ask your administrator to grant portal access." />}
+        <DashboardHero title={greeting(user.name)} subtitle="Your tickets, service levels, contracts and upcoming work">
+          {period}
+        </DashboardHero>
+        {can('portal:access') ? <CustomerDashboard days={days} /> : <EmptyState title="Portal access required" description="Ask your administrator to grant portal access." />}
       </div>
     );
   }
-  const days = Number(state.days ?? 30) || 30;
   const meta = META[tab];
   return (
     <div>
-      <PageHeader title={meta.title} subtitle={meta.subtitle} actions={tabs.length > 1 ? <Segmented options={tabs.map((t) => ({ value: t, label: META[t].label }))} value={tab} onChange={pick} /> : undefined} />
-      {/* Period/scope controls live in their own row, so the view switcher above never moves. */}
-      {tab === 'management' && (
-        <div className="flex flex-wrap items-center justify-between gap-3 min-h-9 -mt-2 mb-4">
-          <ManagementControls days={days} customerId={state.customerId ?? ''} onDays={(d) => set({ days: d }, false)} onCustomer={(id) => set({ customerId: id }, false)} />
-        </div>
-      )}
+      <DashboardHero title={tab === 'engineer' ? greeting(user.name) : meta.title} subtitle={meta.subtitle} right={tabs.length > 1 ? <Segmented options={tabs.map((t) => ({ value: t, label: META[t].label }))} value={tab} onChange={pick} /> : undefined}>
+        {period}
+        {tab === 'management' && (
+          <>
+            <span className="text-[12px] text-subtle ml-2 mr-1">Scope</span>
+            <Select className="w-56 h-8 py-0 text-[12.5px] bg-white" value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value }, false)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
+          </>
+        )}
+      </DashboardHero>
       {tab === 'management' && <ManagementDashboard days={days} customerId={state.customerId ?? ''} />}
-      {tab === 'noc' && <NocDashboard />}
-      {tab === 'soc' && <SocDashboard />}
-      {tab === 'amc' && <AmcDashboard />}
-      {tab === 'engineer' && <EngineerDashboard />}
+      {tab === 'noc' && <NocDashboard days={days} />}
+      {tab === 'soc' && <SocDashboard days={days} />}
+      {tab === 'amc' && <AmcDashboard days={days} />}
+      {tab === 'engineer' && <EngineerDashboard days={days} />}
     </div>
   );
 }

@@ -48,6 +48,10 @@
   --shadow-pop: 0 20px 50px -16px rgba(9, 9, 11, 0.28), 0 0 0 1px rgba(9, 9, 11, 0.05);
   --radius-card: 12px;
   --radius-control: 8px;
+  /* Colour accents: a blue→violet brand gradient for primary actions and highlights, soft washes for hero surfaces. */
+  --grad-brand: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  --grad-brand-soft: linear-gradient(135deg, rgba(37, 99, 235, 0.14) 0%, rgba(124, 58, 237, 0.12) 50%, rgba(236, 72, 153, 0.08) 100%);
+  --grad-toolbar: linear-gradient(180deg, #f9f9fb 0%, #f3f3f6 100%);
   color-scheme: light;
 }
 
@@ -134,6 +138,21 @@ textarea {
 @utility shadow-raised { box-shadow: var(--shadow-raised); }
 @utility shadow-pop { box-shadow: var(--shadow-pop); }
 @utility tnum { font-variant-numeric: tabular-nums; }
+@utility bg-grad-brand { background-image: var(--grad-brand); }
+@utility bg-grad-brand-soft { background-image: var(--grad-brand-soft); }
+@utility text-grad-brand {
+  background-image: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* Hero wash: three soft colour pools in the corners of a white surface. */
+@utility bg-hero {
+  background-image:
+    radial-gradient(900px 260px at 0% 0%, rgba(37, 99, 235, 0.16), transparent 62%),
+    radial-gradient(700px 240px at 100% 0%, rgba(124, 58, 237, 0.14), transparent 60%),
+    radial-gradient(600px 220px at 55% 110%, rgba(16, 185, 129, 0.10), transparent 60%);
+}
 /* Subtle dotted backdrop used behind hero surfaces (login, empty states). */
 @utility bg-dots {
   background-image: radial-gradient(rgba(9, 9, 11, 0.09) 1px, transparent 1px);
@@ -141,6 +160,67 @@ textarea {
 }
 
 @layer components {
+  /* The horizontal filter bar: a quiet toolbar surface so filters read differently from data. */
+  .filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--grad-toolbar);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(9, 9, 11, 0.03);
+  }
+  .filter-bar .input {
+    background: #fff;
+  }
+  .filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 8px 0 11px;
+    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    background: #fff;
+    color: var(--text);
+    font-size: 12.5px;
+    line-height: 1;
+    white-space: nowrap;
+    max-width: 100%;
+    box-shadow: 0 1px 2px rgba(9, 9, 11, 0.04);
+    transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+  }
+  .filter-pill:hover {
+    border-color: #a1a1aa;
+  }
+  .filter-pill-open {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+  .filter-pill-active {
+    border-color: #bfdbfe;
+    background: linear-gradient(180deg, #eff6ff 0%, #e4edff 100%);
+    color: #1e3a8a;
+  }
+  .filter-pill-active:hover {
+    border-color: #93c5fd;
+  }
+  .filter-pill-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 16px;
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--grad-brand);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -209,7 +289,7 @@ textarea {
     color: var(--text-muted);
     padding: 9px 14px;
     border-bottom: 1px solid var(--border);
-    background: #fafafa;
+    background: var(--surface-2);
     white-space: nowrap;
     position: sticky;
     top: 0;

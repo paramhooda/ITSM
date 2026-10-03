@@ -21,7 +21,7 @@ interface Customer {
   /** Tickets opened and resolved per day, last 30 days. */
   series: { day: string; opened: number; resolved: number }[];
   tickets: { open: number; byStatusCategory: Record<string, number>; byPriority: { id: string | null; key: string | null; label: string; color: string | null; level: number; count: number }[]; byType: Record<string, number>; awaitingReply: number; awaitingApproval: number; resolved30d: number; opened30d: number; majorOpen: number };
-  sla: { days30: SlaBlock; days90: SlaBlock };
+  sla: { period?: SlaBlock & { days: number }; days30: SlaBlock; days90: SlaBlock };
   contracts: { id: string; number: string; name: string; status: string; start_date: string; end_date: string; days_to_expiry: number; auto_renew: boolean; type: string | null; services: string | null }[];
   entitlements: { id: string; name: string; unit: string; period: string; contractNumber: string | null; quantity: number; used: number; remaining: number; pct: number; overThreshold: boolean; exhausted: boolean; periodEnd: string }[];
   upcomingMaintenance: { id: string; program: string; planned_date: string; scheduled_date: string | null; status: string; site: string | null; engineer: string | null }[];
@@ -31,9 +31,9 @@ interface Customer {
   serviceTeam: { accountManager: { id: string; name: string; email: string; phone: string | null } | null; teams: { id: string; name: string; team_type: string; email: string | null; manager_name: string | null }[] };
 }
 
-export function CustomerDashboard({ customerId }: { customerId?: string }) {
+export function CustomerDashboard({ customerId, days = 30 }: { customerId?: string; days?: number }) {
   const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
-  const q = useQuery({ queryKey: ['dashboards', 'customer', customerId ?? 'me'], queryFn: () => get<Customer>('/dashboards/customer', { customerId }), placeholderData: (p) => p, staleTime: 30_000 });
+  const q = useQuery({ queryKey: ['dashboards', 'customer', customerId ?? 'me', days], queryFn: () => get<Customer>('/dashboards/customer', { customerId, days }), placeholderData: (p) => p, staleTime: 30_000 });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
   if (!d)
@@ -46,7 +46,8 @@ export function CustomerDashboard({ customerId }: { customerId?: string }) {
       </div>
     );
   const t = d.tickets;
-  const sla = d.sla.days30.totals.compliancePct;
+  const slaBlock = d.sla.period ?? d.sla.days30;
+  const sla = slaBlock.totals.compliancePct;
   const ticketsHref = isCustomer ? '/portal/tickets' : `/tickets?customerId=${d.customer.id}`;
   const openTickets = d.recentTickets.filter((r) => r.status_category && !['resolved', 'closed', 'cancelled'].includes(r.status_category));
   const upcoming: RowItem[] = [
@@ -62,7 +63,7 @@ export function CustomerDashboard({ customerId }: { customerId?: string }) {
     color: PRIORITY_LEVEL_COLORS[p.level] ?? p.color,
     href: p.key ? (isCustomer ? `/portal/tickets?priority=${p.key}` : `/tickets?customerId=${d.customer.id}&open=true&priorityId=${p.id}`) : undefined,
   }));
-  const slaGroups: RowItem[] = d.sla.days30.groups.slice(0, 5).map((g) => ({
+  const slaGroups: RowItem[] = slaBlock.groups.slice(0, 5).map((g) => ({
     key: g.key || g.label,
     primary: g.label,
     secondary: `${fmtNumber(g.met)} met · ${fmtNumber(g.breached)} breached`,
@@ -74,21 +75,21 @@ export function CustomerDashboard({ customerId }: { customerId?: string }) {
         items={[
           { label: 'Open tickets', value: fmtNumber(t.open), hint: `${fmtNumber(t.byType.incident ?? 0)} incidents · ${fmtNumber(t.byType.request ?? 0)} requests`, onClick: () => (window.location.href = ticketsHref) },
           { label: 'Awaiting your reply', value: fmtNumber(t.awaitingReply), tone: t.awaitingReply > 0 ? 'warn' : 'good', hint: t.awaitingApproval ? `${t.awaitingApproval} awaiting your approval` : 'nothing waiting on you', onClick: () => (window.location.href = isCustomer ? '/portal/tickets?status=awaiting' : ticketsHref) },
-          { label: 'Resolved · 30 days', value: fmtNumber(t.resolved30d), hint: `${fmtNumber(t.opened30d)} opened in the same period` },
-          { label: 'SLA compliance · 30 days', value: sla === null ? '—' : `${sla}%`, tone: sla === null ? 'default' : sla >= 95 ? 'good' : sla >= 85 ? 'warn' : 'bad', hint: `${d.sla.days30.totals.met} met · ${d.sla.days30.totals.breached} breached` },
+          { label: `Resolved · ${days} days`, value: fmtNumber(t.resolved30d), hint: `${fmtNumber(t.opened30d)} opened in the same period` },
+          { label: `SLA compliance · ${days} days`, value: sla === null ? '—' : `${sla}%`, tone: sla === null ? 'default' : sla >= 95 ? 'good' : sla >= 85 ? 'warn' : 'bad', hint: `${slaBlock.totals.met} met · ${slaBlock.totals.breached} breached` },
         ]}
       />
-      <Panel title="Ticket flow" subtitle="Opened and resolved per day, last 30 days" to={ticketsHref}>
+      <Panel title="Ticket flow" subtitle={`Opened and resolved per day, last ${days} days`} to={ticketsHref}>
         <TrendChart data={flow} x="day" kind="area" series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={220} />
       </Panel>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <Panel title="Open tickets by priority" subtitle="Highest priority first" to={ticketsHref}>
           <BreakdownBar items={priorities} emptyText="No open tickets" />
         </Panel>
-        <Panel title="SLA compliance · 30 days" subtitle="Resolution targets on tickets raised in the period, by priority">
-          <SlaGauge pct={sla} met={d.sla.days30.totals.met} breached={d.sla.days30.totals.breached} label="Targets met" />
+        <Panel title={`SLA compliance · ${days} days`} subtitle="Resolution targets on tickets raised in the period, by priority">
+          <SlaGauge pct={sla} met={slaBlock.totals.met} breached={slaBlock.totals.breached} label="Targets met" />
           <div className="mt-4 pt-3 border-t border-default">
-            <RowList dense items={slaGroups} empty="No targets completed in the last 30 days" />
+            <RowList dense items={slaGroups} empty={`No targets completed in the last ${days} days`} />
           </div>
         </Panel>
       </div>

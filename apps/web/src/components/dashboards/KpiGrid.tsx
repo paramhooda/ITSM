@@ -23,7 +23,9 @@ export interface KpiItem {
 const TONE_TEXT: Record<Tone, string> = { default: 'text-default', good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600', accent: 'text-brand-600' };
 const TONE_HEX: Record<Tone, string> = { default: '#2563eb', good: '#16a34a', warn: '#f59e0b', bad: '#dc2626', accent: '#2563eb' };
 /** Tinted square behind a tile icon: the one touch of colour on neutral tiles. */
-const TONE_CHIP: Record<Tone, string> = { default: 'bg-brand-50 text-brand-600', good: 'bg-emerald-50 text-emerald-600', warn: 'bg-amber-50 text-amber-600', bad: 'bg-red-50 text-red-600', accent: 'bg-brand-50 text-brand-600' };
+const TONE_CHIP: Record<Tone, string> = { default: 'bg-brand-50 text-brand-600', good: 'bg-emerald-50 text-emerald-600', warn: 'bg-amber-50 text-amber-600', bad: 'bg-red-50 text-red-600', accent: 'bg-violet-50 text-violet-600' };
+/** A soft colour pool in the tile's top-right corner, tinted by tone: the tile reads as "good", "warn" or "bad" before the number does. */
+const TONE_GLOW: Record<Tone, string> = { default: 'rgba(37, 99, 235, 0.11)', good: 'rgba(16, 185, 129, 0.14)', warn: 'rgba(245, 158, 11, 0.16)', bad: 'rgba(239, 68, 68, 0.13)', accent: 'rgba(124, 58, 237, 0.14)' };
 
 export function DeltaBadge({ delta, lowerIsBetter, compact }: { delta?: Delta | null; lowerIsBetter?: boolean; compact?: boolean }) {
   if (!delta || delta.deltaPct === null) return <span className="text-subtle inline-flex items-center gap-1 text-[12px]"><Minus className="h-3 w-3" />{!compact && 'no prior data'}</span>;
@@ -81,7 +83,8 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
   const clickable = !!onClick;
   return (
     <div
-      className={cn('card p-5 flex flex-col gap-3 min-w-0', clickable && 'cursor-pointer hover:border-strong hover:shadow-raised transition-[box-shadow,border-color]', className)}
+      className={cn('card p-5 flex flex-col gap-3 min-w-0 relative overflow-hidden', clickable && 'cursor-pointer hover:border-strong hover:shadow-raised transition-[box-shadow,border-color]', className)}
+      style={{ backgroundImage: `radial-gradient(180px 110px at 100% 0%, ${TONE_GLOW[tone]}, transparent 70%)` }}
       onClick={onClick}
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}

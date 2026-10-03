@@ -1,20 +1,19 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronLeft, SlidersHorizontal, X, Search } from 'lucide-react';
+import { createContext, useContext, useEffect, useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { ChevronDown, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button, SearchInput, Drawer, Select, type SelectProps } from './index';
+import { SearchInput, Select, type SelectProps } from './index';
 import { ModuleNav } from './ModuleNav';
 import type { ModuleItem } from '@/layouts/modules';
 
 /**
- * The list page skeleton: a filter rail on the left, the content on the right.
+ * The list page skeleton: a horizontal filter bar on top, the data underneath.
  *
- * Why a rail: filters and results used to sit in identical cards, so a page read
- * as one undifferentiated block. The rail is a quieter surface (bg-surface-2),
- * holds the search box and every filter group, and shows the active count with a
- * single "Clear all". The content column keeps the quick views, the insight band
- * and the table, with the applied filters spelled out as removable chips right
- * above the results. The rail collapses to a button (remembered per page) and
- * becomes a drawer on narrow screens. Filter state stays in the URL as before.
+ * The bar is its own surface (a quiet toolbar) so filters never read as data. Each
+ * filter is a pill that opens a small popover with its control and shows the chosen
+ * value on the pill itself, the way Vercel's deployment and log filters work; a Reset
+ * link clears everything. Filter state stays in the URL as before, and the building
+ * blocks (FilterGroup, FilterOptions, FilterSelect, FilterDateRange, FilterToggle)
+ * keep their props, so every list page picks the new layout up unchanged.
  */
 
 export interface AppliedFilter {
@@ -24,18 +23,18 @@ export interface AppliedFilter {
 }
 
 export interface ListShellProps {
-  /** Page id for remembering the rail state (e.g. "tickets"). */
+  /** Page id (kept for callers; the bar has no remembered state). */
   id: string;
   /** Module strip under the header; omit on single-page applications. */
   modules?: ModuleItem[];
-  /** Filter groups for the rail (FilterGroup / FilterOptions / FilterSelect …). */
+  /** Filter pills for the bar (FilterGroup / FilterOptions / FilterSelect …). */
   filters?: ReactNode;
-  /** Search box at the top of the rail. */
+  /** Search box at the start of the bar. */
   search?: { value: string; onChange: (v: string) => void; placeholder?: string };
   /** Number of filters in effect (search excluded or included as the page prefers). */
   activeCount?: number;
   onClear?: () => void;
-  /** The filters in effect, as removable chips above the results. */
+  /** The filters in effect. Pills already show them, so this only feeds the count. */
   applied?: AppliedFilter[];
   /** Quick views: status chips, segmented control, saved views. */
   quick?: ReactNode;
@@ -49,126 +48,112 @@ export interface ListShellProps {
   className?: string;
 }
 
-const railKey = (id: string) => `itsm.filters.${id}`;
+/** Which pill is open: one popover at a time across the bar. */
+const BarContext = createContext<{ openKey: string | null; setOpenKey: (k: string | null) => void } | null>(null);
 
-export function ListShell({ id, modules, filters, search, activeCount = 0, onClear, applied = [], quick, insights, toolbar, count, children, className }: ListShellProps) {
-  const [open, setOpen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(railKey(id)) !== 'closed';
-    } catch {
-      return true;
-    }
-  });
-  const [drawer, setDrawer] = useState(false);
-  useEffect(() => {
-    try {
-      localStorage.setItem(railKey(id), open ? 'open' : 'closed');
-    } catch {
-      /* ignore */
-    }
-  }, [id, open]);
-  const hasRail = !!filters || !!search;
+type PillSummary = { label: ReactNode; count: number } | null;
+interface PillApi {
+  /** The control inside a pill reports what is selected so the pill can show it. */
+  report: (summary: PillSummary) => void;
+  /** Closes the popover (single-choice controls do it after a pick). */
+  close: () => void;
+}
+const PillContext = createContext<PillApi | null>(null);
 
-  const rail = (
-    <div className="flex flex-col gap-3">
-      {search && <SearchInput value={search.value} onChange={search.onChange} placeholder={search.placeholder ?? 'Search…'} className="w-full" />}
-      {filters}
-    </div>
-  );
-
+export function ListShell({ modules, filters, search, activeCount = 0, onClear, applied = [], quick, insights, toolbar, count, children, className }: ListShellProps) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const hasBar = !!filters || !!search;
+  const active = Math.max(activeCount, applied.length);
   return (
     <div className={cn('flex flex-col', className)}>
       {modules && <ModuleNav items={modules} />}
-      <div className="flex items-start gap-4">
-        {hasRail && open && (
-          <aside className="hidden lg:flex w-[248px] shrink-0 flex-col rounded-xl border border-default bg-surface-2 sticky top-4 max-h-[calc(100vh-2rem)] overflow-hidden" aria-label="Filters" data-testid="filter-rail">
-            <header className="flex items-center gap-2 px-3 h-10 border-b border-default shrink-0">
-              <SlidersHorizontal className="h-3.5 w-3.5 text-subtle" />
-              <span className="text-[12.5px] font-semibold text-default">Filters</span>
-              {activeCount > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[10.5px] font-semibold text-white tnum">{activeCount}</span>}
-              <span className="ml-auto flex items-center gap-1">
-                {activeCount > 0 && onClear && (
-                  <button type="button" onClick={onClear} className="text-[12px] text-brand-700 hover:underline">
-                    Clear all
-                  </button>
-                )}
-                <button type="button" onClick={() => setOpen(false)} className="h-6 w-6 inline-flex items-center justify-center rounded-md text-subtle hover:text-default hover:bg-white" title="Hide filters" aria-label="Hide filters">
-                  <ChevronLeft className="h-3.5 w-3.5" />
+      <div className="min-w-0 flex flex-col gap-3">
+        {hasBar && (
+          <BarContext.Provider value={{ openKey, setOpenKey }}>
+            <div className="filter-bar" role="toolbar" aria-label="Filters" data-testid="filter-bar">
+              {search && <SearchInput value={search.value} onChange={search.onChange} placeholder={search.placeholder ?? 'Search…'} className="w-full sm:w-64 shrink-0" />}
+              {filters && <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">{filters}</div>}
+              {active > 0 && onClear && (
+                <button type="button" onClick={onClear} className="ml-auto inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-[12.5px] font-medium text-brand-700 hover:bg-white/80 whitespace-nowrap" data-testid="filters-reset">
+                  <X className="h-3.5 w-3.5" /> Reset{active > 1 ? ` (${active})` : ''}
                 </button>
-              </span>
-            </header>
-            <div className="overflow-y-auto px-3 py-3">{rail}</div>
-          </aside>
+              )}
+            </div>
+          </BarContext.Provider>
         )}
-        <div className="min-w-0 flex-1 flex flex-col gap-3">
-          {(hasRail || quick || toolbar) && (
-            <div className="flex flex-wrap items-center gap-2 min-h-8">
-              {hasRail && (
-                <>
-                  <Button size="sm" variant={activeCount ? 'primary' : 'outline'} icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={() => setDrawer(true)} className="lg:hidden">
-                    Filters{activeCount ? ` · ${activeCount}` : ''}
-                  </Button>
-                  {!open && (
-                    <Button size="sm" variant={activeCount ? 'primary' : 'outline'} icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={() => setOpen(true)} className="hidden lg:inline-flex">
-                      Filters{activeCount ? ` · ${activeCount}` : ''}
-                    </Button>
-                  )}
-                </>
-              )}
-              {quick}
-              {toolbar && <div className="ml-auto flex items-center gap-2">{toolbar}</div>}
-            </div>
-          )}
-          {(applied.length > 0 || count) && (
-            <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]" data-testid="applied-filters">
-              {count && <span className="text-muted mr-1">{count}</span>}
-              {applied.length > 0 && <span className="text-subtle">filtered by</span>}
-              {applied.map((f) => (
-                <button key={f.key} type="button" onClick={f.onRemove} className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 text-brand-700 pl-2.5 pr-1.5 h-6 hover:bg-brand-100 transition-colors" title="Remove this filter">
-                  <span className="truncate max-w-[32ch]">{f.label}</span>
-                  <X className="h-3 w-3" />
-                </button>
-              ))}
-              {applied.length > 1 && onClear && (
-                <button type="button" onClick={onClear} className="text-brand-700 hover:underline ml-1">
-                  Clear all
-                </button>
-              )}
-            </div>
-          )}
-          {insights}
-          {children}
-        </div>
+        {(quick || toolbar) && (
+          <div className="flex flex-wrap items-center gap-2 min-h-8 max-w-full overflow-x-auto [scrollbar-width:thin]">
+            {quick}
+            {toolbar && <div className="ml-auto flex items-center gap-2">{toolbar}</div>}
+          </div>
+        )}
+        {(count || active > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted" data-testid="applied-filters">
+            {count && <span>{count}</span>}
+            {active > 0 && <span className="text-subtle">· {active} filter{active === 1 ? '' : 's'} in effect</span>}
+          </div>
+        )}
+        {insights}
+        {children}
       </div>
-      {hasRail && (
-        <Drawer open={drawer} onClose={() => setDrawer(false)} title="Filters" width="max-w-sm" footer={<div className="flex items-center justify-between w-full"><span className="text-[12.5px] text-muted">{activeCount ? `${activeCount} in effect` : 'None in effect'}</span><div className="flex gap-2">{activeCount > 0 && onClear && <Button size="sm" variant="ghost" onClick={onClear}>Clear all</Button>}<Button size="sm" onClick={() => setDrawer(false)}>Done</Button></div></div>}>
-          {rail}
-        </Drawer>
-      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------- rail building blocks
+// ---------------------------------------------------------------- bar building blocks
 
-/** A titled, collapsible group inside the rail. */
-export function FilterGroup({ label, children, defaultOpen = true, hint, className }: { label: ReactNode; children: ReactNode; defaultOpen?: boolean; hint?: ReactNode; className?: string }) {
-  const [open, setOpen] = useState(defaultOpen);
+const textOf = (node: ReactNode, fallback: string) => (typeof node === 'string' || typeof node === 'number' ? String(node) : fallback);
+
+/** A filter pill: the label, the chosen value, and a popover with the control. */
+export function FilterGroup({ label, children, hint, className }: { label: ReactNode; children: ReactNode; defaultOpen?: boolean; hint?: ReactNode; className?: string }) {
+  const bar = useContext(BarContext);
+  const id = useId();
+  const [local, setLocal] = useState(false);
+  const open = bar ? bar.openKey === id : local;
+  const setOpen = (v: boolean) => (bar ? bar.setOpenKey(v ? id : null) : setLocal(v));
+  const [summary, setSummary] = useState<PillSummary>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const api = useRef<PillApi>({ report: setSummary, close: () => setOpen(false) });
+  api.current.close = () => setOpen(false);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const active = !!summary && summary.count > 0;
+  const name = textOf(label, 'Filter');
   return (
-    <section className={cn('flex flex-col gap-1.5', className)}>
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-center justify-between w-full text-left text-[11.5px] font-semibold uppercase tracking-[0.06em] text-muted hover:text-default">
-        <span>{label}</span>
-        <ChevronDown className={cn('h-3.5 w-3.5 text-subtle transition-transform', !open && '-rotate-90')} />
+    <div ref={ref} className={cn('relative', className)}>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" className={cn('filter-pill', active && 'filter-pill-active', open && 'filter-pill-open')} data-testid="filter-pill" data-active={active || undefined}>
+        <span className={cn(active ? 'text-brand-700/80' : 'text-muted')}>{label}</span>
+        {active && (
+          <>
+            <span className="text-brand-300">·</span>
+            <span className="font-medium truncate max-w-[22ch]">{summary!.label}</span>
+            {summary!.count > 1 && <span className="filter-pill-count">+{summary!.count - 1}</span>}
+          </>
+        )}
+        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 transition-transform', active ? 'text-brand-500' : 'text-subtle', open && 'rotate-180')} />
       </button>
-      {open && (
-        <div className="flex flex-col gap-1">
-          {hint && <div className="text-[11.5px] text-subtle">{hint}</div>}
-          {children}
-        </div>
-      )}
-    </section>
+      {/* Always mounted so the control can report its selection while closed. */}
+      <div role="dialog" aria-label={name} className={cn('absolute left-0 top-full mt-1.5 z-40 w-72 card shadow-pop p-1.5', !open && 'hidden')}>
+        {hint && <div className="px-2 pt-1 pb-1.5 text-[11.5px] text-subtle">{hint}</div>}
+        <PillContext.Provider value={api.current}>{children}</PillContext.Provider>
+      </div>
+    </div>
   );
 }
+
+const usePill = () => useContext(PillContext);
 
 export interface FilterOption {
   value: string;
@@ -179,70 +164,139 @@ export interface FilterOption {
 }
 
 /**
- * Option rows for the rail: single-select (radio behaviour, click again to clear)
- * or multi-select (checkboxes). Shows counts on the right and folds long lists.
+ * Option rows inside a pill: single-choice (click again to clear) or multi-choice.
+ * Shows counts on the right and folds long lists.
  */
 export function FilterOptions({ options, value, onChange, multi = false, max = 8, emptyLabel }: { options: FilterOption[]; value: string | string[] | undefined; onChange: (next: string | string[] | undefined) => void; multi?: boolean; max?: number; emptyLabel?: ReactNode }) {
+  const pill = usePill();
   const [all, setAll] = useState(false);
+  const [q, setQ] = useState('');
   const selected = new Set(Array.isArray(value) ? value : value ? [value] : []);
-  const shown = all ? options : options.slice(0, max);
-  if (!options.length) return <div className="text-[12px] text-subtle py-1">{emptyLabel ?? 'No options'}</div>;
+  const chosen = [...selected].map((v) => textOf(options.find((o) => o.value === v)?.label, v));
+  const key = chosen.join('\u0001');
+  useEffect(() => {
+    pill?.report(chosen.length ? { label: chosen[0], count: chosen.length } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const needle = q.trim().toLowerCase();
+  const filtered = needle ? options.filter((o) => textOf(o.label, o.value).toLowerCase().includes(needle)) : options;
+  const shown = all || needle ? filtered : filtered.slice(0, max);
+  if (!options.length) return <div className="text-[12px] text-subtle px-2 py-1.5">{emptyLabel ?? 'No options'}</div>;
   const toggle = (v: string) => {
     if (multi) {
       const next = new Set(selected);
       if (next.has(v)) next.delete(v);
       else next.add(v);
       onChange(next.size ? [...next] : undefined);
-    } else onChange(selected.has(v) ? undefined : v);
+    } else {
+      onChange(selected.has(v) ? undefined : v);
+      pill?.close();
+    }
   };
   return (
     <div className="flex flex-col">
-      {shown.map((o) => {
-        const on = selected.has(o.value);
-        return (
-          <button key={o.value} type="button" onClick={() => toggle(o.value)} aria-pressed={on} className={cn('flex items-center gap-2 rounded-md px-2 h-7 text-[12.5px] text-left transition-colors', on ? 'bg-white text-default border border-default shadow-[0_1px_2px_rgba(9,9,11,0.06)]' : 'text-muted hover:text-default hover:bg-white/70 border border-transparent')}>
-            <span className={cn('h-3.5 w-3.5 shrink-0 rounded-[4px] border inline-flex items-center justify-center', on ? 'bg-brand-600 border-brand-600' : 'border-strong bg-white', !multi && 'rounded-full')}>{on && <span className={cn('bg-white', multi ? 'h-1.5 w-2 rotate-[-45deg] border-l-2 border-b-2 border-white bg-transparent -mt-0.5' : 'h-1.5 w-1.5 rounded-full')} />}</span>
-            {o.dot && <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', o.dot)} />}
-            <span className="truncate flex-1">{o.label}</span>
-            {o.count !== undefined && o.count !== null && <span className="tnum text-[11.5px] text-subtle">{o.count}</span>}
-          </button>
-        );
-      })}
-      {options.length > max && (
-        <button type="button" onClick={() => setAll(!all)} className="self-start px-2 h-6 text-[12px] text-brand-700 hover:underline">
-          {all ? 'Show fewer' : `Show all ${options.length}`}
+      {options.length > 10 && <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find…" aria-label="Find an option" className="input h-7 mb-1 text-[12.5px]" />}
+      <div className="flex flex-col max-h-72 overflow-y-auto">
+        {shown.map((o) => {
+          const on = selected.has(o.value);
+          return (
+            <button key={o.value} type="button" onClick={() => toggle(o.value)} aria-pressed={on} className={cn('flex items-center gap-2 rounded-md px-2 h-8 text-[12.5px] text-left transition-colors', on ? 'bg-brand-50 text-brand-800' : 'text-secondary hover:bg-surface-2 hover:text-default')}>
+              {multi ? (
+                <span className={cn('h-3.5 w-3.5 shrink-0 rounded-[4px] border inline-flex items-center justify-center', on ? 'bg-brand-600 border-brand-600 text-white' : 'border-strong bg-white')}>{on && <Check className="h-2.5 w-2.5" strokeWidth={3} />}</span>
+              ) : null}
+              {o.dot && <span className={cn('h-2 w-2 rounded-full shrink-0', o.dot)} />}
+              <span className="truncate flex-1">{o.label}</span>
+              {o.count !== undefined && o.count !== null && <span className="tnum text-[11.5px] text-subtle">{o.count}</span>}
+              {!multi && on && <Check className="h-3.5 w-3.5 text-brand-600 shrink-0" />}
+            </button>
+          );
+        })}
+        {!shown.length && <div className="text-[12px] text-subtle px-2 py-1.5">No matches</div>}
+      </div>
+      {!needle && filtered.length > max && (
+        <button type="button" onClick={() => setAll(!all)} className="self-start px-2 h-7 text-[12px] text-brand-700 hover:underline">
+          {all ? 'Show fewer' : `Show all ${filtered.length}`}
+        </button>
+      )}
+      {selected.size > 0 && (
+        <button type="button" onClick={() => onChange(undefined)} className="self-start px-2 h-7 text-[12px] text-muted hover:text-default">
+          Clear
         </button>
       )}
     </div>
   );
 }
 
-/** A full-width select for the rail (customer, site, team …). */
+/** A select inside a pill (customer, site, team …): closes the pill after a pick. */
 export function FilterSelect(props: SelectProps) {
-  return <Select {...props} className={cn('w-full h-8 py-0 text-[13px]', props.className)} />;
-}
-
-/** From / to dates for the rail. */
-export function FilterDateRange({ from, to, onChange }: { from?: string; to?: string; onChange: (next: { from?: string; to?: string }) => void }) {
+  const pill = usePill();
+  const v = props.value == null ? '' : String(props.value);
+  const label = v ? textOf(props.options?.find((o) => o.value === v)?.label, v) : '';
+  useEffect(() => {
+    pill?.report(v ? { label, count: 1 } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v, label]);
   return (
-    <div className="grid grid-cols-2 gap-1.5">
-      <input type="date" value={from ?? ''} onChange={(e) => onChange({ from: e.target.value || undefined, to })} className="input h-8 py-0 text-[12.5px]" aria-label="From date" />
-      <input type="date" value={to ?? ''} onChange={(e) => onChange({ from, to: e.target.value || undefined })} className="input h-8 py-0 text-[12.5px]" aria-label="To date" />
+    <div className="p-1 flex flex-col gap-1.5">
+      <Select
+        {...props}
+        className={cn('w-full h-8 py-0 text-[13px]', props.className)}
+        onChange={(e) => {
+          props.onChange?.(e);
+          pill?.close();
+        }}
+      />
+      {v && (
+        <button type="button" onClick={() => props.onChange?.({ target: { value: '' } } as ChangeEvent<HTMLSelectElement>)} className="self-start px-1 h-6 text-[12px] text-muted hover:text-default">
+          Clear
+        </button>
+      )}
     </div>
   );
 }
 
-/** A yes/no row for the rail ("Only unassigned", "Include retired"). */
-export function FilterToggle({ label, checked, onChange, hint }: { label: ReactNode; checked: boolean; onChange: (v: boolean) => void; hint?: ReactNode }) {
+/** From / to dates inside a pill. */
+export function FilterDateRange({ from, to, onChange }: { from?: string; to?: string; onChange: (next: { from?: string; to?: string }) => void }) {
+  const pill = usePill();
+  useEffect(() => {
+    pill?.report(from || to ? { label: `${from ?? '…'} → ${to ?? '…'}`, count: 1 } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
   return (
-    <button type="button" onClick={() => onChange(!checked)} role="switch" aria-checked={checked} className="flex items-center gap-2 rounded-md px-2 h-7 text-[12.5px] text-left text-muted hover:text-default hover:bg-white/70 transition-colors" title={typeof hint === 'string' ? hint : undefined}>
-      <span className={cn('relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0', checked ? 'bg-brand-600' : 'bg-surface-3 border border-strong')}>
-        <span className={cn('inline-block h-3 w-3 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-3.5' : 'translate-x-0.5')} />
-      </span>
-      <span className="truncate">{label}</span>
-    </button>
+    <div className="p-1 flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-1.5">
+        <label className="flex flex-col gap-1 text-[11.5px] text-subtle">
+          From
+          <input type="date" value={from ?? ''} onChange={(e) => onChange({ from: e.target.value || undefined, to })} className="input h-8 py-0 text-[12.5px]" aria-label="From date" />
+        </label>
+        <label className="flex flex-col gap-1 text-[11.5px] text-subtle">
+          To
+          <input type="date" value={to ?? ''} onChange={(e) => onChange({ from, to: e.target.value || undefined })} className="input h-8 py-0 text-[12.5px]" aria-label="To date" />
+        </label>
+      </div>
+      {(from || to) && (
+        <button type="button" onClick={() => onChange({ from: undefined, to: undefined })} className="self-start px-1 h-6 text-[12px] text-muted hover:text-default">
+          Clear
+        </button>
+      )}
+    </div>
   );
 }
 
-/** Small helper for pages: the rail's "search" icon state when the rail is hidden. */
-export const SearchIcon = Search;
+/** A yes/no row inside a pill ("Only unassigned", "Include retired"). */
+export function FilterToggle({ label, checked, onChange, hint }: { label: ReactNode; checked: boolean; onChange: (v: boolean) => void; hint?: ReactNode }) {
+  const pill = usePill();
+  const text = textOf(label, 'On');
+  useEffect(() => {
+    pill?.report(checked ? { label: text, count: 1 } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checked, text]);
+  return (
+    <button type="button" onClick={() => onChange(!checked)} role="switch" aria-checked={checked} className="flex items-center gap-2 rounded-md px-2 h-8 w-full text-[12.5px] text-left text-secondary hover:text-default hover:bg-surface-2 transition-colors" title={typeof hint === 'string' ? hint : undefined}>
+      <span className={cn('relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0', checked ? 'bg-brand-600' : 'bg-surface-3 border border-strong')}>
+        <span className={cn('inline-block h-3 w-3 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-3.5' : 'translate-x-0.5')} />
+      </span>
+      <span className="truncate flex-1">{label}</span>
+    </button>
+  );
+}

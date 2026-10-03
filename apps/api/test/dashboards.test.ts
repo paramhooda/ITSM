@@ -153,11 +153,11 @@ describe('dashboards', () => {
     expect(d.sla30d.compliancePct === null || typeof d.sla30d.compliancePct === 'number').toBe(true);
   });
 
-  it('engineer(): my resolved-per-day series over 14 days and the queue by priority', async () => {
+  it('engineer(): my resolved-per-day series over the default 30 days and the queue by priority', async () => {
     const d = await asAdmin((ctx) => engineer(ctx));
-    expect(d.period).toEqual({ days: 14, from: addDays(today, -13), to: today });
-    expect(d.series).toHaveLength(14);
-    expect(d.series[0]?.day).toBe(addDays(today, -13));
+    expect(d.period).toEqual({ days: 30, from: addDays(today, -29), to: today });
+    expect(d.series).toHaveLength(30);
+    expect(d.series[0]?.day).toBe(addDays(today, -29));
     expect(d.series.at(-1)?.day).toBe(today);
     // The AMC ticket assigned to the admin was resolved today.
     expect(d.series.at(-1)!.resolved).toBeGreaterThanOrEqual(1);

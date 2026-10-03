@@ -30,8 +30,8 @@ interface Engineer {
   watched: TicketRow[];
 }
 
-export function EngineerDashboard() {
-  const q = useQuery({ queryKey: ['dashboards', 'engineer'], queryFn: () => get<Engineer>('/dashboards/engineer'), refetchInterval: 120_000, placeholderData: (p) => p });
+export function EngineerDashboard({ days = 30 }: { days?: number }) {
+  const q = useQuery({ queryKey: ['dashboards', 'engineer', days], queryFn: () => get<Engineer>('/dashboards/engineer', { days }), refetchInterval: 120_000, placeholderData: (p) => p });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
   if (!d)
@@ -80,7 +80,7 @@ export function EngineerDashboard() {
         </Panel>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="Resolved by me" subtitle="Tickets you resolved per day, last 14 days" className="xl:col-span-2" to="/tickets?mine=true&statusCategory=resolved" toLabel="Resolved tickets">
+        <Panel title="Resolved by me" subtitle={`Tickets you resolved per day, last ${days} days`} className="xl:col-span-2" to="/tickets?mine=true&statusCategory=resolved" toLabel="Resolved tickets">
           <TrendChart data={resolvedFlow} x="day" kind="bar" series={[{ key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={160} />
         </Panel>
         <Panel title="My queue by priority" subtitle="Open tickets assigned to you" to="/tickets?mine=true&open=true">

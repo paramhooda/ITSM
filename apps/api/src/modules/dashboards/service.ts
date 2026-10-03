@@ -138,8 +138,12 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
 
 // ---------------------------------------------------------------- NOC
 
-export async function noc(ctx: Ctx) {
+/** Period selector shared by every dashboard: 7, 30 or 90 days from the UI, anything sane from the API. */
+const clampDays = (d?: number | null) => Math.min(365, Math.max(1, Math.round(d ?? 30)));
+
+export async function noc(ctx: Ctx, opts: { days?: number } = {}) {
   ctx.require('dashboards:noc');
+  const days = clampDays(opts.days);
   const base = sql`t.domain <> 'soc'`;
   const openIncidents = await q<Row>(ctx, sql`
     SELECT pr.id, coalesce(pr.label, 'No priority') AS label, pr.key, pr.color, coalesce(pr.level, 99) AS level, count(*)::int AS count, count(*) FILTER (WHERE ${BREACHED})::int AS breached
@@ -180,9 +184,11 @@ export async function noc(ctx: Ctx) {
     WHERE m.status = 'active' ORDER BY m.declared_at DESC LIMIT 10`);
   const order = ['< 4h', '4-24h', '1-3d', '> 3d'];
   const sparkTo = toDay(new Date());
-  const spark = await dailySeries(ctx, addDays(sparkTo, -13), sparkTo, null);
+  const sparkFrom = addDays(sparkTo, -(days - 1));
+  const spark = await dailySeries(ctx, sparkFrom, sparkTo, null);
   return {
     generatedAt: new Date(),
+    period: { days, from: sparkFrom, to: sparkTo },
     majorIncidents: majorIncidents.map((r) => ({ id: String(r.id), number: String(r.number), title: String(r.title), customerName: String(r.customer_name), declaredAt: r.declared_at, lastUpdateAt: r.last_update_at ?? null, nextUpdateDueAt: r.next_update_due_at ?? null, bridgeUrl: r.bridge_url ?? null, commander: r.commander ?? null, overdue: !!r.overdue, children: num(r.children) })),
     series: spark.map((d) => ({ day: d.day, opened: num(d.opened), incidents: num(d.incidentsOpened), security: num(d.securityOpened), resolved: num(d.resolved), breaches: num(d.slaBreached) })),
     totals: { open: num(totals.open), openIncidents: num(totals.open_incidents), breached: num(totals.breached), atRisk: num(totals.at_risk), unassigned: num(totals.unassigned), major: num(totals.major), escalated: num(totals.escalated), openedToday: num(totals.opened_today), resolvedToday: num(resolvedToday.n), mttrTodayMinutes: resolvedToday.mttr === null || resolvedToday.mttr === undefined ? null : num(resolvedToday.mttr) },
@@ -200,9 +206,10 @@ export async function noc(ctx: Ctx) {
 
 // ---------------------------------------------------------------- SOC
 
-export async function soc(ctx: Ctx) {
+export async function soc(ctx: Ctx, opts: { days?: number } = {}) {
   ctx.require('dashboards:soc');
   ctx.require('soc:read');
+  const days = clampDays(opts.days);
   const base = sql`t.domain = 'soc'`;
   const totals = await one<Row>(ctx, sql`
     SELECT count(*)::int AS open, count(*) FILTER (WHERE ${BREACHED})::int AS breached, count(*) FILTER (WHERE ${AT_RISK})::int AS at_risk, count(*) FILTER (WHERE t.escalation_level > 0)::int AS escalated,
@@ -229,15 +236,15 @@ export async function soc(ctx: Ctx) {
   const recent = await q<Row>(ctx, sql`SELECT ${TICKET_LIST_COLS}, sev.label AS severity, sev.color AS severity_color FROM tickets t ${TICKET_LIST_JOINS} LEFT JOIN config_options sev ON sev.id = t.security_severity_id WHERE ${base} ORDER BY t.created_at DESC LIMIT 20`);
   const mttr = await one<Row>(ctx, sql`
     SELECT count(*)::int AS resolved, round((avg(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 60))::numeric)::int AS mttr, round((avg(EXTRACT(EPOCH FROM (t.first_response_at - t.created_at)) / 60))::numeric)::int AS response,
-      (SELECT count(*)::int FROM tickets t2 WHERE t2.domain = 'soc' AND t2.created_at >= now() - interval '30 days') AS opened_30d
-    FROM tickets t WHERE ${base} AND t.resolved_at >= now() - interval '30 days'`);
+      (SELECT count(*)::int FROM tickets t2 WHERE t2.domain = 'soc' AND t2.created_at >= now() - (${days} || ' days')::interval) AS opened_30d
+    FROM tickets t WHERE ${base} AND t.resolved_at >= now() - (${days} || ' days')::interval`);
   const today = toDay(new Date());
-  const from30 = addDays(today, -29);
-  // Security-domain ticket flow for the last 30 days: the trend chart reads it in full, the KPI sparklines its tail.
+  const from30 = addDays(today, -(days - 1));
+  // Security-domain ticket flow for the period: the trend chart reads it in full, the KPI sparklines its tail.
   const series = await ticketFlowSeries(ctx, from30, today, sql`AND ${base}`);
   return {
     generatedAt: new Date(),
-    period: { days: 30, from: from30, to: today },
+    period: { days, from: from30, to: today },
     series,
     totals: { open: num(totals.open), breached: num(totals.breached), atRisk: num(totals.at_risk), escalated: num(totals.escalated), unassigned: num(totals.unassigned), openedToday: num(totals.opened_today), criticalHigh: num(totals.critical_high) },
     bySeverity,
@@ -253,8 +260,9 @@ export async function soc(ctx: Ctx) {
 
 // ---------------------------------------------------------------- engineer (my work)
 
-export async function engineer(ctx: Ctx) {
+export async function engineer(ctx: Ctx, opts: { days?: number } = {}) {
   if (isCustomerUser(ctx)) throw new ForbiddenError('The engineer dashboard is available to MSP users');
+  const days = clampDays(opts.days);
   const me = ctx.user.id;
   const teamIds = ctx.user.teams.map((t) => t.id);
   const soc = socCond(ctx);
@@ -299,12 +307,12 @@ export async function engineer(ctx: Ctx) {
     SELECT ${TICKET_LIST_COLS} FROM ticket_watchers w JOIN tickets t ON t.id = w.ticket_id ${TICKET_LIST_JOINS}
     WHERE w.user_id = ${me}::uuid AND t.last_activity_at >= now() - interval '24 hours' ${soc} ORDER BY t.last_activity_at DESC LIMIT 10`);
   const today = toDay(new Date());
-  const from14 = addDays(today, -13);
+  const from14 = addDays(today, -(days - 1));
   const flow = await ticketFlowSeries(ctx, from14, today, sql`AND t.assignee_id = ${me}::uuid ${soc}`);
   return {
     generatedAt: new Date(),
-    period: { days: 14, from: from14, to: today },
-    /** Tickets assigned to me resolved per day, last 14 days. */
+    period: { days, from: from14, to: today },
+    /** Tickets assigned to me resolved per day over the period. */
     series: flow.map((d) => ({ day: d.day, resolved: d.resolved })),
     assigned: { total: mine.length, byPriority: [...byPriority.values()].sort((a, b) => a.level - b.level), breached: mine.filter((t) => t.sla?.breached).length, items: mine.slice(0, 25), dueSoon },
     teamQueues,
@@ -318,7 +326,8 @@ export async function engineer(ctx: Ctx) {
 
 // ---------------------------------------------------------------- customer
 
-export async function customer(ctx: Ctx, opts: { customerId?: string | null } = {}) {
+export async function customer(ctx: Ctx, opts: { customerId?: string | null; days?: number } = {}) {
+  const days = clampDays(opts.days);
   let customerId: string;
   if (isCustomerUser(ctx)) {
     if (!ctx.can('portal:access', ctx.user.customerId)) throw new ForbiddenError('Missing permission: portal:access');
@@ -337,14 +346,16 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null } = 
   const byType = await q<Row>(ctx, sql`SELECT t.type, count(*)::int AS count FROM tickets t WHERE ${cust} AND ${openCond()} GROUP BY 1`);
   const counts = await one<Row>(ctx, sql`
     SELECT count(*) FILTER (WHERE ${openCond()})::int AS open, count(*) FILTER (WHERE ${openCond()} AND st.key = 'pending_customer')::int AS awaiting_reply, count(*) FILTER (WHERE ${openCond()} AND st.key = 'awaiting_approval')::int AS awaiting_approval,
-      count(*) FILTER (WHERE t.resolved_at >= now() - interval '30 days')::int AS resolved_30d, count(*) FILTER (WHERE t.created_at >= now() - interval '30 days')::int AS opened_30d, count(*) FILTER (WHERE ${openCond()} AND t.is_major)::int AS major_open
-    FROM tickets t JOIN config_options st ON st.id = t.status_id WHERE ${cust} AND (${openCond()} OR t.created_at >= now() - interval '30 days' OR t.resolved_at >= now() - interval '30 days')`);
+      count(*) FILTER (WHERE t.resolved_at >= now() - (${days} || ' days')::interval)::int AS resolved_30d, count(*) FILTER (WHERE t.created_at >= now() - (${days} || ' days')::interval)::int AS opened_30d, count(*) FILTER (WHERE ${openCond()} AND t.is_major)::int AS major_open
+    FROM tickets t JOIN config_options st ON st.id = t.status_id WHERE ${cust} AND (${openCond()} OR t.created_at >= now() - (${days} || ' days')::interval OR t.resolved_at >= now() - (${days} || ' days')::interval)`);
   const now = new Date();
   const d30 = new Date(now.getTime() - 30 * 86_400_000).toISOString();
   const d90 = new Date(now.getTime() - 90 * 86_400_000).toISOString();
+  const dPeriod = new Date(now.getTime() - days * 86_400_000).toISOString();
   const [sla30, sla90] = [await slaCompliance(ctx, { customerId, from: d30, groupBy: 'priority' }), await slaCompliance(ctx, { customerId, from: d90, groupBy: 'priority' })];
+  const slaPeriod = days === 30 ? sla30 : days === 90 ? sla90 : await slaCompliance(ctx, { customerId, from: dPeriod, groupBy: 'priority' });
   const today = toDay(now);
-  const from30 = addDays(today, -29);
+  const from30 = addDays(today, -(days - 1));
   const series = await dailySeries(ctx, from30, today, customerId);
   const contracts = await q<Row>(ctx, sql`
     SELECT c.id, c.number, c.name, c.status, c.start_date, c.end_date, (c.end_date - current_date)::int AS days_to_expiry, c.auto_renew, ty.label AS type,
@@ -368,8 +379,8 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null } = 
   return {
     generatedAt: now,
     customer: info ? { id: info.id, name: info.name, code: info.code, timezone: info.timezone } : { id: customerId, name: '', code: '', timezone: 'UTC' },
-    period: { days: 30, from: from30, to: today },
-    /** Tickets opened and resolved per day for this customer, last 30 days. */
+    period: { days, from: from30, to: today },
+    /** Tickets opened and resolved per day for this customer over the period. */
     series: series.map((d) => ({ day: d.day, opened: num(d.opened), resolved: num(d.resolved) })),
     tickets: {
       open: openTotal,
@@ -382,7 +393,7 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null } = 
       opened30d: num(counts.opened_30d),
       majorOpen: num(counts.major_open),
     },
-    sla: { days30: { totals: sla30.totals, groups: sla30.groups }, days90: { totals: sla90.totals, groups: sla90.groups } },
+    sla: { period: { days, totals: slaPeriod.totals, groups: slaPeriod.groups }, days30: { totals: sla30.totals, groups: sla30.groups }, days90: { totals: sla90.totals, groups: sla90.groups } },
     contracts,
     entitlements,
     upcomingMaintenance: maintenance,
@@ -425,8 +436,9 @@ export async function trends(ctx: Ctx, opts: { customerId?: string | null; from?
 
 // ---------------------------------------------------------------- AMC / field service (ticket management view)
 
-export async function amc(ctx: Ctx) {
+export async function amc(ctx: Ctx, opts: { days?: number } = {}) {
   ctx.require('dashboards:amc');
+  const days = clampDays(opts.days);
   const base = sql`t.domain = 'amc'`;
   const totals = await one<Row>(ctx, sql`
     SELECT count(*)::int AS open, count(*) FILTER (WHERE t.assignee_id IS NULL)::int AS unassigned, count(*) FILTER (WHERE ${BREACHED})::int AS breached,
@@ -455,8 +467,8 @@ export async function amc(ctx: Ctx) {
   const ents = ctx.can('contracts:read') ? await entitlementSummary(ctx, undefined, 500) : { total: 0, overThreshold: 0, exhausted: 0, items: [] };
   const entitlements = ents.items.filter((i) => (i.unit === 'visits' || i.unit === 'hours') && (i.utilization.pct >= 80 || i.utilization.exhausted)).slice(0, 6);
   const today = toDay(new Date());
-  const from30 = addDays(today, -29);
-  const days = await dailySeries(ctx, from30, today, null);
+  const from30 = addDays(today, -(days - 1));
+  const daily = await dailySeries(ctx, from30, today, null);
   // Pipeline health: visits and PM occurrences due in the last 30 and next 30 days, by status (fixed lifecycle order).
   const visitRows = await q<Row>(ctx, sql`SELECT v.status, count(*)::int AS count FROM field_visits v WHERE coalesce(v.scheduled_start, v.created_at) >= current_date - 30 AND coalesce(v.scheduled_start, v.created_at) < current_date + 31 GROUP BY 1`);
   const pmRows = await q<Row>(ctx, sql`SELECT o.status, count(*)::int AS count FROM pm_occurrences o WHERE coalesce(o.scheduled_date, o.planned_date) BETWEEN current_date - 30 AND current_date + 30 GROUP BY 1`);
@@ -467,9 +479,9 @@ export async function amc(ctx: Ctx) {
     FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.metric = 'resolution' AND ${base} AND t.created_at >= ${from30}::date`);
   return {
     generatedAt: new Date(),
-    period: { days: 30, from: from30, to: today },
-    /** Site visits and PM occurrences completed per day, last 30 days. */
-    series: days.map((d) => ({ day: d.day, visitsCompleted: num(d.visitsCompleted), pmCompleted: num(d.pmCompleted) })),
+    period: { days, from: from30, to: today },
+    /** Site visits and PM occurrences completed per day over the period. */
+    series: daily.map((d) => ({ day: d.day, visitsCompleted: num(d.visitsCompleted), pmCompleted: num(d.pmCompleted) })),
     visitsByStatus: byStatus(visitRows, ['requested', 'scheduled', 'in_progress', 'completed', 'cancelled']),
     pmByStatus: byStatus(pmRows, ['planned', 'scheduled', 'rescheduled', 'completed', 'missed', 'cancelled']),
     sla30d: { met: num(sla.met), breached: num(sla.breached), compliancePct: pct(num(sla.met), num(sla.met) + num(sla.breached)) },
