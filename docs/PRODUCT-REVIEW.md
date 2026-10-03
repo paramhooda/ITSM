@@ -37,7 +37,6 @@ The inventory was taken from the code (routes, navigator, API modules, schema, p
 | Change calendar with conflict and blackout-window checks, CAB meeting with agenda and decisions, standard (pre-approved) change catalog, risk questionnaire that scores risk | Change today is a record with free-text CAB notes; the calendar exists only as a report | P1 | M |
 | Known error database view for the desk and the portal (problem workarounds searchable) | Problem records carry workarounds but nothing surfaces them | P2 | S |
 | Ticket templates and quick-create for common incidents | Request catalog covers requests; incidents have none | P2 | S |
-| On-call schedules and rota-based escalation | Escalation rules notify roles and teams, not whoever is on call | P2 | M |
 | Notification channels beyond email, in-app and WhatsApp: SMS, Microsoft Teams, Slack, push | WhatsApp shipped with a provider interface the others plug into | P3 | M |
 | Announcements and outage banners for staff and portal | Employee Center's most used widget | P2 | S |
 | Visual task boards for engineers and shift handover notes | Common in modern desks | P3 | M |
@@ -93,8 +92,8 @@ Note: financial depreciation and contract value tracking were removed by request
 
 ## Suggested order
 
-1. **Shipped since this review**: the staff approvals inbox with sequential steps, WhatsApp notifications (one business account, personal opt-in), the major incident workflow (declare or demote, bridge and roles, stakeholder updates on a cadence with reminders, child incidents, post-incident review, portal banner, Operations list and NOC tile).
-2. **Now**: on-call schedules and paging, CSAT survey, inbound email, SSO.
+1. **Shipped since this review**: the staff approvals inbox with sequential steps, WhatsApp notifications (one business account, personal opt-in), the major incident workflow (declare or demote, bridge and roles, stakeholder updates on a cadence with reminders, child incidents, post-incident review, portal banner, Operations list and NOC tile), on-call schedules and paging (rotas with handoffs and windows, cover, escalation policies with timed steps, pages from tickets, rules and Grady, one-tap acknowledgement, the Operations page and dashboard panel).
+2. **Now**: CSAT survey, inbound email, SSO.
 3. **Next**: change calendar with conflicts and CAB, announcements and service health page, PDF reports, Teams and SMS channels, portal preview.
 4. **Later**: software asset management, stockroom, more adapters, custom report builder.
 

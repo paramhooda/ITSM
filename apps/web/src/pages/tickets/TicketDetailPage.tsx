@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone, Undo2 } from 'lucide-react';
+import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone, Undo2, BellRing } from 'lucide-react';
 import { Button, Badge, LoadingBlock, ErrorBlock, Textarea, Select, Input, Avatar } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
 import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
@@ -30,6 +30,9 @@ import { MajorIncidentPanel } from '@/components/tickets/detail/MajorIncidentPan
 import { TicketDetailsRail, TicketAssistRail } from '@/components/tickets/detail/TicketRail';
 import { ResolveDialog, CommentDialog, ScopeDialog } from '@/components/tickets/detail/ActionDialogs';
 import { SlaCard } from '@/components/tickets/SlaCard';
+import { PageDialog } from '@/components/oncall/PageDialog';
+import { PagesPanel } from '@/components/oncall/PagesPanel';
+import { oncallApi, oncallKeys } from '@/components/oncall/api';
 import { LINK_TYPE_LABELS, type TicketDetail, type CatalogField, type LinkedTicket } from '@/components/tickets/types';
 
 /** In-place select for a form field (ServiceNow edits on the form, not in a dialog). */
@@ -76,6 +79,7 @@ export default function TicketDetailPage() {
 
   const ticketQ = useQuery({ queryKey: qk.detail(id), queryFn: () => ticketsApi.get(id), enabled: !!id, refetchInterval: 60_000 });
   const timelineQ = useQuery({ queryKey: qk.timeline(id), queryFn: () => ticketsApi.timeline(id), enabled: !!id, refetchInterval: 60_000 });
+  const pagesQ = useQuery({ queryKey: oncallKeys.pages({ ticketId: id, limit: 20 }), queryFn: () => oncallApi.pages({ ticketId: id, limit: 20 }), enabled: !!id && !isCustomer, refetchInterval: 60_000 });
   const ticket = ticketQ.data;
 
   useEffect(() => {
@@ -130,7 +134,7 @@ export default function TicketDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const [dialog, setDialog] = useState<null | 'resolve' | 'close' | 'reopen' | 'cancel' | 'escalate' | 'scope' | 'major-declare' | 'major-demote'>(null);
+  const [dialog, setDialog] = useState<null | 'resolve' | 'close' | 'reopen' | 'cancel' | 'escalate' | 'scope' | 'major-declare' | 'major-demote' | 'page'>(null);
   const [editDesc, setEditDesc] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
   const entries = useMemo(() => (timelineQ.data?.items ?? []).map(fromTimeline), [timelineQ.data]);
@@ -181,6 +185,7 @@ export default function TicketDetailPage() {
     ...(p.major && !ticket.isMajor && isOpen ? [{ label: 'Declare major incident…', icon: <Flame className="h-4 w-4" />, onClick: () => setDialog('major-declare') }] : []),
     ...(p.major && ticket.isMajor ? [{ label: 'Not a major incident…', icon: <Undo2 className="h-4 w-4" />, onClick: () => setDialog('major-demote') }] : []),
     ...(p.escalate && isOpen ? [{ label: `Escalate to level ${ticket.escalationLevel + 1}`, icon: <ArrowUpRight className="h-4 w-4" />, onClick: () => setDialog('escalate') }] : []),
+    ...(p.escalate && isOpen && !isCustomer ? [{ label: 'Page on-call…', icon: <BellRing className="h-4 w-4" />, onClick: () => setDialog('page') }] : []),
     ...(p.watch ? [{ label: ticket.isWatching ? 'Stop watching' : 'Watch this ticket', icon: ticket.isWatching ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />, onClick: () => watch.mutate(ticket.isWatching) }] : []),
     ...(p.update && !isCustomer ? [{ label: 'Classify scope…', icon: <Pencil className="h-4 w-4" />, onClick: () => setDialog('scope') }] : []),
     ...(p.cancel && isOpen ? [{ label: 'Cancel ticket', icon: <Ban className="h-4 w-4" />, onClick: () => setDialog('cancel'), danger: true }] : []),
@@ -352,6 +357,7 @@ export default function TicketDetailPage() {
     { key: 'sla', label: 'SLA targets', count: ticket.slas.length, content: <SlaCard slas={ticket.slas} policyName={ticket.slaPolicy?.name} /> },
     { key: 'time', label: 'Time worked', hidden: isCustomer, content: <TimeEntriesPanel ticketId={ticket.id} contractId={ticket.contractId} canEdit={p.time} /> },
     { key: 'related', label: 'Linked tickets', count: ticket.links.length + (ticket.parent ? 1 : 0), hidden: isCustomer, content: <LinksPanel ticket={ticket} links={ticket.links} canEdit={p.links} /> },
+    { key: 'pages', label: 'Paging', count: (pagesQ.data?.items ?? []).filter((x) => x.status === 'pending').length, hidden: isCustomer || !(pagesQ.data?.items.length), content: <div className="card"><PagesPanel ticketId={ticket.id} canAct={p.escalate} /></div> },
   ];
 
   return (
@@ -409,6 +415,7 @@ export default function TicketDetailPage() {
       <CommentDialog open={dialog === 'major-declare'} onClose={() => setDialog(null)} title={`Declare ${ticket.number} a major incident`} confirmLabel="Declare major incident" danger busy={declareMajor.isPending} label="Why is this a major incident? (sent to the response team)" onSubmit={(v) => declareMajor.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'major-demote'} onClose={() => setDialog(null)} title={`${ticket.number} is not a major incident`} confirmLabel="Demote" busy={demoteMajor.isPending} label="Reason" required onSubmit={(v) => demoteMajor.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
       <ScopeDialog open={dialog === 'scope'} onClose={() => setDialog(null)} ticket={ticket} busy={scope.isPending} onSubmit={(v) => scope.mutateAsync(v).then(() => setDialog(null))} />
+      {!isCustomer && <PageDialog open={dialog === 'page'} onClose={() => setDialog(null)} ticketId={ticket.id} ticketNumber={ticket.number} teamId={ticket.assignedTeamId} onPaged={invalidate} />}
     </>
   );
 }

@@ -29,6 +29,8 @@ export interface NotificationInput {
   entityType?: string;
   entityId?: string;
   link?: string;
+  /** The link the WhatsApp message carries when it should differ from `link` (for example a one-tap acknowledgement URL). */
+  whatsappLink?: string;
   /** Override title/body for in-app notifications (defaults derived from the template subject). */
   title?: string;
   body?: string;
@@ -80,7 +82,8 @@ export async function queueNotification(tx: Tx, input: NotificationInput) {
           logger.warn({ err, event: input.event }, 'whatsapp template render failed');
         }
       }
-      const link = input.link ? (input.link.startsWith('http') ? input.link : `${config.APP_URL.replace(/\/$/, '')}${input.link}`) : config.APP_URL;
+      const raw = input.whatsappLink ?? input.link;
+      const link = raw ? (raw.startsWith('http') ? raw : `${config.APP_URL.replace(/\/$/, '')}${raw}`) : config.APP_URL;
       whatsapp = { settings, subject: waSubject, text, link };
     }
   }

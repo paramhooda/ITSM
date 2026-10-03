@@ -12,6 +12,7 @@ import { BreakdownBar } from './BreakdownBar';
 import { TicketMiniTable } from './TicketMiniTable';
 import { WorkloadList, type WorkloadItem } from './WorkloadList';
 import { Panel, KpiSkeleton, Stat, Updated, Segmented } from './Panel';
+import { OnCallPanel, type OnCallSummaryTeam } from './OnCallPanel';
 import type { TicketRow, Breakdown } from './types';
 
 interface Noc {
@@ -28,6 +29,7 @@ interface Noc {
   aging: { bucket: string; count: number }[];
   series: { day: string; opened: number; incidents: number; security: number; resolved: number; breaches: number }[];
   majorIncidents: { id: string; number: string; title: string; customerName: string; declaredAt: string; lastUpdateAt: string | null; nextUpdateDueAt: string | null; bridgeUrl: string | null; commander: string | null; overdue: boolean; children: number }[];
+  onCall?: OnCallSummaryTeam[];
 }
 
 /** Active major incidents: who commands them and whether the stakeholders are owed an update. */
@@ -94,7 +96,10 @@ export function NocDashboard({ days = 30, customerId = '' }: { days?: number; cu
           { label: 'Unassigned', value: fmtNumber(t.unassigned), icon: <UserX className="h-4 w-4" />, tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', to: '/tickets?open=true&unassigned=true' },
         ]}
       />
-      {(d.majorIncidents?.length ?? 0) > 0 && <MajorIncidentsPanel items={d.majorIncidents} />}
+      <div className={cn('grid grid-cols-1 gap-6', (d.majorIncidents?.length ?? 0) > 0 && 'xl:grid-cols-2')}>
+        {(d.majorIncidents?.length ?? 0) > 0 && <MajorIncidentsPanel items={d.majorIncidents} />}
+        <OnCallPanel items={d.onCall ?? []} />
+      </div>
       <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" to="/tickets?open=true&priorityId=&type=incident" toLabel="All incidents" padded={false} action={<Segmented size="sm" options={[{ value: 'all', label: 'All' }, { value: 'p1', label: 'P1' }, { value: 'major', label: 'Major' }]} value={criticalView} onChange={setCriticalView} />}>
         <div className="px-5">
           <TicketMiniTable rows={criticalRows} max={8} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee']} empty="No P1/P2 or major incidents open" />

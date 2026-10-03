@@ -54,7 +54,10 @@ export const MSP_NAV: NavItem[] = [
     tint: 'text-red-600',
     perm: ['tickets:read'],
     area: 'operations',
-    children: [{ to: '/operations/major-incidents', label: 'Major incidents' }],
+    children: [
+      { to: '/operations/major-incidents', label: 'Major incidents' },
+      { to: '/operations/on-call', label: 'On-call', perm: ['oncall:read'] },
+    ],
   },
   {
     to: '/customers',

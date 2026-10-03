@@ -18,6 +18,8 @@ export interface RecipientFlags {
   customerContacts?: boolean;
   approvers?: boolean;
   accountManager?: boolean;
+  /** Whoever the assigned team's rotas put on call right now. */
+  onCall?: boolean;
   roles?: string[];
   users?: string[];
   emails?: string[];
@@ -113,6 +115,10 @@ export async function resolveRecipients(tx: Tx, ticket: TicketRow, flags: Recipi
     const [t] = await tx.select({ managerUserId: schema.teams.managerUserId }).from(schema.teams).where(eq(schema.teams.id, ticket.assignedTeamId)).limit(1);
     if (t?.managerUserId) userIds.add(t.managerUserId);
   }
+  if (flags.onCall && ticket.assignedTeamId) {
+    const { onCallUserIds } = await import('@/modules/oncall/service');
+    (await onCallUserIds(tx, ticket.assignedTeamId)).forEach((id) => userIds.add(id));
+  }
   if (flags.accountManager) {
     const [c] = await tx.select({ accountManagerId: schema.customers.accountManagerId }).from(schema.customers).where(eq(schema.customers.id, ticket.customerId)).limit(1);
     if (c?.accountManagerId) userIds.add(c.accountManagerId);
@@ -204,7 +210,7 @@ export async function notifyTicketEvent(ctx: Ctx, event: NotificationEvent, tick
     } else {
       for (const r of rules) {
         const f = (r.recipients ?? {}) as RecipientFlags;
-        for (const k of ['requester', 'assignee', 'team', 'watchers', 'manager', 'customerContacts', 'approvers', 'accountManager'] as const) if (f[k]) flags[k] = true;
+        for (const k of ['requester', 'assignee', 'team', 'watchers', 'manager', 'customerContacts', 'approvers', 'accountManager', 'onCall'] as const) if (f[k]) flags[k] = true;
         flags.roles = [...(flags.roles ?? []), ...(f.roles ?? [])];
         flags.users = [...(flags.users ?? []), ...(f.users ?? [])];
         flags.emails = [...(flags.emails ?? []), ...(f.emails ?? [])];
@@ -246,8 +252,8 @@ export async function notifyTicketEvent(ctx: Ctx, event: NotificationEvent, tick
 }
 
 /** Helper for escalation rule actions: resolves team manager / roles / users into recipients. */
-export async function escalationRecipients(tx: Tx, ticket: TicketRow, opts: { assignee?: boolean; team?: boolean; manager?: boolean; roles?: string[]; userIds?: string[]; emails?: string[] }): Promise<Recipient[]> {
-  const { msp, portal } = await resolveRecipients(tx, ticket, { assignee: opts.assignee, team: opts.team, manager: opts.manager, roles: opts.roles, users: opts.userIds, emails: opts.emails });
+export async function escalationRecipients(tx: Tx, ticket: TicketRow, opts: { assignee?: boolean; team?: boolean; manager?: boolean; onCall?: boolean; roles?: string[]; userIds?: string[]; emails?: string[] }): Promise<Recipient[]> {
+  const { msp, portal } = await resolveRecipients(tx, ticket, { assignee: opts.assignee, team: opts.team, manager: opts.manager, onCall: opts.onCall, roles: opts.roles, users: opts.userIds, emails: opts.emails });
   return [...msp, ...portal];
 }
 

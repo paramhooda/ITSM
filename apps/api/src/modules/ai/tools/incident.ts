@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { listMajor, getMajor, declareMajor, demoteMajor, updateMajor, postMajorUpdate, addChild, type MajorPatch } from '@/modules/tickets/major';
 import { define, type PreviewDetail } from './types';
 import { ticketRef } from './core';
-import { ticketLink, iso, trunc, resolveTicket, resolveCustomerId, resolveEngineer } from '../helpers';
+import { ticketLink, iso, trunc, resolveTicket, resolveCustomerId, resolveEngineer, resolveTeam } from '../helpers';
+import { onCallNow, listPolicies } from '@/modules/oncall/service';
+import { pageTicket, listPages } from '@/modules/oncall/paging';
 
 /** Major incident tools: the bridge, the commander, stakeholder updates (outbound) and the post-incident review. */
 
@@ -210,6 +212,71 @@ export const INCIDENT: ReturnType<typeof define>[] = [
     },
   }),
 ];
+
+/** Picks an escalation policy by name or id (exact name first), or null when none is given. */
+async function resolvePolicy(ctx: Parameters<typeof listPolicies>[0], ref?: string | null) {
+  const r = ref?.trim();
+  if (!r) return null;
+  const all = await listPolicies(ctx);
+  const exact = all.filter((p) => p.id === r || p.name.toLowerCase() === r.toLowerCase());
+  const loose = exact.length ? exact : all.filter((p) => p.name.toLowerCase().includes(r.toLowerCase()));
+  if (loose.length === 1) return loose[0]!;
+  if (!loose.length) throw new Error(`No escalation policy matching "${r}"; the policies are: ${all.map((p) => p.name).join(', ') || 'none'}`);
+  throw new Error(`Policy "${r}" is ambiguous: ${loose.map((p) => p.name).join(', ')}`);
+}
+
+INCIDENT.push(
+  define({
+    name: 'who_is_on_call',
+    toolset: 'incident',
+    description: 'Who is on call right now (or at a given time) for a team or for every team with a rota: the person per rota, whether cover (an override) applies, when their cover ends, the team manager and the default escalation policy. Use for "who is on call", "who do I wake for the NOC", "is anyone covering tonight".',
+    inputSchema: z.object({ team: z.string().max(200).optional().describe('Team name or key; omit for every team with a rota'), at: z.string().max(40).optional().describe('ISO date-time; defaults to now') }),
+    requires: ['oncall:read'],
+    portal: null,
+    action: false,
+    run: async (ctx, input) => {
+      const team = await resolveTeam(ctx, input.team);
+      const at = input.at ? new Date(input.at) : new Date();
+      if (Number.isNaN(at.getTime())) throw new Error('The time must be an ISO date-time');
+      const res = await onCallNow(ctx, { teamId: team?.id ?? null, at });
+      const people = res.teams.flatMap((t) => t.rotas.filter((r) => r.user).map((r) => `${r.user!.name} (${t.name}, ${r.name}${r.override ? ', cover' : ''})`));
+      return {
+        at: iso(at),
+        facts: [`${people.length} person(s) on call${team ? ` for ${team.name}` : ''} at ${iso(at)}: ${people.join('; ') || 'nobody'}`],
+        teams: res.teams.map((t) => ({ team: t.name, type: t.teamType, manager: t.managerName, escalationPolicy: t.escalationPolicyName, rotas: t.rotas.map((r) => ({ rota: r.name, timezone: r.timezone, onCall: r.user ? { name: r.user.name, email: r.user.email, phone: r.user.phone } : null, cover: r.override ? { reason: r.override.reason } : null, until: iso(r.until) })) })),
+        link: '/operations/on-call',
+      };
+    },
+    summary: (input, result) => `Checked who is on call${input.team ? ` for ${input.team}` : ''} (${(result as { teams: unknown[] }).teams.length} team(s))`,
+  }),
+
+  define({
+    name: 'page_on_call',
+    toolset: 'incident',
+    description: 'Page someone for a ticket through an escalation policy: the first step is notified (email, in-app, WhatsApp as the policy says) and the platform escalates step by step until someone acknowledges. Uses the assigned team\'s default policy unless a policy is named. Use only on explicit instruction naming the ticket.',
+    inputSchema: z.object({ ticket: ticketRef, policy: z.string().max(200).optional().describe('Escalation policy name; defaults to the assigned team\'s policy'), reason: z.string().max(500).optional().describe('One line the person reads first') }),
+    requires: ['tickets:escalate'],
+    portal: null,
+    action: true,
+    invalidates: ['tickets'],
+    run: async (ctx, input) => {
+      const t = await resolveTicket(ctx, input.ticket);
+      const policy = await resolvePolicy(ctx, input.policy);
+      const page = await pageTicket(ctx, t.id, { policyId: policy?.id ?? null, reason: input.reason ?? null, source: 'ai' });
+      return { ticket: t.number, pageId: page.id, status: page.status, step: page.step + 1, steps: page.steps, target: page.targetName ?? page.targetTeamName, channels: page.channels, expiresAt: iso(page.expiresAt), link: ticketLink(ctx, t.id) };
+    },
+    summary: (input, result) => `Paged ${(result as { target: string | null }).target ?? 'the team'} for ${input.ticket}`,
+    preview: async (ctx, input) => {
+      const t = await resolveTicket(ctx, input.ticket);
+      const policy = await resolvePolicy(ctx, input.policy);
+      const open = await listPages(ctx, { ticketId: t.id, status: 'open', limit: 1 });
+      if (open.items.length) return `A page is already in progress for ${short(t)} (step ${open.items[0]!.step + 1}, waiting for ${open.items[0]!.targetName ?? 'the team'}); nothing to do`;
+      const first = policy?.steps[0];
+      const who = first ? (first.target === 'oncall' ? 'whoever is on call' : first.target === 'user' ? (first.userName ?? 'a named person') : first.target === 'team' ? 'every member of the team' : 'the team manager') : 'the first step of the team\'s default policy';
+      return `Page ${who} for ${short(t)} through "${policy?.name ?? 'the assigned team\'s default policy'}"${first ? ` by ${first.channels.join(', ')}, escalating after ${first.timeoutMinutes} min without an acknowledgement` : ''}${input.reason ? ` (reason: ${input.reason.slice(0, 120)})` : ''}`;
+    },
+  }),
+);
 
 type MajorInput = { bridgeUrl?: string | null; bridgeNotes?: string | null; commander?: string; commsLead?: string; updateIntervalMinutes?: number; portalBanner?: boolean; status?: 'active' | 'resolved' | 'review_done'; pirWhatHappened?: string; pirImpact?: string; pirRootCause?: string };
 async function majorPatch(ctx: Parameters<typeof resolveEngineer>[0], input: MajorInput): Promise<{ patch: MajorPatch; lines: string[] }> {

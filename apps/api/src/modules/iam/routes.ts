@@ -104,11 +104,11 @@ export default async function routes(app: FastifyInstance) {
   r.get('/iam/teams/directory', { preHandler: app.auth('tickets:read', 'admin:users'), schema: { tags: ['iam'] } }, h((ctx) => svc.teamDirectory(ctx)));
   r.post('/iam/teams', {
     preHandler: app.auth('admin:users'),
-    schema: { tags: ['iam'], body: z.object({ key: z.string().regex(/^[a-z0-9_]+$/).max(64), name: z.string().min(1).max(120), description: z.string().max(500).optional(), teamType: z.string().max(64).optional(), email: z.string().email().optional(), managerUserId: z.string().uuid().nullable().optional() }) },
+    schema: { tags: ['iam'], body: z.object({ key: z.string().regex(/^[a-z0-9_]+$/).max(64), name: z.string().min(1).max(120), description: z.string().max(500).optional(), teamType: z.string().max(64).optional(), email: z.string().email().optional(), managerUserId: z.string().uuid().nullable().optional(), escalationPolicyId: z.string().uuid().nullable().optional() }) },
   }, h((ctx, req) => svc.createTeam(ctx, req.body as never)));
   r.patch('/iam/teams/:id', {
     preHandler: app.auth('admin:users'),
-    schema: { tags: ['iam'], params: idParam, body: z.object({ name: z.string().min(1).max(120).optional(), description: z.string().max(500).nullable().optional(), teamType: z.string().max(64).optional(), email: z.string().email().nullable().optional(), managerUserId: z.string().uuid().nullable().optional(), isActive: z.boolean().optional() }) },
+    schema: { tags: ['iam'], params: idParam, body: z.object({ name: z.string().min(1).max(120).optional(), description: z.string().max(500).nullable().optional(), teamType: z.string().max(64).optional(), email: z.string().email().nullable().optional(), managerUserId: z.string().uuid().nullable().optional(), escalationPolicyId: z.string().uuid().nullable().optional(), isActive: z.boolean().optional() }) },
   }, h((ctx, req) => svc.updateTeam(ctx, (req.params as { id: string }).id, req.body as never)));
   r.put('/iam/teams/:id/members', {
     preHandler: app.auth('admin:users'),

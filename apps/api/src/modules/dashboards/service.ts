@@ -6,6 +6,7 @@ import { slaCompliance } from '@/modules/sla/policies';
 import { entitlementSummary, customerEntitlements } from '@/modules/contracts/entitlements';
 import { expiringContracts } from '@/modules/contracts/service';
 import { parseDay } from '@/modules/reports/dates';
+import { onCallSummary } from '@/modules/oncall/service';
 import { q, one, num, pct, isCustomerUser, openCond, custCond, socCond, BREACHED, AT_RISK, AGE_BUCKET, TICKET_LIST_COLS, TICKET_LIST_JOINS, EMPTY, dailySeries, ticketFlowSeries, sumOf, weightedOf, delta, toDay, addDays, daysBetween, METRIC_KEYS, type MetricKey } from './common';
 
 type Row = Record<string, unknown>;
@@ -14,6 +15,13 @@ type Row = Record<string, unknown>;
 async function withSla<T extends { id: string }>(ctx: Ctx, list: T[]) {
   const map = await slaSummariesFor(ctx.tx, list.map((t) => t.id));
   return list.map((t) => ({ ...t, sla: worstSla(map.get(t.id)) }));
+}
+
+/** Who is on call for the teams a dashboard cares about (any team with a rota when none of those types has one). */
+async function onCallFor(ctx: Ctx, teamTypes: string[]) {
+  if (!ctx.can('oncall:read')) return [];
+  const typed = await onCallSummary(ctx.tx, teamTypes);
+  return typed.length ? typed : onCallSummary(ctx.tx, null, new Date(), 4);
 }
 
 // ---------------------------------------------------------------- management
@@ -189,9 +197,11 @@ export async function noc(ctx: Ctx, opts: { days?: number; customerId?: string |
   const sparkTo = toDay(new Date());
   const sparkFrom = addDays(sparkTo, -(days - 1));
   const spark = await dailySeries(ctx, sparkFrom, sparkTo, customerId);
+  const onCall = await onCallFor(ctx, ['noc', 'infrastructure', 'network']);
   return {
     generatedAt: new Date(),
     period: { days, from: sparkFrom, to: sparkTo },
+    onCall,
     majorIncidents: majorIncidents.map((r) => ({ id: String(r.id), number: String(r.number), title: String(r.title), customerName: String(r.customer_name), declaredAt: r.declared_at, lastUpdateAt: r.last_update_at ?? null, nextUpdateDueAt: r.next_update_due_at ?? null, bridgeUrl: r.bridge_url ?? null, commander: r.commander ?? null, overdue: !!r.overdue, children: num(r.children) })),
     series: spark.map((d) => ({ day: d.day, opened: num(d.opened), incidents: num(d.incidentsOpened), security: num(d.securityOpened), resolved: num(d.resolved), breaches: num(d.slaBreached) })),
     totals: { open: num(totals.open), openIncidents: num(totals.open_incidents), breached: num(totals.breached), atRisk: num(totals.at_risk), unassigned: num(totals.unassigned), major: num(totals.major), escalated: num(totals.escalated), openedToday: num(totals.opened_today), resolvedToday: num(resolvedToday.n), mttrTodayMinutes: resolvedToday.mttr === null || resolvedToday.mttr === undefined ? null : num(resolvedToday.mttr) },
@@ -248,9 +258,11 @@ export async function soc(ctx: Ctx, opts: { days?: number; customerId?: string |
   const from30 = addDays(today, -(days - 1));
   // Security-domain ticket flow for the period: the trend chart reads it in full, the KPI sparklines its tail.
   const series = await ticketFlowSeries(ctx, from30, today, sql`AND ${base} ${cust}`);
+  const onCall = await onCallFor(ctx, ['soc', 'security']);
   return {
     generatedAt: new Date(),
     period: { days, from: from30, to: today },
+    onCall,
     series,
     totals: { open: num(totals.open), breached: num(totals.breached), atRisk: num(totals.at_risk), escalated: num(totals.escalated), unassigned: num(totals.unassigned), openedToday: num(totals.opened_today), criticalHigh: num(totals.critical_high) },
     bySeverity,

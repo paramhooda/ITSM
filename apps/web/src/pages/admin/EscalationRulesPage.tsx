@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { TICKET_TYPES, SLA_METRICS } from '@itsm/shared';
 import { Button, Badge, type Column } from '@/components/ui';
@@ -10,13 +11,14 @@ import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDi
 import { CheckboxGroup } from '@/components/admin/inputs';
 import { useRoles } from '@/components/admin/RoleAssignmentsEditor';
 import { useConfigKind, useConfigMutations, moveInList } from '@/components/admin/api';
+import { oncallApi, oncallKeys } from '@/components/oncall/api';
 
 interface EscalationRule {
   id: string;
   name: string;
   sortOrder: number;
   conditions: { metric?: string; onBreach?: boolean; thresholdPct?: number; priorityKeys?: string[]; ticketTypes?: string[] };
-  actions: { notifyAssignee?: boolean; notifyTeam?: boolean; notifyManager?: boolean; notifyRoles?: string[]; notifyUserIds?: string[]; emails?: string[]; raiseEscalationLevel?: boolean; reassignTeamId?: string | null; raisePriorityKey?: string | null };
+  actions: { notifyAssignee?: boolean; notifyTeam?: boolean; notifyManager?: boolean; notifyOnCall?: boolean; notifyRoles?: string[]; notifyUserIds?: string[]; emails?: string[]; raiseEscalationLevel?: boolean; reassignTeamId?: string | null; raisePriorityKey?: string | null; pagePolicyId?: string | null; pageTeam?: boolean };
   isActive: boolean;
 }
 
@@ -25,6 +27,7 @@ const NOTIFY_FLAGS = [
   { value: 'notifyAssignee', label: 'Assignee' },
   { value: 'notifyTeam', label: 'Assigned team' },
   { value: 'notifyManager', label: 'Team manager' },
+  { value: 'notifyOnCall', label: 'On-call engineer' },
 ];
 
 export default function EscalationRulesPage() {
@@ -37,6 +40,8 @@ export default function EscalationRulesPage() {
   const roles = useRoles();
   const priorities = lookups.options('ticket_priority');
   const teams = (lookups.lookups?.teams ?? []).map((t) => ({ value: t.id, label: t.name }));
+  const policies = useQuery({ queryKey: oncallKeys.policies, queryFn: oncallApi.policies, staleTime: 60_000 });
+  const pageOptions = [{ value: 'team', label: "The assigned team's default policy" }, ...(policies.data ?? []).filter((p) => p.isActive).map((p) => ({ value: p.id, label: p.name }))];
 
   const fields: FieldSpec<Values>[] = [
     { key: 'name', label: 'Rule name', type: 'text', required: true },
@@ -46,13 +51,14 @@ export default function EscalationRulesPage() {
     { key: 'thresholdPct', label: 'Threshold (% of target)', type: 'number', min: 1, max: 100, visible: (v) => v.trigger === 'threshold', required: true },
     { key: 'priorityKeys', label: 'Priorities', type: 'multiselect', options: priorities.map((p) => ({ value: p.key, label: p.label })), hint: 'Empty = any priority' },
     { key: 'ticketTypes', label: 'Ticket types', type: 'multiselect', options: TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t) })), hint: 'Empty = any type' },
-    { key: 'notifyFlags', label: 'Notify', type: 'custom', section: 'Actions', render: ({ value, onChange }) => <CheckboxGroup value={(value as string[]) ?? []} onChange={onChange} options={NOTIFY_FLAGS} columns={3} /> },
+    { key: 'notifyFlags', label: 'Notify', type: 'custom', section: 'Actions', render: ({ value, onChange }) => <CheckboxGroup value={(value as string[]) ?? []} onChange={onChange} options={NOTIFY_FLAGS} columns={2} /> },
     { key: 'notifyRoles', label: 'Notify roles', type: 'multiselect', options: (roles.data ?? []).filter((r) => r.userType === 'msp').map((r) => ({ value: r.key, label: r.name })) },
     { key: 'notifyUserIds', label: 'Notify users', type: 'multiselect', options: (engineers.data ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.email })) },
     { key: 'emails', label: 'Additional emails', type: 'lines', rows: 2, placeholder: 'one address per line' },
     { key: 'raiseEscalationLevel', label: 'Raise escalation level', type: 'boolean', placeholder: 'Increase the ticket escalation level by one' },
     { key: 'reassignTeamId', label: 'Reassign to team', type: 'select', options: teams },
     { key: 'raisePriorityKey', label: 'Raise priority to', type: 'select', options: priorities.map((p) => ({ value: p.key, label: p.label })) },
+    { key: 'page', label: 'Page on-call through', type: 'select', options: pageOptions, hint: 'Starts a page that escalates step by step until someone acknowledges (Operations → On-call → Policies)' },
   ];
 
   const initial: Values = editor.row
@@ -70,8 +76,9 @@ export default function EscalationRulesPage() {
         raiseEscalationLevel: !!editor.row.actions.raiseEscalationLevel,
         reassignTeamId: editor.row.actions.reassignTeamId ?? null,
         raisePriorityKey: editor.row.actions.raisePriorityKey ?? null,
+        page: editor.row.actions.pageTeam ? 'team' : (editor.row.actions.pagePolicyId ?? null),
       }
-    : { name: '', isActive: true, metric: 'any', trigger: 'threshold', thresholdPct: 75, priorityKeys: [], ticketTypes: [], notifyFlags: ['notifyAssignee', 'notifyTeam'], notifyRoles: [], notifyUserIds: [], emails: [], raiseEscalationLevel: false, reassignTeamId: null, raisePriorityKey: null };
+    : { name: '', isActive: true, metric: 'any', trigger: 'threshold', thresholdPct: 75, priorityKeys: [], ticketTypes: [], notifyFlags: ['notifyAssignee', 'notifyTeam'], notifyRoles: [], notifyUserIds: [], emails: [], raiseEscalationLevel: false, reassignTeamId: null, raisePriorityKey: null, page: null };
 
   async function submit(v: Values) {
     const conditions: EscalationRule['conditions'] = { metric: String(v.metric ?? 'any') };
@@ -80,12 +87,14 @@ export default function EscalationRulesPage() {
     if ((v.priorityKeys as string[])?.length) conditions.priorityKeys = v.priorityKeys as string[];
     if ((v.ticketTypes as string[])?.length) conditions.ticketTypes = v.ticketTypes as string[];
     const flags = (v.notifyFlags as string[]) ?? [];
-    const actions: EscalationRule['actions'] = { notifyAssignee: flags.includes('notifyAssignee'), notifyTeam: flags.includes('notifyTeam'), notifyManager: flags.includes('notifyManager'), raiseEscalationLevel: !!v.raiseEscalationLevel };
+    const actions: EscalationRule['actions'] = { notifyAssignee: flags.includes('notifyAssignee'), notifyTeam: flags.includes('notifyTeam'), notifyManager: flags.includes('notifyManager'), notifyOnCall: flags.includes('notifyOnCall'), raiseEscalationLevel: !!v.raiseEscalationLevel };
     if ((v.notifyRoles as string[])?.length) actions.notifyRoles = v.notifyRoles as string[];
     if ((v.notifyUserIds as string[])?.length) actions.notifyUserIds = v.notifyUserIds as string[];
     if ((v.emails as string[])?.length) actions.emails = v.emails as string[];
     if (v.reassignTeamId) actions.reassignTeamId = v.reassignTeamId as string;
     if (v.raisePriorityKey) actions.raisePriorityKey = v.raisePriorityKey as string;
+    if (v.page === 'team') actions.pageTeam = true;
+    else if (v.page) actions.pagePolicyId = v.page as string;
     const body = { name: v.name, isActive: !!v.isActive, conditions, actions, sortOrder: editor.row?.sortOrder ?? (rows[rows.length - 1]?.sortOrder ?? 0) + 10 };
     if (editor.row) await update.mutateAsync({ id: editor.row.id, ...body });
     else await create.mutateAsync(body);
@@ -101,11 +110,13 @@ export default function EscalationRulesPage() {
   const describeActions = (r: EscalationRule) => {
     const a = r.actions;
     const parts: string[] = [];
-    const notify = [a.notifyAssignee && 'assignee', a.notifyTeam && 'team', a.notifyManager && 'manager', a.notifyRoles?.length && `${a.notifyRoles.length} role(s)`, a.notifyUserIds?.length && `${a.notifyUserIds.length} user(s)`, a.emails?.length && `${a.emails.length} email(s)`].filter(Boolean);
+    const notify = [a.notifyAssignee && 'assignee', a.notifyTeam && 'team', a.notifyManager && 'manager', a.notifyOnCall && 'on-call', a.notifyRoles?.length && `${a.notifyRoles.length} role(s)`, a.notifyUserIds?.length && `${a.notifyUserIds.length} user(s)`, a.emails?.length && `${a.emails.length} email(s)`].filter(Boolean);
     if (notify.length) parts.push(`notify ${notify.join(', ')}`);
     if (a.raiseEscalationLevel) parts.push('raise level');
     if (a.reassignTeamId) parts.push(`reassign → ${lookups.team(a.reassignTeamId)?.name ?? 'team'}`);
     if (a.raisePriorityKey) parts.push(`priority → ${a.raisePriorityKey.toUpperCase()}`);
+    if (a.pageTeam) parts.push("page via the team's policy");
+    else if (a.pagePolicyId) parts.push(`page via ${policies.data?.find((p) => p.id === a.pagePolicyId)?.name ?? 'policy'}`);
     return parts.join(' · ') || '—';
   };
 

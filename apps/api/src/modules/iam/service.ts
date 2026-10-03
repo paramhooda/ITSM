@@ -337,13 +337,13 @@ export async function listTeams(ctx: Ctx) {
   return teams.map((t) => ({ ...t, members: members.filter((m) => m.teamId === t.id).map(({ teamId: _t, ...m }) => m) }));
 }
 
-export async function createTeam(ctx: Ctx, input: { key: string; name: string; description?: string; teamType?: string; email?: string; managerUserId?: string | null }) {
+export async function createTeam(ctx: Ctx, input: { key: string; name: string; description?: string; teamType?: string; email?: string; managerUserId?: string | null; escalationPolicyId?: string | null }) {
   const [team] = await ctx.tx.insert(schema.teams).values(input).returning();
   await ctx.audit({ entityType: 'team', entityId: team.id, entityLabel: team.name, action: 'create' });
   return team;
 }
 
-export async function updateTeam(ctx: Ctx, id: string, patch: Partial<{ name: string; description: string | null; teamType: string; email: string | null; managerUserId: string | null; isActive: boolean }>) {
+export async function updateTeam(ctx: Ctx, id: string, patch: Partial<{ name: string; description: string | null; teamType: string; email: string | null; managerUserId: string | null; escalationPolicyId: string | null; isActive: boolean }>) {
   const [before] = await ctx.tx.select().from(schema.teams).where(eq(schema.teams.id, id)).limit(1);
   if (!before) throw new NotFoundError('Team');
   const [after] = await ctx.tx.update(schema.teams).set({ ...patch, updatedAt: new Date() }).where(eq(schema.teams.id, id)).returning();

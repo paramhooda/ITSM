@@ -17,7 +17,10 @@ export interface ModuleItem {
   match?: (pathname: string) => boolean;
 }
 
-export const OPERATIONS_MODULES: ModuleItem[] = [{ to: '/operations/major-incidents', label: 'Major incidents', match: (p) => p === '/operations' || p.startsWith('/operations/major-incidents') }];
+export const OPERATIONS_MODULES: ModuleItem[] = [
+  { to: '/operations/major-incidents', label: 'Major incidents', match: (p) => p === '/operations' || p.startsWith('/operations/major-incidents') },
+  { to: '/operations/on-call', label: 'On-call', perm: ['oncall:read'] },
+];
 
 export const CMDB_MODULES: ModuleItem[] = [
   { to: '/cmdb', label: 'Overview', end: true },

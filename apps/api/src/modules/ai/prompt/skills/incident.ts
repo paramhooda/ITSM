@@ -2,8 +2,8 @@ import type { SkillDef } from './types';
 
 export const incident: SkillDef = {
   key: 'incident',
-  title: 'Major incidents',
-  when: 'the user asks about the bridge, a major incident, stakeholder updates or declaring one',
+  title: 'Major incidents and on-call',
+  when: 'the user asks about the bridge, a major incident, stakeholder updates, declaring one, who is on call, or paging someone',
   toolsets: ['incident', 'tickets'],
   portal: false,
   staff: true,
@@ -13,5 +13,6 @@ export const incident: SkillDef = {
     'Stakeholder updates: draft_update with kind major, write the text for the audience, then propose post_major_update with the final wording (it is delivered to customers, so it must be approved as written). Internal notes go through add_bridge_note.',
     'Attach related incidents with add_major_child; complete the review through update_major (status review_done and the review text).',
     'Always state when the next stakeholder update is due and whether it is overdue.',
+    'On-call: who_is_on_call answers "who is on call for the NOC" with the person, the rota and when their cover ends; never guess from the team list. To wake someone for a ticket, propose page_on_call with the ticket and, when the team has no default policy, the policy name; the platform pages step by step and escalates until someone acknowledges.',
   ],
 };

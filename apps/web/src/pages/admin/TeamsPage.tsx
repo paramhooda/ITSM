@@ -8,6 +8,7 @@ import { ConfigTable, ActiveDot, MonoCell, MutedCell } from '@/components/admin/
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { MultiSelect } from '@/components/admin/inputs';
 import { useAdminMutation } from '@/components/admin/api';
+import { oncallApi, oncallKeys } from '@/components/oncall/api';
 
 interface Team {
   id: string;
@@ -18,6 +19,7 @@ interface Team {
   email: string | null;
   managerUserId: string | null;
   managerName: string | null;
+  escalationPolicyId: string | null;
   isActive: boolean;
   members: { userId: string; name: string; email: string; isLead: boolean; status: string }[];
 }
@@ -29,7 +31,8 @@ export default function TeamsPage() {
   const editor = useEditor<Team>();
   const lookups = useLookups();
   const engineers = useEngineers();
-  const invalidate = [['iam', 'teams'], ['engineers']];
+  const policies = useQuery({ queryKey: oncallKeys.policies, queryFn: oncallApi.policies, staleTime: 60_000 });
+  const invalidate = [['iam', 'teams'], ['engineers'], ['oncall']];
   const create = useAdminMutation((body: Values) => post<Team>('/iam/teams', body), { invalidate, lookups: true });
   const update = useAdminMutation(({ id, ...body }: Values & { id: string }) => patch<Team>(`/iam/teams/${id}`, body), { invalidate, lookups: true });
   const setMembers = useAdminMutation(({ id, members }: { id: string; members: { userId: string; isLead: boolean }[] }) => put(`/iam/teams/${id}/members`, { members }), { invalidate, lookups: true });
@@ -42,6 +45,7 @@ export default function TeamsPage() {
     { key: 'teamType', label: 'Type', type: 'select', options: lookups.options('team_type').map((o) => ({ value: o.key, label: o.label })) },
     { key: 'email', label: 'Shared mailbox', type: 'email' },
     { key: 'managerUserId', label: 'Manager', type: 'select', options: engineerOpts, hint: 'Receives escalations for the team' },
+    { key: 'escalationPolicyId', label: 'Default escalation policy', type: 'select', options: (policies.data ?? []).filter((p) => p.isActive).map((p) => ({ value: p.id, label: p.name })), hint: 'Whom a page for this team reaches (Operations → On-call → Policies)' },
     { key: 'isActive', label: 'Active', type: 'boolean' },
     { key: 'description', label: 'Description', type: 'textarea', rows: 2 },
     { key: 'memberIds', label: 'Members', type: 'custom', section: 'Membership', render: ({ value, onChange, values, setValues }) => (
@@ -66,14 +70,14 @@ export default function TeamsPage() {
 
   const initial: Values = editor.row
     ? { ...editor.row, memberIds: editor.row.members.map((m) => m.userId), leadIds: editor.row.members.filter((m) => m.isLead).map((m) => m.userId) }
-    : { key: '', name: '', teamType: 'general', email: '', managerUserId: null, isActive: true, description: '', memberIds: [], leadIds: [] };
+    : { key: '', name: '', teamType: 'general', email: '', managerUserId: null, escalationPolicyId: null, isActive: true, description: '', memberIds: [], leadIds: [] };
 
   async function submit(v: Values) {
     const members = ((v.memberIds as string[]) ?? []).map((userId) => ({ userId, isLead: ((v.leadIds as string[]) ?? []).includes(userId) }));
     let id = editor.row?.id;
-    if (editor.row) await update.mutateAsync({ id: editor.row.id, name: v.name, description: v.description || null, teamType: v.teamType || 'general', email: v.email || null, managerUserId: v.managerUserId || null, isActive: !!v.isActive });
+    if (editor.row) await update.mutateAsync({ id: editor.row.id, name: v.name, description: v.description || null, teamType: v.teamType || 'general', email: v.email || null, managerUserId: v.managerUserId || null, escalationPolicyId: v.escalationPolicyId || null, isActive: !!v.isActive });
     else {
-      const t = await create.mutateAsync({ key: v.key, name: v.name, description: v.description || undefined, teamType: v.teamType || 'general', email: v.email || undefined, managerUserId: v.managerUserId || null });
+      const t = await create.mutateAsync({ key: v.key, name: v.name, description: v.description || undefined, teamType: v.teamType || 'general', email: v.email || undefined, managerUserId: v.managerUserId || null, escalationPolicyId: v.escalationPolicyId || null });
       id = t.id;
     }
     await setMembers.mutateAsync({ id: id!, members });

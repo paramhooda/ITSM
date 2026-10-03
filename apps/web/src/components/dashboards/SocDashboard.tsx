@@ -9,6 +9,7 @@ import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
 import { TicketMiniTable } from './TicketMiniTable';
 import { Panel, KpiSkeleton, Skeleton, Stat, Updated, RowList, Segmented } from './Panel';
+import { OnCallPanel, type OnCallSummaryTeam } from './OnCallPanel';
 import type { TicketRow, Breakdown } from './types';
 
 interface Soc {
@@ -25,6 +26,7 @@ interface Soc {
   period: { days: number; from: string; to: string };
   /** Security-domain tickets opened, resolved and SLA-breached per day, last 30 days. */
   series: { day: string; opened: number; resolved: number; breaches: number }[];
+  onCall?: OnCallSummaryTeam[];
 }
 
 export function SocDashboard({ days = 30, customerId = '' }: { days?: number; customerId?: string }) {
@@ -80,7 +82,8 @@ export function SocDashboard({ days = 30, customerId = '' }: { days?: number; cu
           <TicketMiniTable rows={d.recent} max={8} columns={['customer', 'severity', 'status', 'sla', 'assignee']} empty="No security incidents recorded" />
         </div>
       </Panel>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <OnCallPanel items={d.onCall ?? []} />
         <Panel title="Escalations" subtitle="Open incidents escalated beyond level 1" padded={false}>
           <div className="px-5">
             <TicketMiniTable rows={d.escalations.items} max={6} columns={['customer', 'severity', 'sla', 'assignee']} empty="No active escalations" />

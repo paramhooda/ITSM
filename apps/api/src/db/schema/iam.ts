@@ -1,6 +1,7 @@
 import { pgTable, text, boolean, timestamp, uuid, jsonb, index, uniqueIndex, primaryKey, integer, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { id, timestamps, userTypeEnum, userStatusEnum } from './_common';
 import { customers } from './customers';
+import { escalationPolicies } from './oncall';
 
 export const users = pgTable('users', {
   id: id(),
@@ -57,6 +58,8 @@ export const teams = pgTable('teams', {
   teamType: text('team_type').notNull().default('general'),
   email: text('email'),
   managerUserId: uuid('manager_user_id').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
+  /** The policy "page the team" uses (escalation rules and manual pages without an explicit policy). */
+  escalationPolicyId: uuid('escalation_policy_id').references((): AnyPgColumn => escalationPolicies.id, { onDelete: 'set null' }),
   isActive: boolean('is_active').notNull().default(true),
   ...timestamps,
 });

@@ -1,4 +1,5 @@
 import { syncMajorOnStatus } from './major';
+import { cancelPages } from '@/modules/oncall/paging';
 import { eq } from 'drizzle-orm';
 import type { TicketType } from '@itsm/shared';
 import { schema } from '@/db/client';
@@ -131,6 +132,7 @@ export async function changeStatusCore(ctx: Ctx, ticket: TicketRow, to: OptionRo
 
   await onStatusChange(ctx.tx, updated, from, to, actorOf(ctx));
   if (updated.isMajor || (ticket.isMajor && !updated.isMajor)) await syncMajorOnStatus(ctx, updated, toCat, fromCat, patch.resolutionNotes ?? null);
+  if (toCat === 'resolved' || toCat === 'closed' || toCat === 'cancelled') await cancelPages(ctx, updated, `the ticket is ${to.label.toLowerCase()}`);
 
   if (!opts.silent) {
     if (toCat === 'resolved') await notifyTicketEvent(ctx, 'ticket.resolved', updated, { previousStatus: from?.label ?? null, comment: opts.comment ?? opts.resolutionNotes ?? null });

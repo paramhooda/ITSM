@@ -5,6 +5,9 @@ import type { Ctx } from '@/core/context';
 import { applySlas, metricLabel } from '@/modules/sla/engine';
 import { type TicketRow, addActivity, actorOf, optionById, optionByKey, reloadTicket, userIdOf } from './common';
 import { notifyTicketEvent, escalationRecipients } from './notify';
+import { startPaging } from '@/modules/oncall/paging';
+import { ValidationError } from '@/core/errors';
+import { logger } from '@/core/logger';
 
 export interface EscalationTrigger {
   kind: 'breach' | 'warning';
@@ -38,6 +41,12 @@ interface RuleActions {
   reassignTeamId?: string | null;
   raisePriorityKey?: string | null;
   raisePriority?: boolean;
+  /** Notify whoever the assigned team's rotas put on call. */
+  notifyOnCall?: boolean;
+  /** Page through this escalation policy ... */
+  pagePolicyId?: string | null;
+  /** ... or through the assigned team's default policy. */
+  pageTeam?: boolean;
 }
 
 const asList = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : typeof v === 'string' && v ? [v] : []);
@@ -109,16 +118,25 @@ export async function applyEscalationRules(ctx: Ctx, ticket: TicketRow, trigger:
     await addActivity(ctx, current, { type: 'escalation', summary: `Escalation rule "${rule.name}" applied${summary.length ? `: ${summary.join(', ')}` : ''}`, data: { ruleId: rule.id, trigger, actions: a, level }, customerVisible: false });
     await ctx.audit({ entityType: 'ticket', entityId: current.id, entityLabel: current.number, action: 'escalate.auto', customerId: current.customerId, metadata: { ruleId: rule.id, ruleName: rule.name, trigger, actions: a } });
 
-    const wantsNotify = a.notifyAssignee || a.notifyTeam || a.notifyManager || a.notifyRoles?.length || a.notifyUserIds?.length || a.notifyTeamIds?.length || a.emails?.length;
+    const wantsNotify = a.notifyAssignee || a.notifyTeam || a.notifyManager || a.notifyOnCall || a.notifyRoles?.length || a.notifyUserIds?.length || a.notifyTeamIds?.length || a.emails?.length;
     if (wantsNotify) {
       const extraRecipients = a.notifyTeamIds?.length ? await escalationRecipients(ctx.tx, { ...current, assignedTeamId: a.notifyTeamIds[0]! }, { team: true }) : [];
       await notifyTicketEvent(ctx, 'ticket.escalated', current, {
         level,
         reason,
         sla: { metric: trigger.metric, dueAt: trigger.dueAt ?? null, pct: trigger.pct },
-        recipientOverride: { assignee: a.notifyAssignee, team: a.notifyTeam, manager: a.notifyManager, roles: a.notifyRoles, users: a.notifyUserIds, emails: a.emails },
+        recipientOverride: { assignee: a.notifyAssignee, team: a.notifyTeam, manager: a.notifyManager, onCall: a.notifyOnCall, roles: a.notifyRoles, users: a.notifyUserIds, emails: a.emails },
         extraRecipients,
       });
+    }
+    if (a.pagePolicyId || a.pageTeam) {
+      // A page that cannot start (no policy, one already running) must not undo the rule's other actions.
+      try {
+        await startPaging(ctx, current, { policyId: a.pagePolicyId ?? null, reason, source: 'rule' });
+      } catch (err) {
+        if (err instanceof ValidationError) logger.warn({ ticketId: current.id, rule: rule.name, err: err.message }, 'escalation rule could not page');
+        else throw err;
+      }
     }
     applied.push(rule.name);
   }
