@@ -330,7 +330,7 @@ export default function TicketDetailPage() {
       ),
     })),
   ];
-  const related: FormSection = { key: 'related-records', title: 'Related records', hidden: isCustomer || relatedFields.every((f) => f.hidden), fields: relatedFields };
+  const related: FormSection = { key: 'related-records', title: 'Related records', columns: 1, hidden: isCustomer || relatedFields.every((f) => f.hidden), fields: relatedFields };
 
   const sections: FormSection[] = [details, description, attachments, resolution, related];
 
