@@ -34,9 +34,11 @@ RUN npm prune --omit=dev --no-audit --no-fund \
 # ---- runtime --------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
+# Chromium renders PDF reports, review packs and field visit reports (apps/api/src/lib/pdf.ts).
+ENV PDF_CHROMIUM_PATH=/usr/bin/chromium
 WORKDIR /app
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl tini \
+ && apt-get install -y --no-install-recommends ca-certificates curl tini chromium fonts-dejavu-core fonts-liberation \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /data/storage && chown -R node:node /data
 
