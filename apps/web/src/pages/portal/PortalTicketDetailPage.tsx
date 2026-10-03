@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CheckCircle2, RotateCcw, ShieldCheck, ShieldOff, ShieldQuestion, Check, X, MessageSquare, Info, ClipboardCheck, FileSignature } from 'lucide-react';
 import { Button, Badge, LoadingBlock, ErrorBlock, Dialog, Textarea, Field } from '@/components/ui';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RelatedTabs, ActivityStream, RailTabs, RailCard, RailRows, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, ActivityStream, RailTabs, RailCard, RailRows, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
 import { useUiStore } from '@/stores/ui';
 import { fmtDateTime, fmtDuration, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusB
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { SlaCard } from '@/components/tickets/SlaCard';
 import { AttachmentsSection } from '@/components/tickets/AttachmentsSection';
+import { attachmentsQueryKey, commentWithAttachments } from '@/components/attachments/upload';
 import { portalApi, pk, type PortalTicket } from '@/components/portal/api';
 
 const minutesBetween = (a: string, b: string | Date) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60_000));
@@ -83,12 +84,14 @@ export default function PortalTicketDetailPage() {
     qc.invalidateQueries({ queryKey: pk.me });
     qc.invalidateQueries({ queryKey: pk.approvals });
   };
+  // A reply with files: the files go up first (always visible to the customer's own organisation), then the note naming them.
   const comment = useMutation({
-    mutationFn: (body: string) => portalApi.comment(id, body),
-    onSuccess: () => {
+    mutationFn: (input: { body: string; files: File[] }) => commentWithAttachments({ text: input.body, files: input.files, target: { entityType: 'ticket', entityId: id, customerVisible: true }, post: (body) => portalApi.comment(id, body) }),
+    onSuccess: (outcome) => {
       // A reply on a ticket that was waiting on the customer sends it back to the service desk (the API changes the status).
       if (ticketQ.data?.status?.key === 'pending_customer') toast.success('Thanks — your reply is with the service desk and the ticket is back in progress');
       invalidate();
+      if (outcome.ok.length) qc.invalidateQueries({ queryKey: attachmentsQueryKey('ticket', id) });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -133,17 +136,45 @@ export default function PortalTicketDetailPage() {
     </>
   );
 
-  // ---- form
+  // ---- form: what it is about and who has it (Details), then the text, files and the outcome
   const sections: FormSection[] = [
+    {
+      key: 'details',
+      title: 'Details',
+      fields: [
+        { label: 'Raised by', value: ticket.requester ? (ticket.isMine ? `You (${ticket.requester.name})` : ticket.requester.name) : ticket.requesterContact?.name },
+        { label: 'Site', value: ticket.site?.name },
+        { label: 'Service', value: ticket.service?.name },
+        { label: 'Type', value: ticket.typeLabel },
+        { label: 'Category', value: ticket.category?.label },
+        { label: 'Affected', value: [...ticket.cis.map((c) => c.name), ...ticket.assets.map((x) => `${x.name} (${x.tag})`)].join(', '), hidden: !ticket.cis.length && !ticket.assets.length },
+      ],
+      right: [
+        { label: 'Status', value: <TicketStatusBadge status={ticket.status} /> },
+        { label: 'Priority', value: <PriorityBadge priority={ticket.priority} /> },
+        { label: 'Engineer', value: who ?? <span className="text-muted">Being assigned</span> },
+        { label: 'Raised', value: <span title={fmtDateTime(ticket.createdAt)}>{fmtDateTime(ticket.createdAt)}</span> },
+        { label: 'Last update', value: <span title={fmtDateTime(ticket.lastActivityAt)}>{relativeTime(ticket.lastActivityAt)}</span> },
+        { label: 'Due', value: ticket.dueAt ? fmtDateTime(ticket.dueAt) : null, hidden: !ticket.dueAt || ended },
+        { label: 'Resolved', value: ticket.resolvedAt ? fmtDateTime(ticket.resolvedAt) : null, hidden: !ticket.resolvedAt },
+        { label: 'Closed', value: ticket.closedAt ? fmtDateTime(ticket.closedAt) : null, hidden: !ticket.closedAt },
+      ],
+    },
+    {
+      key: 'resolution',
+      title: 'Resolution',
+      hidden: !ended || (!ticket.resolutionNotes && !ticket.resolutionCode),
+      fields: [
+        { label: 'What we did', kind: 'prose', value: ticket.resolutionNotes ?? '', span: 2 },
+        { label: 'Resolution code', value: ticket.resolutionCode?.label, hidden: !ticket.resolutionCode },
+        { label: 'Fixed on', value: ticket.resolvedAt ? fmtDateTime(ticket.resolvedAt) : null, hidden: !ticket.resolvedAt },
+      ],
+    },
     {
       key: 'description',
       title: 'Description',
       columns: 1,
-      fields: [
-        { label: 'Description', kind: 'prose', value: ticket.description ?? '' },
-        { label: 'What we did', kind: 'prose', value: ticket.resolutionNotes ?? '', hidden: !ended || !ticket.resolutionNotes },
-        { label: 'Resolution code', value: ticket.resolutionCode?.label, hidden: !ended || !ticket.resolutionCode },
-      ],
+      fields: [{ label: 'Description', kind: 'prose', value: ticket.description ?? '' }],
     },
     {
       key: 'request',
@@ -153,29 +184,14 @@ export default function PortalTicketDetailPage() {
       fields: ticket.form.map((f): FieldDef => ({ label: f.label, value: fmtValue(f.value), kind: f.type === 'textarea' ? 'prose' : 'text', span: f.type === 'textarea' ? 2 : 1 })),
     },
     {
-      key: 'status',
-      title: 'Status',
-      fields: [
-        { label: 'Status', value: <TicketStatusBadge status={ticket.status} /> },
-        { label: 'Priority', value: <PriorityBadge priority={ticket.priority} /> },
-        { label: 'Type', value: ticket.typeLabel },
-        { label: 'Category', value: ticket.category?.label },
-        { label: 'Engineer', value: who ?? <span className="text-muted">Being assigned</span> },
-        { label: 'Raised by', value: ticket.requester ? (ticket.isMine ? `You (${ticket.requester.name})` : ticket.requester.name) : ticket.requesterContact?.name },
-        { label: 'Site', value: ticket.site?.name, hidden: !ticket.site },
-        { label: 'Service', value: ticket.service?.name, hidden: !ticket.service },
-        { label: 'Affected', value: [...ticket.cis.map((c) => c.name), ...ticket.assets.map((x) => `${x.name} (${x.tag})`)].join(', '), hidden: !ticket.cis.length && !ticket.assets.length },
-        { label: 'Raised', value: <span title={fmtDateTime(ticket.createdAt)}>{fmtDateTime(ticket.createdAt)}</span> },
-        { label: 'Last update', value: <span title={fmtDateTime(ticket.lastActivityAt)}>{relativeTime(ticket.lastActivityAt)}</span> },
-        { label: 'Due', value: ticket.dueAt ? fmtDateTime(ticket.dueAt) : null, hidden: !ticket.dueAt || ended },
-        { label: 'Resolved', value: ticket.resolvedAt ? fmtDateTime(ticket.resolvedAt) : null, hidden: !ticket.resolvedAt },
-        { label: 'Closed', value: ticket.closedAt ? fmtDateTime(ticket.closedAt) : null, hidden: !ticket.closedAt },
-      ],
+      key: 'attachments',
+      fields: [],
+      children: (
+        <div className="py-2.5">
+          <AttachmentsSection entityType="ticket" entityId={ticket.id} canUpload={a.comment || ticket.attachments.canUpload} showVisibility={false} />
+        </div>
+      ),
     },
-  ];
-
-  const tabs = [
-    { key: 'attachments', label: 'Attachments', count: ticket.attachments.items.length, content: <section className="card px-4 py-3"><AttachmentsSection entityType="ticket" entityId={ticket.id} canUpload={a.comment || ticket.attachments.canUpload} showVisibility={false} /></section> },
   ];
 
   const pending = a.approve ? ticket.pendingForMe[0] : undefined;
@@ -241,10 +257,7 @@ export default function PortalTicketDetailPage() {
           </RecordHeader>
         }
         main={
-          <>
-            <RecordForm sections={sections} />
-            <RelatedTabs tabs={tabs} />
-          </>
+          <RecordForm sections={sections} />
         }
         aside={
           <RailTabs
@@ -260,7 +273,7 @@ export default function PortalTicketDetailPage() {
                     entries={entries}
                     emptyText="No updates yet."
                     maxHeight="calc(100vh - 220px)"
-                    composer={a.comment ? { canComment: true, canWorkNote: false, submitting: comment.isPending, placeholder: 'Write a reply to the service desk…', onSubmit: (v) => comment.mutateAsync(v.body) } : undefined}
+                    composer={a.comment ? { canComment: true, canWorkNote: false, canAttach: true, submitting: comment.isPending, placeholder: 'Write a reply to the service desk…', hints: { comment: 'Sent to the service desk' }, onSubmit: (v) => comment.mutateAsync({ body: v.body, files: v.files }) } : undefined}
                   />
                 ),
               },

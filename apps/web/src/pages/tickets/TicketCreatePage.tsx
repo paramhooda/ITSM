@@ -16,6 +16,8 @@ import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import type { TicketType, CatalogItem, ScopeStatus } from '@/components/tickets/types';
 import { ClassifyDraftButton } from '@/components/ai/ClassifyDraftButton';
+import { FilePicker, pastedFiles } from '@/components/attachments/FilePicker';
+import { addFiles, uploadAttachments, reportUploadFailures, UPLOAD_HINT } from '@/components/attachments/upload';
 
 const TYPES: { key: TicketType; label: string; hint: string }[] = [
   { key: 'incident', label: 'Incident', hint: 'Something is broken or degraded' },
@@ -69,6 +71,10 @@ export default function TicketCreatePage() {
   const [f, setF] = useState<FormState>(() => empty((search.get('type') as TicketType) || 'incident', isCustomer ? (user.customerId ?? '') : (search.get('customerId') ?? '')));
   const [cis, setCis] = useState<PickerItem[]>([]);
   const [assets, setAssets] = useState<PickerItem[]>([]);
+  // Files chosen now are uploaded to the ticket right after it is created.
+  const [files, setFiles] = useState<File[]>([]);
+  const [filesVisible, setFilesVisible] = useState(true);
+  const [uploadNote, setUploadNote] = useState<string | null>(null);
   const patch = (p: Partial<FormState>) => setF((s) => ({ ...s, ...p }));
 
   const customerItems = itemsOf<{ id: string; name: string; code: string }>(customers.data);
@@ -113,7 +119,7 @@ export default function TicketCreatePage() {
   const services = lookups?.services ?? [];
 
   const create = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const body: Record<string, unknown> = {
         type: f.type,
         customerId: f.customerId,
@@ -141,10 +147,17 @@ export default function TicketCreatePage() {
       };
       if (f.type === 'change') body.change = { changeType: f.changeType, riskId: nn(f.riskId), scheduledStart: nn(f.scheduledStart) ? new Date(f.scheduledStart).toISOString() : null, scheduledEnd: nn(f.scheduledEnd) ? new Date(f.scheduledEnd).toISOString() : null, implementationPlan: f.implementationPlan || null, backoutPlan: f.backoutPlan || null, justification: f.justification || null };
       if (f.type === 'problem') body.problem = { symptoms: f.symptoms || null };
-      return ticketsApi.create(body);
+      const t = await ticketsApi.create(body);
+      let attached = 0;
+      if (files.length) {
+        const r = await uploadAttachments(files, { entityType: 'ticket', entityId: t.id, customerId: t.customerId, customerVisible: isCustomer ? true : filesVisible }, (done, total, name) => setUploadNote(name ? `Uploading ${done + 1}/${total}…` : null));
+        reportUploadFailures(r);
+        attached = r.ok.length;
+      }
+      return { ticket: t, attached };
     },
-    onSuccess: (t) => {
-      toast.success(`${t.number} created`);
+    onSuccess: ({ ticket: t, attached }) => {
+      toast.success(`${t.number} created${attached ? ` · ${attached} file${attached === 1 ? '' : 's'} attached` : ''}`);
       navigate(isCustomer ? `/portal/tickets/${t.id}` : `/tickets/${t.id}`);
     },
     onError: (e: Error & { details?: { missing?: string[] } }) => toast.error(e.message),
@@ -164,7 +177,7 @@ export default function TicketCreatePage() {
               Cancel
             </Button>
             <Button onClick={() => create.mutate()} loading={create.isPending} disabled={!valid} icon={<Save className="h-4 w-4" />}>
-              Create {TYPES.find((t) => t.key === f.type)?.label.toLowerCase()}
+              {uploadNote ?? `Create ${TYPES.find((t) => t.key === f.type)?.label.toLowerCase()}`}
             </Button>
           </>
         }
@@ -218,7 +231,23 @@ export default function TicketCreatePage() {
                 </div>
               )}
               <Field label="Description" className="sm:col-span-2">
-                <Textarea value={f.description} onChange={(e) => patch({ description: e.target.value })} placeholder={f.type === 'incident' ? 'What is affected, since when, what has been tried…' : 'Details'} className="min-h-[120px]" />
+                <Textarea
+                  value={f.description}
+                  onChange={(e) => patch({ description: e.target.value })}
+                  placeholder={f.type === 'incident' ? 'What is affected, since when, what has been tried…' : 'Details'}
+                  className="min-h-[120px]"
+                  onPaste={(e) => {
+                    const fs = pastedFiles(e);
+                    if (fs.length) {
+                      e.preventDefault();
+                      setFiles((cur) => addFiles(cur, fs));
+                    }
+                  }}
+                />
+              </Field>
+              <Field label="Attachments" className="sm:col-span-2" hint={`${UPLOAD_HINT} · a screenshot pasted into the description is attached too`}>
+                <FilePicker files={files} onChange={setFiles} disabled={create.isPending} />
+                {!isCustomer && files.length > 0 && <Checkbox checked={filesVisible} onChange={(e) => setFilesVisible(e.target.checked)} label="Visible to the customer" className="mt-1" />}
               </Field>
             </div>
           </Card>

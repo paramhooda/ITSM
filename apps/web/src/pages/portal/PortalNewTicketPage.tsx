@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ClipboardEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 import { CatalogForm } from '@/components/tickets/CatalogForm';
 import { KbSuggestions } from '@/components/knowledge/KbSuggestions';
 import { portalApi, pk, type PortalCatalogItem } from '@/components/portal/api';
+import { FilePicker, pastedFiles } from '@/components/attachments/FilePicker';
+import { addFiles, uploadAttachments, reportUploadFailures } from '@/components/attachments/upload';
 
 type Kind = 'issue' | 'request';
 
@@ -47,6 +49,16 @@ export default function PortalNewTicketPage() {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [reqSummary, setReqSummary] = useState('');
   const [reqNotes, setReqNotes] = useState('');
+  // Screenshots and files chosen now go onto the ticket as soon as it is raised.
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploadNote, setUploadNote] = useState<string | null>(null);
+  const pasteFiles = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const fs = pastedFiles(e);
+    if (fs.length) {
+      e.preventDefault();
+      setFiles((cur) => addFiles(cur, fs));
+    }
+  };
 
   const sites = me.data?.sites ?? [];
   useEffect(() => {
@@ -69,28 +81,38 @@ export default function PortalNewTicketPage() {
   }, [assets.data, cis.data]);
 
   const create = useMutation({
-    mutationFn: () => {
-      if (kind === 'issue') {
-        return portalApi.createTicket({
-          type: 'incident',
-          title: title.trim(),
-          description: description.trim() || null,
-          siteId: siteId || null,
-          serviceId: serviceId || null,
-          impactId: impactId || null,
-          urgencyId: urgencyId || null,
-          assetId: device.startsWith('asset:') ? device.slice(6) : null,
-          ciId: device.startsWith('ci:') ? device.slice(3) : null,
-        });
+    mutationFn: async () => {
+      const t = await raise();
+      let attached = 0;
+      if (files.length) {
+        const r = await uploadAttachments(files, { entityType: 'ticket', entityId: t.id, customerVisible: true }, (done, total, name) => setUploadNote(name ? `Uploading ${done + 1}/${total}…` : null));
+        reportUploadFailures(r);
+        attached = r.ok.length;
       }
-      return portalApi.createTicket({ type: 'request', title: reqSummary.trim(), description: reqNotes.trim() || null, siteId: siteId || null, catalogItemId: itemId || null, formData, serviceId: item?.serviceId ?? (serviceId || null) });
+      return { ticket: t, attached };
     },
-    onSuccess: (t) => {
-      toast.success(`${t.number} raised. We will keep you posted here.`, { description: 'You can add screenshots or files on the ticket page.' });
+    onSuccess: ({ ticket: t, attached }) => {
+      toast.success(`${t.number} raised. We will keep you posted here.`, { description: attached ? `${attached} file${attached === 1 ? '' : 's'} attached.` : 'You can add screenshots or files on the ticket page.' });
       navigate(`/portal/tickets/${t.id}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  function raise() {
+    if (kind === 'issue') {
+      return portalApi.createTicket({
+        type: 'incident',
+        title: title.trim(),
+        description: description.trim() || null,
+        siteId: siteId || null,
+        serviceId: serviceId || null,
+        impactId: impactId || null,
+        urgencyId: urgencyId || null,
+        assetId: device.startsWith('asset:') ? device.slice(6) : null,
+        ciId: device.startsWith('ci:') ? device.slice(3) : null,
+      });
+    }
+    return portalApi.createTicket({ type: 'request', title: reqSummary.trim(), description: reqNotes.trim() || null, siteId: siteId || null, catalogItemId: itemId || null, formData, serviceId: item?.serviceId ?? (serviceId || null) });
+  }
 
   const issueValid = title.trim().length >= 3;
   const requestValid = !!item && reqSummary.trim().length >= 3 && (item.formSchema ?? []).every((f) => !f.required || (formData[f.key] !== undefined && formData[f.key] !== '' && formData[f.key] !== null));
@@ -147,7 +169,10 @@ export default function PortalNewTicketPage() {
                 <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Internet is down at the Pune office" autoFocus maxLength={300} />
               </Field>
               <Field label="Details" hint="What happened, since when, what you already tried, who is affected.">
-                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[120px]" />
+                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[120px]" onPaste={pasteFiles} />
+              </Field>
+              <Field label="Screenshots or files" hint="Optional · a screenshot pasted into the details box is attached too.">
+                <FilePicker files={files} onChange={setFiles} disabled={create.isPending} />
               </Field>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Site">
@@ -181,7 +206,7 @@ export default function PortalNewTicketPage() {
                   <ShieldCheck className="h-4 w-4 text-subtle shrink-0" /> An engineer picks it up and keeps you updated here and by e-mail.
                 </li>
                 <li className="flex gap-2">
-                  <Send className="h-4 w-4 text-subtle shrink-0" /> Reply on the ticket any time; screenshots can be attached after it is raised.
+                  <Send className="h-4 w-4 text-subtle shrink-0" /> Reply on the ticket any time; attach screenshots or files now or later.
                 </li>
               </ul>
             </Card>
@@ -241,7 +266,10 @@ export default function PortalNewTicketPage() {
                     </Field>
                   </div>
                   <Field label="Anything else we should know?">
-                    <Textarea value={reqNotes} onChange={(e) => setReqNotes(e.target.value)} />
+                    <Textarea value={reqNotes} onChange={(e) => setReqNotes(e.target.value)} onPaste={pasteFiles} />
+                  </Field>
+                  <Field label="Screenshots or files" hint="Optional">
+                    <FilePicker files={files} onChange={setFiles} disabled={create.isPending} />
                   </Field>
                 </div>
               </Card>
@@ -268,7 +296,7 @@ export default function PortalNewTicketPage() {
           Cancel
         </Button>
         <Button onClick={() => create.mutate()} loading={create.isPending} disabled={!valid} icon={<Send className="h-4 w-4" />}>
-          {kind === 'issue' ? 'Report issue' : 'Submit request'}
+          {uploadNote ?? (kind === 'issue' ? 'Report issue' : 'Submit request')}
         </Button>
       </div>
     </div>

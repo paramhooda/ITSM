@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Building2, Users, BookOpen, Copy, Eye, EyeOff, X, Mail, Phone, Paperclip } from 'lucide-react';
+import { Building2, Users, BookOpen, Copy, Eye, EyeOff, X, Mail, Phone } from 'lucide-react';
 import { Select, Avatar, Badge } from '@/components/ui';
 import { RailCard, RailRows } from '@/components/record';
 import { useEngineers } from '@/hooks/useLookups';
@@ -13,12 +13,11 @@ import { truncate } from '@/lib/utils';
 import { ticketsApi, qk, itemsOf } from '../api';
 import { SlaCard } from '../SlaCard';
 import { TicketStatusBadge, TypeBadge } from '../TicketStatusBadge';
-import { AttachmentsSection } from '../AttachmentsSection';
 import type { TicketDetail } from '../types';
 import { TicketAiPanel } from '@/components/ai/TicketAiPanel';
 import { ChangeImpactCard } from '@/components/ai/ChangeImpactCard';
 
-/** Right-rail "Details": who the ticket is for, the SLA clocks, the people around it, attachments. */
+/** Right-rail "Details": who the ticket is for, the SLA clocks, the people around it. Attachments live in the form. */
 export function TicketDetailsRail({ ticket }: { ticket: TicketDetail }) {
   const qc = useQueryClient();
   const engineers = useEngineers();
@@ -80,9 +79,6 @@ export function TicketDetailsRail({ ticket }: { ticket: TicketDetail }) {
             <Select value={watcherPick} onChange={(e) => { if (e.target.value) { watch.mutate({ userId: e.target.value }); setWatcherPick(''); } }} placeholder="Add watcher…" className="h-7 py-0 text-[12.5px] mt-1.5" options={(engineers.data ?? []).filter((e) => !ticket.watchers.some((w) => w.id === e.id)).map((e) => ({ value: e.id, label: e.name }))} />
           )}
         </div>
-      </RailCard>
-      <RailCard title={<><Paperclip className="h-3.5 w-3.5 text-subtle" /> Attachments</>}>
-        <AttachmentsSection entityType="ticket" entityId={ticket.id} customerId={ticket.customerId} canUpload={p.comment || p.update} canDelete={p.update} showVisibility={!isCustomer} />
       </RailCard>
     </>
   );

@@ -24,6 +24,7 @@ The inventory was taken from the code (routes, navigator, API modules, schema, p
 - One filter system everywhere: a quiet filter rail on the left with search and grouped options, the results on the right with the applied filters spelled out as removable chips and a count. The rail collapses and becomes a drawer on small screens.
 - Dashboard drill-downs into the ticket list now apply every parameter they send (mine, unassigned, domain, severity, category, engineer, resolved).
 - Service levels has a place in the navigator (under Contracts & Scope).
+- The ticket record is laid out like ServiceNow's incident form: Details in two columns, Description, Attachments, Resolution information, Related records, then the related lists as tabs; the portal ticket follows the same order in customer wording. Files can be attached while raising a ticket and while replying (pick, drop or paste), on both sides.
 
 ## Gaps, by area
 
@@ -43,6 +44,7 @@ The inventory was taken from the code (routes, navigator, API modules, schema, p
 | Announcements and outage banners for staff and portal | Employee Center's most used widget | P2 | S |
 | Visual task boards for engineers and shift handover notes | Common in modern desks | P3 | M |
 | Comment editing in the UI (API exists) | Small polish | P3 | S |
+| Attachments linked to the note they came with (a `comment_id` on attachments) | Today the note names its files; a link would let the stream show them inline | P3 | S |
 
 ### Customer portal
 

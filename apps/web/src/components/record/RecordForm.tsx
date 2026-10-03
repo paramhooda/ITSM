@@ -21,6 +21,8 @@ export interface FormSection {
   title?: ReactNode;
   description?: ReactNode;
   fields: FieldDef[];
+  /** Fields for the right column; `fields` then fill the left one and the two stacks stay independent (ServiceNow's two-column form). */
+  right?: FieldDef[];
   columns?: 1 | 2;
   collapsible?: boolean;
   defaultOpen?: boolean;
@@ -64,8 +66,10 @@ export function FieldRow({ field, className }: { field: FieldDef; className?: st
 export function FormSectionCard({ section }: { section: FormSection }) {
   const [open, setOpen] = useState(section.defaultOpen ?? true);
   const fields = section.fields.filter((f) => !f.hidden);
-  if (section.hidden || (fields.length === 0 && !section.children)) return null;
+  const right = (section.right ?? []).filter((f) => !f.hidden);
+  if (section.hidden || (fields.length === 0 && right.length === 0 && !section.children)) return null;
   const cols = section.columns ?? 2;
+  const hasFields = fields.length > 0 || right.length > 0;
   return (
     <section className="card">
       {(section.title || section.actions) && (
@@ -80,14 +84,27 @@ export function FormSectionCard({ section }: { section: FormSection }) {
       )}
       {open && (
         <div className="px-5 py-1.5">
-          {fields.length > 0 && (
+          {right.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+              <div className="min-w-0">
+                {fields.map((f, i) => (
+                  <FieldRow key={i} field={f} />
+                ))}
+              </div>
+              <div className="min-w-0">
+                {right.map((f, i) => (
+                  <FieldRow key={i} field={f} />
+                ))}
+              </div>
+            </div>
+          ) : fields.length > 0 ? (
             <div className={cn('grid grid-cols-1 gap-x-8', cols === 2 && 'md:grid-cols-2')}>
               {fields.map((f, i) => (
                 <FieldRow key={i} field={f} />
               ))}
             </div>
-          )}
-          {section.children && <div className={cn(fields.length > 0 && 'mt-3 mb-2')}>{section.children}</div>}
+          ) : null}
+          {section.children && <div className={cn(hasFields && 'mt-3 mb-2')}>{section.children}</div>}
         </div>
       )}
     </section>

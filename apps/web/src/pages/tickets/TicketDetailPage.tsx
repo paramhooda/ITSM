@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X } from 'lucide-react';
-import { Button, Badge, LoadingBlock, ErrorBlock, Textarea, Select, Input } from '@/components/ui';
+import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone } from 'lucide-react';
+import { Button, Badge, LoadingBlock, ErrorBlock, Textarea, Select, Input, Avatar } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
-import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, fromTimeline, type FormSection } from '@/components/record';
+import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
 import { ticketAttention } from '@/components/record/attention';
 import { useUiStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
@@ -16,6 +16,9 @@ import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusB
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { ScopeBadge } from '@/components/tickets/ScopeBadge';
 import { CatalogFormValues } from '@/components/tickets/CatalogForm';
+import { AttachmentsSection } from '@/components/tickets/AttachmentsSection';
+import { attachmentsQueryKey, commentWithAttachments } from '@/components/attachments/upload';
+import type { ComposerInput } from '@/components/tickets/Composer';
 import { ApprovalsPanel } from '@/components/tickets/detail/ApprovalsPanel';
 import { TasksPanel } from '@/components/tickets/detail/TasksPanel';
 import { TimeEntriesPanel } from '@/components/tickets/detail/TimeEntriesPanel';
@@ -26,13 +29,40 @@ import { ChangeForm } from '@/components/tickets/detail/ChangeForm';
 import { TicketDetailsRail, TicketAssistRail } from '@/components/tickets/detail/TicketRail';
 import { ResolveDialog, CommentDialog, ScopeDialog } from '@/components/tickets/detail/ActionDialogs';
 import { SlaCard } from '@/components/tickets/SlaCard';
-import type { TicketDetail, CatalogField } from '@/components/tickets/types';
+import { LINK_TYPE_LABELS, type TicketDetail, type CatalogField, type LinkedTicket } from '@/components/tickets/types';
 
 /** In-place select for a form field (ServiceNow edits on the form, not in a dialog). */
 function FieldSelect({ value, options, onChange, disabled, placeholder = '—' }: { value: string | null | undefined; options: { value: string; label: string }[]; onChange: (v: string | null) => void; disabled?: boolean; placeholder?: string }) {
   if (disabled) return <span>{options.find((o) => o.value === value)?.label ?? <span className="text-subtle">{placeholder}</span>}</span>;
   return <Select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} placeholder={placeholder} className="h-7 py-0 text-[12.5px] w-full max-w-[260px]" options={options} />;
 }
+
+/** A person with their contact handles, as on the rail. */
+function Person({ p }: { p: { name: string; email?: string | null; phone?: string | null } | null | undefined }) {
+  if (!p) return <span className="text-subtle">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 min-w-0">
+      <Avatar name={p.name} size="xs" /> <span className="truncate">{p.name}</span>
+      {p.email && <a href={`mailto:${p.email}`} className="text-subtle hover:text-default" title={p.email}><Mail className="h-3 w-3" /></a>}
+      {p.phone && <a href={`tel:${p.phone}`} className="text-subtle hover:text-default" title={p.phone}><Phone className="h-3 w-3" /></a>}
+    </span>
+  );
+}
+
+/** One linked ticket on a row: type, number, title, state. */
+function TicketRef({ t }: { t: LinkedTicket['ticket'] | { id: string; number: string; title: string; type?: TicketDetail['type']; status?: LinkedTicket['ticket']['status'] } }) {
+  return (
+    <span className="flex items-center gap-1.5 min-w-0" title={`${t.number} · ${t.title}`}>
+      {t.type && <TypeBadge type={t.type} short className="px-1 py-0 text-[10px] shrink-0" />}
+      <Link to={`/tickets/${t.id}`} className="font-mono text-[12.5px] text-brand-700 hover:underline whitespace-nowrap shrink-0">{t.number}</Link>
+      <span className="truncate flex-1 min-w-0">{t.title}</span>
+      {t.status && <span className="shrink-0"><TicketStatusBadge status={t.status} /></span>}
+    </span>
+  );
+}
+
+/** How a link reads from the other end: incidents "of" a problem, changes "for" a ticket, duplicates, children… */
+const INBOUND_LINK_LABELS: Record<string, string> = { problem_of: 'Incidents', change_for: 'Changes', caused_by: 'Caused', duplicate_of: 'Duplicates', blocks: 'Blocked by', child_of: 'Children', resolved_by: 'Resolves', related: 'Related to' };
 
 export default function TicketDetailPage() {
   const { id = '' } = useParams();
@@ -78,11 +108,19 @@ export default function TicketDetailPage() {
   const scope = act((v: { scopeStatus: string; scopeNote: string }) => ticketsApi.scope(id, { scopeStatus: v.scopeStatus, scopeNote: v.scopeNote || null }), 'Scope updated');
   const assignMe = act(() => ticketsApi.assign(id, { assigneeId: user.id, autoProgress: true }), 'Assigned to you');
   const watch = act((remove: boolean) => (remove ? ticketsApi.unwatch(id) : ticketsApi.watch(id)));
+  // A note with files: the files go up first and follow the note's audience (a reply is customer-visible, a work note is not).
   const comment = useMutation({
-    mutationFn: (input: { kind: string; body: string; minutesSpent?: number | null }) => ticketsApi.comment(id, input),
-    onSuccess: () => {
+    mutationFn: (input: ComposerInput) =>
+      commentWithAttachments({
+        text: input.body,
+        files: input.files,
+        target: { entityType: 'ticket', entityId: id, customerId: ticket?.customerId, customerVisible: isCustomer ? true : input.kind === 'comment' },
+        post: (body) => ticketsApi.comment(id, { kind: input.kind, body, minutesSpent: input.minutesSpent }),
+      }),
+    onSuccess: (outcome) => {
       invalidate();
       qc.invalidateQueries({ queryKey: qk.time(id) });
+      if (outcome.ok.length) qc.invalidateQueries({ queryKey: attachmentsQueryKey('ticket', id) });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -111,6 +149,8 @@ export default function TicketDetailPage() {
   const isSoc = ticket.domain === 'soc' || ticket.category?.domain === 'soc';
   const teamEngineers = (engineers.data ?? []).filter((e) => !ticket.assignedTeamId || e.teamIds.includes(ticket.assignedTeamId) || e.id === ticket.assigneeId);
   const opt = (type: string) => options(type).map((o) => ({ value: o.id, label: o.label }));
+  const primaryCi = ticket.cis.find((c) => c.id === ticket.primaryCiId) ?? ticket.cis[0] ?? null;
+  const primaryAsset = ticket.assets.find((a) => a.id === ticket.primaryAssetId) ?? ticket.assets[0] ?? null;
 
   // ---- what needs attention (MSP staff only): breached clocks, no assignee, waiting on the customer…
   const attention = isCustomer
@@ -157,7 +197,7 @@ export default function TicketDetailPage() {
     </>
   );
 
-  // ---- form sections
+  // ---- Details: who it is for and what it concerns (left), its state and who owns it (right)
   const tagsField = (
     <div className="flex flex-wrap items-center gap-1">
       {ticket.tags.map((t) => (
@@ -170,75 +210,139 @@ export default function TicketDetailPage() {
       {!p.update && !ticket.tags.length && <span className="text-subtle">—</span>}
     </div>
   );
-  const sections: FormSection[] = [
-    {
-      key: 'description',
-      title: 'Description',
-      columns: 1,
-      actions: p.update && editDesc === null ? <Button size="sm" variant="ghost" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEditDesc(ticket.description ?? '')}>Edit</Button> : undefined,
-      fields: editDesc !== null ? [] : [{ label: 'Description', kind: 'prose', value: ticket.description ?? '' }, { label: 'Resolution', kind: 'prose', value: ticket.resolutionNotes ?? '', hidden: !(isResolved || isClosed) || !ticket.resolutionNotes }, { label: 'Resolution code', value: ticket.resolutionCode?.label, hidden: !ticket.resolutionCode }, { label: 'Closure code', value: ticket.closureCode?.label, hidden: !ticket.closureCode }],
-      children:
-        editDesc !== null ? (
-          <div className="flex flex-col gap-2 py-1">
-            <Textarea autoFocus value={editDesc} onChange={(e) => setEditDesc(e.target.value)} className="min-h-[120px]" />
-            <div className="flex gap-2 justify-end">
-              <Button size="sm" variant="ghost" onClick={() => setEditDesc(null)}>Cancel</Button>
-              <Button size="sm" onClick={() => { update.mutate({ description: editDesc.trim() || null }); setEditDesc(null); }}>Save</Button>
-            </div>
+  const details: FormSection = {
+    key: 'details',
+    title: 'Details',
+    fields: [
+      { label: 'Customer', value: isCustomer ? ticket.customer?.name : ticket.customer ? <Link to={`/customers/${ticket.customerId}`} className="hover:underline font-medium">{ticket.customer.name}</Link> : null },
+      { label: 'Site', value: ticket.site?.name },
+      { label: 'Requester', value: <Person p={ticket.requester ?? ticket.requesterContact} /> },
+      { label: 'Service', value: ticket.service?.name },
+      { label: 'Contract', value: ticket.contract ? (isCustomer ? ticket.contract.number : <Link to={`/contracts/${ticket.contract.id}`} className="hover:underline">{ticket.contract.number} · {ticket.contract.name}</Link>) : <span className="text-amber-700">No active contract</span>, hidden: isCustomer && !ticket.contract },
+      {
+        label: 'Configuration item',
+        value: primaryCi ? (
+          <span className="inline-flex items-center gap-1.5 min-w-0">
+            {isCustomer ? <span>{primaryCi.name}</span> : <Link to={`/cmdb/cis/${primaryCi.id}`} className="hover:underline">{primaryCi.name}</Link>}
+            {primaryCi.hostname && <span className="text-subtle font-mono text-[12px]">{primaryCi.hostname}</span>}
+            {ticket.cis.length > 1 && <span className="text-subtle text-[12px]">+{ticket.cis.length - 1} more</span>}
+          </span>
+        ) : null,
+        hidden: isCustomer && !primaryCi,
+      },
+      {
+        label: 'Asset',
+        value: primaryAsset ? (
+          <span className="inline-flex items-center gap-1.5 min-w-0">
+            {isCustomer ? <span>{primaryAsset.tag} · {primaryAsset.name}</span> : <Link to={`/assets/${primaryAsset.id}`} className="hover:underline">{primaryAsset.tag} · {primaryAsset.name}</Link>}
+            {ticket.assets.length > 1 && <span className="text-subtle text-[12px]">+{ticket.assets.length - 1} more</span>}
+          </span>
+        ) : null,
+        hidden: !primaryAsset,
+      },
+      { label: 'Category', edit: <FieldSelect value={ticket.categoryId} disabled={!p.update} options={opt('ticket_category')} onChange={(v) => update.mutate({ categoryId: v, subcategoryId: null })} /> },
+      { label: 'Subcategory', edit: <FieldSelect value={ticket.subcategoryId} disabled={!p.update} options={subcats.map((o) => ({ value: o.id, label: o.label }))} onChange={(v) => update.mutate({ subcategoryId: v })} />, hidden: subcats.length === 0 && !ticket.subcategoryId },
+      { label: 'Tags', value: tagsField, hidden: isCustomer },
+      { label: 'External ref', value: ticket.externalRef, kind: 'mono', hidden: !ticket.externalRef },
+    ],
+    right: [
+      { label: 'Source', edit: <FieldSelect value={ticket.sourceId} disabled={!p.update} options={opt('ticket_source')} onChange={(v) => update.mutate({ sourceId: v })} />, hidden: isCustomer },
+      { label: 'Opened', value: ticket.createdByUser ? `${ticket.createdByUser.name} · ${fmtDateTime(ticket.createdAt)}` : fmtDateTime(ticket.createdAt) },
+      { label: 'Status', value: <TicketStatusBadge status={ticket.status} /> },
+      { label: 'Impact', edit: <FieldSelect value={ticket.impactId} disabled={!p.update} options={opt('ticket_impact')} onChange={(v) => update.mutate({ impactId: v })} /> },
+      { label: 'Urgency', edit: <FieldSelect value={ticket.urgencyId} disabled={!p.update} options={opt('ticket_urgency')} onChange={(v) => update.mutate({ urgencyId: v })} /> },
+      { label: 'Priority', edit: p.update && !isClosed ? <FieldSelect value={ticket.priorityId} options={priorityChoices.map((o) => ({ value: o.id, label: o.label }))} onChange={(v) => update.mutate({ priorityId: v })} /> : <PriorityBadge priority={ticket.priority} /> },
+      { label: 'Severity', edit: <FieldSelect value={ticket.securitySeverityId} disabled={!p.update} options={opt('security_severity')} onChange={(v) => update.mutate({ securitySeverityId: v })} />, hidden: !isSoc },
+      { label: 'Team', edit: <FieldSelect value={ticket.assignedTeamId} disabled={!p.assign || isClosed} placeholder="No team" options={(lookups?.teams ?? []).map((t) => ({ value: t.id, label: t.name }))} onChange={(v) => assign.mutate({ teamId: v, assigneeId: null })} />, hidden: isCustomer },
+      { label: 'Assigned to', edit: isCustomer ? <span>{ticket.assignee?.name ?? <span className="text-muted">Being assigned</span>}</span> : <FieldSelect value={ticket.assigneeId} disabled={!p.assign || isClosed} placeholder="Unassigned" options={teamEngineers.map((e) => ({ value: e.id, label: e.name }))} onChange={(v) => assign.mutate({ assigneeId: v, autoProgress: true })} /> },
+      { label: 'Due', value: ticket.dueAt ? <span className={ticket.dueAt && new Date(ticket.dueAt) < new Date() && isOpen ? 'text-red-600' : undefined}>{fmtDateTime(ticket.dueAt)}</span> : null, hidden: !ticket.dueAt },
+    ],
+  };
+
+  // ---- Description, with the request form when it came from the catalog
+  const description: FormSection = {
+    key: 'description',
+    title: 'Description',
+    columns: 1,
+    actions: p.update && editDesc === null ? <Button size="sm" variant="ghost" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEditDesc(ticket.description ?? '')}>Edit</Button> : undefined,
+    fields: editDesc !== null ? [] : [{ label: 'Description', kind: 'prose', value: ticket.description ?? '' }],
+    children:
+      editDesc !== null ? (
+        <div className="flex flex-col gap-2 py-1">
+          <Textarea autoFocus value={editDesc} onChange={(e) => setEditDesc(e.target.value)} className="min-h-[120px]" />
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" variant="ghost" onClick={() => setEditDesc(null)}>Cancel</Button>
+            <Button size="sm" onClick={() => { update.mutate({ description: editDesc.trim() || null }); setEditDesc(null); }}>Save</Button>
           </div>
-        ) : ticket.catalogItem ? (
-          <div className="pt-1 pb-2">
-            <div className="text-[12.5px] font-medium mb-1.5">{ticket.catalogItem.name}</div>
-            <CatalogFormValues schema={(ticket.catalogItem.formSchema ?? []) as unknown as CatalogField[]} value={ticket.formData ?? {}} />
-            {ticket.catalogItem.fulfilmentInstructions && !isCustomer && (
-              <div className="mt-2 text-[12.5px] text-muted rounded-md bg-surface-2 px-3 py-2 inline-flex items-start gap-2"><Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" /> {ticket.catalogItem.fulfilmentInstructions}</div>
-            )}
-          </div>
-        ) : undefined,
-    },
-    {
-      key: 'classification',
-      title: 'Classification',
-      fields: [
-        { label: 'Customer', value: isCustomer ? ticket.customer?.name : ticket.customer ? <Link to={`/customers/${ticket.customerId}`} className="hover:underline">{ticket.customer.name}</Link> : null },
-        { label: 'Site', value: ticket.site?.name },
-        { label: 'Service', value: ticket.service?.name },
-        { label: 'Contract', value: ticket.contract ? (isCustomer ? ticket.contract.number : <Link to={`/contracts/${ticket.contract.id}`} className="hover:underline">{ticket.contract.number} · {ticket.contract.name}</Link>) : null },
-        { label: 'Category', edit: <FieldSelect value={ticket.categoryId} disabled={!p.update} options={opt('ticket_category')} onChange={(v) => update.mutate({ categoryId: v, subcategoryId: null })} /> },
-        { label: 'Subcategory', edit: <FieldSelect value={ticket.subcategoryId} disabled={!p.update} options={subcats.map((o) => ({ value: o.id, label: o.label }))} onChange={(v) => update.mutate({ subcategoryId: v })} />, hidden: subcats.length === 0 && !ticket.subcategoryId },
-        { label: 'Impact', edit: <FieldSelect value={ticket.impactId} disabled={!p.update} options={opt('ticket_impact')} onChange={(v) => update.mutate({ impactId: v })} /> },
-        { label: 'Urgency', edit: <FieldSelect value={ticket.urgencyId} disabled={!p.update} options={opt('ticket_urgency')} onChange={(v) => update.mutate({ urgencyId: v })} /> },
-        { label: 'Source', edit: <FieldSelect value={ticket.sourceId} disabled={!p.update} options={opt('ticket_source')} onChange={(v) => update.mutate({ sourceId: v })} />, hidden: isCustomer },
-        { label: 'Severity', edit: <FieldSelect value={ticket.securitySeverityId} disabled={!p.update} options={opt('security_severity')} onChange={(v) => update.mutate({ securitySeverityId: v })} />, hidden: !isSoc },
-        { label: 'Tags', value: tagsField, hidden: isCustomer },
-        { label: 'External ref', value: ticket.externalRef, kind: 'mono', hidden: !ticket.externalRef },
-        { label: 'Parent', value: ticket.parent ? <Link to={`/tickets/${ticket.parent.id}`} className="hover:underline font-mono text-[12.5px]">{ticket.parent.number}</Link> : null, hidden: !ticket.parent },
-      ],
-    },
-    {
-      key: 'assignment',
-      title: 'Assignment',
-      hidden: isCustomer,
-      fields: [
-        { label: 'Team', edit: <FieldSelect value={ticket.assignedTeamId} disabled={!p.assign || isClosed} placeholder="No team" options={(lookups?.teams ?? []).map((t) => ({ value: t.id, label: t.name }))} onChange={(v) => assign.mutate({ teamId: v, assigneeId: null })} /> },
-        { label: 'Assigned to', edit: <FieldSelect value={ticket.assigneeId} disabled={!p.assign || isClosed} placeholder="Unassigned" options={teamEngineers.map((e) => ({ value: e.id, label: e.name }))} onChange={(v) => assign.mutate({ assigneeId: v, autoProgress: true })} /> },
-        { label: 'Requester', value: ticket.requester?.name ?? ticket.requesterContact?.name },
-        { label: 'Opened by', value: ticket.createdByUser ? `${ticket.createdByUser.name} · ${fmtDateTime(ticket.createdAt)}` : fmtDateTime(ticket.createdAt) },
-        { label: 'Due', value: ticket.dueAt ? fmtDateTime(ticket.dueAt) : null },
-        { label: 'Resolved', value: ticket.resolvedAt ? fmtDateTime(ticket.resolvedAt) : null, hidden: !ticket.resolvedAt },
-      ],
-    },
+        </div>
+      ) : ticket.catalogItem ? (
+        <div className="pt-1 pb-2">
+          <div className="text-[12.5px] font-medium mb-1.5">{ticket.catalogItem.name}</div>
+          <CatalogFormValues schema={(ticket.catalogItem.formSchema ?? []) as unknown as CatalogField[]} value={ticket.formData ?? {}} />
+          {ticket.catalogItem.fulfilmentInstructions && !isCustomer && (
+            <div className="mt-2 text-[12.5px] text-muted rounded-md bg-surface-2 px-3 py-2 inline-flex items-start gap-2"><Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" /> {ticket.catalogItem.fulfilmentInstructions}</div>
+          )}
+        </div>
+      ) : undefined,
+  };
+
+  // ---- Attachments: the list carries its own title, upload button and visibility toggle
+  const attachments: FormSection = {
+    key: 'attachments',
+    fields: [],
+    children: (
+      <div className="py-2.5">
+        <AttachmentsSection entityType="ticket" entityId={ticket.id} customerId={ticket.customerId} canUpload={p.comment || p.update} canDelete={p.update} showVisibility={!isCustomer} />
+      </div>
+    ),
+  };
+
+  // ---- Resolution information: only once there is something to say
+  const resolution: FormSection = {
+    key: 'resolution',
+    title: 'Resolution information',
+    hidden: !(isResolved || isClosed) && !ticket.resolutionNotes && !ticket.resolutionCode && !ticket.closureCode,
+    fields: [
+      { label: 'Resolution code', value: ticket.resolutionCode?.label },
+      { label: 'Resolved', value: ticket.resolvedAt ? fmtDateTime(ticket.resolvedAt) : null },
+      { label: 'Closure code', value: ticket.closureCode?.label, hidden: !ticket.closureCode },
+      { label: cat === 'cancelled' ? 'Cancelled' : 'Closed', value: ticket.closedAt ? fmtDateTime(ticket.closedAt) : null, hidden: !ticket.closedAt },
+      { label: 'Reopened', value: ticket.reopenCount ? `${ticket.reopenCount}×` : 'never', hidden: isCustomer && !ticket.reopenCount },
+      { label: 'Resolution notes', kind: 'prose', value: ticket.resolutionNotes ?? '', span: 2 },
+    ],
+  };
+
+  // ---- Related records: the parent and the typed links, read-only (managed on the Linked tickets tab)
+  const linkGroups = new Map<string, LinkedTicket[]>();
+  for (const l of ticket.links) {
+    const label = l.direction === 'outbound' ? LINK_TYPE_LABELS[l.linkType] ?? l.linkType : INBOUND_LINK_LABELS[l.linkType] ?? `← ${LINK_TYPE_LABELS[l.linkType] ?? l.linkType}`;
+    linkGroups.set(label, [...(linkGroups.get(label) ?? []), l]);
+  }
+  const relatedFields: FieldDef[] = [
+    { label: 'Parent', value: ticket.parent ? <TicketRef t={ticket.parent} /> : null, hidden: !ticket.parent },
+    ...[...linkGroups.entries()].map(([label, links]): FieldDef => ({
+      label,
+      value: (
+        <div className="flex flex-col gap-0.5 min-w-0">
+          {links.slice(0, 3).map((l) => <TicketRef key={l.id} t={l.ticket} />)}
+          {links.length > 3 && <span className="text-subtle text-[12px]">+{links.length - 3} more on the Linked tickets tab</span>}
+        </div>
+      ),
+    })),
   ];
+  const related: FormSection = { key: 'related-records', title: 'Related records', hidden: isCustomer || relatedFields.every((f) => f.hidden), fields: relatedFields };
+
+  const sections: FormSection[] = [details, description, attachments, resolution, related];
 
   // ---- related lists
   const tabs = [
     { key: 'plan', label: ticket.type === 'problem' ? 'Problem analysis' : 'Change plan', hidden: !(ticket.type === 'problem' || ticket.type === 'change'), content: ticket.type === 'problem' ? <ProblemForm ticketId={ticket.id} details={ticket.problem} canEdit={p.problem} /> : <ChangeForm ticketId={ticket.id} details={ticket.change} canEdit={p.change} /> },
     { key: 'approvals', label: 'Approvals', count: ticket.approvals.length, hidden: !(ticket.approvals.length > 0 || (!isCustomer && (ticket.type === 'change' || ticket.type === 'request'))), content: <ApprovalsPanel ticket={ticket} approvals={ticket.approvals} canApprove={p.approve} canRequest={!isCustomer && (p.change || p.update)} /> },
     { key: 'tasks', label: 'Tasks', count: ticket.tasks.length, hidden: isCustomer, content: <TasksPanel ticketId={ticket.id} tasks={ticket.tasks} canEdit={p.tasks && !isClosed} /> },
-    { key: 'time', label: 'Time worked', hidden: isCustomer, content: <TimeEntriesPanel ticketId={ticket.id} contractId={ticket.contractId} canEdit={p.time} /> },
-    { key: 'related', label: 'Related tickets', count: ticket.links.length + (ticket.parent ? 1 : 0), hidden: isCustomer, content: <LinksPanel ticket={ticket} links={ticket.links} canEdit={p.links} /> },
     { key: 'items', label: 'Affected CIs & assets', count: ticket.cis.length + ticket.assets.length, content: <CisAssetsPanel ticket={ticket} canEdit={p.update} /> },
-    { key: 'sla', label: 'SLA', count: ticket.slas.length, content: <SlaCard slas={ticket.slas} policyName={ticket.slaPolicy?.name} /> },
+    { key: 'sla', label: 'SLA targets', count: ticket.slas.length, content: <SlaCard slas={ticket.slas} policyName={ticket.slaPolicy?.name} /> },
+    { key: 'time', label: 'Time worked', hidden: isCustomer, content: <TimeEntriesPanel ticketId={ticket.id} contractId={ticket.contractId} canEdit={p.time} /> },
+    { key: 'related', label: 'Linked tickets', count: ticket.links.length + (ticket.parent ? 1 : 0), hidden: isCustomer, content: <LinksPanel ticket={ticket} links={ticket.links} canEdit={p.links} /> },
   ];
 
   return (
@@ -265,7 +369,7 @@ export default function TicketDetailPage() {
             createdBy={ticket.createdByUser?.name ?? ticket.requester?.name ?? null}
             updatedAt={ticket.updatedAt}
           >
-            <RecordRibbon items={glance(ticket)} columns={5} />
+            <RecordRibbon items={glance(ticket, !isCustomer)} columns={isCustomer ? 5 : 6} />
           </RecordHeader>
         }
         main={
@@ -279,7 +383,7 @@ export default function TicketDetailPage() {
           <div ref={railRef} className="contents">
             <RailTabs
               tabs={[
-                { key: 'activity', label: 'Activity', icon: MessageSquare, badge: entries.length, content: <ActivityStream entries={entries} loading={timelineQ.isLoading} maxHeight="calc(100vh - 220px)" composer={{ canComment: p.comment, canWorkNote: p.workNote, canTime: p.time, submitting: comment.isPending, onSubmit: (v) => comment.mutateAsync(v) }} /> },
+                { key: 'activity', label: 'Activity', icon: MessageSquare, badge: entries.length, content: <ActivityStream entries={entries} loading={timelineQ.isLoading} maxHeight="calc(100vh - 220px)" composer={{ canComment: p.comment, canWorkNote: p.workNote, canTime: p.time, canAttach: p.comment || p.workNote, submitting: comment.isPending, onSubmit: (v) => comment.mutateAsync(v) }} /> },
                 { key: 'details', label: 'Details', icon: Info, content: <TicketDetailsRail ticket={ticket} /> },
                 { key: 'assist', label: 'Assist', icon: Sparkles, hidden: isCustomer, content: <TicketAssistRail ticket={ticket} /> },
               ]}
@@ -304,8 +408,8 @@ export type { TicketDetail };
 
 const minutesBetween = (a: string, b: string | Date) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60_000));
 
-/** The numbers an agent checks first: age, first response, the nearest SLA clock, due, reopens. */
-function glance(ticket: TicketDetail): { label: string; value: string; tone?: 'good' | 'warn' | 'bad' }[] {
+/** The numbers an agent checks first: who has it, age, first response, the nearest SLA clock, due, reopens. */
+function glance(ticket: TicketDetail, staff: boolean): { label: string; value: string; tone?: 'good' | 'warn' | 'bad'; hint?: string }[] {
   const ended = ticket.resolvedAt ?? ticket.closedAt ?? null;
   const age = minutesBetween(ticket.createdAt, ended ?? new Date());
   const firstResponse = ticket.firstResponseAt ? minutesBetween(ticket.createdAt, ticket.firstResponseAt) : null;
@@ -314,6 +418,7 @@ function glance(ticket: TicketDetail): { label: string; value: string; tone?: 'g
   const met = ticket.slas.filter((s) => s.state === 'met').length;
   const next = running.length ? running.reduce((a, b) => (a.remainingMinutes < b.remainingMinutes ? a : b)) : null;
   return [
+    ...(staff ? [{ label: 'Assigned to', value: ticket.assignee?.name ?? 'Unassigned', tone: !ticket.assignee && !ended ? ('warn' as const) : undefined, hint: ticket.team ? `Team: ${ticket.team.name}` : undefined }] : []),
     { label: ended ? 'Time to resolve' : 'Age', value: fmtDuration(age) },
     { label: 'First response', value: firstResponse === null ? (ended ? '—' : 'pending') : fmtDuration(firstResponse), tone: firstResponse === null && !ended ? 'warn' : undefined },
     next

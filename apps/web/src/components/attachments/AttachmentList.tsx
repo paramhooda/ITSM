@@ -1,7 +1,8 @@
 import { useRef, useState, type DragEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Paperclip, Upload, Trash2, Download, Image as ImageIcon, FileText, FileArchive, FileSpreadsheet, File as FileIcon, Eye, EyeOff, Loader2, FileCode, Film, Music } from 'lucide-react';
+import { Paperclip, Upload, Trash2, Download, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { fileIcon } from './fileIcon';
 import { get, patch, del, upload, download, ApiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { Button, Badge, ConfirmDialog, Select } from '@/components/ui';
@@ -44,17 +45,7 @@ interface ListResponse {
   access: { canUpload: boolean; canManage: boolean };
 }
 
-export function fileIcon(contentType: string, filename: string) {
-  const ext = filename.toLowerCase().split('.').pop() ?? '';
-  if (contentType.startsWith('image/')) return ImageIcon;
-  if (contentType.startsWith('video/')) return Film;
-  if (contentType.startsWith('audio/')) return Music;
-  if (contentType === 'application/pdf' || contentType.startsWith('text/') || ['doc', 'docx', 'md'].includes(ext)) return FileText;
-  if (['zip', 'gz', 'tar', '7z', 'rar'].includes(ext) || contentType.includes('zip') || contentType.includes('compressed')) return FileArchive;
-  if (['xls', 'xlsx', 'csv'].includes(ext)) return FileSpreadsheet;
-  if (['json', 'xml', 'yaml', 'yml', 'log'].includes(ext)) return FileCode;
-  return FileIcon;
-}
+export { fileIcon };
 
 export const attachmentsKey = (entityType: string, entityId: string) => ['attachments', entityType, entityId] as const;
 
