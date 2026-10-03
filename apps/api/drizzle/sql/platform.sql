@@ -104,6 +104,14 @@ CREATE POLICY tenant_isolation ON shift_handovers
   USING (app_all_customers() OR app_is_msp())
   WITH CHECK (app_all_customers() OR app_is_msp());
 
+-- briefings belong to one person: readable and writable by them (and the system).
+ALTER TABLE briefings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE briefings FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON briefings;
+CREATE POLICY tenant_isolation ON briefings
+  USING (app_all_customers() OR user_id = app_user_id())
+  WITH CHECK (app_all_customers() OR user_id = app_user_id());
+
 -- ---------------------------------------------------------------------------
 -- Partitioned high-volume tables
 -- ---------------------------------------------------------------------------

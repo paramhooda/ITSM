@@ -11,6 +11,7 @@ import { SocDashboard } from '@/components/dashboards/SocDashboard';
 import { AmcDashboard } from '@/components/dashboards/AmcDashboard';
 import { EngineerDashboard } from '@/components/dashboards/EngineerDashboard';
 import { Segmented } from '@/components/dashboards/Panel';
+import { BriefingCard } from '@/components/dashboards/BriefingCard';
 
 type Tab = 'management' | 'noc' | 'soc' | 'amc' | 'engineer';
 const STORAGE_KEY = 'dashboard.tab';
@@ -97,6 +98,7 @@ export default function DashboardPage() {
         <span className="text-[12px] text-subtle ml-2 mr-1">Scope</span>
         <Select className="w-56 h-8 py-0 text-[12.5px] bg-white" value={customerId} onChange={(e) => set({ customerId: e.target.value }, false)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} aria-label="Customer scope" />
       </DashboardHero>
+      <BriefingCard />
       {tab === 'management' && <ManagementDashboard days={days} customerId={customerId} />}
       {tab === 'noc' && <NocDashboard days={days} customerId={customerId} />}
       {tab === 'soc' && <SocDashboard days={days} customerId={customerId} />}

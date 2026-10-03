@@ -105,6 +105,7 @@ export const NOTIFICATION_EVENTS = [
   'change.window_reminder',
   'change.cab_decision',
   'handover.published',
+  'briefing.daily',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

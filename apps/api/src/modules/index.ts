@@ -33,6 +33,7 @@ export async function registerModules(app: FastifyInstance) {
     import('./status/routes'),
     import('./changes/routes'),
     import('./handover/routes'),
+    import('./briefings/routes'),
     import('./portal/routes'),
   ]);
   for (const m of mods) await app.register(m.default);

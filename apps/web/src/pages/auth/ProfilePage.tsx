@@ -2,13 +2,14 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { LogOut, Laptop } from 'lucide-react';
+import { LogOut, Laptop, Sparkles } from 'lucide-react';
 import type { Principal } from '@itsm/shared';
 import { api, get, patch, post, del, ApiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { Badge, Button, Card, ConfirmDialog, DataTable, Field, Input, KeyValue, PageHeader, Select, Toggle, type Column } from '@/components/ui';
 import { fmtDateTime, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { briefingsApi, briefingKeys, BRIEFING_TIMES, type BriefingPrefs, type BriefingChannel } from '@/components/briefings/api';
 
 const TIMEZONES = [
   'UTC',
@@ -89,6 +90,21 @@ export default function ProfilePage() {
   const [phone, setPhone] = useState(user.phone ?? profile.phone ?? '');
   const [timezone, setTimezone] = useState(user.timezone || 'UTC');
   const [prefs, setPrefs] = useState<NotificationPrefs>(() => prefsOf(user));
+  const briefingToday = useQuery({ queryKey: briefingKeys.today, queryFn: briefingsApi.today, enabled: user.userType === 'msp', staleTime: 60_000 });
+  const [briefing, setBriefing] = useState<BriefingPrefs | null>(null);
+  const briefingPrefs: BriefingPrefs = briefing ?? briefingToday.data?.prefs ?? { enabled: false, time: '08:00', role: 'auto', channels: ['email', 'in_app'] };
+  const saveBriefing = useMutation({
+    mutationFn: (next: BriefingPrefs) => patch<{ user: Principal }>('/auth/me', { preferences: { ...user.preferences, briefing: next } }),
+    onSuccess: (res, next) => {
+      setUser(res.user);
+      setBriefing(null);
+      qc.setQueryData(briefingKeys.today, (prev: typeof briefingToday.data) => (prev ? { ...prev, prefs: next } : prev));
+      void qc.invalidateQueries({ queryKey: briefingKeys.today });
+      toast.success(next.enabled ? `Daily briefing on, at ${next.time}` : 'Daily briefing off');
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not save the briefing settings'),
+  });
+  const setBriefingField = (patchPrefs: Partial<BriefingPrefs>) => setBriefing({ ...briefingPrefs, ...patchPrefs });
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [revokeAllOpen, setRevokeAllOpen] = useState(false);
 
@@ -262,6 +278,37 @@ export default function ProfilePage() {
               {!user.phone && <div className="text-[12px] text-subtle -mt-1 pl-11">Save a mobile number in your profile first.</div>}
             </div>
           </Card>
+
+          {user.userType === 'msp' && (
+            <Card title="Daily briefing" actions={<Sparkles className="h-4 w-4 text-brand-600" />}>
+              <div className="flex flex-col gap-3">
+                <Toggle checked={briefingPrefs.enabled} onChange={(v) => saveBriefing.mutate({ ...briefingPrefs, enabled: v })} label={<span>Send me a briefing every morning <span className="text-subtle">— what matters for your role, written by Grady from the live figures</span></span>} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="Time" hint={`In your timezone (${user.timezone || 'UTC'})`}>
+                    <Select value={briefingPrefs.time} onChange={(e) => setBriefingField({ time: e.target.value })} options={(BRIEFING_TIMES.includes(briefingPrefs.time) ? BRIEFING_TIMES : [briefingPrefs.time, ...BRIEFING_TIMES]).map((t) => ({ value: t, label: t }))} />
+                  </Field>
+                  <Field label="Briefing" hint="Chosen from your roles when left on automatic">
+                    <Select value={briefingPrefs.role} onChange={(e) => setBriefingField({ role: e.target.value as BriefingPrefs['role'] })} options={[{ value: 'auto', label: `Automatic${briefingToday.data ? ` (${briefingToday.data.roles.find((r) => r.key === briefingToday.data!.role)?.label ?? ''})` : ''}` }, ...(briefingToday.data?.roles ?? []).filter((r) => r.allowed).map((r) => ({ value: r.key, label: r.label }))]} />
+                  </Field>
+                </div>
+                <div className="flex flex-wrap items-center gap-4">
+                  {(['email', 'in_app'] as BriefingChannel[]).map((ch) => (
+                    <label key={ch} className="inline-flex items-center gap-1.5 text-[13px] cursor-pointer">
+                      <input type="checkbox" className="h-3.5 w-3.5 accent-brand-600" checked={briefingPrefs.channels.includes(ch)} onChange={(e) => setBriefingField({ channels: e.target.checked ? [...briefingPrefs.channels, ch] : briefingPrefs.channels.filter((c) => c !== ch) })} />
+                      {ch === 'email' ? 'Email' : 'In-app'}
+                    </label>
+                  ))}
+                  <div className="ml-auto flex items-center gap-2">
+                    {briefing && <Button size="sm" variant="ghost" onClick={() => setBriefing(null)}>Discard</Button>}
+                    <Button size="sm" disabled={!briefing} loading={saveBriefing.isPending} onClick={() => saveBriefing.mutate(briefingPrefs)}>Save briefing settings</Button>
+                  </div>
+                </div>
+                {briefingToday.data?.roles.find((r) => r.key === (briefingPrefs.role === 'auto' ? briefingToday.data?.role : briefingPrefs.role))?.description && (
+                  <div className="text-[12.5px] text-muted">{briefingToday.data.roles.find((r) => r.key === (briefingPrefs.role === 'auto' ? briefingToday.data?.role : briefingPrefs.role))?.description}</div>
+                )}
+              </div>
+            </Card>
+          )}
 
           <Card
             title="Change password"

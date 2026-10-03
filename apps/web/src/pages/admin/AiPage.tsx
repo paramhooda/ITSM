@@ -51,6 +51,7 @@ const FEATURE_LABELS: Record<string, string> = {
   sentiment: 'Customer sentiment on comments',
   recommendations: 'Service review recommendations',
   handover: 'Drafted shift handovers',
+  briefing: 'Daily briefings',
 };
 const fmt = (n: number) => n.toLocaleString('en-GB');
 const compact = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}k` : fmt(n));

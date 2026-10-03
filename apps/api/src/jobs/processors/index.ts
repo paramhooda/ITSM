@@ -18,3 +18,4 @@ import './paging';
 import './risk';
 import './status';
 import './changes';
+import './briefings';

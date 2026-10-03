@@ -92,6 +92,13 @@
       "when": 1791900000000,
       "tag": "0012_handover",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0013_briefings",
+      "breakpoints": true
     }
   ]
 }

@@ -293,7 +293,7 @@ async function seedSystemSettings(tx: Tx) {
     'audit.retention_months': { value: 36, description: 'Months to retain audit log partitions' },
     'events.retention_months': { value: 12, description: 'Months to retain integration event partitions' },
     'ai.assistant.enabled': { value: true, description: 'Kill switch for Grady: off stops every chat and AI feature at once' },
-    'ai.disabled_features': { value: [], description: 'AI features switched off (assistant, summarize, classify, assign, similar, suggest_kb, resolution, draft, duplicates, change_impact, problem_clusters, triage, sentiment, recommendations, handover)' },
+    'ai.disabled_features': { value: [], description: 'AI features switched off (assistant, summarize, classify, assign, similar, suggest_kb, resolution, draft, duplicates, change_impact, problem_clusters, triage, sentiment, recommendations, handover, briefing)' },
     'ai.autonomy': { value: 'confirm_all', description: 'confirm_all: every change waits for confirmation; auto_low: low-risk internal writes (work notes, watching, tasks, links) apply at once' },
     'ai.effort': { value: 'low', description: 'Reasoning effort for the assistant (low, medium, high) on models that support it' },
     'ai.daily_token_budget': { value: 250000, description: 'Tokens one person may spend on the assistant per day (0 = unlimited)' },
