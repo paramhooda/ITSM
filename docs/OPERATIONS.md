@@ -81,6 +81,10 @@ See `SECURITY.md`. Rotate `JWT_SECRET` to invalidate all access tokens (users re
 
 1,000 customers · 1,000 tickets/day · 10 comments/ticket · 3 SLA rows/ticket ≈ 5 M tickets, 50 M comments, 15 M SLA rows over 5 years, ~80 GB including indexes. A single PostgreSQL primary with 8 vCPU / 32 GB RAM and NVMe storage is adequate; scale reads with a replica if reporting load grows.
 
+## Triage on arrival
+
+Every new incident or request is triaged by Grady a moment after it is created (`triage-ticket` on the `ai` queue; the worker must be running). The job classifies the ticket, recommends an owner and looks for duplicates; above `ai.triage.auto_apply_confidence` the category and the owner are applied, otherwise they wait as proposals the engineer accepts from the chips under the ticket's attention strip. Monitoring and SIEM tickets that look like an open one are linked as duplicates of the oldest (`ai.triage.storm_auto_link`); `ai.triage.storm_threshold` look-alikes within `ai.triage.storm_window_minutes` is reported as an alert storm. The switch and the thresholds live on **Administration → AI assistant** (feature *Triage on arrival*, the Limits card); each run is a `Grady triage: …` activity on the ticket and an `ai.triage` audit entry. Without an AI provider the keyword heuristic still runs.
+
 ## AI assistant troubleshooting
 
 The assistant uses the provider set by `AI_PROVIDER` (`anthropic`, `openai_compatible` or `none`), the model in `AI_MODEL` and, for OpenAI-compatible endpoints, `OPENAI_COMPATIBLE_BASE_URL` plus `OPENAI_COMPATIBLE_API_KEY`. Environment variables are read when the container starts, so run `docker compose up -d` after changing `.env`.

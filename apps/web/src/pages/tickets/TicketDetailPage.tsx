@@ -31,6 +31,9 @@ import { TicketDetailsRail, TicketAssistRail } from '@/components/tickets/detail
 import { ResolveDialog, CommentDialog, ScopeDialog } from '@/components/tickets/detail/ActionDialogs';
 import { SlaCard } from '@/components/tickets/SlaCard';
 import { PageDialog } from '@/components/oncall/PageDialog';
+import { TriageChips } from '@/components/ai/TriageChips';
+import { HandoverSummaryDialog } from '@/components/ai/HandoverSummaryDialog';
+import { aiApi, aiQk } from '@/components/ai/api';
 import { PagesPanel } from '@/components/oncall/PagesPanel';
 import { oncallApi, oncallKeys } from '@/components/oncall/api';
 import { LINK_TYPE_LABELS, type TicketDetail, type CatalogField, type LinkedTicket } from '@/components/tickets/types';
@@ -72,7 +75,12 @@ export default function TicketDetailPage() {
   const { id = '' } = useParams();
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user)!;
+  const can = useAuthStore((s) => s.can);
   const isCustomer = user.userType === 'customer';
+  const aiOn = !isCustomer && can('ai:use');
+  const aiStatus = useQuery({ queryKey: aiQk.status, queryFn: aiApi.status, staleTime: 60_000, retry: false, enabled: aiOn });
+  const aiFeatures = aiStatus.data?.features ?? [];
+  const aiFeature = (f: string) => aiOn && aiFeatures.includes(f);
   const setAssistantContext = useUiStore((s) => s.setAssistantContext);
   const { options, lookups } = useLookups();
   const engineers = useEngineers();
@@ -134,7 +142,7 @@ export default function TicketDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const [dialog, setDialog] = useState<null | 'resolve' | 'close' | 'reopen' | 'cancel' | 'escalate' | 'scope' | 'major-declare' | 'major-demote' | 'page'>(null);
+  const [dialog, setDialog] = useState<null | 'resolve' | 'close' | 'reopen' | 'cancel' | 'escalate' | 'scope' | 'major-declare' | 'major-demote' | 'page' | 'handover'>(null);
   const [editDesc, setEditDesc] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
   const entries = useMemo(() => (timelineQ.data?.items ?? []).map(fromTimeline), [timelineQ.data]);
@@ -186,6 +194,7 @@ export default function TicketDetailPage() {
     ...(p.major && ticket.isMajor ? [{ label: 'Not a major incident…', icon: <Undo2 className="h-4 w-4" />, onClick: () => setDialog('major-demote') }] : []),
     ...(p.escalate && isOpen ? [{ label: `Escalate to level ${ticket.escalationLevel + 1}`, icon: <ArrowUpRight className="h-4 w-4" />, onClick: () => setDialog('escalate') }] : []),
     ...(p.escalate && isOpen && !isCustomer ? [{ label: 'Page on-call…', icon: <BellRing className="h-4 w-4" />, onClick: () => setDialog('page') }] : []),
+    ...(aiFeature('summarize') ? [{ label: 'Summarise for handover…', icon: <Sparkles className="h-4 w-4" />, onClick: () => setDialog('handover') }] : []),
     ...(p.watch ? [{ label: ticket.isWatching ? 'Stop watching' : 'Watch this ticket', icon: ticket.isWatching ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />, onClick: () => watch.mutate(ticket.isWatching) }] : []),
     ...(p.update && !isCustomer ? [{ label: 'Classify scope…', icon: <Pencil className="h-4 w-4" />, onClick: () => setDialog('scope') }] : []),
     ...(p.cancel && isOpen ? [{ label: 'Cancel ticket', icon: <Ban className="h-4 w-4" />, onClick: () => setDialog('cancel'), danger: true }] : []),
@@ -390,6 +399,7 @@ export default function TicketDetailPage() {
         main={
           <>
             {!isCustomer && <RecordAttention items={attention} />}
+            {aiOn && <TriageChips ticket={ticket} canUpdate={p.update && isOpen} canAssign={p.assign && isOpen} canLink={p.links && isOpen} />}
             <RecordForm sections={sections} />
             <RelatedTabs tabs={tabs} defaultTab={ticket.isMajor && !isCustomer ? 'major' : undefined} />
           </>
@@ -398,7 +408,7 @@ export default function TicketDetailPage() {
           <div ref={railRef} className="contents">
             <RailTabs
               tabs={[
-                { key: 'activity', label: 'Activity', icon: MessageSquare, badge: entries.length, content: <ActivityStream entries={entries} loading={timelineQ.isLoading} maxHeight="calc(100vh - 220px)" composer={{ canComment: p.comment, canWorkNote: p.workNote, canTime: p.time, canAttach: p.comment || p.workNote, submitting: comment.isPending, onSubmit: (v) => comment.mutateAsync(v) }} /> },
+                { key: 'activity', label: 'Activity', icon: MessageSquare, badge: entries.length, content: <ActivityStream entries={entries} loading={timelineQ.isLoading} maxHeight="calc(100vh - 220px)" composer={{ canComment: p.comment, canWorkNote: p.workNote, canTime: p.time, canAttach: p.comment || p.workNote, submitting: comment.isPending, onSubmit: (v) => comment.mutateAsync(v), ai: aiOn ? { draft: aiFeature('draft') && p.comment ? (tone) => aiApi.draftCustomerUpdate(id, tone) : undefined, knowledge: aiFeature('suggest_kb') ? () => aiApi.suggestKnowledge(id) : undefined } : undefined }} /> },
                 { key: 'details', label: 'Details', icon: Info, content: <TicketDetailsRail ticket={ticket} /> },
                 { key: 'assist', label: 'Assist', icon: Sparkles, hidden: isCustomer, content: <TicketAssistRail ticket={ticket} /> },
               ]}
@@ -407,7 +417,8 @@ export default function TicketDetailPage() {
         }
       />
 
-      <ResolveDialog open={dialog === 'resolve'} onClose={() => setDialog(null)} ticket={ticket} busy={resolve.isPending} onSubmit={(v) => resolve.mutateAsync(v).then(() => setDialog(null))} />
+      <ResolveDialog open={dialog === 'resolve'} onClose={() => setDialog(null)} ticket={ticket} busy={resolve.isPending} onSubmit={(v) => resolve.mutateAsync(v).then(() => setDialog(null))} onDraftNotes={aiFeature('draft') ? () => aiApi.draftResolution(id) : undefined} />
+      {aiOn && <HandoverSummaryDialog open={dialog === 'handover'} onClose={() => setDialog(null)} ticketId={ticket.id} ticketNumber={ticket.number} />}
       <CommentDialog open={dialog === 'close'} onClose={() => setDialog(null)} title={`Close ${ticket.number}`} confirmLabel="Close ticket" busy={close.isPending} codes={closureCodes} label="Closing comment" onSubmit={(v) => close.mutateAsync(v).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'reopen'} onClose={() => setDialog(null)} title={`Reopen ${ticket.number}`} confirmLabel="Reopen" busy={reopen.isPending} label="Why is this being reopened?" required onSubmit={(v) => reopen.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'cancel'} onClose={() => setDialog(null)} title={`Cancel ${ticket.number}`} confirmLabel="Cancel ticket" danger busy={cancel.isPending} codes={isCustomer ? undefined : closureCodes} label="Reason" required onSubmit={(v) => cancel.mutateAsync(v).then(() => setDialog(null))} />

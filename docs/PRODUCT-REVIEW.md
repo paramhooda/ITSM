@@ -92,7 +92,7 @@ Note: financial depreciation and contract value tracking were removed by request
 
 ## Suggested order
 
-1. **Shipped since this review**: the staff approvals inbox with sequential steps, WhatsApp notifications (one business account, personal opt-in), the major incident workflow (declare or demote, bridge and roles, stakeholder updates on a cadence with reminders, child incidents, post-incident review, portal banner, Operations list and NOC tile), on-call schedules and paging (rotas with handoffs and windows, cover, escalation policies with timed steps, pages from tickets, rules and Grady, one-tap acknowledgement, the Operations page and dashboard panel).
+1. **Shipped since this review**: the staff approvals inbox with sequential steps, WhatsApp notifications (one business account, personal opt-in), the major incident workflow (declare or demote, bridge and roles, stakeholder updates on a cadence with reminders, child incidents, post-incident review, portal banner, Operations list and NOC tile), on-call schedules and paging (rotas with handoffs and windows, cover, escalation policies with timed steps, pages from tickets, rules and Grady, one-tap acknowledgement, the Operations page and dashboard panel), Grady in the composer and triage on arrival (drafted replies with a tone, knowledge suggestions, drafted resolution notes, handover summaries; automatic classification, owner and duplicate triage with a confidence threshold and alert-storm linking).
 2. **Now**: CSAT survey, inbound email, SSO.
 3. **Next**: change calendar with conflicts and CAB, announcements and service health page, PDF reports, Teams and SMS channels, portal preview.
 4. **Later**: software asset management, stockroom, more adapters, custom report builder.

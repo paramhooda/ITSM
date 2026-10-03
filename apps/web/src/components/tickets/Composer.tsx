@@ -1,7 +1,11 @@
 import { useState, useRef, useEffect, type DragEvent } from 'react';
-import { Lock, MessageSquare, Paperclip, Send } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
+import { Lock, MessageSquare, Paperclip, Send, Sparkles, ChevronDown, BookOpen, X } from 'lucide-react';
 import { Button, Textarea, Input, Kbd } from '@/components/ui';
+import { Menu } from '@/components/Menu';
 import { cn } from '@/lib/utils';
+import type { KnowledgeResult, Tone } from '@/components/ai/api';
 import { FileChips, pastedFiles } from '@/components/attachments/FilePicker';
 import { addFiles } from '@/components/attachments/upload';
 
@@ -16,12 +20,24 @@ export interface ComposerInput {
 }
 
 const DEFAULT_HINTS: Record<ComposerKind, string> = { comment: 'Visible to the customer', work_note: 'Internal only' };
+const TONES: { value: Tone; label: string }[] = [
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'formal', label: 'Formal' },
+  { value: 'friendly', label: 'Friendly' },
+  { value: 'apologetic', label: 'Apologetic' },
+];
+
+/** Grady helpers the page may hand the composer (staff only): a drafted reply in a tone, matching knowledge articles. */
+export interface ComposerAi {
+  draft?: (tone: Tone) => Promise<{ draft: string; aiGenerated: boolean }>;
+  knowledge?: () => Promise<KnowledgeResult>;
+}
 
 /**
  * Reply / work-note composer with minutes-spent, attachments (button, drop or paste) and
  * Ctrl+Enter submit. A note needs text or at least one file.
  */
-export function Composer({ onSubmit, canComment, canWorkNote, canTime, canAttach = true, submitting, placeholder, defaultKind = 'comment', hints }: { onSubmit: (input: ComposerInput) => Promise<unknown> | void; canComment: boolean; canWorkNote: boolean; canTime?: boolean; canAttach?: boolean; submitting?: boolean; placeholder?: string; defaultKind?: ComposerKind; /** Audience line per kind, e.g. "Sent to the service desk" on the portal. */ hints?: Partial<Record<ComposerKind, string>> }) {
+export function Composer({ onSubmit, canComment, canWorkNote, canTime, canAttach = true, submitting, placeholder, defaultKind = 'comment', hints, ai }: { onSubmit: (input: ComposerInput) => Promise<unknown> | void; canComment: boolean; canWorkNote: boolean; canTime?: boolean; canAttach?: boolean; submitting?: boolean; placeholder?: string; defaultKind?: ComposerKind; /** Audience line per kind, e.g. "Sent to the service desk" on the portal. */ hints?: Partial<Record<ComposerKind, string>>; ai?: ComposerAi }) {
   const [kind, setKind] = useState<ComposerKind>(canComment ? defaultKind : 'work_note');
   const [body, setBody] = useState('');
   const [minutes, setMinutes] = useState('');
@@ -29,10 +45,44 @@ export function Composer({ onSubmit, canComment, canWorkNote, canTime, canAttach
   const [dragging, setDragging] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [drafting, setDrafting] = useState(false);
+  const [drafted, setDrafted] = useState<{ aiGenerated: boolean } | null>(null);
+  const [kb, setKb] = useState<{ loading: boolean; result: KnowledgeResult | null } | null>(null);
   useEffect(() => {
     if (!canComment && canWorkNote) setKind('work_note');
   }, [canComment, canWorkNote]);
   if (!canComment && !canWorkNote) return null;
+
+  const draftReply = async (tone: Tone) => {
+    if (!ai?.draft || drafting) return;
+    setDrafting(true);
+    try {
+      const r = await ai.draft(tone);
+      setBody(r.draft);
+      setDrafted({ aiGenerated: r.aiGenerated });
+      ref.current?.focus();
+    } catch (err) {
+      toast.error((err as Error).message || 'Could not draft a reply');
+    } finally {
+      setDrafting(false);
+    }
+  };
+  const suggestKnowledge = async () => {
+    if (!ai?.knowledge) return;
+    if (kb && !kb.loading) return setKb(null);
+    setKb({ loading: true, result: null });
+    try {
+      setKb({ loading: false, result: await ai.knowledge() });
+    } catch (err) {
+      setKb(null);
+      toast.error((err as Error).message || 'Could not look up knowledge');
+    }
+  };
+  const insertArticle = (a: KnowledgeResult['items'][number]) => {
+    const line = `${a.title}: ${window.location.origin}${a.link}`;
+    setBody((cur) => (cur.trim() ? `${cur.replace(/\s+$/, '')}\n\n${line}` : line));
+    ref.current?.focus();
+  };
 
   const hint = { ...DEFAULT_HINTS, ...hints }[kind];
   const ready = (body.trim().length > 0 || files.length > 0) && !submitting;
@@ -52,6 +102,8 @@ export function Composer({ onSubmit, canComment, canWorkNote, canTime, canAttach
     setBody('');
     setMinutes('');
     setFiles([]);
+    setDrafted(null);
+    setKb(null);
     ref.current?.focus();
   }
 
@@ -107,6 +159,42 @@ export function Composer({ onSubmit, canComment, canWorkNote, canTime, canAttach
             }
           }}
         />
+        {drafted && body.trim() && (
+          <div className="px-1 pb-1 text-[11.5px] text-subtle inline-flex items-center gap-1"><Sparkles className="h-3 w-3" /> {drafted.aiGenerated ? 'Drafted by Grady from the ticket and its notes. Read it before sending.' : 'Template reply (the AI provider is not configured). Read it before sending.'}</div>
+        )}
+        {kb && (
+          <div className="mx-1 mb-1 rounded-md border border-default bg-surface-2 p-2 text-[12.5px]">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-medium inline-flex items-center gap-1"><BookOpen className="h-3.5 w-3.5" /> Knowledge that may help</span>
+              {kb.loading && <span className="text-subtle">looking…</span>}
+              <button type="button" className="ml-auto text-subtle hover:text-default" aria-label="Close" onClick={() => setKb(null)}><X className="h-3.5 w-3.5" /></button>
+            </div>
+            {kb.result && kb.result.items.length === 0 && <div className="text-muted">No published article matches this ticket.</div>}
+            {kb.result && kb.result.items.length > 0 && (
+              <ul className="flex flex-col divide-y divide-[var(--border)]">
+                {kb.result.items.slice(0, 5).map((a) => (
+                  <li key={a.id} className="flex items-center gap-2 py-1">
+                    <div className="min-w-0 flex-1">
+                      <Link to={a.link} className="font-medium text-brand-700 hover:underline" target="_blank" rel="noreferrer">{a.number} {a.title}</Link>
+                      <div className="text-subtle truncate">{a.reason}</div>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => insertArticle(a)}>Insert link</Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {(ai?.draft || ai?.knowledge) && (
+          <div className="flex flex-wrap items-center gap-1 px-1 pb-1">
+            {ai.draft && kind === 'comment' && (
+              <Menu align="left" trigger={<Button size="sm" variant="ghost" className="px-2 h-7" icon={<Sparkles className="h-3.5 w-3.5" />} loading={drafting} disabled={submitting} title="Let Grady draft the reply from the ticket and its notes">Draft reply <ChevronDown className="h-3 w-3" /></Button>} items={TONES.map((t) => ({ label: `${t.label} tone`, onClick: () => void draftReply(t.value) }))} />
+            )}
+            {ai.knowledge && (
+              <Button size="sm" variant="ghost" className="px-2 h-7" icon={<BookOpen className="h-3.5 w-3.5" />} loading={!!kb?.loading} disabled={submitting} onClick={() => void suggestKnowledge()} title="Knowledge articles that match this ticket">Suggest knowledge</Button>
+            )}
+          </div>
+        )}
         {files.length > 0 && (
           <div className="px-1 pb-1 flex flex-col gap-1">
             <FileChips files={files} disabled={submitting} onRemove={(i) => setFiles((cur) => cur.filter((_, j) => j !== i))} />

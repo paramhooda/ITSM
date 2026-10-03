@@ -13,7 +13,7 @@ import { suggest as kbSuggest, getArticle } from '@/modules/knowledge/service';
 import { impact as ciImpact } from '@/modules/cmdb/service';
 import { llmJson, enabled, asSteps, type Steps } from './service';
 import { assertFeature } from './guards';
-import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, MAJOR_UPDATE_SYSTEM, RESOLUTION_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompt';
+import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, MAJOR_UPDATE_SYSTEM, RESOLUTION_SYSTEM, RESOLUTION_NOTES_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompt';
 import { compactDetail, compactTimeline, ticketLink } from './helpers';
 
 /**
@@ -33,15 +33,18 @@ const trunc = (s: string | null | undefined, n: number) => (s ? (s.length > n ? 
 const firstName = (name?: string | null) => (name ? name.split(/\s+/)[0]! : '');
 const minutesLabel = (m: number) => (Math.abs(m) >= 120 ? `${Math.round(Math.abs(m) / 60)}h` : `${Math.abs(m)}m`);
 
-export type SuggestionKind = 'summary' | 'classification' | 'assignment' | 'similar' | 'knowledge' | 'resolution' | 'draft_update' | 'duplicates' | 'change_impact' | 'problem_cluster';
+export type SuggestionKind = 'summary' | 'classification' | 'assignment' | 'similar' | 'knowledge' | 'resolution' | 'resolution_notes' | 'draft_update' | 'duplicates' | 'change_impact' | 'problem_cluster';
+/** proposed: waits for a person; accepted / rejected: decided; applied: the change was made (by the person accepting, or by triage above the confidence threshold). */
+export type SuggestionStatus = 'proposed' | 'accepted' | 'rejected' | 'applied';
 
-async function store(ctx: Ctx, input: { customerId: string | null; entityType: string; entityId: string; kind: SuggestionKind; payload: Record<string, unknown>; rationale?: string | null; confidence?: number | null }) {
+async function store(ctx: Ctx, input: { customerId: string | null; entityType: string; entityId: string; kind: SuggestionKind; payload: Record<string, unknown>; rationale?: string | null; confidence?: number | null; status?: SuggestionStatus }) {
   const [row] = await ctx.tx
     .insert(schema.aiSuggestions)
-    .values({ customerId: input.customerId, entityType: input.entityType, entityId: input.entityId, kind: input.kind, payload: input.payload, rationale: input.rationale ?? null, confidence: input.confidence ?? null, status: 'proposed' })
+    .values({ customerId: input.customerId, entityType: input.entityType, entityId: input.entityId, kind: input.kind, payload: input.payload, rationale: input.rationale ?? null, confidence: input.confidence ?? null, status: input.status ?? 'proposed' })
     .returning({ id: schema.aiSuggestions.id });
   return row!.id;
 }
+export const storeSuggestion = store;
 
 async function readTicket(ctx: Ctx, id: string) {
   const row = await loadTicket(ctx, id);
@@ -227,13 +230,13 @@ export async function gatherClassification(ctx: Ctx, input: ClassifyInput) {
 }
 
 /** Step 2 (model, no transaction): the provider's pick from the real option keys; null when disabled or unusable. */
-async function classifyLlm(g: Gathered) {
+export async function classifyLlm(g: Gathered) {
   if (!enabled()) return null;
   return llmJson(CLASSIFY_SYSTEM, JSON.stringify({ ticket: { type: g.input.type ?? 'incident', title: g.input.title, description: trunc(g.input.description, 4000) }, options: g.options }), (v) => classificationSchema.parse(v), { maxTokens: 400 });
 }
 
 /** Step 3 (database): resolve the model's keys against the options and the priority matrix, or keep the heuristic. */
-async function finishClassification(ctx: Ctx, g: Gathered, llm: Awaited<ReturnType<typeof classifyLlm>>): Promise<{ result: Classification; aiGenerated: boolean }> {
+export async function finishClassification(ctx: Ctx, g: Gathered, llm: Awaited<ReturnType<typeof classifyLlm>>): Promise<{ result: Classification; aiGenerated: boolean }> {
   if (!llm) return { result: g.heuristic, aiGenerated: false };
   const { cats, subs, impacts, urgencies, priorities } = g;
   const cat = cats.find((c) => c.key === llm.data.categoryKey) ?? null;
@@ -512,6 +515,38 @@ function fallbackDraft(d: Detail, tone: string, engineer: string, notes: Timelin
   return `${greeting}\n\n${opener}This is an update on ticket ${d.number} "${d.title}". ${stateLine}${progress} ${next}\n\n${closing}\n${engineer}`;
 }
 
+// ---------------------------------------------------------------- resolution notes draft
+
+const resolutionNotesSchema = z.object({ notes: z.string().min(10).max(3000) });
+
+/** Drafts the customer-visible resolution notes from the engineer's work notes and the ticket (nothing is applied). */
+export async function draftResolutionNotes(who: Who, ticketId: string) {
+  const s = asSteps(who);
+  const g = await s.tx(async (ctx) => {
+    await assertFeature(ctx, 'draft');
+    const { row, detail } = await readTicket(ctx, ticketId);
+    if (isCustomerUser(ctx)) throw new ForbiddenError();
+    ctx.require('tickets:resolve', row.customerId);
+    const tl = await timeline(ctx, ticketId);
+    const notes = tl.items.filter((i) => i.kind === 'comment').slice(-8);
+    return { row, detail, notes, compact: compactDetail(ctx, detail) };
+  });
+  const { row, notes } = g;
+  const llm = await llmJson(RESOLUTION_NOTES_SYSTEM, JSON.stringify({ ticket: { ...g.compact, description: trunc(row.description, 1200), existingResolutionNotes: trunc(row.resolutionNotes, 800) }, notes: compactTimeline(notes, 8) }), (v) => resolutionNotesSchema.parse(v), { maxTokens: 500 });
+  const text = llm?.data.notes ?? fallbackResolutionNotes(row, notes);
+  return s.tx(async (ctx) => {
+    const suggestionId = await store(ctx, { customerId: row.customerId, entityType: 'ticket', entityId: row.id, kind: 'resolution_notes', payload: { notes: text }, rationale: llm ? 'Drafted by the AI provider from the work notes' : 'Assembled from the latest work notes (AI provider not configured)' });
+    return { suggestionId, aiGenerated: !!llm, notes: text };
+  });
+}
+
+function fallbackResolutionNotes(row: TicketRow, notes: TimelineItems) {
+  const internal = notes.filter((n) => n.isInternal && n.body?.trim());
+  const latest = (internal.length ? internal : notes.filter((n) => n.body?.trim())).slice(-3).map((n) => trunc(n.body!.replace(/\s+/g, ' ').trim(), 240));
+  const done = latest.length ? `What was done: ${latest.join(' ')}` : 'What was done: see the work notes on the ticket.';
+  return `Issue: ${row.title}.\n${done}\nOutcome: the service is restored; please reopen the ticket if the problem comes back.`;
+}
+
 // ---------------------------------------------------------------- major incident stakeholder update
 
 /** Drafts the next stakeholder update (customer audience) or bridge note (internal) of a major incident. */
@@ -788,14 +823,28 @@ export async function listSuggestions(ctx: Ctx, ticketId: string, kind?: string)
   return { items: rows.map((s) => ({ id: s.id, kind: s.kind, status: s.status, confidence: s.confidence, rationale: s.rationale, payload: s.payload, decidedBy: s.decidedBy, decidedAt: s.decidedAt, createdAt: s.createdAt })) };
 }
 
-export async function decide(ctx: Ctx, suggestionId: string, status: 'accepted' | 'rejected', note?: string | null) {
+/**
+ * Records a person's decision. With `apply`, an accepted classification, owner
+ * or duplicate suggestion is also carried out through the ticket services under
+ * that person's permissions, and the row reads `applied` (the Assist rail applies
+ * through the ticket endpoints itself and only records the decision).
+ */
+export async function decide(ctx: Ctx, suggestionId: string, status: 'accepted' | 'rejected', note?: string | null, opts: { apply?: boolean; targetTicketId?: string | null } = {}) {
   const [s] = await ctx.tx.select().from(schema.aiSuggestions).where(eq(schema.aiSuggestions.id, suggestionId)).limit(1);
   if (!s) throw new NotFoundError('Suggestion');
   if (s.customerId) ctx.requireCustomer(s.customerId);
-  if (s.entityType === 'ticket') await loadTicket(ctx, s.entityId); // read access to the ticket is enough; applying happens through the ticket endpoints
-  const [updated] = await ctx.tx.update(schema.aiSuggestions).set({ status, decidedBy: ctx.user.id, decidedAt: new Date(), payload: note ? { ...s.payload, decisionNote: note } : s.payload }).where(eq(schema.aiSuggestions.id, s.id)).returning();
-  await ctx.audit({ entityType: 'ai_suggestion', entityId: s.id, entityLabel: s.kind, action: `ai.suggestion.${status}`, customerId: s.customerId, metadata: { kind: s.kind, entityType: s.entityType, entityId: s.entityId, note: note ?? null } });
-  return { id: updated!.id, kind: updated!.kind, status: updated!.status, decidedAt: updated!.decidedAt };
+  if (s.entityType === 'ticket') await loadTicket(ctx, s.entityId);
+  if (isCustomerUser(ctx)) throw new ForbiddenError();
+  let changes: string[] = [];
+  if (status === 'accepted' && opts.apply === true) {
+    const { applySuggestion } = await import('./triage');
+    changes = await applySuggestion(ctx, s, { targetTicketId: opts.targetTicketId ?? null });
+  }
+  const final: SuggestionStatus = changes.length ? 'applied' : status;
+  const payload = { ...s.payload, ...(note ? { decisionNote: note } : {}), ...(changes.length ? { appliedBy: ctx.user.id, appliedChanges: changes } : {}) };
+  const [updated] = await ctx.tx.update(schema.aiSuggestions).set({ status: final, decidedBy: ctx.user.id, decidedAt: new Date(), payload }).where(eq(schema.aiSuggestions.id, s.id)).returning();
+  await ctx.audit({ entityType: 'ai_suggestion', entityId: s.id, entityLabel: s.kind, action: `ai.suggestion.${final}`, customerId: s.customerId, metadata: { kind: s.kind, entityType: s.entityType, entityId: s.entityId, note: note ?? null, changes } });
+  return { id: updated!.id, kind: updated!.kind, status: updated!.status, decidedAt: updated!.decidedAt, changes };
 }
 
 export type { TicketRow };

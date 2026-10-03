@@ -4,6 +4,7 @@ import type { Ctx } from '@/core/context';
 import { ForbiddenError } from '@/core/errors';
 import { updateSettings } from '@/modules/config/service';
 import { AI_FEATURES, loadAiSettings, type AiSettings } from './guards';
+import { loadTriageSettings, type TriageSettings } from './triage';
 
 /**
  * The administrator's control surface: the operating settings of the assistant
@@ -23,6 +24,10 @@ export const aiSettingsBodySchema = z
     dailyTokenBudget: z.number().int().min(0).max(100_000_000).optional(),
     turnTimeoutSeconds: z.number().int().min(15).max(600).optional(),
     retentionDays: z.number().int().min(0).max(3650).optional(),
+    triageAutoApplyConfidence: z.number().int().min(50).max(100).optional(),
+    stormWindowMinutes: z.number().int().min(5).max(1440).optional(),
+    stormThreshold: z.number().int().min(2).max(50).optional(),
+    stormAutoLink: z.boolean().optional(),
   })
   .refine((b) => b.retentionDays === undefined || b.retentionDays === 0 || b.retentionDays >= 7, { message: 'Retention is 0 (keep forever) or at least 7 days', path: ['retentionDays'] });
 export type AiSettingsBody = z.infer<typeof aiSettingsBodySchema>;
@@ -36,11 +41,12 @@ const requireAdmin = (ctx: Ctx) => {
 export interface AiAdminSettings extends AiSettings {
   features: readonly string[];
   rateLimitPerMinute: number;
+  triage: TriageSettings;
 }
 
 export async function getAiSettings(ctx: Ctx): Promise<AiAdminSettings> {
   requireAdmin(ctx);
-  return { ...(await loadAiSettings(ctx.tx)), features: AI_FEATURES, rateLimitPerMinute: CHAT_RATE_LIMIT_PER_MINUTE };
+  return { ...(await loadAiSettings(ctx.tx)), features: AI_FEATURES, rateLimitPerMinute: CHAT_RATE_LIMIT_PER_MINUTE, triage: await loadTriageSettings(ctx.tx) };
 }
 
 /** Writes only the keys given, through the settings service (audited as a settings update). */
@@ -54,6 +60,10 @@ export async function updateAiSettings(ctx: Ctx, patch: AiSettingsBody): Promise
   if (patch.dailyTokenBudget !== undefined) map['ai.daily_token_budget'] = patch.dailyTokenBudget;
   if (patch.turnTimeoutSeconds !== undefined) map['ai.turn_timeout_seconds'] = patch.turnTimeoutSeconds;
   if (patch.retentionDays !== undefined) map['ai.conversation_retention_days'] = patch.retentionDays;
+  if (patch.triageAutoApplyConfidence !== undefined) map['ai.triage.auto_apply_confidence'] = patch.triageAutoApplyConfidence;
+  if (patch.stormWindowMinutes !== undefined) map['ai.triage.storm_window_minutes'] = patch.stormWindowMinutes;
+  if (patch.stormThreshold !== undefined) map['ai.triage.storm_threshold'] = patch.stormThreshold;
+  if (patch.stormAutoLink !== undefined) map['ai.triage.storm_auto_link'] = patch.stormAutoLink;
   if (Object.keys(map).length) await updateSettings(ctx, map);
   return getAiSettings(ctx);
 }

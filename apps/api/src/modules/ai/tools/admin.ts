@@ -32,6 +32,10 @@ function validateSetting(key: string, value: unknown) {
     case 'ai.turn_timeout_seconds': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 10 && value <= 600, 'must be between 10 and 600 seconds');
     case 'ai.conversation_retention_days': return expect(typeof value === 'number' && Number.isInteger(value) && (value === 0 || (value >= 7 && value <= 3650)), 'must be 0 (keep forever) or 7 to 3650 days');
     case 'ai.disabled_features': return expect(Array.isArray(value) && value.every((v) => (AI_FEATURES as readonly string[]).includes(String(v))), `must be a list of: ${AI_FEATURES.join(', ')}`);
+    case 'ai.triage.auto_apply_confidence': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 100, 'must be between 50 and 100');
+    case 'ai.triage.storm_window_minutes': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 5 && value <= 1440, 'must be between 5 and 1440 minutes');
+    case 'ai.triage.storm_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 50, 'must be between 2 and 50');
+    case 'ai.triage.storm_auto_link': return expect(typeof value === 'boolean', 'must be true or false');
     default: return undefined;
   }
 }

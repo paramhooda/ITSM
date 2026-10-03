@@ -1,20 +1,38 @@
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { Sparkles } from 'lucide-react';
 import { Dialog, Button, Field, Select, Textarea } from '@/components/ui';
 import { useLookups } from '@/hooks/useLookups';
 import type { ScopeStatus, TicketDetail } from '../types';
 
-export function ResolveDialog({ open, onClose, onSubmit, busy, ticket }: { open: boolean; onClose: () => void; onSubmit: (v: { resolutionCodeId: string | null; resolutionNotes: string }) => void; busy: boolean; ticket: TicketDetail }) {
+export function ResolveDialog({ open, onClose, onSubmit, busy, ticket, onDraftNotes }: { open: boolean; onClose: () => void; onSubmit: (v: { resolutionCodeId: string | null; resolutionNotes: string }) => void; busy: boolean; ticket: TicketDetail; /** Grady writes the notes from the work notes (staff with the draft feature). */ onDraftNotes?: () => Promise<{ notes: string; aiGenerated: boolean }> }) {
   const { options } = useLookups();
   const codes = options('resolution_code');
   const [code, setCode] = useState('');
   const [notes, setNotes] = useState('');
+  const [drafting, setDrafting] = useState(false);
+  const [drafted, setDrafted] = useState<boolean | null>(null);
   useEffect(() => {
     if (open) {
       setCode(codes.find((c) => c.isDefault)?.id ?? '');
       setNotes(ticket.resolutionNotes ?? '');
+      setDrafted(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+  const draft = async () => {
+    if (!onDraftNotes || drafting) return;
+    setDrafting(true);
+    try {
+      const r = await onDraftNotes();
+      setNotes(r.notes);
+      setDrafted(r.aiGenerated);
+    } catch (err) {
+      toast.error((err as Error).message || 'Could not draft the notes');
+    } finally {
+      setDrafting(false);
+    }
+  };
   const verb = ticket.type === 'request' ? 'Fulfil' : ticket.type === 'change' ? 'Mark implemented' : 'Resolve';
   return (
     <Dialog open={open} onClose={onClose} title={`${verb} ${ticket.number}`} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button onClick={() => onSubmit({ resolutionCodeId: code || null, resolutionNotes: notes.trim() })} disabled={!notes.trim()} loading={busy}>{verb}</Button></>}>
@@ -22,7 +40,7 @@ export function ResolveDialog({ open, onClose, onSubmit, busy, ticket }: { open:
         <Field label="Resolution code">
           <Select value={code} onChange={(e) => setCode(e.target.value)} placeholder="—" options={codes.map((c) => ({ value: c.id, label: c.label }))} />
         </Field>
-        <Field label="Resolution notes" required hint="Visible to the customer and included in the resolution email.">
+        <Field label={<span className="inline-flex items-center gap-2">Resolution notes{onDraftNotes && <Button size="sm" variant="ghost" className="h-6 px-1.5" icon={<Sparkles className="h-3 w-3" />} loading={drafting} onClick={() => void draft()}>Write with Grady</Button>}</span>} required hint={drafted === null ? 'Visible to the customer and included in the resolution email.' : drafted ? 'Drafted by Grady from the work notes. Check it before resolving.' : 'Assembled from the work notes (the AI provider is not configured). Check it before resolving.'}>
           <Textarea autoFocus value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[110px]" placeholder="What was done to resolve the issue" />
         </Field>
       </div>

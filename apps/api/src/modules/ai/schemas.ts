@@ -46,7 +46,7 @@ export const feedbackBodySchema = z.object({ rating: z.enum(['up', 'down']).null
 
 export const idParam = z.object({ id: uuid });
 
-export const decideBodySchema = z.object({ status: z.enum(['accepted', 'rejected']), note: z.string().max(2000).nullable().optional() });
+export const decideBodySchema = z.object({ status: z.enum(['accepted', 'rejected']), note: z.string().max(2000).nullable().optional(), apply: z.boolean().optional(), targetTicketId: z.string().uuid().nullable().optional() });
 
 export const draftUpdateBodySchema = z.object({ tone: z.enum(['neutral', 'formal', 'friendly', 'apologetic']).optional() }).default({});
 

@@ -87,6 +87,7 @@ export default async function routes(app: FastifyInstance) {
   r.post('/ai/tickets/:id/similar', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.similar(steps(req), id(req)));
   r.post('/ai/tickets/:id/suggest-knowledge', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.suggestKnowledge(steps(req), id(req)));
   r.post('/ai/tickets/:id/resolution-suggestions', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.resolutionSuggestions(steps(req), id(req)));
+  r.post('/ai/tickets/:id/draft-resolution', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.draftResolutionNotes(steps(req), id(req)));
   r.post('/ai/tickets/:id/draft-customer-update', { preHandler: use, config: chatLimit, schema: { tags, params: idParam, body: draftUpdateBodySchema } }, async (req) => sug.draftCustomerUpdate(steps(req), id(req), (req.body as { tone?: 'neutral' | 'formal' | 'friendly' | 'apologetic' } | undefined)?.tone ?? 'neutral'));
   r.post('/ai/tickets/:id/major/draft-update', { preHandler: use, config: chatLimit, schema: { tags, params: idParam, body: z.object({ audience: z.enum(['customer', 'internal']).optional() }).optional() } }, async (req) => sug.draftMajorUpdate(steps(req), id(req), (req.body as { audience?: 'customer' | 'internal' } | undefined)?.audience ?? 'customer'));
   r.post('/ai/tickets/:id/duplicate-check', { preHandler: use, schema: { tags, params: idParam } }, h((ctx, req) => sug.duplicateCheck(ctx, id(req))));
@@ -95,6 +96,6 @@ export default async function routes(app: FastifyInstance) {
   r.get('/ai/problem-clusters', { preHandler: use, config: chatLimit, schema: { tags, querystring: problemClustersQuerySchema } }, async (req) => sug.problemClusters(steps(req), req.query as z.infer<typeof problemClustersQuerySchema>));
   r.post('/ai/suggestions/:id/decide', { preHandler: use, schema: { tags, params: idParam, body: decideBodySchema } }, h((ctx, req) => {
     const body = req.body as z.infer<typeof decideBodySchema>;
-    return sug.decide(ctx, id(req), body.status, body.note ?? null);
+    return sug.decide(ctx, id(req), body.status, body.note ?? null, { apply: body.apply, targetTicketId: body.targetTicketId ?? null });
   }));
 }

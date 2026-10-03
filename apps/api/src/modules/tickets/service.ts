@@ -2,6 +2,7 @@ import { eq, and, inArray, asc, desc, sql } from 'drizzle-orm';
 import type { TicketType } from '@itsm/shared';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
+import { enqueue } from '@/jobs/queues';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { applySlas, markAcknowledged, slaSummary, worstSla } from '@/modules/sla/engine';
@@ -271,6 +272,8 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
     current = await reloadTicket(ctx.tx, ticket.id);
     await startApproval(ctx, current, approvalWorkflowId);
   }
+  // Triage on arrival runs a moment later in the worker (the row must be committed first); the job checks the switches itself.
+  if (type === 'incident' || type === 'request') void enqueue('ai', 'triage-ticket', { ticketId: ticket.id }, { delay: 2000, jobId: `triage-${ticket.id}` });
   return reloadTicket(ctx.tx, ticket.id);
 }
 

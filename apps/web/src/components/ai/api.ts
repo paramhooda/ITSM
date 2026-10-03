@@ -278,7 +278,37 @@ export const aiQk = {
   conversations: ['ai', 'conversations'] as const,
   conversation: (id: string) => ['ai', 'conversation', id] as const,
   clusters: (params: Record<string, unknown>) => ['ai', 'problem-clusters', params] as const,
+  suggestions: (ticketId: string) => ['ai', 'suggestions', ticketId] as const,
 };
+
+export interface KnowledgeSuggestion {
+  id: string;
+  number: string;
+  title: string;
+  summary: string | null;
+  articleType?: string | null;
+  link: string;
+  reason: string;
+}
+export interface KnowledgeResult extends Base {
+  items: KnowledgeSuggestion[];
+  rationale: string;
+}
+export interface ResolutionNotesResult extends Base {
+  notes: string;
+}
+/** A stored suggestion row (what triage on arrival or the Assist rail produced). */
+export interface StoredSuggestion {
+  id: string;
+  kind: string;
+  status: 'proposed' | 'accepted' | 'rejected' | 'applied';
+  confidence: number | null;
+  rationale: string | null;
+  payload: Record<string, unknown>;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+}
 
 export const aiApi = {
   status: () => get<AiStatus>('/ai/status'),
@@ -300,5 +330,8 @@ export const aiApi = {
   duplicateCheck: (id: string) => post<DuplicateResult>(`/ai/tickets/${id}/duplicate-check`),
   changeImpact: (id: string) => post<ChangeImpactResult>(`/ai/changes/${id}/impact`),
   problemClusters: (params: { days?: number; customerId?: string; minCount?: number }) => get<ProblemClustersResult>('/ai/problem-clusters', params),
-  decide: (id: string, status: 'accepted' | 'rejected', note?: string) => post<{ id: string; status: string }>(`/ai/suggestions/${id}/decide`, { status, note }),
+  decide: (id: string, status: 'accepted' | 'rejected', note?: string | null, opts?: { apply?: boolean; targetTicketId?: string | null }) => post<{ id: string; status: string; changes?: string[] }>(`/ai/suggestions/${id}/decide`, { status, note: note ?? undefined, ...(opts ?? {}) }),
+  suggestKnowledge: (id: string) => post<KnowledgeResult>(`/ai/tickets/${id}/suggest-knowledge`),
+  draftResolution: (id: string) => post<ResolutionNotesResult>(`/ai/tickets/${id}/draft-resolution`),
+  listSuggestions: (id: string, kind?: string) => get<{ items: StoredSuggestion[] }>(`/ai/tickets/${id}/suggestions`, kind ? { kind } : undefined),
 };

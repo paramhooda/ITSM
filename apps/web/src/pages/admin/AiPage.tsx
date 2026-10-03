@@ -23,6 +23,7 @@ interface AiAdminSettings {
   retentionDays: number;
   features: string[];
   rateLimitPerMinute: number;
+  triage: { autoApplyConfidence: number; stormWindowMinutes: number; stormThreshold: number; stormAutoLink: boolean };
 }
 interface UsageDay { day: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; toolCalls: number; up: number; down: number; avgDurationMs: number }
 interface ToolRow { id?: string; tool: string; calls: number; ok: number; proposed: number; failed: number; action: boolean }
@@ -46,6 +47,7 @@ const FEATURE_LABELS: Record<string, string> = {
   duplicates: 'Duplicate check',
   change_impact: 'Change impact summaries',
   problem_clusters: 'Problem clusters',
+  triage: 'Triage on arrival (classify, owner, duplicates)',
 };
 const fmt = (n: number) => n.toLocaleString('en-GB');
 const compact = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}k` : fmt(n));
@@ -62,11 +64,12 @@ export default function AiPage() {
   useEffect(() => setDraft({}), [settings.data]);
   const [days, setDays] = useState(30);
   const usage = useQuery({ queryKey: ['ai', 'admin', 'usage', days], queryFn: () => get<AiUsage>('/ai/admin/usage', { days }), staleTime: 30_000 });
-  const save = useAdminMutation((body: Partial<Editable>) => put('/ai/admin/settings', body), { invalidate: [[...SETTINGS_KEY], [...aiQk.status], ['config', 'settings']], success: 'Assistant settings saved' });
+  const save = useAdminMutation(({ triage, ...body }: Partial<Editable>) => put('/ai/admin/settings', { ...body, ...(triage ? { triageAutoApplyConfidence: triage.autoApplyConfidence, stormWindowMinutes: triage.stormWindowMinutes, stormThreshold: triage.stormThreshold, stormAutoLink: triage.stormAutoLink } : {}) }), { invalidate: [[...SETTINGS_KEY], [...aiQk.status], ['config', 'settings']], success: 'Assistant settings saved' });
 
   const current = useMemo(() => (settings.data ? { ...settings.data, ...draft } : null), [settings.data, draft]);
   const dirty = Object.keys(draft).length > 0;
   const set = <K extends keyof Editable>(k: K, v: Editable[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  const setTriage = (patch: Partial<AiAdminSettings['triage']>) => setDraft((d) => ({ ...d, triage: { ...(settings.data?.triage ?? { autoApplyConfidence: 85, stormWindowMinutes: 30, stormThreshold: 3, stormAutoLink: true }), ...(d.triage ?? {}), ...patch } }));
   const toggleFeature = (f: string, on: boolean) => {
     const list = new Set(current?.disabledFeatures ?? []);
     if (on) list.delete(f);
@@ -147,6 +150,28 @@ export default function AiPage() {
               </Field>
               <div className="rounded-lg border border-default bg-app px-3 py-2 text-[12.5px] text-muted">
                 <span className="font-medium text-default">Rate limit:</span> {current.rateLimitPerMinute} messages per minute per person, on top of the API-wide limit. Fixed in the deployment.
+              </div>
+              <div className="pt-2 border-t border-default">
+                <div className="text-[13px] font-medium mb-0.5">Triage on arrival</div>
+                <div className="text-[12px] text-muted mb-3">A moment after a ticket is raised Grady classifies it, recommends an owner and looks for duplicates. Priority is never changed without a person.</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="Apply without asking at (% confidence)" hint="Below it the category and the owner wait as proposals on the ticket; 50 to 100.">
+                    <Input type="number" min={50} max={100} value={current.triage.autoApplyConfidence} disabled={!canWrite} onChange={(e) => setTriage({ autoApplyConfidence: Math.round(Number(e.target.value) || 0) })} />
+                  </Field>
+                  <Field label="Alert storm window (minutes)" hint="Similar tickets opened within it count towards a storm; 5 to 1440.">
+                    <Input type="number" min={5} max={1440} value={current.triage.stormWindowMinutes} disabled={!canWrite} onChange={(e) => setTriage({ stormWindowMinutes: Math.round(Number(e.target.value) || 0) })} />
+                  </Field>
+                  <Field label="Storm threshold (tickets)" hint="This many look-alikes in the window, the new ticket included; 2 to 50.">
+                    <Input type="number" min={2} max={50} value={current.triage.stormThreshold} disabled={!canWrite} onChange={(e) => setTriage({ stormThreshold: Math.round(Number(e.target.value) || 0) })} />
+                  </Field>
+                  <div className="flex items-start justify-between gap-3 pt-5">
+                    <div className="text-[12.5px]">
+                      <div className="font-medium">Link machine-raised duplicates</div>
+                      <div className="text-muted text-[12px]">Monitoring and SIEM tickets that look like an open one are linked as duplicates of the oldest.</div>
+                    </div>
+                    <Toggle checked={current.triage.stormAutoLink} onChange={(v) => canWrite && setTriage({ stormAutoLink: v })} />
+                  </div>
+                </div>
               </div>
             </div>
           </Card>

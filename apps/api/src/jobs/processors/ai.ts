@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { registerProcessor, registerSchedule } from '../workers';
 import { withSystem, type Tx } from '@/db/client';
 import { logger } from '@/core/logger';
+import { triageTicket } from '@/modules/ai/triage';
 
 /**
  * Assistant housekeeping: conversations older than the retention setting are
@@ -24,5 +25,17 @@ registerProcessor({
   processor: async () => {
     const out = await withSystem(purgeConversations);
     logger.info(out, out.days ? 'ai conversations purged' : 'ai conversations kept (retention 0)');
+  },
+});
+
+/** A moment after a ticket is created: classify it, recommend an owner, look for duplicates (see modules/ai/triage.ts). */
+registerProcessor({
+  queue: 'ai',
+  jobName: 'triage-ticket',
+  processor: async (job) => {
+    const ticketId = String((job.data as { ticketId?: string }).ticketId ?? '');
+    if (!ticketId) return;
+    const out = await triageTicket(ticketId);
+    logger.info(out, out.skipped ? 'ticket triage skipped' : 'ticket triaged');
   },
 });
