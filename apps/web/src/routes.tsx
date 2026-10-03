@@ -29,6 +29,7 @@ export const routes: AppRoute[] = [
   { path: '/operations/major-incidents', component: page(() => import('@/pages/operations/MajorIncidentsPage')), perm: ['tickets:read'] },
   { path: '/operations/on-call', component: page(() => import('@/pages/operations/OnCallPage')), perm: ['oncall:read'] },
   { path: '/operations/announcements', component: page(() => import('@/pages/operations/AnnouncementsPage')), perm: ['announcements:manage'] },
+  { path: '/operations/handover', component: page(() => import('@/pages/operations/HandoverPage')), perm: ['handover:write', 'oncall:manage'] },
   { path: '/operations/change-calendar', component: page(() => import('@/pages/operations/ChangeCalendarPage')), perm: ['tickets:read'] },
   { path: '/operations/cab', component: page(() => import('@/pages/operations/CabMeetingsPage')), perm: ['changes:cab', 'changes:approve', 'changes:manage'] },
   { path: '/operations/cab/:id', component: page(() => import('@/pages/operations/CabMeetingPage')), perm: ['changes:cab', 'changes:approve', 'changes:manage'] },

@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, Star } from 'lucide-react';
+import { Plus, Pencil, Trash2, Star, Clock } from 'lucide-react';
 import { get, post, patch, put, del } from '@/api/client';
 import { Button, Badge, type Column } from '@/components/ui';
 import { useLookups, useEngineers } from '@/hooks/useLookups';
@@ -9,6 +10,7 @@ import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDi
 import { MultiSelect } from '@/components/admin/inputs';
 import { useAdminMutation } from '@/components/admin/api';
 import { oncallApi, oncallKeys } from '@/components/oncall/api';
+import { ShiftsDialog } from '@/components/handover/ShiftsDialog';
 
 interface Team {
   id: string;
@@ -29,6 +31,7 @@ type Values = Record<string, unknown>;
 export default function TeamsPage() {
   const q = useQuery({ queryKey: ['iam', 'teams'], queryFn: () => get<Team[]>('/iam/teams') });
   const editor = useEditor<Team>();
+  const [shiftsFor, setShiftsFor] = useState<Team | null>(null);
   const lookups = useLookups();
   const engineers = useEngineers();
   const policies = useQuery({ queryKey: oncallKeys.policies, queryFn: oncallApi.policies, staleTime: 60_000 });
@@ -114,10 +117,12 @@ export default function TeamsPage() {
         onRowClick={editor.edit}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
+          { label: 'Shifts', icon: <Clock className="h-4 w-4" />, inline: true, onClick: (r) => setShiftsFor(r) },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete team "${r.name}"?`, description: 'Tickets assigned to it become unassigned.', confirmLabel: 'Delete team' }), onClick: (r) => remove.mutate(r.id) },
         ]}
       />
       <FormDialog<Values> open={editor.open} onClose={editor.close} title={editor.row ? `Edit ${editor.row.name}` : 'New team'} fields={fields} initial={initial} onSubmit={submit} variant="drawer" width="max-w-2xl" />
+      <ShiftsDialog open={!!shiftsFor} onClose={() => setShiftsFor(null)} team={shiftsFor} />
     </div>
   );
 }

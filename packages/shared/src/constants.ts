@@ -104,6 +104,7 @@ export const NOTIFICATION_EVENTS = [
   'ticket.sentiment_negative',
   'change.window_reminder',
   'change.cab_decision',
+  'handover.published',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

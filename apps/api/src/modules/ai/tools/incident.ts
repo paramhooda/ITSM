@@ -6,6 +6,7 @@ import { ticketLink, iso, trunc, resolveTicket, resolveCustomerId, resolveEngine
 import { onCallNow, listPolicies } from '@/modules/oncall/service';
 import { pageTicket, listPages } from '@/modules/oncall/paging';
 import { createAnnouncement } from '@/modules/status/service';
+import { digest as handoverDigest, list as listHandovers } from '@/modules/handover/service';
 
 /** Major incident tools: the bridge, the commander, stakeholder updates (outbound) and the post-incident review. */
 
@@ -285,6 +286,40 @@ INCIDENT.push(
       };
     },
     summary: (input, result) => `Checked who is on call${input.team ? ` for ${input.team}` : ''} (${(result as { teams: unknown[] }).teams.length} team(s))`,
+  }),
+
+  define({
+    name: 'shift_handover',
+    toolset: 'incident',
+    description: "A team's shift handover picture: the live digest (open tickets, P1/P2, breached and at-risk SLAs, unassigned, waiting on the customer, active major incidents, changes in the next 12 hours, on call now and next) and the latest published handover note with its author and whether the incoming shift acknowledged it. Use for \"what should the night shift watch\", \"was the handover done\", \"what did the day shift leave for the NOC\".",
+    inputSchema: z.object({ team: z.string().max(200).describe('Team name or key (NOC, SOC, service desk)') }),
+    requires: ['tickets:read'],
+    portal: null,
+    action: false,
+    run: async (ctx, input) => {
+      const team = await resolveTeam(ctx, input.team);
+      if (!team) throw new Error(`No team matches "${input.team}"`);
+      const d = await handoverDigest(ctx, team.id);
+      const latest = (await listHandovers(ctx, { teamId: team.id, status: 'all', page: 1, pageSize: 1 })).items[0] ?? null;
+      const c = d.counts;
+      const facts = [
+        `${team.name}: ${c.open} open ticket(s), ${c.p1p2} P1/P2, ${c.breached} with a breached SLA, ${c.atRisk} at risk, ${c.unassigned} unassigned, ${c.awaitingCustomer} waiting on the customer, ${c.major} active major incident(s), ${c.changesNext} change(s) in the next 12 hours; ${c.openedInShift} opened and ${c.resolvedInShift} resolved since ${d.window.from.slice(0, 16).replace('T', ' ')} UTC`,
+        `On call now: ${d.onCall.now.map((p) => `${p.name}${p.rota ? ` (${p.rota})` : ''}`).join('; ') || 'nobody on a rota'}; next: ${d.onCall.next.map((p) => p.name).join('; ') || 'nobody on a rota'}`,
+        latest ? `Latest handover: ${latest.shiftDate}${latest.shiftName ? ` ${latest.shiftName}` : ''} by ${latest.authorName ?? 'unknown'}, ${latest.status === 'acknowledged' ? `acknowledged by ${latest.acknowledgedByName ?? 'someone'}` : latest.status === 'final' ? 'published, not yet acknowledged' : 'still a draft'}` : 'No handover has been written for this team yet',
+      ];
+      return {
+        team: { id: team.id, name: team.name },
+        counts: c,
+        lists: d.tickets.map((l) => ({ title: l.title, items: l.items.map((t) => ({ number: t.number, title: t.title, priority: t.priority, status: t.status, customer: t.customer, assignee: t.assignee, slaDueAt: t.slaDueAt, breachRisk: t.breachRisk, link: ticketLink(ctx, t.id) })) })),
+        major: d.major.map((m) => ({ number: m.number, title: m.title, customer: m.customer, commander: m.commander, nextUpdateAt: m.nextUpdateAt, link: ticketLink(ctx, m.id) })),
+        changes: d.changes.map((ch) => ({ number: ch.number, title: ch.title, customer: ch.customer, scheduledStart: ch.scheduledStart, scheduledEnd: ch.scheduledEnd, link: ticketLink(ctx, ch.id) })),
+        onCall: d.onCall,
+        latestHandover: latest ? { id: latest.id, shiftDate: latest.shiftDate, shift: latest.shiftName, author: latest.authorName, status: latest.status, publishedAt: iso(latest.publishedAt), acknowledgedBy: latest.acknowledgedByName, acknowledgedAt: iso(latest.acknowledgedAt), body: trunc(latest.body, 3000) } : null,
+        facts,
+        link: `/operations/handover?team=${team.id}`,
+      };
+    },
+    summary: (input, result) => `Read the shift handover picture for ${input.team} (${(result as { counts: { open: number } }).counts.open} open)`,
   }),
 
   define({

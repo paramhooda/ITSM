@@ -1,4 +1,4 @@
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_AREAS, OPTION_PARENT_TYPES, type OptionType } from '@itsm/shared';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
@@ -101,6 +101,20 @@ async function seedPriorityMatrix(tx: Tx) {
 
 async function seedTeams(tx: Tx) {
   for (const t of TEAM_SEEDS) await tx.insert(schema.teams).values(t).onConflictDoNothing();
+  await seedTeamShifts(tx);
+}
+
+/** Day and night shifts for the operations teams, so the handover page works out of the box. */
+async function seedTeamShifts(tx: Tx) {
+  const [existing] = await tx.select({ id: schema.teamShifts.id }).from(schema.teamShifts).limit(1);
+  if (existing) return;
+  const teams = await tx.select({ id: schema.teams.id, key: schema.teams.key }).from(schema.teams).where(inArray(schema.teams.key, ['noc', 'soc', 'service_desk']));
+  for (const t of teams) {
+    const shifts = t.key === 'service_desk'
+      ? [{ name: 'Morning', startTime: '07:00', endTime: '15:00' }, { name: 'Afternoon', startTime: '15:00', endTime: '23:00' }, { name: 'Night', startTime: '23:00', endTime: '07:00' }]
+      : [{ name: 'Day', startTime: '08:00', endTime: '20:00' }, { name: 'Night', startTime: '20:00', endTime: '08:00' }];
+    await tx.insert(schema.teamShifts).values(shifts.map((sh, i) => ({ teamId: t.id, ...sh, timezone: 'Asia/Kolkata', sortOrder: (i + 1) * 10 })));
+  }
 }
 
 async function seedCalendars(tx: Tx) {
@@ -279,7 +293,7 @@ async function seedSystemSettings(tx: Tx) {
     'audit.retention_months': { value: 36, description: 'Months to retain audit log partitions' },
     'events.retention_months': { value: 12, description: 'Months to retain integration event partitions' },
     'ai.assistant.enabled': { value: true, description: 'Kill switch for Grady: off stops every chat and AI feature at once' },
-    'ai.disabled_features': { value: [], description: 'AI features switched off (assistant, summarize, classify, assign, similar, suggest_kb, resolution, draft, duplicates, change_impact, problem_clusters, triage, sentiment, recommendations)' },
+    'ai.disabled_features': { value: [], description: 'AI features switched off (assistant, summarize, classify, assign, similar, suggest_kb, resolution, draft, duplicates, change_impact, problem_clusters, triage, sentiment, recommendations, handover)' },
     'ai.autonomy': { value: 'confirm_all', description: 'confirm_all: every change waits for confirmation; auto_low: low-risk internal writes (work notes, watching, tasks, links) apply at once' },
     'ai.effort': { value: 'low', description: 'Reasoning effort for the assistant (low, medium, high) on models that support it' },
     'ai.daily_token_budget': { value: 250000, description: 'Tokens one person may spend on the assistant per day (0 = unlimited)' },

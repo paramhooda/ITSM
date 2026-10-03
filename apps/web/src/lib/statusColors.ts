@@ -16,6 +16,7 @@ export const BREACH_RISK_COLORS: Record<string, string> = { high: 'red', medium:
 export const SENTIMENT_COLORS: Record<string, string> = { angry: 'red', negative: 'amber', neutral: 'slate', positive: 'green' };
 /** Business service health on the status page and the CMDB; announcement banners by type. */
 export const SERVICE_HEALTH_COLORS: Record<string, string> = { good: 'green', degraded: 'amber', maintenance: 'blue', down: 'red' };
+export const HANDOVER_STATUS_COLORS: Record<string, string> = { draft: 'slate', final: 'amber', acknowledged: 'green' };
 export const ANNOUNCEMENT_TYPE_COLORS: Record<string, string> = { info: 'blue', maintenance: 'amber', outage: 'red' };
 export const APPROVAL_STATUS_COLORS: Record<string, string> = { pending: 'amber', waiting: 'slate', approved: 'green', rejected: 'red', skipped: 'gray', superseded: 'gray', not_required: 'green' };
 /** Change risk from the questionnaire (low/medium/high) and the CAB decision on an agenda item. */

@@ -90,6 +90,20 @@ CREATE POLICY tenant_isolation ON announcements
   )
   WITH CHECK (app_all_customers() OR app_is_msp());
 
+-- shift handovers and team shifts are shared operations rows: staff only, never a customer scope.
+ALTER TABLE team_shifts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE team_shifts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON team_shifts;
+CREATE POLICY tenant_isolation ON team_shifts
+  USING (app_all_customers() OR app_is_msp())
+  WITH CHECK (app_all_customers() OR app_is_msp());
+ALTER TABLE shift_handovers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shift_handovers FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON shift_handovers;
+CREATE POLICY tenant_isolation ON shift_handovers
+  USING (app_all_customers() OR app_is_msp())
+  WITH CHECK (app_all_customers() OR app_is_msp());
+
 -- ---------------------------------------------------------------------------
 -- Partitioned high-volume tables
 -- ---------------------------------------------------------------------------

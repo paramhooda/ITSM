@@ -21,6 +21,7 @@ export const OPERATIONS_MODULES: ModuleItem[] = [
   { to: '/operations/major-incidents', label: 'Major incidents', match: (p) => p === '/operations' || p.startsWith('/operations/major-incidents') },
   { to: '/operations/on-call', label: 'On-call', perm: ['oncall:read'] },
   { to: '/operations/announcements', label: 'Announcements', perm: ['announcements:manage'] },
+  { to: '/operations/handover', label: 'Handover', perm: ['handover:write', 'oncall:manage'] },
   { to: '/operations/change-calendar', label: 'Change calendar' },
   { to: '/operations/cab', label: 'CAB', perm: ['changes:cab', 'changes:approve', 'changes:manage'], match: (p) => p.startsWith('/operations/cab') },
 ];
