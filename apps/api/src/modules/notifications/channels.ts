@@ -7,7 +7,7 @@ import { config } from '@/config';
 import { decryptSecret } from '@/lib/crypto';
 import { logger } from '@/core/logger';
 import { ValidationError } from '@/core/errors';
-import { normalizePhone, templateParam, sendWhatsAppTemplate, type TemplateRef, type WhatsAppConfig } from '@/lib/channels';
+import { normalizePhone, templateParam, sendWhatsAppTemplate, PermanentChannelError, type TemplateRef, type WhatsAppConfig } from '@/lib/channels';
 
 /**
  * WhatsApp is configured once by an administrator in system settings; everyone
@@ -116,7 +116,8 @@ export function templateForEvent(settings: WhatsAppSettings, event: string, fiel
   const group = event.split('.')[0] ?? event;
   const def = settings.templates[event] ?? settings.templates[group] ?? settings.templates.default;
   if (!def?.name) return null;
-  const order = def.params?.length ? def.params : ['subject', 'text', 'link'];
+  // an explicit empty list means a template without placeholders (Meta's hello_world, for example)
+  const order = def.params ?? ['subject', 'text', 'link'];
   const source: Record<string, string> = { subject: fields.subject, text: fields.text, link: fields.link, event, platform: 'Progression' };
   return { name: def.name, language: def.language || 'en', params: order.map((k) => templateParam(source[k] ?? k)) };
 }
@@ -159,7 +160,34 @@ const isLocalUrl = (value: string) => {
   }
 };
 
-/** Sends the default template (or Meta's sample `hello_world`) to one number so the admin can see it arrive. */
+/** The number of body parameters Meta says the template takes, from error 132000's message; null when it does not say. */
+export function expectedParamCount(message: string): number | null {
+  const m = /expected number of params \((\d+)\)/i.exec(message);
+  return m ? Number(m[1]) : null;
+}
+
+/** Turns a Cloud API refusal into a message that says what to change on the WhatsApp page. */
+export function explainWhatsAppError(err: unknown, template: TemplateRef): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const code = err instanceof PermanentChannelError ? err.code : null;
+  const where = 'Under Administration → WhatsApp';
+  if (code === 132000) {
+    const expected = expectedParamCount(message);
+    const sent = template.params.length;
+    return `Meta rejected template "${template.name}" (${template.language}): it has ${expected === null ? 'a different number of' : expected} body placeholder${expected === 1 ? '' : 's'} but the mapping sends ${sent} parameter${sent === 1 ? '' : 's'}. ${where}, set the template's parameters to match its {{1}}…{{n}} placeholders${expected === 0 ? ' (leave the list empty for a template without placeholders such as hello_world)' : ''}.`;
+  }
+  if (code === 132001) return `Template "${template.name}" does not exist for language ${template.language} in this WhatsApp Business account, or is not approved yet. ${where}, enter the exact template name and language code from Meta.`;
+  if (code === 190) return `Meta refused the access token (expired or invalid). ${where}, paste a current permanent system-user token.`;
+  if (code === 131030 || /not in allowed list/i.test(message)) return `Meta only delivers to numbers on the test allow-list while the app is in development mode; add the recipient in Meta or move the app to live. (${message})`;
+  return `WhatsApp refused the message: ${message}`;
+}
+
+/**
+ * Sends the mapped default template (or Meta's sample `hello_world`) to one
+ * number so the admin can see it arrive. A refusal comes back as a 422 with
+ * what to change; a template that turns out to have no placeholders is retried
+ * once without parameters so the admin still gets the message.
+ */
 export async function sendWhatsAppTest(ctx: Ctx, rawTo: string) {
   resetWhatsAppSettingsCache();
   const s = await loadWhatsAppSettings(ctx.tx);
@@ -167,9 +195,24 @@ export async function sendWhatsAppTest(ctx: Ctx, rawTo: string) {
   const to = normalizePhone(rawTo, s.defaultCountryCode);
   if (!to) throw new ValidationError('Enter a valid mobile number with country code');
   const template = templateForEvent(s, 'test.message', { subject: 'Progression test message', text: `Sent by ${ctx.user.name} to check the WhatsApp connection.`, link: config.APP_URL }) ?? { name: 'hello_world', language: 'en_US', params: [] };
-  const res = await sendWhatsAppTemplate(whatsappClientConfig(s), to, template);
-  await ctx.audit({ entityType: 'system_settings', action: 'whatsapp.test', metadata: { to, template: template.name, providerMessageId: res.providerMessageId } });
-  return { ok: true, to, template: template.name, providerMessageId: res.providerMessageId ?? null };
+  let sent = template;
+  let note: string | null = null;
+  let res;
+  try {
+    res = await sendWhatsAppTemplate(whatsappClientConfig(s), to, template);
+  } catch (err) {
+    const expected = err instanceof PermanentChannelError && err.code === 132000 ? expectedParamCount(err.message) : null;
+    if (expected !== 0 || !template.params.length) throw new ValidationError(explainWhatsAppError(err, template));
+    sent = { ...template, params: [] };
+    try {
+      res = await sendWhatsAppTemplate(whatsappClientConfig(s), to, sent);
+    } catch (again) {
+      throw new ValidationError(explainWhatsAppError(again, sent));
+    }
+    note = `Template "${template.name}" has no placeholders, so it was sent without parameters. Under Administration → WhatsApp, clear the parameters of this template (or map a template with {{1}}…{{n}} placeholders) so notifications carry their text.`;
+  }
+  await ctx.audit({ entityType: 'system_settings', action: 'whatsapp.test', metadata: { to, template: sent.name, params: sent.params.length, providerMessageId: res.providerMessageId, note } });
+  return { ok: true, to, template: sent.name, providerMessageId: res.providerMessageId ?? null, note };
 }
 
 // ---------------------------------------------------------------- webhook

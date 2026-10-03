@@ -131,7 +131,8 @@ export default function WhatsAppPage() {
         const row = templates[g.key];
         if (!row?.name.trim()) continue;
         const params = row.params.split(',').map((p) => p.trim()).filter((p) => PARAM_SOURCES.includes(p));
-        tpl[g.key] = { name: row.name.trim(), language: row.language.trim() || 'en', params: params.length ? params : ['subject', 'text', 'link'] };
+        // an empty list is kept as is: the template has no placeholders (Meta's hello_world, for example)
+        tpl[g.key] = { name: row.name.trim(), language: row.language.trim() || 'en', params };
       }
       return put('/config/settings', {
         [KEYS.enabled]: form.enabled,
@@ -157,8 +158,11 @@ export default function WhatsAppPage() {
 
   const [testTo, setTestTo] = useState('');
   const test = useMutation({
-    mutationFn: () => post<{ ok: boolean; to: string; template: string; providerMessageId: string | null }>('/notifications/whatsapp/test', { to: testTo }),
-    onSuccess: (r) => toast.success(`Sent "${r.template}" to ${r.to}`, { description: r.providerMessageId ? `Message id ${r.providerMessageId}` : undefined }),
+    mutationFn: () => post<{ ok: boolean; to: string; template: string; providerMessageId: string | null; note: string | null }>('/notifications/whatsapp/test', { to: testTo }),
+    onSuccess: (r) => {
+      toast.success(`Sent "${r.template}" to ${r.to}`, { description: r.providerMessageId ? `Message id ${r.providerMessageId}` : undefined });
+      if (r.note) toast.warning(r.note, { duration: 12_000 });
+    },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Test failed'),
   });
 
@@ -261,7 +265,7 @@ export default function WhatsAppPage() {
                     </div>
                     <Input value={row.name} onChange={(e) => set({ name: e.target.value })} placeholder={g.key === 'default' ? 'progression_update' : 'leave blank to use the default'} disabled={!canWrite} className="font-mono text-[12.5px]" />
                     <Input value={row.language} onChange={(e) => set({ language: e.target.value })} placeholder="en" disabled={!canWrite} className="font-mono text-[12.5px]" />
-                    <Input value={row.params} onChange={(e) => set({ params: e.target.value })} placeholder="subject, text, link" disabled={!canWrite} className="font-mono text-[12.5px]" />
+                    <Input value={row.params} onChange={(e) => set({ params: e.target.value })} placeholder="subject, text, link (empty = no placeholders)" disabled={!canWrite} className="font-mono text-[12.5px]" />
                   </div>
                 );
               })}

@@ -11,7 +11,8 @@ import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { encryptSecret } from '../src/lib/crypto';
 import { queueNotification } from '../src/modules/notifications/dispatch';
-import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings, whatsappStatus, resolveWebhookUrl } from '../src/modules/notifications/channels';
+import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings, whatsappStatus, resolveWebhookUrl, sendWhatsAppTest, explainWhatsAppError, expectedParamCount } from '../src/modules/notifications/channels';
+import { PermanentChannelError } from '../src/lib/channels';
 import { deliverOutbox } from '../src/jobs/processors/notifications';
 import { listSettings, updateSettings } from '../src/modules/config/service';
 import { config } from '../src/config';
@@ -86,6 +87,46 @@ describe('templates', () => {
     const d = templateForEvent({ ...settings, templates: { default: { name: 'd', params: ['text', 'subject'] } } }, 'ticket.created', { subject: 'Subj', text: 'Body', link: 'http://x' });
     expect(d).toEqual({ name: 'd', language: 'en', params: ['Body', 'Subj'] });
     expect(templateForEvent({ ...settings, templates: {} }, 'ticket.created', { subject: 'a', text: 'b', link: 'c' })).toBeNull();
+    // an explicit empty list is a template without placeholders; a missing list takes the default order
+    expect(templateForEvent({ ...settings, templates: { default: { name: 'hello_world', language: 'en_US', params: [] } } }, 'ticket.created', { subject: 'a', text: 'b', link: 'c' })).toEqual({ name: 'hello_world', language: 'en_US', params: [] });
+    expect(templateForEvent({ ...settings, templates: { default: { name: 'd' } } }, 'ticket.created', { subject: 'a', text: 'b', link: 'c' })!.params).toEqual(['a', 'b', 'c']);
+  });
+
+  it('explains a parameter-count rejection and the other permanent refusals in terms of the mapping', () => {
+    const msg = 'WhatsApp 400 (code 132000): (#132000) Number of parameters does not match the expected number of params (body: number of localizable_params (3) does not match the expected number of params (0))';
+    expect(expectedParamCount(msg)).toBe(0);
+    expect(expectedParamCount('something else')).toBeNull();
+    const tpl = { name: 'hello_world', language: 'en_US', params: ['a', 'b', 'c'] };
+    const text = explainWhatsAppError(new PermanentChannelError(msg, 132000), tpl);
+    expect(text).toContain('"hello_world" (en_US)');
+    expect(text).toContain('0 body placeholders');
+    expect(text).toContain('sends 3 parameters');
+    expect(text).toContain('leave the list empty');
+    expect(explainWhatsAppError(new PermanentChannelError('WhatsApp 400 (code 132001): Template name does not exist', 132001), tpl)).toContain('does not exist for language en_US');
+    expect(explainWhatsAppError(new Error('boom'), tpl)).toBe('WhatsApp refused the message: boom');
+  });
+
+  it('the test message retries once without parameters when Meta says the template has no placeholders', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { body?: string }) => {
+      const body = JSON.parse(init?.body ?? '{}') as Record<string, unknown>;
+      bodies.push(body);
+      const components = (body.template as { components: unknown[] }).components;
+      if (components.length) return new Response(JSON.stringify({ error: { message: '(#132000) Number of parameters does not match the expected number of params', code: 132000, error_data: { details: 'body: number of localizable_params (3) does not match the expected number of params (0)' } } }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ messages: [{ id: `wamid.test.${S}` }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+    try {
+      const r = await asAdmin((ctx) => sendWhatsAppTest(ctx, '9876543210'));
+      expect(r).toMatchObject({ ok: true, to: '+919876543210', template: 'progression_update', providerMessageId: `wamid.test.${S}` });
+      expect(r.note).toContain('no placeholders');
+      expect(bodies.length).toBe(2);
+      expect((bodies[1]!.template as { components: unknown[] }).components).toEqual([]);
+      // any other refusal comes back as a validation error with the explanation, not a 500
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { message: 'Template name does not exist in the translation', code: 132001 } }), { status: 400, headers: { 'Content-Type': 'application/json' } })));
+      await expect(asAdmin((ctx) => sendWhatsAppTest(ctx, '9876543210'))).rejects.toThrow(/does not exist for language en/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
