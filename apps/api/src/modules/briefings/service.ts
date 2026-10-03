@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { DateTime } from 'luxon';
 import type { Ctx } from '@/core/context';
@@ -109,6 +109,36 @@ export function markdownToHtml(md: string, appUrl: string): string {
 
 const briefingSchema = z.object({ text: z.string().trim().min(40).max(8000) });
 
+// ---------------------------------------------------------------- limits on manual generation
+
+export interface BriefingLimits {
+  /** Generations on request per person per day (0 = unlimited). */
+  maxPerDay: number;
+  /** Minutes after a generation during which a request returns the stored briefing. */
+  cooldownMinutes: number;
+}
+export const DEFAULT_LIMITS: BriefingLimits = { maxPerDay: 3, cooldownMinutes: 15 };
+const clampNum = (v: unknown, fallback: number, min: number, max: number) => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
+};
+
+/** `ai.briefing.max_per_day` and `ai.briefing.cooldown_minutes` from system settings. */
+export async function loadLimits(tx: Tx): Promise<BriefingLimits> {
+  const rows = await tx.select({ key: schema.systemSettings.key, value: schema.systemSettings.value }).from(schema.systemSettings).where(inArray(schema.systemSettings.key, ['ai.briefing.max_per_day', 'ai.briefing.cooldown_minutes']));
+  const get = (k: string) => rows.find((r) => r.key === k)?.value;
+  return { maxPerDay: clampNum(get('ai.briefing.max_per_day'), DEFAULT_LIMITS.maxPerDay, 0, 100), cooldownMinutes: clampNum(get('ai.briefing.cooldown_minutes'), DEFAULT_LIMITS.cooldownMinutes, 0, 1440) };
+}
+
+/** What the person may still do today: generations used, how many are left and when the cooldown ends. */
+export function usageOf(row: { generations: number; generatedAt: Date } | null, limits: BriefingLimits, now = new Date()) {
+  const used = row?.generations ?? 0;
+  const remaining = limits.maxPerDay > 0 ? Math.max(0, limits.maxPerDay - used) : null;
+  const coolUntil = row && limits.cooldownMinutes > 0 ? new Date(row.generatedAt.getTime() + limits.cooldownMinutes * 60_000) : null;
+  const cooling = !!coolUntil && coolUntil.getTime() > now.getTime();
+  return { ...limits, used, remaining, nextAllowedAt: cooling ? coolUntil : null, exhausted: remaining === 0, cooling };
+}
+
 // ---------------------------------------------------------------- generation
 
 export interface GenerateOptions {
@@ -120,10 +150,25 @@ export interface GenerateOptions {
   now?: Date;
 }
 
-const view = (r: typeof schema.briefings.$inferSelect) => ({ id: r.id, userId: r.userId, role: r.roleKey as BriefingRole, roleLabel: briefingDefinition(r.roleKey)?.label ?? r.roleKey, day: r.day, text: r.text, html: r.html, ai: r.ai, facts: r.facts, channels: r.channels, generatedAt: r.generatedAt, deliveredAt: r.deliveredAt });
+const view = (r: typeof schema.briefings.$inferSelect) => ({ id: r.id, userId: r.userId, role: r.roleKey as BriefingRole, roleLabel: briefingDefinition(r.roleKey)?.label ?? r.roleKey, day: r.day, text: r.text, html: r.html, ai: r.ai, facts: r.facts, channels: r.channels, generations: r.generations, generatedAt: r.generatedAt, deliveredAt: r.deliveredAt });
 
-/** Builds (and stores) the briefing for the person behind `who`, phrasing it with the model when one is on. */
-export async function generate(who: Ctx | Steps, opts: GenerateOptions = {}) {
+export type BriefingView = ReturnType<typeof view>;
+export interface GenerateResult {
+  briefing: BriefingView;
+  /** True when the stored briefing came back without a new model call (cooldown or daily cap). */
+  reused: boolean;
+  /** Why it was reused, when it was. */
+  reason: 'cooldown' | 'limit' | null;
+  usage: ReturnType<typeof usageOf>;
+}
+
+/**
+ * Builds (and stores) the briefing for the person behind `who`, phrasing it
+ * with the model when one is on. On request (not delivered) the person's
+ * daily cap and the cooldown apply: inside the cooldown, or once the cap is
+ * reached, the stored briefing comes back and nothing is called.
+ */
+export async function generate(who: Ctx | Steps, opts: GenerateOptions = {}): Promise<GenerateResult> {
   const s = asSteps(who);
   const now = opts.now ?? new Date();
   const gathered = await s.tx(async (ctx) => {
@@ -134,10 +179,18 @@ export async function generate(who: Ctx | Steps, opts: GenerateOptions = {}) {
     const timezone = zoneOf(ctx.user.timezone);
     const day = opts.day ?? localDay(timezone, now);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ValidationError('day must be YYYY-MM-DD');
+    const limits = await loadLimits(ctx.tx);
+    const [existing] = await ctx.tx.select().from(schema.briefings).where(and(eq(schema.briefings.userId, ctx.user.id), eq(schema.briefings.day, day))).limit(1);
+    if (!opts.deliver && existing) {
+      const usage = usageOf(existing, limits, now);
+      if (usage.exhausted) return { reuse: { briefing: view(existing), reused: true, reason: 'limit' as const, usage } };
+      if (usage.cooling && existing.roleKey === role) return { reuse: { briefing: view(existing), reused: true, reason: 'cooldown' as const, usage } };
+    }
     const built = await def.build(ctx, { day, timezone, now });
     const facts: BriefingFacts = { role, roleLabel: def.label, day, timezone, generatedAt: now.toISOString(), headline: built.headline, sections: built.sections };
-    return { facts, prefs, useModel: aiEnabled() && featureEnabled(await loadAiSettings(ctx.tx), 'briefing') };
+    return { facts, prefs, limits, generations: existing ? existing.generations + (opts.deliver ? 0 : 1) : 1, useModel: aiEnabled() && featureEnabled(await loadAiSettings(ctx.tx), 'briefing') };
   });
+  if ('reuse' in gathered && gathered.reuse) return gathered.reuse;
   const fallback = renderBriefing(gathered.facts, s.principal.name);
   let text = fallback;
   let ai = false;
@@ -153,8 +206,8 @@ export async function generate(who: Ctx | Steps, opts: GenerateOptions = {}) {
     const channels = opts.deliver ? gathered.prefs.channels : [];
     const [row] = await ctx.tx
       .insert(schema.briefings)
-      .values({ userId: ctx.user.id, roleKey: gathered.facts.role, day: gathered.facts.day, facts: gathered.facts, text, html, ai, channels, generatedAt: now })
-      .onConflictDoUpdate({ target: [schema.briefings.userId, schema.briefings.day], set: { roleKey: gathered.facts.role, facts: gathered.facts, text, html, ai, channels, generatedAt: now } })
+      .values({ userId: ctx.user.id, roleKey: gathered.facts.role, day: gathered.facts.day, facts: gathered.facts, text, html, ai, channels, generations: gathered.generations, generatedAt: now })
+      .onConflictDoUpdate({ target: [schema.briefings.userId, schema.briefings.day], set: { roleKey: gathered.facts.role, facts: gathered.facts, text, html, ai, channels, generations: gathered.generations, generatedAt: now } })
       .returning();
     if (opts.deliver && channels.length) {
       await queueNotification(ctx.tx, {
@@ -170,8 +223,9 @@ export async function generate(who: Ctx | Steps, opts: GenerateOptions = {}) {
       });
       await ctx.tx.update(schema.briefings).set({ deliveredAt: now }).where(eq(schema.briefings.id, row.id));
     }
-    await ctx.audit({ entityType: 'briefing', entityId: row.id, entityLabel: `${gathered.facts.roleLabel} ${gathered.facts.day}`, action: opts.deliver ? 'deliver' : 'generate', metadata: { role: gathered.facts.role, day: gathered.facts.day, ai, channels } });
-    return view({ ...row, deliveredAt: opts.deliver && channels.length ? now : row.deliveredAt });
+    await ctx.audit({ entityType: 'briefing', entityId: row.id, entityLabel: `${gathered.facts.roleLabel} ${gathered.facts.day}`, action: opts.deliver ? 'deliver' : 'generate', metadata: { role: gathered.facts.role, day: gathered.facts.day, ai, channels, generations: row.generations } });
+    const stored = { ...row, deliveredAt: opts.deliver && channels.length ? now : row.deliveredAt };
+    return { briefing: view(stored), reused: false, reason: null, usage: usageOf(stored, gathered.limits, now) };
   });
 }
 
@@ -184,6 +238,7 @@ export async function today(ctx: Ctx, now = new Date()) {
   return {
     day,
     briefing: row ? view(row) : null,
+    usage: usageOf(row ?? null, await loadLimits(ctx.tx), now),
     prefs,
     role: roleFor(ctx, prefs),
     roles: BRIEFING_DEFINITIONS.map((d) => ({ key: d.key, label: d.label, description: d.description, allowed: d.allowed(ctx) })),
@@ -237,6 +292,6 @@ export async function generateForUser(userId: string, day: string, now = new Dat
   const prefs = prefsOf(principal.preferences);
   if (!prefs.enabled) return { skipped: 'disabled' as const };
   const steps = stepsFor(principal, { requestId: `briefing:${userId}:${day}` });
-  const briefing = await generate(steps, { day, deliver: true, now });
+  const { briefing } = await generate(steps, { day, deliver: true, now });
   return { id: briefing.id, role: briefing.role, ai: briefing.ai, channels: briefing.channels };
 }

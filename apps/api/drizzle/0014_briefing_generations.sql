@@ -1,0 +1,1 @@
+ALTER TABLE "briefings" ADD COLUMN "generations" integer DEFAULT 1 NOT NULL;

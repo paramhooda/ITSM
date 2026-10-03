@@ -299,6 +299,8 @@ async function seedSystemSettings(tx: Tx) {
     'ai.daily_token_budget': { value: 250000, description: 'Tokens one person may spend on the assistant per day (0 = unlimited)' },
     'ai.turn_timeout_seconds': { value: 90, description: 'Wall-clock limit for one assistant reply including tool calls' },
     'ai.conversation_retention_days': { value: 90, description: 'Days to keep assistant conversations (0 = forever, minimum 7)' },
+    'ai.briefing.max_per_day': { value: 3, description: 'How many times one person may generate or refresh their briefing on request per day (the scheduled morning one does not count)' },
+    'ai.briefing.cooldown_minutes': { value: 15, description: 'Minutes after a briefing is generated during which "Brief me now" shows the stored one instead of calling the model again' },
     'ai.triage.auto_apply_confidence': { value: 85, description: 'Triage on arrival applies the category and the owner without a person at or above this confidence (50-100); below it they wait as proposals' },
     'ai.triage.storm_window_minutes': { value: 30, description: 'Similar tickets opened within this many minutes count towards an alert storm' },
     'ai.triage.storm_threshold': { value: 3, description: 'This many similar open tickets in the window (including the new one) is an alert storm' },

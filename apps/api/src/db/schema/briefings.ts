@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, date, timestamp, uuid, jsonb, uniqueIndex, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, date, timestamp, uuid, jsonb, integer, uniqueIndex, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { id } from './_common';
 import { users } from './iam';
 
@@ -53,6 +53,8 @@ export const briefings = pgTable('briefings', {
   /** True when the model phrased it; false for the deterministic text. */
   ai: boolean('ai').notNull().default(false),
   channels: text('channels').array().notNull().default([]),
+  /** How many times the briefing for this day was (re)generated on request; the manual cap counts these. */
+  generations: integer('generations').notNull().default(1),
   generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
   deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

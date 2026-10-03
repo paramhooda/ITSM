@@ -27,13 +27,34 @@ export interface Briefing {
   ai: boolean;
   facts: BriefingFacts | null;
   channels: string[];
+  generations: number;
   generatedAt: string;
   deliveredAt: string | null;
+}
+
+/** The daily cap and the cooldown on generating a briefing on request. */
+export interface BriefingUsage {
+  maxPerDay: number;
+  cooldownMinutes: number;
+  used: number;
+  remaining: number | null;
+  nextAllowedAt: string | null;
+  exhausted: boolean;
+  cooling: boolean;
+}
+
+export interface GenerateResult {
+  briefing: Briefing;
+  /** True when the stored briefing came back without a new model call. */
+  reused: boolean;
+  reason: 'cooldown' | 'limit' | null;
+  usage: BriefingUsage;
 }
 
 export interface BriefingToday {
   day: string;
   briefing: Briefing | null;
+  usage: BriefingUsage;
   prefs: BriefingPrefs;
   role: BriefingRole;
   roles: { key: BriefingRole; label: string; description: string; allowed: boolean }[];
@@ -42,7 +63,7 @@ export interface BriefingToday {
 export const briefingKeys = { today: ['briefings', 'today'] as const };
 export const briefingsApi = {
   today: () => get<BriefingToday>('/briefings/today'),
-  generate: (role?: BriefingRole) => post<Briefing>('/briefings/generate', role ? { role } : {}),
+  generate: (role?: BriefingRole) => post<GenerateResult>('/briefings/generate', role ? { role } : {}),
 };
 
 /** Half-hour steps between 05:00 and 21:30 for the time picker. */

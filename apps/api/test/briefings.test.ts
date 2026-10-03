@@ -27,6 +27,11 @@ let portal: Principal;
 const ids = { a: '', b: '', team: '', alice: '', am: '', portal: '', p1: '', p3: '', mine: '', unassigned: '', theirs: '' };
 const json = (o: unknown): ChatResponse => ({ text: JSON.stringify(o), toolCalls: [], stopReason: 'end', usage: { inputTokens: 1, outputTokens: 1 } });
 const as = (p: Principal) => <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(p, meta, fn);
+const setLimits = (maxPerDay: number, cooldownMinutes: number) =>
+  withSystem(async (tx) => {
+    await tx.update(schema.systemSettings).set({ value: maxPerDay }).where(eq(schema.systemSettings.key, 'ai.briefing.max_per_day'));
+    await tx.update(schema.systemSettings).set({ value: cooldownMinutes }).where(eq(schema.systemSettings.key, 'ai.briefing.cooldown_minutes'));
+  });
 
 async function roleId(tx: Tx, key: string) {
   const [row] = await tx.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, key)).limit(1);
@@ -131,7 +136,9 @@ describe('roles and content', () => {
   });
 
   it('writes the engineer briefing from the person\'s own queue and stores it for the day', async () => {
-    const b = await as(alice)((ctx) => briefings.generate(ctx, { now: new Date() }));
+    const { briefing: b, reused, usage } = await as(alice)((ctx) => briefings.generate(ctx, { now: new Date() }));
+    expect(reused).toBe(false);
+    expect(usage).toMatchObject({ used: 1, remaining: 2, cooling: true, exhausted: false });
     expect(b.role).toBe('engineer');
     expect(b.ai).toBe(false);
     expect(b.text.startsWith('Good morning, Alice.')).toBe(true);
@@ -146,16 +153,19 @@ describe('roles and content', () => {
     const t = await as(alice)((ctx) => briefings.today(ctx));
     expect(t.briefing?.id).toBe(b.id);
     expect(t.day).toBe(b.day);
-    // regenerating the same day replaces the row
+    // inside the cooldown a second request returns the stored briefing without a new build
     const again = await as(alice)((ctx) => briefings.generate(ctx));
-    expect(again.id).toBe(b.id);
+    expect(again.reused).toBe(true);
+    expect(again.reason).toBe('cooldown');
+    expect(again.briefing.id).toBe(b.id);
+    expect(again.briefing.generations).toBe(1);
     // the other customer's P1 belongs to the admin: not in Alice's queue
     expect(b.text).not.toContain(`Other customer ${S}`);
     expect(b.facts?.headline[1]).toContain('1 ticket in Briefing NOC');
   });
 
   it('the account manager briefing covers only the customers they manage', async () => {
-    const b = await as(am)((ctx) => briefings.generate(ctx));
+    const { briefing: b } = await as(am)((ctx) => briefings.generate(ctx));
     expect(b.role).toBe('account_manager');
     expect(b.facts?.headline[0]).toContain('Your 1 customer has 2 open tickets');
     const customers = b.facts?.sections.find((s) => s.key === 'customers');
@@ -170,14 +180,16 @@ describe('roles and content', () => {
   it('takes the model\'s text when a provider is on and keeps the facts otherwise', async () => {
     ai.setProviderForTests({ name: 'fake', model: 'fake-1', chat: async () => json({ text: 'Good morning, Alice. The model wrote this.\n\n- one open ticket\n\n## Due next\n- **[INC-1](/tickets/x)** something' }) });
     try {
-      const b = await as(alice)((ctx) => briefings.generate(ctx));
+      await setLimits(0, 0);
+      const { briefing: b } = await as(alice)((ctx) => briefings.generate(ctx));
       expect(b.ai).toBe(true);
       expect(b.text).toContain('The model wrote this');
       expect(b.html).toContain('<a href="');
       await withSystem((tx) => tx.update(schema.systemSettings).set({ value: ['briefing'] }).where(eq(schema.systemSettings.key, 'ai.disabled_features')));
-      const off = await as(alice)((ctx) => briefings.generate(ctx));
+      const { briefing: off } = await as(alice)((ctx) => briefings.generate(ctx));
       expect(off.ai).toBe(false);
     } finally {
+      await setLimits(3, 15);
       await withSystem((tx) => tx.update(schema.systemSettings).set({ value: [] }).where(eq(schema.systemSettings.key, 'ai.disabled_features')));
       ai.setProviderForTests({ name: 'none', model: 'none', chat: async () => json({}) });
     }
@@ -189,6 +201,49 @@ describe('roles and content', () => {
     expect(html).toContain('<h3 style="margin:18px 0 6px;font-size:14px">Due next</h3>');
     expect(html).toContain('<strong><a href="https://itsm.example/tickets/1">INC-1</a></strong> fix &amp; go — soon');
     expect(html.match(/<ul/g)?.length).toBe(1);
+  });
+});
+
+describe('guardrails on generating on request', () => {
+  it('caps generations per day and reuses the stored briefing inside the cooldown', async () => {
+    await withSystem((tx) => tx.delete(schema.briefings).where(eq(schema.briefings.userId, ids.alice)));
+    await setLimits(2, 0);
+    try {
+      const first = await as(alice)((ctx) => briefings.generate(ctx));
+      expect(first).toMatchObject({ reused: false, usage: { used: 1, remaining: 1, exhausted: false } });
+      const second = await as(alice)((ctx) => briefings.generate(ctx));
+      expect(second).toMatchObject({ reused: false, usage: { used: 2, remaining: 0, exhausted: true } });
+      expect(second.briefing.generations).toBe(2);
+      const third = await as(alice)((ctx) => briefings.generate(ctx));
+      expect(third).toMatchObject({ reused: true, reason: 'limit' });
+      expect(third.briefing.id).toBe(first.briefing.id);
+      expect(third.briefing.generations).toBe(2);
+      const t = await as(alice)((ctx) => briefings.today(ctx));
+      expect(t.usage).toMatchObject({ maxPerDay: 2, used: 2, remaining: 0, exhausted: true });
+      // the cooldown alone: a fresh briefing, then an immediate request comes back reused
+      await setLimits(0, 30);
+      await withSystem((tx) => tx.delete(schema.briefings).where(eq(schema.briefings.userId, ids.alice)));
+      const fresh = await as(alice)((ctx) => briefings.generate(ctx));
+      expect(fresh.usage).toMatchObject({ remaining: null, cooling: true });
+      const soon = await as(alice)((ctx) => briefings.generate(ctx));
+      expect(soon).toMatchObject({ reused: true, reason: 'cooldown' });
+      expect(new Date(soon.usage.nextAllowedAt!).getTime()).toBeGreaterThan(Date.now());
+      // the scheduled delivery is never blocked by the cap or the cooldown
+      await setLimits(1, 1440);
+      await withSystem((tx) => tx.update(schema.users).set({ preferences: { briefing: { enabled: true, time: '00:00', channels: ['in_app'] } } }).where(eq(schema.users.id, ids.alice)));
+      const delivered = await briefings.generateForUser(ids.alice, fresh.briefing.day);
+      expect(delivered).toMatchObject({ role: 'engineer', channels: ['in_app'] });
+      const rows = await withSystem((tx) => tx.select().from(schema.briefings).where(eq(schema.briefings.userId, ids.alice)));
+      expect(rows.length).toBe(1);
+      expect(rows[0]!.generations).toBe(1); // a delivery does not count against the person's cap
+    } finally {
+      await setLimits(3, 15);
+      await withSystem(async (tx) => {
+        await tx.update(schema.users).set({ preferences: {} }).where(eq(schema.users.id, ids.alice));
+        await tx.delete(schema.notifications).where(and(eq(schema.notifications.userId, ids.alice), eq(schema.notifications.event, 'briefing.daily')));
+        await tx.delete(schema.briefings).where(eq(schema.briefings.userId, ids.alice));
+      });
+    }
   });
 });
 
