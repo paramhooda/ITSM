@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import type { Tx } from '@/db/client';
 import { schema, withSystem } from '@/db/client';
 import type { Ctx } from '@/core/context';
@@ -7,7 +7,8 @@ import { config } from '@/config';
 import { decryptSecret } from '@/lib/crypto';
 import { logger } from '@/core/logger';
 import { ValidationError } from '@/core/errors';
-import { normalizePhone, templateParam, sendWhatsAppTemplate, PermanentChannelError, type TemplateRef, type WhatsAppConfig } from '@/lib/channels';
+import { normalizePhone, templateParam, sendWhatsAppTemplate, PermanentChannelError, getPhoneNumberInfo, listMessageTemplates, getSubscribedApps, templatePlaceholders, type TemplateRef, type WhatsAppConfig } from '@/lib/channels';
+import { NotFoundError } from '@/core/errors';
 
 /**
  * WhatsApp is configured once by an administrator in system settings; everyone
@@ -211,8 +212,104 @@ export async function sendWhatsAppTest(ctx: Ctx, rawTo: string) {
     }
     note = `Template "${template.name}" has no placeholders, so it was sent without parameters. Under Administration → WhatsApp, clear the parameters of this template (or map a template with {{1}}…{{n}} placeholders) so notifications carry their text.`;
   }
-  await ctx.audit({ entityType: 'system_settings', action: 'whatsapp.test', metadata: { to, template: sent.name, params: sent.params.length, providerMessageId: res.providerMessageId, note } });
-  return { ok: true, to, template: sent.name, providerMessageId: res.providerMessageId ?? null, note };
+  // an outbox row, so Meta's delivery callbacks (sent, delivered, read, failed with a reason) land somewhere visible
+  const [row] = await ctx.tx
+    .insert(schema.notificationOutbox)
+    .values({ channel: 'whatsapp', event: 'test.message', recipient: to, subject: `Test: ${sent.name}`, body: `Test message sent by ${ctx.user.name}`, bodyText: `Test message sent by ${ctx.user.name}`, payload: { template: sent }, providerMessageId: res.providerMessageId ?? null, deliveryStatus: 'accepted', status: 'sent', attempts: 1, sentAt: new Date() })
+    .returning({ id: schema.notificationOutbox.id });
+  await ctx.audit({ entityType: 'system_settings', action: 'whatsapp.test', metadata: { to, template: sent.name, params: sent.params.length, providerMessageId: res.providerMessageId, outboxId: row.id, note } });
+  return { ok: true, to, template: sent.name, providerMessageId: res.providerMessageId ?? null, outboxId: row.id, note };
+}
+
+/** The delivery state of one outbox row (the admin page polls it after a test). */
+export async function whatsappMessageStatus(ctx: Ctx, id: string) {
+  const [row] = await ctx.tx.select({ id: schema.notificationOutbox.id, recipient: schema.notificationOutbox.recipient, status: schema.notificationOutbox.status, deliveryStatus: schema.notificationOutbox.deliveryStatus, lastError: schema.notificationOutbox.lastError, providerMessageId: schema.notificationOutbox.providerMessageId, sentAt: schema.notificationOutbox.sentAt }).from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.id, id), eq(schema.notificationOutbox.channel, 'whatsapp'))).limit(1);
+  if (!row) throw new NotFoundError('Message');
+  return row;
+}
+
+export interface Finding {
+  level: 'ok' | 'warn' | 'error';
+  text: string;
+}
+
+/** Meta's own names for what the status callback reports, with the usual reason behind each code. */
+export const WHATSAPP_FAILURE_HINTS: Record<number, string> = {
+  130472: "the recipient's number is in a Meta experiment that withholds marketing templates; use a UTILITY template or another number",
+  131026: 'the message is undeliverable: the number has no WhatsApp account, has not accepted the latest terms, or blocked the business',
+  131047: 'more than 24 hours since the person last wrote to the business, so only an approved template can be sent',
+  131049: 'Meta held the message back to keep the user experience healthy (frequency or quality limits)',
+  131053: 'the media could not be uploaded',
+  132015: 'the template is paused after quality complaints',
+  132016: 'the template is disabled',
+  133010: 'the phone number is not registered with the Cloud API; register it under WhatsApp Manager → Phone numbers',
+  131030: 'the recipient is not on the test allow-list of a number that is still in development mode',
+};
+
+/**
+ * The connection check: asks Meta about the phone number, every mapped
+ * template and the webhook subscription, and compares the answers with the
+ * mapping. Every row is a plain sentence with what to change.
+ */
+export async function whatsappDiagnostics(ctx: Ctx): Promise<{ checkedAt: string; findings: Finding[]; phone: Record<string, unknown> | null }> {
+  resetWhatsAppSettingsCache();
+  const s = await loadWhatsAppSettings(ctx.tx);
+  if (!s.configured) throw new ValidationError('Enter the phone number id and access token first');
+  const cfg = whatsappClientConfig(s);
+  const findings: Finding[] = [];
+  let phone: Record<string, unknown> | null = null;
+  try {
+    const p = await getPhoneNumberInfo(cfg);
+    phone = p as Record<string, unknown>;
+    findings.push({ level: 'ok', text: `Token and phone number id work: ${p.display_phone_number ?? 'number'}${p.verified_name ? ` (“${p.verified_name}”)` : ''}.` });
+    if (p.status && p.status.toUpperCase() !== 'CONNECTED') findings.push({ level: 'error', text: `Meta reports the number as ${p.status}; it must be CONNECTED to deliver. Register or re-verify it under WhatsApp Manager → Phone numbers.` });
+    if (p.code_verification_status && p.code_verification_status.toUpperCase() !== 'VERIFIED') findings.push({ level: 'warn', text: `The number's verification is ${p.code_verification_status}; finish the SMS or voice verification in WhatsApp Manager.` });
+    if (p.name_status && !['APPROVED', 'AVAILABLE_WITHOUT_REVIEW'].includes(p.name_status.toUpperCase())) findings.push({ level: 'warn', text: `The display name is ${p.name_status}; until it is approved Meta may hold messages back.` });
+    if (p.quality_rating && ['RED', 'YELLOW'].includes(p.quality_rating.toUpperCase())) findings.push({ level: 'warn', text: `The number's quality rating is ${p.quality_rating}; Meta throttles or pauses templates on low-quality numbers.` });
+    if (p.messaging_limit_tier) findings.push({ level: 'ok', text: `Messaging limit tier: ${p.messaging_limit_tier.replace(/^TIER_/, 'tier ')}.` });
+  } catch (err) {
+    findings.push({ level: 'error', text: `Meta refused the phone number id or the token: ${(err as Error).message}. Check both under Administration → WhatsApp; a temporary token expires after 24 hours, use a permanent system-user token.` });
+    return { checkedAt: new Date().toISOString(), findings, phone };
+  }
+  if (!s.businessAccountId) {
+    findings.push({ level: 'warn', text: 'No WhatsApp Business Account id is saved, so the templates and the webhook subscription cannot be checked. Copy it from WhatsApp Manager into the settings.' });
+    return { checkedAt: new Date().toISOString(), findings, phone };
+  }
+  try {
+    const templates = await listMessageTemplates(cfg, s.businessAccountId);
+    const mapped = Object.entries(s.templates).filter(([, t]) => t?.name).map(([group, t]) => ({ group, name: t!.name, language: t!.language || 'en', params: t!.params ?? ['subject', 'text', 'link'] }));
+    if (!mapped.length) findings.push({ level: 'error', text: 'No template is mapped; map at least the default one.' });
+    for (const m of mapped) {
+      const candidates = templates.filter((t) => t.name === m.name);
+      const t = candidates.find((c) => (c.language ?? '').toLowerCase() === m.language.toLowerCase()) ?? null;
+      if (!candidates.length) {
+        findings.push({ level: 'error', text: `Template "${m.name}" (${m.group}) does not exist in the business account. Create it in WhatsApp Manager or map an existing one.` });
+        continue;
+      }
+      if (!t) {
+        findings.push({ level: 'error', text: `Template "${m.name}" (${m.group}) exists in ${candidates.map((c) => c.language).join(', ')} but not in "${m.language}"; set the mapping's language to one of those codes.` });
+        continue;
+      }
+      const status = (t.status ?? '').toUpperCase();
+      if (status !== 'APPROVED') findings.push({ level: 'error', text: `Template "${m.name}" (${m.language}) is ${status || 'unknown'}: only APPROVED templates are delivered. Wait for the review or fix the rejection in WhatsApp Manager.` });
+      const placeholders = templatePlaceholders(t);
+      if (placeholders !== m.params.length) findings.push({ level: 'error', text: `Template "${m.name}" has ${placeholders} body placeholder${placeholders === 1 ? '' : 's'} but the ${m.group} mapping sends ${m.params.length} parameter${m.params.length === 1 ? '' : 's'}; make them match (empty list for no placeholders).` });
+      if ((t.category ?? '').toUpperCase() === 'MARKETING') findings.push({ level: 'warn', text: `Template "${m.name}" is a MARKETING template: Meta limits those (opt-outs, per-user frequency caps, experiments in some countries). Use a UTILITY template for operational notifications.` });
+      if (status === 'APPROVED' && placeholders === m.params.length) findings.push({ level: 'ok', text: `Template "${m.name}" (${m.group}, ${m.language}) is approved${t.category ? `, ${t.category.toLowerCase()}` : ''}, ${placeholders} placeholder${placeholders === 1 ? '' : 's'}.` });
+    }
+  } catch (err) {
+    findings.push({ level: 'warn', text: `Could not read the templates of business account ${s.businessAccountId}: ${(err as Error).message}. Check the id, and that the token's system user has access to this account.` });
+  }
+  try {
+    const apps = await getSubscribedApps(cfg, s.businessAccountId);
+    if (!apps.length) findings.push({ level: 'error', text: 'No app is subscribed to this business account\'s webhooks, so delivery states (sent, delivered, read, failed) never reach the platform. In the Meta app go to WhatsApp → Configuration, set the callback URL and verify token, subscribe to the "messages" field, and make sure the app is subscribed to the account (POST /<waba-id>/subscribed_apps).' });
+    else findings.push({ level: 'ok', text: `Webhook subscribed: ${apps.map((a) => a.whatsapp_business_api_data?.name ?? a.whatsapp_business_api_data?.id ?? 'app').join(', ')}. Delivery states will arrive at ${resolveWebhookUrl(s.webhookUrl)} once that URL is the one set in Meta.` });
+  } catch (err) {
+    findings.push({ level: 'warn', text: `Could not read the webhook subscription: ${(err as Error).message}.` });
+  }
+  if (isLocalUrl(resolveWebhookUrl(s.webhookUrl))) findings.push({ level: 'warn', text: 'The webhook URL is local; Meta cannot reach it, so delivery states will not arrive. Use a tunnel URL on a laptop.' });
+  await ctx.audit({ entityType: 'system_settings', action: 'whatsapp.check', metadata: { findings: findings.map((f) => f.level) } });
+  return { checkedAt: new Date().toISOString(), findings, phone };
 }
 
 // ---------------------------------------------------------------- webhook
@@ -246,7 +343,8 @@ export async function applyWhatsAppStatuses(payload: unknown): Promise<number> {
         const status = st.status;
         if (!providerMessageId || !status) continue;
         const error = st.errors?.[0];
-        const detail = error ? `${error.code ?? ''} ${error.title ?? error.message ?? ''}${error.error_data?.details ? ` (${error.error_data.details})` : ''}`.trim() : null;
+        const hint = error?.code && WHATSAPP_FAILURE_HINTS[error.code] ? ` — ${WHATSAPP_FAILURE_HINTS[error.code]}` : '';
+        const detail = error ? `${error.code ?? ''} ${error.title ?? error.message ?? ''}${error.error_data?.details ? ` (${error.error_data.details})` : ''}${hint}`.trim() : null;
         const res = await withSystem((tx) =>
           tx
             .update(schema.notificationOutbox)
@@ -255,6 +353,8 @@ export async function applyWhatsAppStatuses(payload: unknown): Promise<number> {
             .returning({ id: schema.notificationOutbox.id }),
         );
         updated += res.length;
+        if (!res.length) logger.info({ providerMessageId, status, detail }, 'whatsapp status for a message not in the outbox');
+        else if (status === 'failed') logger.warn({ providerMessageId, detail }, 'whatsapp message failed');
       }
     }
   }

@@ -25,6 +25,8 @@ export default async function routes(app: FastifyInstance) {
 
   // ------------------------------------------------------------ WhatsApp (admin)
   r.get('/notifications/whatsapp/status', { preHandler: app.auth('admin:system', 'admin:config'), schema: { tags: ['notifications'] } }, h((ctx) => channels.whatsappStatus(ctx)));
+  r.get('/notifications/whatsapp/test/:id', { preHandler: app.auth('admin:system', 'admin:config'), schema: { tags: ['notifications'], params: z.object({ id: z.string().uuid() }) } }, h((ctx, req) => channels.whatsappMessageStatus(ctx, (req.params as { id: string }).id)));
+  r.post('/notifications/whatsapp/check', { preHandler: app.auth('admin:system'), config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, schema: { tags: ['notifications'] } }, h((ctx) => channels.whatsappDiagnostics(ctx)));
   r.post('/notifications/whatsapp/test', { preHandler: app.auth('admin:system'), schema: { tags: ['notifications'], body: z.object({ to: z.string().min(6).max(30) }) } }, h((ctx, req) => channels.sendWhatsAppTest(ctx, (req.body as { to: string }).to)));
 
   // ------------------------------------------------------------ WhatsApp webhook (public; Meta calls it)

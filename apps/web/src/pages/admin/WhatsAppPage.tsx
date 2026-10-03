@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Check, Copy, MessageCircle, RefreshCw, RotateCcw, Send, ShieldAlert } from 'lucide-react';
+import { Check, Copy, MessageCircle, RefreshCw, RotateCcw, Send, ShieldAlert, Stethoscope, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 import { get, post, put, ApiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { Badge, Button, Card, Field, Input, Toggle, type Column } from '@/components/ui';
@@ -85,6 +85,14 @@ function normaliseWebhookUrl(value: string): string {
 }
 
 type TemplateRow = { name: string; language: string; params: string };
+type TestResult = { ok: boolean; to: string; template: string; providerMessageId: string | null; outboxId: string; note: string | null };
+type TestStatus = { id: string; recipient: string; status: string; deliveryStatus: string | null; lastError: string | null; providerMessageId: string | null; sentAt: string | null };
+type Finding = { level: 'ok' | 'warn' | 'error'; text: string };
+const FINDING_ICON = { ok: CheckCircle2, warn: AlertTriangle, error: XCircle } as const;
+const FINDING_TONE = { ok: 'text-emerald-600', warn: 'text-amber-600', error: 'text-red-600' } as const;
+const DELIVERY_LABEL: Record<string, string> = { accepted: 'Accepted by Meta, waiting for the delivery state…', sent: 'Sent: left Meta, not yet on the phone', delivered: 'Delivered to the phone', read: 'Read on the phone', failed: 'Failed' };
+/** How long the page waits for a delivery callback before saying none came. */
+const TRACK_MS = 120_000;
 
 /**
  * Administration > WhatsApp: the one place WhatsApp is configured. Everyone else only
@@ -157,13 +165,31 @@ export default function WhatsAppPage() {
   });
 
   const [testTo, setTestTo] = useState('');
+  const [tracking, setTracking] = useState<{ id: string; startedAt: number } | null>(null);
   const test = useMutation({
-    mutationFn: () => post<{ ok: boolean; to: string; template: string; providerMessageId: string | null; note: string | null }>('/notifications/whatsapp/test', { to: testTo }),
+    mutationFn: () => post<TestResult>('/notifications/whatsapp/test', { to: testTo }),
     onSuccess: (r) => {
-      toast.success(`Sent "${r.template}" to ${r.to}`, { description: r.providerMessageId ? `Message id ${r.providerMessageId}` : undefined });
+      toast.success(`Meta accepted "${r.template}" for ${r.to}`, { description: 'Watching for the delivery state below' });
       if (r.note) toast.warning(r.note, { duration: 12_000 });
+      setTracking({ id: r.outboxId, startedAt: Date.now() });
+      qc.invalidateQueries({ queryKey: ['notifications', 'outbox', 'whatsapp'] });
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Test failed'),
+  });
+  const track = useQuery({
+    queryKey: ['notifications', 'whatsapp', 'test', tracking?.id],
+    queryFn: () => get<TestStatus>(`/notifications/whatsapp/test/${tracking!.id}`),
+    enabled: !!tracking,
+    refetchInterval: (q) => {
+      const d = q.state.data?.deliveryStatus;
+      if (!tracking || d === 'delivered' || d === 'read' || d === 'failed') return false;
+      return Date.now() - tracking.startedAt > TRACK_MS ? false : 3000;
+    },
+  });
+  const trackTimedOut = !!tracking && Date.now() - tracking.startedAt > TRACK_MS && !['delivered', 'read', 'failed'].includes(track.data?.deliveryStatus ?? '');
+  const check = useMutation({
+    mutationFn: () => post<{ checkedAt: string; findings: Finding[]; phone: Record<string, unknown> | null }>('/notifications/whatsapp/check', {}),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Check failed'),
   });
 
   const status = statusQ.data;
@@ -290,7 +316,39 @@ export default function WhatsAppPage() {
               </Field>
               <Button icon={<Send className="h-4 w-4" />} onClick={() => test.mutate()} loading={test.isPending} disabled={!canWrite || !testTo.trim() || !status?.configured}>Send test</Button>
               {!status?.configured && <div className="text-[12px] text-subtle">Save the phone number id and access token first.</div>}
+              {tracking && track.data && (
+                <div className="rounded-lg border border-default bg-surface-2 p-3 text-[12.5px] flex flex-col gap-1" data-testid="whatsapp-test-track">
+                  <div className="flex items-center gap-2">
+                    {track.data.deliveryStatus === 'failed' ? <XCircle className="h-4 w-4 text-red-600" /> : track.data.deliveryStatus === 'delivered' || track.data.deliveryStatus === 'read' ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : trackTimedOut ? <AlertTriangle className="h-4 w-4 text-amber-600" /> : <Loader2 className="h-4 w-4 animate-spin text-brand-600" />}
+                    <span className="font-medium">{DELIVERY_LABEL[track.data.deliveryStatus ?? 'accepted'] ?? track.data.deliveryStatus}</span>
+                  </div>
+                  {track.data.lastError && <div className="text-red-700">{track.data.lastError}</div>}
+                  {trackTimedOut && (
+                    <div className="text-muted">
+                      No delivery state arrived in two minutes. Meta accepted the message, so the phone number and token are fine; the state comes back only through the webhook. Run <strong>Check connection</strong> below: it tells you whether the webhook is subscribed and whether the template is approved. If everything is green and the phone still shows nothing, the recipient's number may have no WhatsApp account, may have blocked the business, or Meta is holding the template back (marketing limits, number quality).
+                    </div>
+                  )}
+                  <div className="text-subtle">{track.data.recipient}{track.data.providerMessageId ? ` · ${track.data.providerMessageId}` : ''}</div>
+                </div>
+              )}
             </div>
+          </Card>
+          <Card title="Check connection" actions={<Button size="sm" variant="outline" icon={<Stethoscope className="h-3.5 w-3.5" />} onClick={() => check.mutate()} loading={check.isPending} disabled={!canWrite || !status?.configured}>Run check</Button>}>
+            {!check.data && <div className="text-[12.5px] text-muted">Asks Meta about the phone number (registration, display name, quality, messaging tier), every mapped template (exists, approved, placeholders match the parameters) and the webhook subscription, and says what to fix.</div>}
+            {check.data && (
+              <ul className="flex flex-col gap-2" data-testid="whatsapp-check">
+                {check.data.findings.map((f, i) => {
+                  const Icon = FINDING_ICON[f.level];
+                  return (
+                    <li key={i} className="flex items-start gap-2 text-[12.5px]">
+                      <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${FINDING_TONE[f.level]}`} />
+                      <span>{f.text}</span>
+                    </li>
+                  );
+                })}
+                <li className="text-[11.5px] text-subtle">Checked {relativeTime(check.data.checkedAt)}</li>
+              </ul>
+            )}
           </Card>
           <Card title="How it works">
             <ol className="text-[12.5px] text-muted flex flex-col gap-2 list-decimal pl-4">

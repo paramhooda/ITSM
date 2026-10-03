@@ -11,7 +11,7 @@ import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { encryptSecret } from '../src/lib/crypto';
 import { queueNotification } from '../src/modules/notifications/dispatch';
-import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings, whatsappStatus, resolveWebhookUrl, sendWhatsAppTest, explainWhatsAppError, expectedParamCount } from '../src/modules/notifications/channels';
+import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings, whatsappStatus, resolveWebhookUrl, sendWhatsAppTest, explainWhatsAppError, expectedParamCount, whatsappMessageStatus, whatsappDiagnostics } from '../src/modules/notifications/channels';
 import { PermanentChannelError } from '../src/lib/channels';
 import { deliverOutbox } from '../src/jobs/processors/notifications';
 import { listSettings, updateSettings } from '../src/modules/config/service';
@@ -121,11 +121,47 @@ describe('templates', () => {
       expect(r.note).toContain('no placeholders');
       expect(bodies.length).toBe(2);
       expect((bodies[1]!.template as { components: unknown[] }).components).toEqual([]);
+      // the test is an outbox row, so the status callback can mark it delivered or failed with the reason
+      const row = await asAdmin((ctx) => whatsappMessageStatus(ctx, r.outboxId));
+      expect(row).toMatchObject({ recipient: '+919876543210', status: 'sent', deliveryStatus: 'accepted', providerMessageId: `wamid.test.${S}` });
+      await applyWhatsAppStatuses({ entry: [{ changes: [{ value: { statuses: [{ id: `wamid.test.${S}`, status: 'failed', errors: [{ code: 131026, title: 'Message undeliverable' }] }] } }] }] });
+      const failed = await asAdmin((ctx) => whatsappMessageStatus(ctx, r.outboxId));
+      expect(failed.deliveryStatus).toBe('failed');
+      expect(failed.lastError).toContain('131026 Message undeliverable');
+      expect(failed.lastError).toContain('no WhatsApp account');
       // any other refusal comes back as a validation error with the explanation, not a 500
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { message: 'Template name does not exist in the translation', code: 132001 } }), { status: 400, headers: { 'Content-Type': 'application/json' } })));
       await expect(asAdmin((ctx) => sendWhatsAppTest(ctx, '9876543210'))).rejects.toThrow(/does not exist for language en/);
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('connection check', () => {
+  it('reads the number, the templates and the webhook subscription from Meta and compares them with the mapping', async () => {
+    await setSettings({ 'whatsapp.business_account_id': '555666777', 'whatsapp.templates': { default: { name: 'progression_update', language: 'en', params: ['subject', 'text', 'link'] }, sla: { name: 'hello_world', language: 'en_US', params: ['subject'] }, page: { name: 'missing_one', language: 'en', params: [] } } });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (u.includes('/100200300?')) return json({ display_phone_number: '+91 11 4000 0000', verified_name: 'Progression', quality_rating: 'GREEN', status: 'CONNECTED', code_verification_status: 'VERIFIED', name_status: 'APPROVED', messaging_limit_tier: 'TIER_1K' });
+      if (u.includes('/555666777/message_templates')) return json({ data: [{ name: 'progression_update', status: 'PENDING', category: 'UTILITY', language: 'en', components: [{ type: 'BODY', text: '{{1}}: {{2}} {{3}}' }] }, { name: 'hello_world', status: 'APPROVED', category: 'MARKETING', language: 'en_US', components: [{ type: 'BODY', text: 'Welcome and congratulations!' }] }] });
+      if (u.includes('/555666777/subscribed_apps')) return json({ data: [] });
+      return new Response(JSON.stringify({ error: { message: 'unexpected', code: 100 } }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }));
+    try {
+      const d = await asAdmin((ctx) => whatsappDiagnostics(ctx));
+      const texts = d.findings.map((f) => `${f.level}: ${f.text}`);
+      expect(texts.some((t) => t.startsWith('ok: Token and phone number id work: +91 11 4000 0000'))).toBe(true);
+      expect(texts.some((t) => t.startsWith('error: Template "progression_update" (en) is PENDING'))).toBe(true);
+      expect(texts.some((t) => t.includes('Template "hello_world" has 0 body placeholders but the sla mapping sends 1 parameter'))).toBe(true);
+      expect(texts.some((t) => t.includes('"hello_world" is a MARKETING template'))).toBe(true);
+      expect(texts.some((t) => t.startsWith('error: Template "missing_one" (page) does not exist'))).toBe(true);
+      expect(texts.some((t) => t.startsWith('error: No app is subscribed'))).toBe(true);
+      expect(d.phone).toMatchObject({ status: 'CONNECTED' });
+    } finally {
+      vi.unstubAllGlobals();
+      await setSettings({ 'whatsapp.business_account_id': '', 'whatsapp.templates': { default: { name: 'progression_update', language: 'en', params: ['subject', 'text', 'link'] } } });
     }
   });
 });
