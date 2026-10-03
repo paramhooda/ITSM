@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Check, Copy, MessageCircle, RefreshCw, Send, ShieldAlert } from 'lucide-react';
+import { Check, Copy, MessageCircle, RefreshCw, RotateCcw, Send, ShieldAlert } from 'lucide-react';
 import { get, post, put, ApiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { Badge, Button, Card, Field, Input, Toggle, type Column } from '@/components/ui';
@@ -22,7 +22,10 @@ interface Status {
   defaultCountryCode: string;
   templates: Record<string, { name: string; language?: string; params?: string[] } | undefined>;
   missing: string[];
+  /** The URL to register in Meta: the override when one is saved, otherwise the platform URL. */
   webhookUrl: string;
+  webhookUrlDefault: string;
+  webhookUrlIsCustom: boolean;
   hasOptIns: boolean;
 }
 interface OutboxRow {
@@ -64,7 +67,22 @@ const KEYS = {
   apiVersion: 'whatsapp.api_version',
   countryCode: 'whatsapp.default_country_code',
   templates: 'whatsapp.templates',
+  webhookUrl: 'whatsapp.webhook_url',
 } as const;
+
+const WEBHOOK_PATH = '/api/webhooks/whatsapp';
+/** An origin on its own (`https://abcd.ngrok-free.app`) becomes the full webhook route; anything else is kept as typed. */
+function normaliseWebhookUrl(value: string): string {
+  const raw = value.trim();
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    if (u.pathname === '/' || u.pathname === '') u.pathname = WEBHOOK_PATH;
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
 
 type TemplateRow = { name: string; language: string; params: string };
 
@@ -80,11 +98,12 @@ export default function WhatsAppPage() {
   const statusQ = useQuery({ queryKey: ['notifications', 'whatsapp', 'status'], queryFn: () => get<Status>('/notifications/whatsapp/status') });
   const outboxQ = useQuery({ queryKey: ['notifications', 'outbox', 'whatsapp'], queryFn: () => get<{ byStatus: Record<string, number>; recent: OutboxRow[] }>('/notifications/outbox', { channel: 'whatsapp', limit: 50 }), refetchInterval: 30_000 });
 
-  const [form, setForm] = useState({ enabled: false, phoneNumberId: '', businessAccountId: '', accessToken: '', appSecret: '', verifyToken: '', apiVersion: 'v21.0', countryCode: '91' });
+  const [form, setForm] = useState({ enabled: false, phoneNumberId: '', businessAccountId: '', accessToken: '', appSecret: '', verifyToken: '', apiVersion: 'v21.0', countryCode: '91', webhookUrl: '' });
   const [templates, setTemplates] = useState<Record<string, TemplateRow>>({});
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
-    if (!settingsQ.data || loaded) return;
+    // The webhook field shows the effective URL, so wait for the status too (or give up on it when it fails).
+    if (!settingsQ.data || loaded || (!statusQ.data && !statusQ.isError)) return;
     const value = (k: string) => settingsQ.data?.find((s) => s.key === k)?.value;
     const t = (value(KEYS.templates) ?? {}) as Record<string, { name?: string; language?: string; params?: string[] } | undefined>;
     setForm({
@@ -96,11 +115,15 @@ export default function WhatsAppPage() {
       verifyToken: String(value(KEYS.verifyToken) ?? ''),
       apiVersion: String(value(KEYS.apiVersion) ?? 'v21.0'),
       countryCode: String(value(KEYS.countryCode) ?? '91'),
+      webhookUrl: String(value(KEYS.webhookUrl) ?? '').trim() || statusQ.data?.webhookUrlDefault || '',
     });
     setTemplates(Object.fromEntries(GROUPS.map((g) => [g.key, { name: t[g.key]?.name ?? '', language: t[g.key]?.language ?? 'en', params: (t[g.key]?.params ?? (g.key === 'default' ? ['subject', 'text', 'link'] : [])).join(', ') }])));
     setLoaded(true);
-  }, [settingsQ.data, loaded]);
+  }, [settingsQ.data, statusQ.data, statusQ.isError, loaded]);
 
+  /** What the page shows, copies and saves: the field normalised, or the platform URL while the field is empty. */
+  const webhookUrl = normaliseWebhookUrl(form.webhookUrl) || statusQ.data?.webhookUrlDefault || '';
+  const webhookIsDefault = !statusQ.data || webhookUrl === statusQ.data.webhookUrlDefault;
   const save = useMutation({
     mutationFn: () => {
       const tpl: Record<string, { name: string; language: string; params: string[] }> = {};
@@ -120,6 +143,8 @@ export default function WhatsAppPage() {
         [KEYS.apiVersion]: form.apiVersion.trim() || 'v21.0',
         [KEYS.countryCode]: form.countryCode.replace(/\D/g, '') || '91',
         [KEYS.templates]: tpl,
+        // Equal to the platform URL means no override, so a later APP_URL change still flows through.
+        [KEYS.webhookUrl]: webhookIsDefault ? '' : webhookUrl,
       });
     },
     onSuccess: () => {
@@ -140,7 +165,7 @@ export default function WhatsAppPage() {
   const status = statusQ.data;
   const copyWebhook = async () => {
     try {
-      await navigator.clipboard.writeText(status?.webhookUrl ?? '');
+      await navigator.clipboard.writeText(webhookUrl);
       toast.success('Webhook URL copied');
     } catch {
       toast.error('Copy the URL manually');
@@ -202,10 +227,19 @@ export default function WhatsAppPage() {
               <Field label="Graph API version">
                 <Input value={form.apiVersion} onChange={(e) => setForm({ ...form, apiVersion: e.target.value })} disabled={!canWrite} className="w-32" />
               </Field>
-              <Field label="Webhook URL" hint="Subscribe this URL to the messages field of your WhatsApp app">
+              <Field
+                label="Webhook URL"
+                className="sm:col-span-2"
+                hint={
+                  webhookIsDefault
+                    ? 'Subscribe this URL to the messages field of your WhatsApp app. Running on localhost? Expose the API with a tunnel such as ngrok and paste that URL here; the webhook path is added for you.'
+                    : <>Overrides the platform URL <span className="font-mono">{status?.webhookUrlDefault}</span>. Subscribe it to the messages field of your WhatsApp app.</>
+                }
+              >
                 <div className="flex items-center gap-2">
-                  <Input value={status?.webhookUrl ?? ''} readOnly className="font-mono text-[12px]" />
-                  <Button variant="outline" size="sm" icon={<Copy className="h-3.5 w-3.5" />} onClick={copyWebhook} aria-label="Copy webhook URL" />
+                  <Input value={form.webhookUrl} onChange={(e) => setForm({ ...form, webhookUrl: e.target.value })} disabled={!canWrite} placeholder={status?.webhookUrlDefault ?? 'https://your-host/api/webhooks/whatsapp'} className="font-mono text-[12px]" spellCheck={false} aria-label="Webhook URL" />
+                  <Button variant="outline" size="sm" icon={<Copy className="h-3.5 w-3.5" />} onClick={copyWebhook} aria-label="Copy webhook URL" title="Copy webhook URL" />
+                  {canWrite && !webhookIsDefault && <Button variant="ghost" size="sm" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => setForm({ ...form, webhookUrl: status?.webhookUrlDefault ?? '' })} title="Use the platform URL">Use default</Button>}
                 </div>
               </Field>
             </div>
@@ -259,7 +293,7 @@ export default function WhatsAppPage() {
               <li>In Meta for Developers create an app with the WhatsApp product, add a phone number and generate a permanent system-user token.</li>
               <li>In WhatsApp Manager create the message template and wait for approval (usually within a day).</li>
               <li>Enter the ids and token here, map the template, save and send a test to your own number.</li>
-              <li>Subscribe the webhook URL above with your verify token so delivery states come back.</li>
+              <li>Subscribe the webhook URL above with your verify token so delivery states come back. On a laptop, expose the API with a tunnel (ngrok, Cloudflare Tunnel) and enter that URL as the webhook URL; save, then copy it into Meta.</li>
               <li>Tick WhatsApp on the notification rules that should reach people on their phones.</li>
               <li>Everyone opts in on their profile with a mobile number; customer administrators can do it for their users.</li>
             </ol>

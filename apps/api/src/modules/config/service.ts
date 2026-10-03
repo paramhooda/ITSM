@@ -1,4 +1,4 @@
-import { resetWhatsAppSettingsCache } from '@/modules/notifications/channels';
+import { resetWhatsAppSettingsCache, assertWebhookUrl } from '@/modules/notifications/channels';
 import { eq, and, or, asc, sql, inArray, lt, lte, gte, isNull, isNotNull } from 'drizzle-orm';
 import { OPTION_TYPES, OPTION_PARENT_TYPES, IMPACT_DIRECTIONS, type OptionType } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
@@ -193,6 +193,7 @@ export async function listSettings(ctx: Ctx) {
 export async function updateSettings(ctx: Ctx, patch: Record<string, unknown>) {
   for (const [key, value] of Object.entries(patch)) {
     if (value === '********') continue;
+    if (key === 'whatsapp.webhook_url') assertWebhookUrl(value);
     const stored = key.endsWith('.password') || key.endsWith('.secret') || key.endsWith('.api_key') ? encryptSecret(String(value)) : value;
     await ctx.tx
       .insert(schema.systemSettings)

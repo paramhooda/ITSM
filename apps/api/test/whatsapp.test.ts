@@ -11,9 +11,10 @@ import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { encryptSecret } from '../src/lib/crypto';
 import { queueNotification } from '../src/modules/notifications/dispatch';
-import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings } from '../src/modules/notifications/channels';
+import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings, whatsappStatus, resolveWebhookUrl } from '../src/modules/notifications/channels';
 import { deliverOutbox } from '../src/jobs/processors/notifications';
-import { listSettings } from '../src/modules/config/service';
+import { listSettings, updateSettings } from '../src/modules/config/service';
+import { config } from '../src/config';
 import { normalizePhone } from '../src/lib/channels';
 
 const S = Math.random().toString(36).slice(2, 8);
@@ -161,5 +162,39 @@ describe('fan-out and delivery', () => {
     const rows = await asAdmin((ctx) => listSettings(ctx));
     expect(rows.find((r) => r.key === 'whatsapp.access_token.secret')!.value).toBe('********');
     expect(String(rows.find((r) => r.key === 'whatsapp.phone_number_id')!.value)).toBe('100200300');
+  });
+});
+
+describe('webhook url', () => {
+  const expectedDefault = `${config.APP_URL.replace(/\/$/, '')}/api/webhooks/whatsapp`;
+
+  it('derives the default from APP_URL and appends the route to an origin-only override', () => {
+    expect(resolveWebhookUrl('')).toBe(expectedDefault);
+    expect(resolveWebhookUrl('https://abcd.ngrok-free.app')).toBe('https://abcd.ngrok-free.app/api/webhooks/whatsapp');
+    expect(resolveWebhookUrl('https://abcd.ngrok-free.app/')).toBe('https://abcd.ngrok-free.app/api/webhooks/whatsapp');
+    expect(resolveWebhookUrl('https://abcd.ngrok-free.app/hooks/wa')).toBe('https://abcd.ngrok-free.app/hooks/wa');
+  });
+
+  it('reports the override through the status and goes back to the default when cleared', async () => {
+    await asAdmin((ctx) => updateSettings(ctx, { 'whatsapp.webhook_url': 'https://abcd.ngrok-free.app' }));
+    const custom = await asAdmin((ctx) => whatsappStatus(ctx));
+    expect(custom.webhookUrl).toBe('https://abcd.ngrok-free.app/api/webhooks/whatsapp');
+    expect(custom.webhookUrlIsCustom).toBe(true);
+    expect(custom.webhookUrlDefault).toBe(expectedDefault);
+    expect(custom.missing.some((m) => m.includes('public webhook URL'))).toBe(false);
+
+    await asAdmin((ctx) => updateSettings(ctx, { 'whatsapp.webhook_url': '' }));
+    const plain = await asAdmin((ctx) => whatsappStatus(ctx));
+    expect(plain.webhookUrl).toBe(expectedDefault);
+    expect(plain.webhookUrlIsCustom).toBe(false);
+    // the test APP_URL is local, which the page flags as still needed
+    expect(plain.missing.some((m) => m.includes('public webhook URL'))).toBe(/localhost|127\.0\.0\.1/.test(expectedDefault));
+  });
+
+  it('rejects an override that is not an http(s) URL', async () => {
+    await expect(asAdmin((ctx) => updateSettings(ctx, { 'whatsapp.webhook_url': 'abcd.ngrok-free.app' }))).rejects.toThrow(/full URL/);
+    await expect(asAdmin((ctx) => updateSettings(ctx, { 'whatsapp.webhook_url': 'ftp://abcd.ngrok-free.app' }))).rejects.toThrow(/https/);
+    const after = await asAdmin((ctx) => whatsappStatus(ctx));
+    expect(after.webhookUrlIsCustom).toBe(false);
   });
 });

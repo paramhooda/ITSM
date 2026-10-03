@@ -31,9 +31,46 @@ export interface WhatsAppSettings {
   apiVersion: string;
   defaultCountryCode: string;
   templates: WhatsAppTemplateMap;
+  /** Webhook URL override (blank: derived from APP_URL). Set to a tunnel such as ngrok when the platform runs on localhost. */
+  webhookUrl: string;
 }
 
-const KEYS = ['whatsapp.enabled', 'whatsapp.phone_number_id', 'whatsapp.business_account_id', 'whatsapp.access_token.secret', 'whatsapp.app.secret', 'whatsapp.verify_token.secret', 'whatsapp.api_version', 'whatsapp.default_country_code', 'whatsapp.templates'];
+const KEYS = ['whatsapp.enabled', 'whatsapp.phone_number_id', 'whatsapp.business_account_id', 'whatsapp.access_token.secret', 'whatsapp.app.secret', 'whatsapp.verify_token.secret', 'whatsapp.api_version', 'whatsapp.default_country_code', 'whatsapp.templates', 'whatsapp.webhook_url'];
+
+/** The route Meta posts delivery callbacks to, relative to the public origin of the API. */
+export const WHATSAPP_WEBHOOK_PATH = '/api/webhooks/whatsapp';
+
+export const defaultWebhookUrl = () => `${config.APP_URL.replace(/\/$/, '')}${WHATSAPP_WEBHOOK_PATH}`;
+
+/**
+ * The URL to register in Meta: the override when one is set, otherwise the platform URL.
+ * An override that names only an origin (`https://abcd.ngrok-free.app`) gets the webhook
+ * path appended so what the admin copies is always the full route.
+ */
+export function resolveWebhookUrl(override: string): string {
+  const raw = override.trim();
+  if (!raw) return defaultWebhookUrl();
+  try {
+    const u = new URL(raw);
+    if (u.pathname === '/' || u.pathname === '') u.pathname = WHATSAPP_WEBHOOK_PATH;
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
+/** Only http(s) URLs are accepted as the webhook override; anything else is a typo Meta would reject. */
+export function assertWebhookUrl(value: unknown) {
+  const raw = typeof value === 'string' ? value.trim() : value === null || value === undefined ? '' : String(value);
+  if (!raw) return;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new ValidationError('Webhook URL must be a full URL such as https://abcd.ngrok-free.app/api/webhooks/whatsapp');
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new ValidationError('Webhook URL must start with https:// (Meta only calls HTTPS endpoints)');
+}
 
 let cache: { at: number; value: WhatsAppSettings } | null = null;
 const CACHE_MS = 30_000;
@@ -65,6 +102,7 @@ export async function loadWhatsAppSettings(tx: Tx): Promise<WhatsAppSettings> {
     apiVersion: str(get('whatsapp.api_version')) || 'v21.0',
     defaultCountryCode: str(get('whatsapp.default_country_code')) || '91',
     templates: typeof templates === 'object' && templates ? templates : {},
+    webhookUrl: str(get('whatsapp.webhook_url')),
   };
   value.configured = !!(value.phoneNumberId && value.accessToken);
   cache = { at: Date.now(), value };
@@ -93,6 +131,8 @@ export async function whatsappStatus(ctx: Ctx) {
   if (!s.templates.default?.name) missing.push('default template');
   if (!s.appSecret) missing.push('app secret (delivery callbacks are not verified)');
   if (!s.verifyToken) missing.push('verify token (webhook subscription)');
+  const webhookUrl = resolveWebhookUrl(s.webhookUrl);
+  if (isLocalUrl(webhookUrl)) missing.push('a public webhook URL (the platform URL is local; enter a tunnel URL such as ngrok so Meta can reach the webhook)');
   const [optedIn] = await ctx.tx.select({ n: schema.users.id }).from(schema.users).where(eq(schema.users.whatsappOptIn, true));
   return {
     enabled: s.enabled,
@@ -103,10 +143,21 @@ export async function whatsappStatus(ctx: Ctx) {
     defaultCountryCode: s.defaultCountryCode,
     templates: s.templates,
     missing,
-    webhookUrl: `${config.APP_URL.replace(/\/$/, '')}/api/webhooks/whatsapp`,
+    webhookUrl,
+    webhookUrlDefault: defaultWebhookUrl(),
+    webhookUrlIsCustom: !!s.webhookUrl.trim(),
     hasOptIns: !!optedIn,
   };
 }
+
+const isLocalUrl = (value: string) => {
+  try {
+    const host = new URL(value).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.localhost');
+  } catch {
+    return false;
+  }
+};
 
 /** Sends the default template (or Meta's sample `hello_world`) to one number so the admin can see it arrive. */
 export async function sendWhatsAppTest(ctx: Ctx, rawTo: string) {

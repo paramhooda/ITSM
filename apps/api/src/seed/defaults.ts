@@ -286,6 +286,7 @@ async function seedSystemSettings(tx: Tx) {
     'whatsapp.verify_token.secret': { value: '', description: 'Verify token you enter when subscribing the webhook in Meta' },
     'whatsapp.api_version': { value: 'v21.0', description: 'Graph API version' },
     'whatsapp.default_country_code': { value: '91', description: 'Country code assumed for ten-digit numbers' },
+    'whatsapp.webhook_url': { value: '', description: 'Webhook URL to register in Meta; blank derives it from APP_URL. Set a tunnel URL (for example ngrok) when the platform runs on localhost' },
     'whatsapp.templates': { value: { default: { name: 'progression_update', language: 'en', params: ['subject', 'text', 'link'] } }, description: 'Approved template per event group (default, ticket, sla, incident, page, handover, briefing); params in template order from subject, text, link, event' },
   };
   for (const [key, def] of Object.entries(defaults)) {
