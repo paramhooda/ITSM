@@ -1,6 +1,7 @@
 import { get, post, patch } from '@/api/client';
 import type { OptionLabel, SlaCompact, SlaMetricSummary, TimelineEntry, CatalogField } from '@/components/tickets/types';
 import type { PortalAssetsOverview } from '@/components/overview/types';
+import type { Announcement } from '@/components/announcements/api';
 
 /** API shapes of the customer portal module (apps/api/src/modules/portal). */
 
@@ -84,7 +85,7 @@ export interface PortalAttachment {
   canDelete: boolean;
 }
 
-export interface PortalBanner {
+export interface PortalMajorBanner {
   kind: 'major_incident';
   ticketId: string;
   number: string;
@@ -94,6 +95,8 @@ export interface PortalBanner {
   nextUpdateDueAt: string | null;
   latestUpdate: { body: string; at: string } | null;
 }
+/** Above every portal page: major incidents being announced and the announcements aimed at this organisation. */
+export type PortalBanner = PortalMajorBanner | ({ kind: 'announcement' } & Announcement);
 
 export interface PortalTicket {
   id: string;

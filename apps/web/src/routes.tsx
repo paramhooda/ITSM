@@ -24,10 +24,11 @@ export const routes: AppRoute[] = [
   { path: '/tickets/new', component: page(() => import('@/pages/tickets/TicketCreatePage')), perm: ['tickets:create'] },
   { path: '/tickets/approvals', component: page(() => import('@/pages/tickets/ApprovalsInboxPage')), perm: ['requests:approve', 'changes:approve'] },
   { path: '/tickets/:id', component: page(() => import('@/pages/tickets/TicketDetailPage')), perm: ['tickets:read'] },
-  // Operations: Major incidents · On-call (handover and announcements follow)
+  // Operations: Major incidents · On-call · Announcements (handover follows)
   { path: '/operations', component: page(() => import('@/pages/operations/MajorIncidentsPage')), perm: ['tickets:read'] },
   { path: '/operations/major-incidents', component: page(() => import('@/pages/operations/MajorIncidentsPage')), perm: ['tickets:read'] },
   { path: '/operations/on-call', component: page(() => import('@/pages/operations/OnCallPage')), perm: ['oncall:read'] },
+  { path: '/operations/announcements', component: page(() => import('@/pages/operations/AnnouncementsPage')), perm: ['announcements:manage'] },
   // Customers & contracts
   // Customers: Overview · Accounts
   { path: '/customers', component: page(() => import('@/pages/customers/CustomersOverviewPage')), perm: ['customers:read'] },
@@ -101,6 +102,7 @@ export const routes: AppRoute[] = [
   { path: '/portal/assets/coverage', component: page(() => import('@/pages/portal/PortalAssetsCoveragePage')), perm: ['portal:assets'], portal: true },
   { path: '/portal/maintenance', component: page(() => import('@/pages/portal/PortalMaintenancePage')), perm: ['portal:access'], portal: true },
   { path: '/portal/maintenance/history', component: page(() => import('@/pages/portal/PortalMaintenanceHistoryPage')), perm: ['portal:access'], portal: true },
+  { path: '/portal/status', component: page(() => import('@/pages/portal/PortalStatusPage')), perm: ['portal:status'], portal: true },
   { path: '/portal/approvals', component: page(() => import('@/pages/portal/PortalApprovalsPage')), perm: ['portal:approve'], portal: true },
   { path: '/portal/users', component: page(() => import('@/pages/portal/PortalUsersPage')), perm: ['portal:manage_users'], portal: true },
 ];

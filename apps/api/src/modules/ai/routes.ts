@@ -7,6 +7,8 @@ import { logger } from '@/core/logger';
 import * as svc from './service';
 import * as sug from './suggestions';
 import * as admin from './admin';
+import { draftAnnouncement } from '@/modules/status/draft';
+import { draftAnnouncementSchema, type DraftAnnouncementInput } from '@/modules/status/schemas';
 import { chatBodySchema, feedbackBodySchema, idParam, decideBodySchema, draftUpdateBodySchema, classifyDraftBodySchema, problemClustersQuerySchema, suggestionsQuerySchema, type ChatBody, type ClassifyDraftBody } from './schemas';
 
 /**
@@ -90,6 +92,7 @@ export default async function routes(app: FastifyInstance) {
   r.post('/ai/tickets/:id/draft-resolution', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.draftResolutionNotes(steps(req), id(req)));
   r.post('/ai/tickets/:id/draft-customer-update', { preHandler: use, config: chatLimit, schema: { tags, params: idParam, body: draftUpdateBodySchema } }, async (req) => sug.draftCustomerUpdate(steps(req), id(req), (req.body as { tone?: 'neutral' | 'formal' | 'friendly' | 'apologetic' } | undefined)?.tone ?? 'neutral'));
   r.post('/ai/tickets/:id/major/draft-update', { preHandler: use, config: chatLimit, schema: { tags, params: idParam, body: z.object({ audience: z.enum(['customer', 'internal']).optional() }).optional() } }, async (req) => sug.draftMajorUpdate(steps(req), id(req), (req.body as { audience?: 'customer' | 'internal' } | undefined)?.audience ?? 'customer'));
+  r.post('/ai/announcements/draft', { preHandler: use, config: chatLimit, schema: { tags, body: draftAnnouncementSchema } }, async (req) => draftAnnouncement(steps(req), req.body as DraftAnnouncementInput));
   r.post('/ai/tickets/:id/duplicate-check', { preHandler: use, schema: { tags, params: idParam } }, h((ctx, req) => sug.duplicateCheck(ctx, id(req))));
   r.get('/ai/tickets/:id/suggestions', { preHandler: use, schema: { tags, params: idParam, querystring: suggestionsQuerySchema } }, h((ctx, req) => sug.listSuggestions(ctx, id(req), (req.query as { kind?: string }).kind)));
   r.post('/ai/changes/:id/impact', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.changeImpact(steps(req), id(req)));

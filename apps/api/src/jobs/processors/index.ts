@@ -16,3 +16,4 @@ import './major';
 import './ai';
 import './paging';
 import './risk';
+import './status';

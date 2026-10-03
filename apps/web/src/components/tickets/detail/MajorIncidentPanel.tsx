@@ -13,6 +13,8 @@ import { TicketStatusBadge } from '../TicketStatusBadge';
 import { PriorityBadge } from '../PriorityBadge';
 import { ticketsApi, qk } from '../api';
 import { aiApi } from '@/components/ai/api';
+import { useAuthStore } from '@/stores/auth';
+import { AnnouncementDialog } from '@/components/announcements/AnnouncementDialog';
 import { MAJOR_STATUS_LABELS, type MajorAudience, type MajorDetail, type MajorRecord, type PirAction, type TicketDetail } from '../types';
 
 /**
@@ -73,6 +75,21 @@ export function MajorIncidentPanel({ ticket, canEdit }: { ticket: TicketDetail; 
 
 // ---------------------------------------------------------------- command
 
+/** Publish a banner about this incident (outage notice for the customer by default); the dialog drafts it with Grady on request. */
+function DraftAnnouncementButton({ ticket }: { ticket: TicketDetail }) {
+  const can = useAuthStore((s) => s.can);
+  const [open, setOpen] = useState(false);
+  if (!can('announcements:manage')) return null;
+  return (
+    <>
+      <Button size="sm" variant="outline" icon={<Megaphone className="h-3.5 w-3.5" />} onClick={() => setOpen(true)} title="Publish a banner about this incident to customers or staff">
+        Draft announcement
+      </Button>
+      <AnnouncementDialog open={open} onClose={() => setOpen(false)} seed={{ type: 'outage', audience: 'customers', customerIds: [ticket.customerId], sourceTicketId: ticket.id, sourceTicket: { id: ticket.id, number: ticket.number } }} onSaved={() => setOpen(false)} />
+    </>
+  );
+}
+
 function CommandCard({ ticket, record, canEdit, onDone }: { ticket: TicketDetail; record: MajorRecord; canEdit: boolean; onDone: () => void }) {
   const engineers = useEngineers();
   const [bridge, setBridge] = useState(record.bridgeUrl ?? '');
@@ -105,15 +122,18 @@ function CommandCard({ ticket, record, canEdit, onDone }: { ticket: TicketDetail
         </>
       }
       actions={
-        canEdit && record.status === 'active' ? (
-          <Button size="sm" variant="outline" icon={<CheckCircle2 className="h-3.5 w-3.5" />} loading={save.isPending} onClick={() => save.mutate({ status: 'resolved' })} title="Service restored: stops the update cadence and opens the review">
-            Mark resolved
-          </Button>
-        ) : canEdit && record.status === 'resolved' ? (
-          <Button size="sm" variant="outline" loading={save.isPending} onClick={() => save.mutate({ status: 'active' })}>
-            Re-open incident
-          </Button>
-        ) : undefined
+        <>
+          <DraftAnnouncementButton ticket={ticket} />
+          {canEdit && record.status === 'active' ? (
+            <Button size="sm" variant="outline" icon={<CheckCircle2 className="h-3.5 w-3.5" />} loading={save.isPending} onClick={() => save.mutate({ status: 'resolved' })} title="Service restored: stops the update cadence and opens the review">
+              Mark resolved
+            </Button>
+          ) : canEdit && record.status === 'resolved' ? (
+            <Button size="sm" variant="outline" loading={save.isPending} onClick={() => save.mutate({ status: 'active' })}>
+              Re-open incident
+            </Button>
+          ) : null}
+        </>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-3 text-[13px]">

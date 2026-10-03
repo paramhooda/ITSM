@@ -11,6 +11,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { MSP_NAV, visibleNav, type NavItem, type NavChild } from './nav';
 import { GlobalSearch } from '@/components/GlobalSearch';
 import { GradyWidget } from '@/components/grady/GradyWidget';
+import { AnnouncementBanner } from '@/components/announcements/AnnouncementStrip';
 import { PageContextSync } from '@/components/grady/usePageContext';
 import { Menu } from '@/components/Menu';
 
@@ -271,6 +272,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         <div className="flex-1 flex min-h-0">
           <main className="flex-1 overflow-y-auto">
+            <AnnouncementBanner />
             <div className="p-5 md:p-7 max-w-[1500px] mx-auto">{children}</div>
           </main>
         </div>

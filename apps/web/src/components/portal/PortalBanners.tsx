@@ -3,19 +3,24 @@ import { useQuery } from '@tanstack/react-query';
 import { Siren } from 'lucide-react';
 import { get } from '@/api/client';
 import { relativeTime, fmtDateTime } from '@/lib/format';
-import type { PortalBanner } from './api';
+import type { PortalBanner, PortalMajorBanner } from './api';
+import { AnnouncementList } from '@/components/announcements/AnnouncementStrip';
 
 /**
- * Service notices above every portal page: major incidents the service desk is announcing,
- * with the latest stakeholder update. Nothing renders when there is nothing to announce.
+ * Service notices above every portal page: announcements aimed at this organisation and major
+ * incidents the service desk is announcing, with the latest stakeholder update. Nothing renders
+ * when there is nothing to announce.
  */
 export function PortalBanners() {
   const q = useQuery({ queryKey: ['portal', 'banners'], queryFn: () => get<{ items: PortalBanner[] }>('/portal/banners'), refetchInterval: 60_000, staleTime: 30_000 });
   const items = q.data?.items ?? [];
   if (!items.length) return null;
+  const incidents = items.filter((b): b is PortalMajorBanner => b.kind === 'major_incident');
+  const announcements = items.filter((b): b is Extract<PortalBanner, { kind: 'announcement' }> => b.kind === 'announcement');
   return (
     <div className="flex flex-col gap-2 mb-5" data-testid="portal-banners">
-      {items.map((b) => (
+      {announcements.length > 0 && <AnnouncementList items={announcements} linkBase="/portal/tickets" />}
+      {incidents.map((b) => (
         <div key={b.ticketId} className="rounded-xl border border-red-200 bg-red-50 text-red-900 px-4 py-3 flex gap-3 items-start" role="status">
           <span className="h-7 w-7 rounded-full bg-red-600 text-white flex items-center justify-center shrink-0 mt-0.5">
             <Siren className="h-4 w-4" />

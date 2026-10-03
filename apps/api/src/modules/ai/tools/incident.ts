@@ -5,6 +5,7 @@ import { ticketRef } from './core';
 import { ticketLink, iso, trunc, resolveTicket, resolveCustomerId, resolveEngineer, resolveTeam } from '../helpers';
 import { onCallNow, listPolicies } from '@/modules/oncall/service';
 import { pageTicket, listPages } from '@/modules/oncall/paging';
+import { createAnnouncement } from '@/modules/status/service';
 
 /** Major incident tools: the bridge, the commander, stakeholder updates (outbound) and the post-incident review. */
 
@@ -209,6 +210,42 @@ export const INCIDENT: ReturnType<typeof define>[] = [
     preview: async (ctx, input) => {
       const [t, child] = await Promise.all([resolveTicket(ctx, input.ticket), resolveTicket(ctx, input.child)]);
       return `Attach ${short(child)} as a child of major incident ${t.number}`;
+    },
+  }),
+  define({
+    name: 'create_announcement',
+    toolset: 'incident',
+    description: 'Publish an announcement banner: info, planned maintenance or an outage notice, shown above every page to its audience (everyone, customers only or staff only), optionally for one customer and inside a time window, and on the customer status page. Customers read it as written, so the wording must be final and approved by the user.',
+    inputSchema: z.object({
+      title: z.string().min(3).max(200),
+      body: z.string().min(10).max(5000),
+      type: z.enum(['info', 'maintenance', 'outage']).optional().describe('Defaults to info'),
+      audience: z.enum(['all', 'customers', 'staff']).optional().describe('Defaults to all'),
+      customer: z.string().max(200).optional().describe('Customer name, code or id when the announcement is for one organisation; omit for every customer'),
+      ticket: ticketRef.optional().describe('The incident, change or maintenance it is about'),
+      endsAt: z.string().max(40).optional().describe('ISO time when the banner should come down; omit to leave it up until someone ends it'),
+    }),
+    requires: ['announcements:manage'],
+    portal: null,
+    action: true,
+    tier: 'outbound',
+    invalidates: ['announcements'],
+    run: async (ctx, input) => {
+      const customerId = input.customer ? await resolveCustomerId(ctx, input.customer, true) : undefined;
+      const t = input.ticket ? await resolveTicket(ctx, input.ticket) : null;
+      const endsAt = input.endsAt ? new Date(input.endsAt) : null;
+      const a = await createAnnouncement(ctx, { title: input.title, body: input.body, type: input.type ?? 'info', audience: input.audience ?? 'all', customerIds: customerId ? [customerId] : [], endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null, sourceTicketId: t?.id ?? null });
+      return { id: a.id, title: a.title, type: a.type, audience: a.audience, customers: customerId ? 1 : 'all', endsAt: iso(a.endsAt), link: '/operations/announcements' };
+    },
+    summary: (input) => `Published the ${input.type ?? 'info'} announcement "${trunc(input.title, 60)}"`,
+    preview: async (ctx, input): Promise<PreviewDetail> => {
+      const customerId = input.customer ? await resolveCustomerId(ctx, input.customer, true) : undefined;
+      const t = input.ticket ? await resolveTicket(ctx, input.ticket) : null;
+      const who = { all: 'everyone (customers and staff)', customers: 'customers only', staff: 'staff only' }[input.audience ?? 'all'];
+      const lines = [`Title: ${input.title}`, `Body: ${trunc(input.body.replace(/\s+/g, ' '), 240)}`];
+      if (t) lines.push(`About: ${short(t)}`);
+      if (input.endsAt) lines.push(`Comes down: ${input.endsAt}`);
+      return { text: `Publish a ${input.type ?? 'info'} announcement to ${who}${customerId ? ` for the customer ${input.customer}` : ''}; it appears above every page for them at once`, lines };
     },
   }),
 ];

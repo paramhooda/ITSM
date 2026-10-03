@@ -44,7 +44,7 @@ export interface AiTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
   /** Kept for compatibility but no longer offered to the model (superseded by a better tool). */
   hidden?: boolean;
   /** Web query caches to refresh after this action ran. */
-  invalidates?: ('tickets' | 'approvals' | 'visits' | 'knowledge' | 'config' | 'cmdb' | 'assets' | 'contracts')[];
+  invalidates?: ('tickets' | 'approvals' | 'visits' | 'knowledge' | 'config' | 'cmdb' | 'assets' | 'contracts' | 'announcements')[];
   run(ctx: Ctx, input: z.infer<S>): Promise<unknown>;
   /** One-line description shown in the conversation ("Listed 5 open tickets for Sample Customer"). */
   summary(input: z.infer<S>, result: unknown): string;

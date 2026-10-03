@@ -35,6 +35,12 @@ LANGUAGE sql STABLE PARALLEL SAFE AS $$
   SELECT nullif(current_setting('app.user_id', true), '')::uuid;
 $$;
 
+-- True for MSP staff (users.user_type = 'msp'); false for customer users, API keys and when nothing is set.
+CREATE OR REPLACE FUNCTION app_is_msp() RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM users u WHERE u.id = app_user_id() AND u.user_type = 'msp');
+$$;
+
 -- Apply RLS to every table that carries a customer_id column. Rows with a
 -- NULL customer_id are global (shared) rows and remain visible.
 CREATE OR REPLACE FUNCTION app_apply_tenant_rls() RETURNS void
@@ -70,6 +76,19 @@ DROP POLICY IF EXISTS tenant_isolation ON customers;
 CREATE POLICY tenant_isolation ON customers
   USING (app_all_customers() OR id = ANY (app_customer_ids()))
   WITH CHECK (app_all_customers() OR id = ANY (app_customer_ids()));
+
+-- announcements are shared rows: readable by audience (staff see 'all' and 'staff'; a customer
+-- scope sees 'all' and 'customers' aimed at everyone or at one of its organisations); written by staff only.
+ALTER TABLE announcements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE announcements FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON announcements;
+CREATE POLICY tenant_isolation ON announcements
+  USING (
+    app_all_customers()
+    OR (audience <> 'customers' AND app_is_msp())
+    OR (audience <> 'staff' AND (cardinality(customer_ids) = 0 OR customer_ids && app_customer_ids()))
+  )
+  WITH CHECK (app_all_customers() OR app_is_msp());
 
 -- ---------------------------------------------------------------------------
 -- Partitioned high-volume tables

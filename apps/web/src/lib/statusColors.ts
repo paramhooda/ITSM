@@ -14,6 +14,9 @@ export const SCOPE_COLORS: Record<string, string> = { in_scope: 'green', out_of_
 /** Breach forecast (scored by the risk job) and the customer's last mood (labelled after each customer comment). */
 export const BREACH_RISK_COLORS: Record<string, string> = { high: 'red', medium: 'amber', low: 'green' };
 export const SENTIMENT_COLORS: Record<string, string> = { angry: 'red', negative: 'amber', neutral: 'slate', positive: 'green' };
+/** Business service health on the status page and the CMDB; announcement banners by type. */
+export const SERVICE_HEALTH_COLORS: Record<string, string> = { good: 'green', degraded: 'amber', maintenance: 'blue', down: 'red' };
+export const ANNOUNCEMENT_TYPE_COLORS: Record<string, string> = { info: 'blue', maintenance: 'amber', outage: 'red' };
 export const APPROVAL_STATUS_COLORS: Record<string, string> = { pending: 'amber', waiting: 'slate', approved: 'green', rejected: 'red', skipped: 'gray', superseded: 'gray' };
 
 export const VISIT_STATUS_COLORS: Record<string, string> = { requested: 'slate', scheduled: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'gray' };

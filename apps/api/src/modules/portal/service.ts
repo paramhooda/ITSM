@@ -10,6 +10,7 @@ import { addComment, timeline } from '@/modules/tickets/activity';
 import * as approvalsSvc from '@/modules/tickets/approvals';
 import { changeStatusCore, statusByKey } from '@/modules/tickets/status';
 import { loadTicket, optionByKey, requireAction } from '@/modules/tickets/common';
+import { visibleAnnouncements, majorIncidentBanners } from '@/modules/status/announcements';
 import { listItems as listCatalogItems } from '@/modules/catalog/service';
 import { listAttachments } from '@/modules/attachments/service';
 import { customerEntitlements } from '@/modules/contracts/entitlements';
@@ -34,7 +35,7 @@ import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiLis
  * activities, hidden attachments, MSP user e-mails) never leaves the MSP side.
  */
 
-const PORTAL_PERMISSIONS: Permission[] = ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users'];
+const PORTAL_PERMISSIONS: Permission[] = ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'portal:status'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_CATEGORIES = ['new', 'open', 'pending'];
 const AWAITING_STATUS_KEY = 'pending_customer';
@@ -836,29 +837,13 @@ export { COVERING_STATUSES, isPortalUser };
 
 /**
  * What the portal shows above every page: active major incidents the service desk chose to
- * announce (portal banner on), with the latest stakeholder update. Row-level security already
- * limits the rows to the caller's customer; the scope check keeps previews honest.
+ * announce (portal banner on, with the latest stakeholder update) and the announcements aimed
+ * at this organisation or at everyone. Row-level security already limits the rows to the
+ * caller's customer; the scope check keeps previews honest.
  */
 export async function portalBanners(ctx: Ctx, requested?: string | null) {
   const scope = resolvePortalCustomer(ctx, 'portal:access', requested);
-  const m = schema.majorIncidents;
-  const t = schema.tickets;
-  const rows = await ctx.tx
-    .select({ ticketId: m.ticketId, number: t.number, title: t.title, declaredAt: m.declaredAt, lastUpdateAt: m.lastUpdateAt, nextUpdateDueAt: m.nextUpdateDueAt, status: m.status })
-    .from(m)
-    .innerJoin(t, eq(t.id, m.ticketId))
-    .where(and(eq(m.customerId, scope.customerId), eq(m.status, 'active'), eq(m.portalBanner, true)))
-    .orderBy(desc(m.declaredAt))
-    .limit(5);
-  const items = [];
-  for (const r of rows) {
-    const [latest] = await ctx.tx
-      .select({ body: schema.majorIncidentUpdates.body, createdAt: schema.majorIncidentUpdates.createdAt })
-      .from(schema.majorIncidentUpdates)
-      .where(and(eq(schema.majorIncidentUpdates.ticketId, r.ticketId), eq(schema.majorIncidentUpdates.kind, 'stakeholder'), eq(schema.majorIncidentUpdates.portalBanner, true)))
-      .orderBy(desc(schema.majorIncidentUpdates.createdAt))
-      .limit(1);
-    items.push({ kind: 'major_incident' as const, ticketId: r.ticketId, number: r.number, title: r.title, declaredAt: r.declaredAt, lastUpdateAt: r.lastUpdateAt, nextUpdateDueAt: r.nextUpdateDueAt, latestUpdate: latest ? { body: latest.body, at: latest.createdAt } : null });
-  }
-  return { items };
+  const incidents = await majorIncidentBanners(ctx.tx, scope.customerId);
+  const announcements = await visibleAnnouncements(ctx.tx, { staff: false, customerId: scope.customerId });
+  return { items: [...incidents, ...announcements.map((a) => ({ kind: 'announcement' as const, ...a }))] };
 }

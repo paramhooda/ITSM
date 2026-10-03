@@ -10,6 +10,7 @@ import type { Permission } from '@itsm/shared';
 import { routes as appRoutes } from '@/routes';
 
 const ResetPasswordPage = lazy(() => import('@/pages/auth/ResetPasswordPage'));
+const PublicStatusPage = lazy(() => import('@/pages/public/PublicStatusPage'));
 
 function Guard({ perm, children }: { perm?: Permission[]; children: ReactNode }) {
   const can = useAuthStore((s) => s.can);
@@ -41,6 +42,18 @@ export default function App() {
   }, [ready, setSession, setReady]);
 
   if (!ready) return <div className="h-full flex items-center justify-center"><LoadingBlock label="Starting…" /></div>;
+
+  // The public status page lives outside both shells: a token link, no sign-in, signed in or not.
+  if (location.pathname.startsWith('/status/')) {
+    return (
+      <Suspense fallback={<LoadingBlock />}>
+        <Routes>
+          <Route path="/status/:token" element={<PublicStatusPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    );
+  }
 
   if (!user) {
     return (

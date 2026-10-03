@@ -1,5 +1,5 @@
 import type { Permission, NavArea } from '@itsm/shared';
-import { LayoutDashboard, Ticket, Building2, FileSignature, Boxes, Server, Wrench, CalendarCheck, BookOpen, BarChart3, Settings, Layers, ClipboardCheck, UsersRound, Siren } from 'lucide-react';
+import { LayoutDashboard, Ticket, Building2, FileSignature, Boxes, Server, Wrench, CalendarCheck, BookOpen, BarChart3, Settings, Layers, ClipboardCheck, UsersRound, Siren, Activity } from 'lucide-react';
 
 /** A module inside an application (ServiceNow's navigator: Application → Modules). */
 export interface NavChild {
@@ -57,6 +57,7 @@ export const MSP_NAV: NavItem[] = [
     children: [
       { to: '/operations/major-incidents', label: 'Major incidents' },
       { to: '/operations/on-call', label: 'On-call', perm: ['oncall:read'] },
+      { to: '/operations/announcements', label: 'Announcements', perm: ['announcements:manage'] },
     ],
   },
   {
@@ -153,6 +154,7 @@ export const MSP_NAV: NavItem[] = [
 
 export const PORTAL_NAV: NavItem[] = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, tint: 'text-brand-600' },
+  { to: '/portal/status', label: 'Service status', icon: Activity, perm: ['portal:status'], tint: 'text-emerald-600' },
   { to: '/portal/tickets', label: 'My Tickets', icon: Ticket, perm: ['portal:tickets'], tint: 'text-blue-600' },
   { to: '/portal/approvals', label: 'Approvals', icon: ClipboardCheck, perm: ['portal:approve'], tint: 'text-amber-600' },
   {

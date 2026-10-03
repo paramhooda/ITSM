@@ -148,12 +148,14 @@ describe('stakeholder updates', () => {
   });
 
   it('shows the customer a portal banner with the latest stakeholder update', async () => {
+    type Banner = Awaited<ReturnType<typeof portalBanners>>['items'][number];
+    const majorsOf = (items: Banner[]) => items.filter((i): i is Extract<Banner, { kind: 'major_incident' }> => i.kind === 'major_incident');
     const b = await asPortal((ctx) => portalBanners(ctx));
-    const mine = b.items.find((i) => i.ticketId === ids.major);
+    const mine = majorsOf(b.items).find((i) => i.ticketId === ids.major);
     expect(mine?.latestUpdate?.body).toMatch(/Core switch replaced/);
     // Hidden once the banner is switched off.
     await asAdmin((ctx) => updateMajor(ctx, ids.major, { portalBanner: false }));
-    expect((await asPortal((ctx) => portalBanners(ctx))).items.find((i) => i.ticketId === ids.major)).toBeUndefined();
+    expect(majorsOf((await asPortal((ctx) => portalBanners(ctx))).items).find((i) => i.ticketId === ids.major)).toBeUndefined();
     await asAdmin((ctx) => updateMajor(ctx, ids.major, { portalBanner: true }));
   });
 

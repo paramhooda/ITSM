@@ -30,6 +30,7 @@ const INVALIDATION: Record<string, string[][]> = {
   cmdb: [['cmdb'], ['discovery'], ['integrations']],
   assets: [['assets'], ['portal']],
   contracts: [['contracts'], ['customers'], ['portal']],
+  announcements: [['announcements'], ['portal']],
 };
 
 const STORAGE_KEY = 'grady.conversation';
