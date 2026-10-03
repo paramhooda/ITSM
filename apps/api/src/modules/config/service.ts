@@ -1,3 +1,4 @@
+import { resetWhatsAppSettingsCache } from '@/modules/notifications/channels';
 import { eq, and, or, asc, sql, inArray, lt, lte, gte, isNull, isNotNull } from 'drizzle-orm';
 import { OPTION_TYPES, OPTION_PARENT_TYPES, IMPACT_DIRECTIONS, type OptionType } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
@@ -198,6 +199,7 @@ export async function updateSettings(ctx: Ctx, patch: Record<string, unknown>) {
       .values({ key, value: stored as never, updatedBy: ctx.user.id })
       .onConflictDoUpdate({ target: schema.systemSettings.key, set: { value: stored as never, updatedBy: ctx.user.id, updatedAt: new Date() } });
   }
+  if (Object.keys(patch).some((k) => k.startsWith('whatsapp.'))) resetWhatsAppSettingsCache();
   await ctx.audit({ entityType: 'system_settings', action: 'update', metadata: { keys: Object.keys(patch) } });
   return listSettings(ctx);
 }

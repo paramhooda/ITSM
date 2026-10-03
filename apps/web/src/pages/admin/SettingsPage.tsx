@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Save, RotateCcw, PlugZap, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react';
@@ -18,8 +19,8 @@ interface Setting {
   updatedAt: string;
 }
 
-const GROUP_LABELS: Record<string, string> = { platform: 'Platform', tickets: 'Tickets', contracts: 'Contracts', entitlements: 'Entitlements', portal: 'Customer portal', security: 'Security', audit: 'Audit retention', events: 'Integration events retention', ai: 'AI', smtp: 'Email delivery' };
-const GROUP_ORDER = ['platform', 'tickets', 'contracts', 'entitlements', 'portal', 'security', 'audit', 'events', 'ai', 'smtp'];
+const GROUP_LABELS: Record<string, string> = { platform: 'Platform', tickets: 'Tickets', contracts: 'Contracts', entitlements: 'Entitlements', portal: 'Customer portal', security: 'Security', audit: 'Audit retention', events: 'Integration events retention', ai: 'AI', smtp: 'Email delivery', notifications: 'Notifications', whatsapp: 'WhatsApp' };
+const GROUP_ORDER = ['platform', 'tickets', 'contracts', 'entitlements', 'portal', 'security', 'audit', 'events', 'ai', 'smtp', 'notifications', 'whatsapp'];
 
 type Kind = 'boolean' | 'number' | 'number[]' | 'string[]' | 'string' | 'secret' | 'json';
 function kindOf(key: string, value: unknown): Kind {
@@ -71,7 +72,11 @@ export default function SettingsPage() {
       {!canWrite && <div className="mb-3 text-[12.5px] text-amber-700">Read-only: saving settings requires the admin:system permission.</div>}
       <div className="flex flex-col gap-4">
         {!groups.some(([g]) => g === 'ai') && <AiConnectionCard canTest={can('admin:system') || can('admin:config')} />}
-        {groups.map(([group, items]) => (
+        {groups.map(([group, items]) => group === 'whatsapp' ? (
+          <Card key={group} title="WhatsApp">
+            <div className="text-[13px] text-muted">The WhatsApp Business connection, templates and test messages are managed on their own page. <Link to="/admin/whatsapp" className="text-brand-700 hover:underline">Open WhatsApp settings</Link></div>
+          </Card>
+        ) : (
           <Card key={group} title={GROUP_LABELS[group] ?? titleCase(group)} padded={false} className="relative">
             {group === 'ai' && <AiConnectionCard canTest={can('admin:system') || can('admin:config')} embedded />}
             <div className="divide-y divide-[var(--border)]">

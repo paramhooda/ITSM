@@ -75,5 +75,6 @@ export const contactInput = z.object({
   escalationLevel: z.coerce.number().int().min(1).max(20).nullable().optional(),
   notes: z.string().max(4000).nullable().optional(),
   isActive: z.boolean().optional(),
+  whatsappOptIn: z.boolean().optional(),
 });
 export type ContactInput = z.infer<typeof contactInput>;

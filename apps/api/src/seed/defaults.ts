@@ -3,7 +3,7 @@ import { ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_AREAS, OPTION_PARENT_TYPES, 
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { OPTION_SEEDS, PRIORITY_MATRIX, TEAM_SEEDS, CI_TYPE_SEEDS, RELATIONSHIP_TYPE_SEEDS, KB_CATEGORY_SEEDS } from './options';
-import { NOTIFICATION_TEMPLATE_SEEDS, NOTIFICATION_RULE_SEEDS } from './templates';
+import { NOTIFICATION_TEMPLATE_SEEDS_ALL, NOTIFICATION_RULE_SEEDS } from './templates';
 import { DEFAULT_BUSINESS_HOURS } from '@/lib/calendar';
 import { logger } from '@/core/logger';
 
@@ -204,7 +204,7 @@ async function seedKbCategories(tx: Tx) {
 }
 
 async function seedNotificationTemplates(tx: Tx) {
-  for (const t of NOTIFICATION_TEMPLATE_SEEDS) await tx.insert(schema.notificationTemplates).values({ ...t, isSystem: true }).onConflictDoNothing();
+  for (const t of NOTIFICATION_TEMPLATE_SEEDS_ALL) await tx.insert(schema.notificationTemplates).values({ ...t, isSystem: true }).onConflictDoNothing();
 }
 
 async function seedNotificationRules(tx: Tx) {
@@ -277,6 +277,16 @@ async function seedSystemSettings(tx: Tx) {
     'audit.retention_months': { value: 36, description: 'Months to retain audit log partitions' },
     'events.retention_months': { value: 12, description: 'Months to retain integration event partitions' },
     'ai.enabled_features': { value: ['assistant', 'summarize', 'classify', 'similar', 'suggest_kb'], description: 'AI features enabled' },
+    'notifications.outbox_retention_days': { value: 90, description: 'Days to keep sent and failed outbox messages' },
+    'whatsapp.enabled': { value: false, description: 'Send WhatsApp notifications to people who opted in' },
+    'whatsapp.phone_number_id': { value: '', description: 'Meta WhatsApp Cloud API phone number id' },
+    'whatsapp.business_account_id': { value: '', description: 'WhatsApp Business Account id (for reference)' },
+    'whatsapp.access_token.secret': { value: '', description: 'Permanent system-user access token for the Cloud API' },
+    'whatsapp.app.secret': { value: '', description: 'Meta app secret, used to verify delivery callbacks' },
+    'whatsapp.verify_token.secret': { value: '', description: 'Verify token you enter when subscribing the webhook in Meta' },
+    'whatsapp.api_version': { value: 'v21.0', description: 'Graph API version' },
+    'whatsapp.default_country_code': { value: '91', description: 'Country code assumed for ten-digit numbers' },
+    'whatsapp.templates': { value: { default: { name: 'progression_update', language: 'en', params: ['subject', 'text', 'link'] } }, description: 'Approved template per event group (default, ticket, sla, incident, page, handover, briefing); params in template order from subject, text, link, event' },
   };
   for (const [key, def] of Object.entries(defaults)) {
     await tx.insert(schema.systemSettings).values({ key, value: def.value as never, description: def.description }).onConflictDoNothing();

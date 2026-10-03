@@ -416,6 +416,7 @@ export interface PortalUser {
   email: string;
   name: string;
   phone: string | null;
+  whatsappOptIn: boolean;
   title: string | null;
   status: string;
   lastLoginAt: string | null;

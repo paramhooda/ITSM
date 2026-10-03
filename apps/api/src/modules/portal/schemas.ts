@@ -109,5 +109,6 @@ export const updateUserBody = z.object({
   title: z.string().trim().max(100).nullable().optional(),
   status: z.enum(['active', 'disabled']).optional(),
   role: z.enum(PORTAL_ROLE_KEYS).optional(),
+  whatsappOptIn: z.boolean().optional(),
 });
 export type UpdateUserBody = z.infer<typeof updateUserBody>;

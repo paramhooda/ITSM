@@ -15,6 +15,8 @@ export interface ContactPayload {
   escalationLevel: number | null;
   notes: string | null;
   isActive?: boolean;
+  /** Send ticket updates to the mobile number on WhatsApp (the contact agreed to it). */
+  whatsappOptIn?: boolean;
 }
 
 export function ContactForm({ initial, sites, onSubmit, onCancel, submitting }: { initial?: Partial<Contact>; sites: Pick<Site, 'id' | 'name' | 'code'>[]; onSubmit: (body: ContactPayload) => void; onCancel: () => void; submitting?: boolean }) {
@@ -31,6 +33,7 @@ export function ContactForm({ initial, sites, onSubmit, onCancel, submitting }: 
     escalationLevel: initial?.escalationLevel ? String(initial.escalationLevel) : '1',
     notes: initial?.notes ?? '',
     isActive: initial?.isActive ?? true,
+    whatsappOptIn: initial?.whatsappOptIn ?? false,
   });
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((s) => ({ ...s, [k]: v }));
   const nz = (s: string) => (s.trim() === '' ? null : s.trim());
@@ -49,6 +52,7 @@ export function ContactForm({ initial, sites, onSubmit, onCancel, submitting }: 
       escalationLevel: f.isEscalation ? Number(f.escalationLevel) || 1 : null,
       notes: nz(f.notes),
       isActive: f.isActive,
+      whatsappOptIn: f.whatsappOptIn && !!nz(f.mobile ?? '') ? true : f.whatsappOptIn && !!nz(f.phone ?? '') ? true : false,
     });
   }
   return (
@@ -66,8 +70,8 @@ export function ContactForm({ initial, sites, onSubmit, onCancel, submitting }: 
         <Field label="Phone">
           <Input value={f.phone} onChange={(e) => set('phone', e.target.value)} />
         </Field>
-        <Field label="Mobile">
-          <Input value={f.mobile} onChange={(e) => set('mobile', e.target.value)} />
+        <Field label="Mobile" hint={f.whatsappOptIn && !f.mobile.trim() && !f.phone.trim() ? 'Needed for WhatsApp notifications' : undefined}>
+          <Input value={f.mobile} onChange={(e) => set('mobile', e.target.value)} placeholder="+91 …" />
         </Field>
         <Field label="Title">
           <Input value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="IT Manager" />
@@ -79,6 +83,7 @@ export function ContactForm({ initial, sites, onSubmit, onCancel, submitting }: 
       <div className="flex flex-wrap items-center gap-5">
         <Checkbox label="Primary contact" checked={f.isPrimary} onChange={(e) => set('isPrimary', e.target.checked)} />
         <Checkbox label="Escalation contact" checked={f.isEscalation} onChange={(e) => set('isEscalation', e.target.checked)} />
+        <Checkbox label="WhatsApp notifications" checked={f.whatsappOptIn} onChange={(e) => set('whatsappOptIn', e.target.checked)} />
         {f.isEscalation && (
           <label className="inline-flex items-center gap-2 text-[13px]">
             Level

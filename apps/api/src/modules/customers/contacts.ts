@@ -1,3 +1,4 @@
+import { normalizePhone } from '@/lib/channels';
 import { eq, and, ne, asc, desc, sql, inArray } from 'drizzle-orm';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
@@ -37,9 +38,11 @@ export async function escalationContacts(ctx: Ctx, customerId: string) {
 
 function values(input: Partial<ContactInput>): Partial<typeof k.$inferInsert> {
   const v: Partial<typeof k.$inferInsert> = {};
-  (['name', 'siteId', 'userId', 'email', 'phone', 'mobile', 'title', 'department', 'isPrimary', 'isEscalation', 'escalationLevel', 'notes', 'isActive'] as const).forEach((key) => {
+  (['name', 'siteId', 'userId', 'email', 'phone', 'mobile', 'title', 'department', 'isPrimary', 'isEscalation', 'escalationLevel', 'notes', 'isActive', 'whatsappOptIn'] as const).forEach((key) => {
     if (input[key] !== undefined) (v as Record<string, unknown>)[key] = input[key];
   });
+  if (v.mobile) v.mobile = normalizePhone(v.mobile) ?? v.mobile;
+  if (v.whatsappOptIn !== undefined) v.whatsappOptedInAt = v.whatsappOptIn ? new Date() : null;
   if (v.email === '') v.email = null;
   if (v.email) v.email = v.email.toLowerCase();
   if (v.isEscalation === false) v.escalationLevel = null;

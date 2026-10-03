@@ -1,3 +1,4 @@
+import { normalizePhone } from '@/lib/channels';
 import { eq, and, inArray, sql, ilike, or, desc, asc, isNull, getTableColumns } from 'drizzle-orm';
 import { ALL_PERMISSIONS, ALL_NAV_AREAS, PERMISSION_MODULES, PERMISSIONS, type Permission } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
@@ -173,14 +174,20 @@ export async function createUser(ctx: Ctx, input: CreateUserInput) {
   return { user: await getUser(ctx, user.id), temporaryPassword: input.password ? undefined : temporaryPassword };
 }
 
-export async function updateUser(ctx: Ctx, id: string, patch: Partial<Pick<CreateUserInput, 'name' | 'phone' | 'title' | 'timezone' | 'customerId'>> & { status?: 'active' | 'disabled' }) {
+export async function updateUser(ctx: Ctx, id: string, patch: Partial<Pick<CreateUserInput, 'name' | 'phone' | 'title' | 'timezone' | 'customerId'>> & { status?: 'active' | 'disabled'; whatsappOptIn?: boolean }) {
   const [before] = await ctx.tx.select().from(schema.users).where(eq(schema.users.id, id)).limit(1);
   if (!before) throw new NotFoundError('User');
   if (before.customerId) ctx.requireCustomer(before.customerId);
   if (id === ctx.user.id && patch.status === 'disabled') throw new ValidationError('You cannot disable your own account');
   const values: Partial<typeof schema.users.$inferInsert> = { updatedAt: new Date() };
   if (patch.name !== undefined) values.name = patch.name;
-  if (patch.phone !== undefined) values.phone = patch.phone;
+  if (patch.phone !== undefined) values.phone = patch.phone ? (normalizePhone(patch.phone) ?? patch.phone) : patch.phone;
+  if (patch.whatsappOptIn !== undefined) {
+    const phone = values.phone !== undefined ? values.phone : before.phone;
+    if (patch.whatsappOptIn && !phone) throw new ValidationError('Add a mobile number before turning on WhatsApp notifications');
+    values.whatsappOptIn = patch.whatsappOptIn;
+    values.whatsappOptedInAt = patch.whatsappOptIn ? (before.whatsappOptIn ? before.whatsappOptedInAt : new Date()) : null;
+  }
   if (patch.title !== undefined) values.title = patch.title;
   if (patch.timezone !== undefined) values.timezone = patch.timezone;
   if (patch.status !== undefined) values.status = patch.status;

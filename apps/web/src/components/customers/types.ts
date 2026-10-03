@@ -92,6 +92,7 @@ export interface Contact {
   escalationLevel: number | null;
   notes: string | null;
   isActive: boolean;
+  whatsappOptIn?: boolean;
 }
 
 export interface OverviewTicket {

@@ -8,6 +8,9 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash'),
   name: text('name').notNull(),
   phone: text('phone'),
+  /** The person asked for WhatsApp notifications on their phone number (Meta requires an opt-in). */
+  whatsappOptIn: boolean('whatsapp_opt_in').notNull().default(false),
+  whatsappOptedInAt: timestamp('whatsapp_opted_in_at', { withTimezone: true }),
   title: text('title'),
   userType: userTypeEnum('user_type').notNull().default('msp'),
   status: userStatusEnum('status').notNull().default('active'),

@@ -34,6 +34,7 @@ const RECIPIENT_FLAGS = [
 const CHANNELS = [
   { value: 'email', label: 'Email' },
   { value: 'in_app', label: 'In-app' },
+  { value: 'whatsapp', label: 'WhatsApp' },
 ];
 
 type Values = Record<string, unknown>;
@@ -84,7 +85,7 @@ export default function NotificationRulesPage() {
     { key: 'event', header: 'Event', render: (r) => <MonoCell>{r.event}</MonoCell> },
     { key: 'name', header: 'Rule', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'recipients', header: 'Recipients', render: (r) => <MutedCell>{describe(r)}</MutedCell> },
-    { key: 'channels', header: 'Channels', render: (r) => <span className="inline-flex gap-1">{r.channels.map((c) => <Badge key={c} color={c === 'email' ? 'blue' : 'violet'}>{c}</Badge>)}</span> },
+    { key: 'channels', header: 'Channels', render: (r) => <span className="inline-flex gap-1">{r.channels.map((c) => <Badge key={c} color={c === 'email' ? 'blue' : c === 'whatsapp' ? 'green' : 'violet'}>{c === 'in_app' ? 'in-app' : c}</Badge>)}</span> },
     { key: 'isActive', header: 'Status', render: (r) => <ActiveDot active={r.isActive} /> },
   ];
 

@@ -5,11 +5,19 @@ import { config } from '@/config';
 import { render, emailLayout } from '@/lib/templates';
 import { enqueue } from '@/jobs/queues';
 import { logger } from '@/core/logger';
+import { normalizePhone } from '@/lib/channels';
+import { loadWhatsAppSettings, templateForEvent } from './channels';
+
+export type NotificationChannel = 'email' | 'in_app' | 'whatsapp';
+export const NOTIFICATION_CHANNELS: NotificationChannel[] = ['email', 'in_app', 'whatsapp'];
 
 export interface Recipient {
   userId?: string | null;
   email?: string | null;
   name?: string | null;
+  /** Mobile number; WhatsApp rows are written only when `whatsappOptIn` is set. */
+  phone?: string | null;
+  whatsappOptIn?: boolean | null;
 }
 
 export interface NotificationInput {
@@ -17,7 +25,7 @@ export interface NotificationInput {
   recipients: Recipient[];
   data: Record<string, unknown>;
   customerId?: string | null;
-  channels?: ('email' | 'in_app')[];
+  channels?: NotificationChannel[];
   entityType?: string;
   entityId?: string;
   link?: string;
@@ -52,8 +60,33 @@ export async function queueNotification(tx: Tx, input: NotificationInput) {
   } else {
     html = emailLayout(subject, `<p>${input.body ?? subject}</p>`);
   }
+  // WhatsApp: a short text template per event becomes the parameters of the approved Meta template.
+  let whatsapp: { settings: Awaited<ReturnType<typeof loadWhatsAppSettings>>; subject: string; text: string; link: string } | null = null;
+  if (channels.includes('whatsapp')) {
+    const settings = await loadWhatsAppSettings(tx);
+    if (settings.enabled && settings.configured) {
+      const [waTemplate] = await tx
+        .select()
+        .from(schema.notificationTemplates)
+        .where(and(eq(schema.notificationTemplates.event, input.event), eq(schema.notificationTemplates.channel, 'whatsapp'), eq(schema.notificationTemplates.isActive, true)))
+        .limit(1);
+      let text = input.body ?? subject;
+      let waSubject = subject;
+      if (waTemplate) {
+        try {
+          text = render(waTemplate.body, data);
+          if (waTemplate.subject) waSubject = render(waTemplate.subject, data);
+        } catch (err) {
+          logger.warn({ err, event: input.event }, 'whatsapp template render failed');
+        }
+      }
+      const link = input.link ? (input.link.startsWith('http') ? input.link : `${config.APP_URL.replace(/\/$/, '')}${input.link}`) : config.APP_URL;
+      whatsapp = { settings, subject: waSubject, text, link };
+    }
+  }
   const seenEmails = new Set<string>();
   const seenUsers = new Set<string>();
+  const seenPhones = new Set<string>();
   let queued = 0;
   for (const rcpt of input.recipients) {
     if (channels.includes('email') && rcpt.email && !seenEmails.has(rcpt.email.toLowerCase())) {
@@ -83,6 +116,28 @@ export async function queueNotification(tx: Tx, input: NotificationInput) {
         entityType: input.entityType,
         entityId: input.entityId,
       });
+    }
+    if (whatsapp && rcpt.whatsappOptIn) {
+      const phone = normalizePhone(rcpt.phone, whatsapp.settings.defaultCountryCode);
+      if (phone && !seenPhones.has(phone)) {
+        seenPhones.add(phone);
+        const template = templateForEvent(whatsapp.settings, input.event, { subject: whatsapp.subject, text: whatsapp.text, link: whatsapp.link });
+        if (template) {
+          await tx.insert(schema.notificationOutbox).values({
+            channel: 'whatsapp',
+            event: input.event,
+            customerId: input.customerId ?? null,
+            recipient: phone,
+            subject: whatsapp.subject,
+            body: whatsapp.text,
+            bodyText: whatsapp.text,
+            payload: { template, link: whatsapp.link },
+            entityType: input.entityType,
+            entityId: input.entityId,
+          });
+          queued++;
+        }
+      }
     }
   }
   if (queued) void enqueue('notifications', 'deliver', {}, { delay: 500, jobId: `deliver-${Date.now()}` });

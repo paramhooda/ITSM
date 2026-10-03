@@ -34,6 +34,7 @@ const TeamsPage = page(() => import('./TeamsPage'));
 const ApiKeysPage = page(() => import('./ApiKeysPage'));
 const SettingsPage = page(() => import('./SettingsPage'));
 const OutboxPage = page(() => import('./OutboxPage'));
+const WhatsAppPage = page(() => import('./WhatsAppPage'));
 const AuditPage = page(() => import('./AuditPage'));
 const IntegrationsPage = page(() => import('@/pages/integrations/IntegrationsPage'));
 
@@ -75,6 +76,7 @@ export default function AdminPage() {
           <Route path="api-keys" element={<Guarded perm={['integrations:manage']}><ApiKeysPage /></Guarded>} />
           <Route path="settings" element={<Guarded perm={['admin:system', 'admin:config']}><SettingsPage /></Guarded>} />
           <Route path="outbox" element={<Guarded perm={['admin:system', 'admin:config']}><OutboxPage /></Guarded>} />
+          <Route path="whatsapp" element={<Guarded perm={['admin:system', 'admin:config']}><WhatsAppPage /></Guarded>} />
           <Route path="audit" element={<Guarded perm={['admin:audit']}><AuditPage /></Guarded>} />
           <Route path="integrations" element={<Guarded perm={['integrations:events', 'integrations:manage']}><IntegrationsPage /></Guarded>} />
           <Route path="*" element={<Navigate to="/admin" replace />} />

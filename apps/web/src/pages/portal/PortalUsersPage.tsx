@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { UserPlus, KeyRound, Pencil, UserX, UserCheck, Copy, Users } from 'lucide-react';
-import { PageHeader, Button, DataTable, Pagination, Badge, Dialog, Drawer, ConfirmDialog, Field, Input, Select, EmptyState, ErrorBlock, ListShell, FilterGroup, FilterOptions, type Column, type AppliedFilter } from '@/components/ui';
+import { PageHeader, Button, DataTable, Pagination, Badge, Dialog, Drawer, ConfirmDialog, Field, Input, Select, EmptyState, ErrorBlock, ListShell, FilterGroup, FilterOptions, type Column, type AppliedFilter, Checkbox } from '@/components/ui';
 import { fmtNumber } from '@/lib/format';
 import { useListState } from '@/hooks/useListState';
 import { fmtDateTime, relativeTime } from '@/lib/format';
@@ -48,13 +48,13 @@ export default function PortalUsersPage() {
   const [invite, setInvite] = useState(false);
   const [inv, setInv] = useState({ name: '', email: '', phone: '', title: '', role: 'customer_user' as PortalRole });
   const [edit, setEdit] = useState<PortalUser | null>(null);
-  const [ed, setEd] = useState({ name: '', phone: '', title: '', role: 'customer_user' as PortalRole });
+  const [ed, setEd] = useState({ name: '', phone: '', title: '', role: 'customer_user' as PortalRole, whatsappOptIn: false });
   const [resetTarget, setResetTarget] = useState<PortalUser | null>(null);
   const [toggleTarget, setToggleTarget] = useState<PortalUser | null>(null);
   const [temp, setTemp] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
-    if (edit) setEd({ name: edit.name, phone: edit.phone ?? '', title: edit.title ?? '', role: edit.role ?? 'customer_user' });
+    if (edit) setEd({ name: edit.name, phone: edit.phone ?? '', title: edit.title ?? '', role: edit.role ?? 'customer_user', whatsappOptIn: edit.whatsappOptIn ?? false });
   }, [edit]);
 
   const create = useMutation({
@@ -69,7 +69,7 @@ export default function PortalUsersPage() {
     onError: (e: Error) => toast.error(e.message),
   });
   const update = useMutation({
-    mutationFn: () => portalApi.updateUser(edit!.id, { name: ed.name.trim(), phone: ed.phone.trim() || null, title: ed.title.trim() || null, ...(edit!.isSelf || ed.role === edit!.role ? {} : { role: ed.role }) }),
+    mutationFn: () => portalApi.updateUser(edit!.id, { name: ed.name.trim(), phone: ed.phone.trim() || null, title: ed.title.trim() || null, whatsappOptIn: ed.whatsappOptIn && !!ed.phone.trim(), ...(edit!.isSelf || ed.role === edit!.role ? {} : { role: ed.role }) }),
     onSuccess: () => {
       toast.success('User updated');
       setEdit(null);
@@ -221,9 +221,12 @@ export default function PortalUsersPage() {
             <Field label="Full name" required>
               <Input value={ed.name} onChange={(e) => setEd({ ...ed, name: e.target.value })} />
             </Field>
-            <Field label="Phone">
-              <Input value={ed.phone} onChange={(e) => setEd({ ...ed, phone: e.target.value })} />
+            <Field label="Mobile" hint={ed.whatsappOptIn && !ed.phone.trim() ? 'Needed for WhatsApp notifications' : undefined}>
+              <Input value={ed.phone} onChange={(e) => setEd({ ...ed, phone: e.target.value })} placeholder="+91 …" />
             </Field>
+            <div className="sm:col-span-2">
+              <Checkbox label="WhatsApp notifications to this number" checked={ed.whatsappOptIn} onChange={(e) => setEd({ ...ed, whatsappOptIn: e.target.checked })} />
+            </div>
             <Field label="Job title">
               <Input value={ed.title} onChange={(e) => setEd({ ...ed, title: e.target.value })} />
             </Field>

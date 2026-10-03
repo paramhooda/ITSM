@@ -58,6 +58,8 @@ export const contacts = pgTable('contacts', {
   email: text('email'),
   phone: text('phone'),
   mobile: text('mobile'),
+  whatsappOptIn: boolean('whatsapp_opt_in').notNull().default(false),
+  whatsappOptedInAt: timestamp('whatsapp_opted_in_at', { withTimezone: true }),
   title: text('title'),
   department: text('department'),
   isPrimary: boolean('is_primary').notNull().default(false),

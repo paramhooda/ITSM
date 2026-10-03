@@ -86,7 +86,7 @@ export default function ProfilePage() {
 
   const profile = (user.preferences?.profile ?? {}) as { phone?: string };
   const [name, setName] = useState(user.name);
-  const [phone, setPhone] = useState(profile.phone ?? '');
+  const [phone, setPhone] = useState(user.phone ?? profile.phone ?? '');
   const [timezone, setTimezone] = useState(user.timezone || 'UTC');
   const [prefs, setPrefs] = useState<NotificationPrefs>(() => prefsOf(user));
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
@@ -104,6 +104,7 @@ export default function ProfilePage() {
       }),
     onSuccess: (res) => {
       setUser(res.user);
+      setPhone(res.user.phone ?? '');
       toast.success('Profile updated');
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not save profile'),
@@ -116,6 +117,15 @@ export default function ProfilePage() {
       toast.success('Notification preferences saved');
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not save preferences'),
+  });
+
+  const saveWhatsApp = useMutation({
+    mutationFn: (whatsappOptIn: boolean) => patch<{ user: Principal }>('/auth/me', { whatsappOptIn }),
+    onSuccess: (res) => {
+      setUser(res.user);
+      toast.success(res.user.whatsappOptIn ? 'WhatsApp notifications on' : 'WhatsApp notifications off');
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not update WhatsApp notifications'),
   });
 
   const changePassword = useMutation({
@@ -240,6 +250,16 @@ export default function ProfilePage() {
                   </span>
                 }
               />
+              <Toggle
+                checked={!!user.whatsappOptIn}
+                onChange={(v) => saveWhatsApp.mutate(v)}
+                label={
+                  <span>
+                    WhatsApp notifications <span className="text-subtle">— ticket updates and alerts on {user.phone ? user.phone : 'your mobile number'}</span>
+                  </span>
+                }
+              />
+              {!user.phone && <div className="text-[12px] text-subtle -mt-1 pl-11">Save a mobile number in your profile first.</div>}
             </div>
           </Card>
 

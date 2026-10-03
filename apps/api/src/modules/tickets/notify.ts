@@ -4,7 +4,7 @@ import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { config } from '@/config';
-import { queueNotification, type Recipient } from '@/modules/notifications/dispatch';
+import { queueNotification, type Recipient, type NotificationChannel } from '@/modules/notifications/dispatch';
 import { logger } from '@/core/logger';
 import { TYPE_LABEL, type TicketRow, isSystemCtx } from './common';
 
@@ -34,7 +34,7 @@ export interface NotifyExtra {
   /** Replace rule-based recipients entirely (escalation rule actions). */
   recipientOverride?: RecipientFlags;
   /** Channels override (defaults to the union of matching rules, or email+in_app). */
-  channels?: ('email' | 'in_app')[];
+  channels?: NotificationChannel[];
   /** Users who must not be notified in addition to the actor. */
   excludeUserIds?: string[];
 }
@@ -44,7 +44,13 @@ interface UserLite {
   email: string;
   name: string;
   userType: 'msp' | 'customer';
+  phone: string | null;
+  whatsappOptIn: boolean;
 }
+
+const USER_LITE = { id: schema.users.id, email: schema.users.email, name: schema.users.name, userType: schema.users.userType, phone: schema.users.phone, whatsappOptIn: schema.users.whatsappOptIn };
+const CONTACT_LITE = { email: schema.contacts.email, name: schema.contacts.name, userId: schema.contacts.userId, phone: schema.contacts.phone, mobile: schema.contacts.mobile, whatsappOptIn: schema.contacts.whatsappOptIn };
+const contactRecipient = (c: { email: string | null; name: string; phone: string | null; mobile: string | null; whatsappOptIn: boolean }): Recipient => ({ email: c.email, name: c.name, phone: c.mobile ?? c.phone, whatsappOptIn: c.whatsappOptIn });
 
 const appUrl = () => config.APP_URL.replace(/\/$/, '');
 export const ticketLink = (ticketId: string, portal = false) => `${appUrl()}${portal ? '/portal/tickets/' : '/tickets/'}${ticketId}`;
@@ -52,13 +58,13 @@ export const ticketLink = (ticketId: string, portal = false) => `${appUrl()}${po
 async function usersByIds(tx: Tx, ids: string[]): Promise<UserLite[]> {
   const clean = [...new Set(ids.filter(Boolean))];
   if (!clean.length) return [];
-  return tx.select({ id: schema.users.id, email: schema.users.email, name: schema.users.name, userType: schema.users.userType }).from(schema.users).where(and(inArray(schema.users.id, clean), eq(schema.users.status, 'active')));
+  return tx.select(USER_LITE).from(schema.users).where(and(inArray(schema.users.id, clean), eq(schema.users.status, 'active')));
 }
 
 async function usersWithRoles(tx: Tx, roleKeys: string[], customerId: string): Promise<UserLite[]> {
   if (!roleKeys.length) return [];
   const rows = await tx
-    .select({ id: schema.users.id, email: schema.users.email, name: schema.users.name, userType: schema.users.userType })
+    .select(USER_LITE)
     .from(schema.users)
     .innerJoin(schema.userRoles, eq(schema.userRoles.userId, schema.users.id))
     .innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId))
@@ -71,7 +77,7 @@ async function usersInTeams(tx: Tx, teamIds: string[]): Promise<UserLite[]> {
   const clean = [...new Set(teamIds.filter(Boolean))];
   if (!clean.length) return [];
   const rows = await tx
-    .select({ id: schema.users.id, email: schema.users.email, name: schema.users.name, userType: schema.users.userType })
+    .select(USER_LITE)
     .from(schema.teamMembers)
     .innerJoin(schema.users, eq(schema.users.id, schema.teamMembers.userId))
     .where(and(inArray(schema.teamMembers.teamId, clean), eq(schema.users.status, 'active')));
@@ -89,9 +95,9 @@ export async function resolveRecipients(tx: Tx, ticket: TicketRow, flags: Recipi
   if (flags.requester) {
     if (ticket.requesterUserId) userIds.add(ticket.requesterUserId);
     if (ticket.requesterContactId) {
-      const [c] = await tx.select({ email: schema.contacts.email, name: schema.contacts.name, userId: schema.contacts.userId }).from(schema.contacts).where(eq(schema.contacts.id, ticket.requesterContactId)).limit(1);
+      const [c] = await tx.select(CONTACT_LITE).from(schema.contacts).where(eq(schema.contacts.id, ticket.requesterContactId)).limit(1);
       if (c?.userId) userIds.add(c.userId);
-      else if (c?.email) portal.push({ email: c.email, name: c.name });
+      else if (c?.email || (c?.whatsappOptIn && (c.mobile || c.phone))) portal.push(contactRecipient(c));
     }
     if (!ticket.requesterUserId && !ticket.requesterContactId && ticket.createdBy) userIds.add(ticket.createdBy);
   }
@@ -111,12 +117,12 @@ export async function resolveRecipients(tx: Tx, ticket: TicketRow, flags: Recipi
   }
   if (flags.customerContacts) {
     const rows = await tx
-      .select({ email: schema.contacts.email, name: schema.contacts.name, userId: schema.contacts.userId })
+      .select(CONTACT_LITE)
       .from(schema.contacts)
       .where(and(eq(schema.contacts.customerId, ticket.customerId), eq(schema.contacts.isActive, true), or(eq(schema.contacts.isEscalation, true), eq(schema.contacts.isPrimary, true))));
     for (const c of rows) {
       if (c.userId) userIds.add(c.userId);
-      else if (c.email) portal.push({ email: c.email, name: c.name });
+      else if (c.email || (c.whatsappOptIn && (c.mobile || c.phone))) portal.push(contactRecipient(c));
     }
   }
   if (flags.roles?.length) users.push(...(await usersWithRoles(tx, flags.roles, ticket.customerId)));
@@ -136,7 +142,7 @@ export async function resolveRecipients(tx: Tx, ticket: TicketRow, flags: Recipi
   for (const u of users) {
     if (seen.has(u.id)) continue;
     seen.add(u.id);
-    const rcpt: Recipient = { userId: u.id, email: u.email, name: u.name };
+    const rcpt: Recipient = { userId: u.id, email: u.email, name: u.name, phone: u.phone, whatsappOptIn: u.whatsappOptIn };
     if (u.userType === 'customer') portal.push(rcpt);
     else msp.push(rcpt);
   }
@@ -189,7 +195,7 @@ export async function notifyTicketEvent(ctx: Ctx, event: NotificationEvent, tick
   try {
     const rules = await tx.select().from(schema.notificationRules).where(and(eq(schema.notificationRules.event, event), eq(schema.notificationRules.isActive, true)));
     let flags: RecipientFlags = {};
-    let channels = new Set<'email' | 'in_app'>();
+    let channels = new Set<NotificationChannel>();
     if (extra.recipientOverride) {
       flags = extra.recipientOverride;
       (extra.channels ?? ['email', 'in_app']).forEach((c) => channels.add(c));
@@ -200,7 +206,7 @@ export async function notifyTicketEvent(ctx: Ctx, event: NotificationEvent, tick
         flags.roles = [...(flags.roles ?? []), ...(f.roles ?? [])];
         flags.users = [...(flags.users ?? []), ...(f.users ?? [])];
         flags.emails = [...(flags.emails ?? []), ...(f.emails ?? [])];
-        (r.channels as ('email' | 'in_app')[]).forEach((c) => channels.add(c));
+        (r.channels as NotificationChannel[]).forEach((c) => channels.add(c));
       }
       if (extra.channels) channels = new Set(extra.channels);
     }

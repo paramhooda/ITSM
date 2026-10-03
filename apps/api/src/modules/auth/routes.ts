@@ -48,7 +48,7 @@ export default async function routes(app: FastifyInstance) {
 
   r.patch('/auth/me', {
     preHandler: app.auth(),
-    schema: { tags: ['auth'], body: z.object({ name: z.string().min(1).max(200).optional(), phone: z.string().max(50).optional(), timezone: z.string().max(64).optional(), preferences: z.record(z.string(), z.unknown()).optional() }) },
+    schema: { tags: ['auth'], body: z.object({ name: z.string().min(1).max(200).optional(), phone: z.string().max(50).optional(), timezone: z.string().max(64).optional(), preferences: z.record(z.string(), z.unknown()).optional(), whatsappOptIn: z.boolean().optional() }) },
   }, async (req) => {
     const p = await svc.updatePreferences(req.principal!.id, req.body);
     return { user: toPublicPrincipal(p!) };

@@ -7,6 +7,7 @@ export interface Principal {
   email: string;
   name: string;
   phone: string | null;
+  whatsappOptIn?: boolean;
   userType: 'msp' | 'customer';
   customerId: string | null;
   status: string;
@@ -109,6 +110,7 @@ export async function loadPrincipal(userId: string): Promise<Principal | null> {
     email: user.email,
     name: user.name,
     phone: user.phone,
+    whatsappOptIn: user.whatsappOptIn,
     userType: user.userType,
     customerId: user.customerId,
     status: user.status,
@@ -136,6 +138,7 @@ export async function loadApiKeyPrincipal(rawKey: string, sha256: (s: string) =>
     email: `apikey:${row.keyPrefix}`,
     name: row.name,
     phone: null,
+    whatsappOptIn: false,
     userType: 'msp',
     customerId: row.customerId,
     status: 'active',
@@ -159,6 +162,7 @@ export function toPublicPrincipal(p: Principal) {
     email: p.email,
     name: p.name,
     phone: p.phone,
+    whatsappOptIn: p.whatsappOptIn ?? false,
     userType: p.userType,
     customerId: p.customerId,
     permissions: [...all],

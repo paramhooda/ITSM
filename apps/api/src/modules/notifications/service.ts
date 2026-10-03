@@ -23,12 +23,15 @@ export async function markRead(ctx: Ctx, ids: string[] | 'all') {
   return unreadCount(ctx);
 }
 
-export async function outboxStats(ctx: Ctx) {
-  const rows = await ctx.tx.select({ status: schema.notificationOutbox.status, count: sql<number>`count(*)::int` }).from(schema.notificationOutbox).groupBy(schema.notificationOutbox.status);
+export async function outboxStats(ctx: Ctx, filter: { channel?: string | null; limit?: number } = {}) {
+  const where = filter.channel ? eq(schema.notificationOutbox.channel, filter.channel) : undefined;
+  const rows = await ctx.tx.select({ status: schema.notificationOutbox.status, count: sql<number>`count(*)::int` }).from(schema.notificationOutbox).where(where).groupBy(schema.notificationOutbox.status);
+  const byChannel = await ctx.tx.select({ channel: schema.notificationOutbox.channel, count: sql<number>`count(*)::int` }).from(schema.notificationOutbox).groupBy(schema.notificationOutbox.channel);
   const recent = await ctx.tx
-    .select({ id: schema.notificationOutbox.id, recipient: schema.notificationOutbox.recipient, subject: schema.notificationOutbox.subject, status: schema.notificationOutbox.status, attempts: schema.notificationOutbox.attempts, lastError: schema.notificationOutbox.lastError, sentAt: schema.notificationOutbox.sentAt, createdAt: schema.notificationOutbox.createdAt, event: schema.notificationOutbox.event })
+    .select({ id: schema.notificationOutbox.id, channel: schema.notificationOutbox.channel, recipient: schema.notificationOutbox.recipient, subject: schema.notificationOutbox.subject, status: schema.notificationOutbox.status, deliveryStatus: schema.notificationOutbox.deliveryStatus, providerMessageId: schema.notificationOutbox.providerMessageId, attempts: schema.notificationOutbox.attempts, lastError: schema.notificationOutbox.lastError, sentAt: schema.notificationOutbox.sentAt, createdAt: schema.notificationOutbox.createdAt, event: schema.notificationOutbox.event })
     .from(schema.notificationOutbox)
+    .where(where)
     .orderBy(desc(schema.notificationOutbox.createdAt))
-    .limit(100);
-  return { byStatus: Object.fromEntries(rows.map((r) => [r.status, r.count])), recent };
+    .limit(Math.min(500, Math.max(1, filter.limit ?? 100)));
+  return { byStatus: Object.fromEntries(rows.map((r) => [r.status, r.count])), byChannel: Object.fromEntries(byChannel.map((r) => [r.channel, r.count])), recent };
 }

@@ -1,3 +1,4 @@
+import { normalizePhone } from '@/lib/channels';
 import { eq, and, isNull, gt, sql } from 'drizzle-orm';
 import { db, schema, withSystem } from '@/db/client';
 import { config } from '@/config';
@@ -130,16 +131,22 @@ export async function resetPassword(token: string, newPassword: string) {
   await revokeAllSessions(row.userId);
 }
 
-export async function updatePreferences(userId: string, patch: { preferences?: Record<string, unknown>; timezone?: string; name?: string; phone?: string }) {
+export async function updatePreferences(userId: string, patch: { preferences?: Record<string, unknown>; timezone?: string; name?: string; phone?: string; whatsappOptIn?: boolean }) {
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
   if (!user) throw new UnauthorizedError();
+  // Phone numbers are kept in E.164 when they parse, so WhatsApp can use them as entered.
+  const phone = patch.phone === undefined ? user.phone : patch.phone.trim() ? (normalizePhone(patch.phone) ?? patch.phone.trim()) : null;
+  const optIn = patch.whatsappOptIn === undefined ? user.whatsappOptIn : patch.whatsappOptIn;
+  if (optIn && !phone) throw new ValidationError('Add a mobile number before turning on WhatsApp notifications');
   await db
     .update(schema.users)
     .set({
       preferences: patch.preferences ? { ...user.preferences, ...patch.preferences } : user.preferences,
       timezone: patch.timezone ?? user.timezone,
       name: patch.name ?? user.name,
-      phone: patch.phone ?? user.phone,
+      phone,
+      whatsappOptIn: optIn,
+      whatsappOptedInAt: optIn && !user.whatsappOptIn ? new Date() : optIn ? user.whatsappOptedInAt : null,
       updatedAt: new Date(),
     })
     .where(eq(schema.users.id, userId));

@@ -46,6 +46,33 @@ export const NOTIFICATION_TEMPLATE_SEEDS = [
   { event: 'user.welcome', channel: 'email', name: 'Welcome', subject: 'Welcome to {{platformName}}', body: `<p>Hello {{user.name}},</p><p>An account has been created for you.</p><p>Sign in at <a href="{{appUrl}}">{{appUrl}}</a> with your email address{{#if temporaryPassword}} and temporary password <strong>{{temporaryPassword}}</strong>{{/if}}.</p>` },
 ];
 
+/**
+ * WhatsApp: one short line per event. The rendered text becomes a parameter of the
+ * approved Meta template (see Administration > WhatsApp), so keep it to a sentence
+ * with no line breaks.
+ */
+const WHATSAPP_SEEDS = [
+  { event: 'ticket.created', name: 'Ticket created (WhatsApp)', subject: '{{ticket.number}} logged', body: '{{ticket.typeLabel}} {{ticket.number}} "{{ticket.title}}" has been logged for {{ticket.customerName}}. Priority {{ticket.priority}}.' },
+  { event: 'ticket.assigned', name: 'Ticket assigned (WhatsApp)', subject: '{{ticket.number}} assigned to you', body: '{{actor}} assigned {{ticket.number}} "{{ticket.title}}" to {{ticket.assignee}}. Priority {{ticket.priority}}.' },
+  { event: 'ticket.status_changed', name: 'Ticket status changed (WhatsApp)', subject: '{{ticket.number}} is now {{ticket.status}}', body: '{{ticket.number}} "{{ticket.title}}" moved from {{previousStatus}} to {{ticket.status}} by {{actor}}.' },
+  { event: 'ticket.customer_comment', name: 'Customer commented (WhatsApp)', subject: '{{ticket.number}}: new customer comment', body: '{{actor}} commented on {{ticket.number}}: {{comment}}' },
+  { event: 'ticket.engineer_comment', name: 'Engineer commented (WhatsApp)', subject: '{{ticket.number}}: update from the service desk', body: 'Update on {{ticket.number}} "{{ticket.title}}" from {{actor}}: {{comment}}' },
+  { event: 'ticket.resolved', name: 'Ticket resolved (WhatsApp)', subject: '{{ticket.number}} resolved', body: '{{ticket.number}} "{{ticket.title}}" has been resolved by {{actor}}. Resolution: {{ticket.resolutionNotes}}. Reply on the ticket if the issue persists.' },
+  { event: 'ticket.closed', name: 'Ticket closed (WhatsApp)', subject: '{{ticket.number}} closed', body: '{{ticket.number}} "{{ticket.title}}" is now closed. Thank you.' },
+  { event: 'ticket.escalated', name: 'Ticket escalated (WhatsApp)', subject: '{{ticket.number}} escalated to level {{level}}', body: 'ESCALATION L{{level}} on {{ticket.number}} "{{ticket.title}}" ({{ticket.customerName}}, {{ticket.priority}}): {{reason}}' },
+  { event: 'sla.warning', name: 'SLA warning (WhatsApp)', subject: '{{ticket.number}}: {{sla.metric}} SLA at {{sla.pct}}%', body: '{{sla.metric}} SLA on {{ticket.number}} "{{ticket.title}}" is at {{sla.pct}}%, due {{date sla.dueAt}}.' },
+  { event: 'sla.breached', name: 'SLA breached (WhatsApp)', subject: '{{ticket.number}}: {{sla.metric}} SLA breached', body: 'SLA BREACH: {{sla.metric}} on {{ticket.number}} "{{ticket.title}}" ({{ticket.customerName}}, {{ticket.priority}}) was due {{date sla.dueAt}}.' },
+  { event: 'change.approval_requested', name: 'Change approval requested (WhatsApp)', subject: 'Approval requested: {{ticket.number}}', body: 'Your approval is requested for change {{ticket.number}} "{{ticket.title}}" ({{ticket.customerName}}).' },
+  { event: 'request.approval_requested', name: 'Request approval requested (WhatsApp)', subject: 'Approval requested: {{ticket.number}}', body: 'Your approval is requested for request {{ticket.number}} "{{ticket.title}}" ({{ticket.customerName}}).' },
+  { event: 'request.approved', name: 'Request approved (WhatsApp)', subject: '{{ticket.number}} approved', body: 'Request {{ticket.number}} "{{ticket.title}}" was approved by {{actor}} and is being fulfilled.' },
+  { event: 'request.rejected', name: 'Request rejected (WhatsApp)', subject: '{{ticket.number}} rejected', body: 'Request {{ticket.number}} "{{ticket.title}}" was rejected by {{actor}}. {{comment}}' },
+  { event: 'field_visit.scheduled', name: 'Field visit scheduled (WhatsApp)', subject: 'Site visit {{visit.number}} scheduled', body: 'A site visit ({{visit.number}}, {{visit.title}}) is scheduled at {{visit.siteName}} on {{date visit.scheduledStart}}. Engineer: {{visit.engineer}}.' },
+  { event: 'field_visit.completed', name: 'Field visit completed (WhatsApp)', subject: 'Site visit {{visit.number}} completed', body: 'Site visit {{visit.number}} at {{visit.siteName}} was completed by {{visit.engineer}}. {{visit.workSummary}}' },
+  { event: 'pm.scheduled', name: 'Maintenance scheduled (WhatsApp)', subject: 'Maintenance scheduled: {{pm.programName}}', body: 'Preventive maintenance "{{pm.programName}}" for {{pm.customerName}} is scheduled for {{pm.date}}.' },
+].map((t) => ({ ...t, channel: 'whatsapp' }));
+
+export const NOTIFICATION_TEMPLATE_SEEDS_ALL = [...NOTIFICATION_TEMPLATE_SEEDS, ...WHATSAPP_SEEDS];
+
 export const NOTIFICATION_RULE_SEEDS = [
   { event: 'ticket.created', name: 'Notify requester, team and watchers on creation', recipients: { requester: true, team: true, watchers: true }, channels: ['email', 'in_app'] },
   { event: 'ticket.assigned', name: 'Notify assignee', recipients: { assignee: true }, channels: ['email', 'in_app'] },

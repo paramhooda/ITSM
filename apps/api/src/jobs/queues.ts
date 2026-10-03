@@ -12,6 +12,7 @@ export const QUEUES = {
   integrations: 'integrations',
   maintenance: 'maintenance',
   ai: 'ai',
+  paging: 'paging',
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 

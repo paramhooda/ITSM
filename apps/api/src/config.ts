@@ -26,6 +26,8 @@ const schema = z.object({
   STORAGE_DRIVER: z.enum(['local']).default('local'),
   STORAGE_LOCAL_PATH: z.string().default('./storage'),
   MAX_UPLOAD_MB: z.coerce.number().default(50),
+  /** Overrides Meta's Graph API host (tests, proxies). */
+  WHATSAPP_API_BASE: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(25),
   SMTP_SECURE: bool.default(false),

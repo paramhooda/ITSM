@@ -6,6 +6,8 @@ export interface Principal {
   email: string;
   name: string;
   phone?: string | null;
+  /** Opted in to WhatsApp notifications on the phone number. */
+  whatsappOptIn?: boolean;
   userType: 'msp' | 'customer';
   customerId: string | null;
   permissions: Permission[];

@@ -764,7 +764,7 @@ function portalRoleOf(roles: { key: string }[]): PortalRoleKey | null {
 }
 
 function safeUser(ctx: Ctx, u: IamUser | IamListUser) {
-  return { id: u.id, email: u.email, name: u.name, phone: u.phone, title: u.title, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, role: portalRoleOf(u.roles), roleName: u.roles.find((r) => r.key === portalRoleOf(u.roles))?.name ?? null, isSelf: u.id === ctx.user.id };
+  return { id: u.id, email: u.email, name: u.name, phone: u.phone, whatsappOptIn: (u as { whatsappOptIn?: boolean }).whatsappOptIn ?? false, title: u.title, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, role: portalRoleOf(u.roles), roleName: u.roles.find((r) => r.key === portalRoleOf(u.roles))?.name ?? null, isSelf: u.id === ctx.user.id };
 }
 
 async function portalRole(ctx: Ctx, key: string) {
@@ -812,6 +812,7 @@ export async function updatePortalUser(ctx: Ctx, id: string, patch: UpdateUserBo
   if (patch.phone !== undefined) fields.phone = patch.phone ?? undefined;
   if (patch.title !== undefined) fields.title = patch.title ?? undefined;
   if (patch.status !== undefined) fields.status = patch.status;
+  if (patch.whatsappOptIn !== undefined) fields.whatsappOptIn = patch.whatsappOptIn;
   if (Object.keys(fields).length) await iam.updateUser(ctx, id, fields);
   if (patch.role !== undefined) {
     if (id === ctx.user.id) throw new ValidationError('You cannot change your own role');

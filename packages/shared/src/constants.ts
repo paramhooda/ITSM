@@ -109,6 +109,7 @@ export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
  */
 export const NAV_AREAS = {
   tickets: 'Tickets',
+  operations: 'Operations',
   customers: 'Customers',
   contracts: 'Contracts & scope',
   catalog: 'Service catalog',

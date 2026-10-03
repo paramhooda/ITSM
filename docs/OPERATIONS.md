@@ -33,6 +33,12 @@ Environment variables are documented in `.env.example`. All services read the sa
 * **Redis**: no backup required.
 * Test restores quarterly: restore into a staging stack and run `GET /api/health` plus a login.
 
+## WhatsApp notifications
+
+WhatsApp is configured once under **Administration → WhatsApp** (Meta WhatsApp Cloud API): phone number id, a permanent system-user access token, the app secret (so delivery callbacks can be verified), a webhook verify token and the approved message templates. Business-initiated messages must use templates Meta has approved, so create one (the default is `progression_update` with three body parameters: subject, text, link) and map it on that page; event groups (ticket, sla, incident, page, handover, briefing) can map to their own templates and otherwise fall back to the default. The page sends a test message and lists recent WhatsApp rows of the outbox with their delivery state.
+
+Everyone else opts in on their profile with a mobile number (ten-digit numbers get the default country code, India by default); customer administrators can do it for their users, and staff can tick it on customer contacts. A notification rule reaches WhatsApp only when the rule includes the WhatsApp channel and the recipient has opted in. Rows are written to `notification_outbox` with channel `whatsapp` inside the business transaction, delivered by the `deliver-outbox` job with retries, and marked failed at once on permanent provider errors (unknown template, invalid number). Register `/api/webhooks/whatsapp` in the Meta app (field `messages`) so sent, delivered, read and failed states flow back; `WHATSAPP_API_BASE` overrides the Graph host for tests. Sent and failed outbox rows are purged after `notifications.outbox_retention_days` (90 by default) by the nightly `outbox-purge` job.
+
 ## Monitoring
 
 * `GET /api/health` → `{status, db, latencyMs}`; the Docker healthcheck uses it.
