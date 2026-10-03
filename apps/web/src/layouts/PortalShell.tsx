@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import { PORTAL_NAV } from './nav';
 import { Sidebar, NotificationBell, UserMenu, MobileNav, BrandLogo } from './AppShell';
 import { GradyWidget } from '@/components/grady/GradyWidget';
+import { PortalBanners } from '@/components/portal/PortalBanners';
 
 export function PortalShell({ children }: { children: ReactNode }) {
   const can = useAuthStore((s) => s.can);
@@ -27,7 +28,10 @@ export function PortalShell({ children }: { children: ReactNode }) {
         </header>
         <div className="flex-1 flex min-h-0">
           <main className="flex-1 overflow-y-auto">
-            <div className="p-5 md:p-7 max-w-[1300px] mx-auto">{children}</div>
+            <div className="p-5 md:p-7 max-w-[1300px] mx-auto">
+              <PortalBanners />
+              {children}
+            </div>
           </main>
         </div>
         <MobileNav items={PORTAL_NAV} />

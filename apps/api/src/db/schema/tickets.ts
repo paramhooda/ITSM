@@ -264,3 +264,54 @@ export const savedViews = pgTable('saved_views', {
   sortOrder: integer('sort_order').notNull().default(0),
   ...timestamps,
 }, (t) => [index('saved_views_user_idx').on(t.userId)]);
+
+
+/**
+ * A major incident is an incident run as a programme: a bridge, named roles, timed
+ * stakeholder updates, child incidents and a post-incident review. One row per
+ * ticket; `tickets.is_major` mirrors whether the row is active.
+ */
+export const majorIncidents = pgTable('major_incidents', {
+  ticketId: uuid('ticket_id').primaryKey().references(() => tickets.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull(),
+  /** active | resolved | review_done | demoted */
+  status: text('status').notNull().default('active'),
+  declaredBy: uuid('declared_by'),
+  declaredAt: timestamp('declared_at', { withTimezone: true }).defaultNow().notNull(),
+  demotedAt: timestamp('demoted_at', { withTimezone: true }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  bridgeUrl: text('bridge_url'),
+  bridgeNotes: text('bridge_notes'),
+  commanderUserId: uuid('commander_user_id'),
+  commsLeadUserId: uuid('comms_lead_user_id'),
+  /** Show the latest stakeholder update as a banner in the customer portal. */
+  portalBanner: boolean('portal_banner').notNull().default(true),
+  updateIntervalMinutes: integer('update_interval_minutes').notNull().default(30),
+  nextUpdateDueAt: timestamp('next_update_due_at', { withTimezone: true }),
+  lastUpdateAt: timestamp('last_update_at', { withTimezone: true }),
+  lastReminderAt: timestamp('last_reminder_at', { withTimezone: true }),
+  pirWhatHappened: text('pir_what_happened'),
+  pirImpact: text('pir_impact'),
+  pirRootCause: text('pir_root_cause'),
+  pirActions: jsonb('pir_actions').$type<{ id: string; text: string; ownerId?: string | null; ownerName?: string | null; dueAt?: string | null; done: boolean }[]>().notNull().default([]),
+  pirCompletedAt: timestamp('pir_completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [index('major_incidents_status_idx').on(t.status, t.declaredAt)]);
+
+/** The communication log of a major incident: stakeholder updates (sent out) and internal notes. */
+export const majorIncidentUpdates = pgTable('major_incident_updates', {
+  id: id(),
+  ticketId: uuid('ticket_id').notNull().references(() => tickets.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull(),
+  authorId: uuid('author_id'),
+  authorName: text('author_name').notNull(),
+  /** stakeholder | internal */
+  kind: text('kind').notNull().default('stakeholder'),
+  body: text('body').notNull(),
+  audience: jsonb('audience').$type<Record<string, unknown>>().notNull().default({}),
+  channels: text('channels').array().notNull().default([]),
+  portalBanner: boolean('portal_banner').notNull().default(true),
+  sentCount: integer('sent_count').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [index('major_incident_updates_ticket_idx').on(t.ticketId, t.createdAt)]);

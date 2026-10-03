@@ -34,13 +34,11 @@ The inventory was taken from the code (routes, navigator, API modules, schema, p
 |---|---|---|---|
 | Inbound email to ticket (reply threading, attachments, auto-acknowledge) | The most used channel after the portal; ServiceNow and Summit both ingest mail | P1 | M |
 | Customer satisfaction survey on resolution and closure, with CSAT on dashboards and reports | Standard in both products; the only rating today is on field visits | P1 | S |
-| Staff approvals inbox ("My approvals") and sequential approval steps honouring all-or-any per step | The API has an inbox endpoint with no screen, and steps currently run in parallel with "any" ignored | P1 | S |
 | Change calendar with conflict and blackout-window checks, CAB meeting with agenda and decisions, standard (pre-approved) change catalog, risk questionnaire that scores risk | Change today is a record with free-text CAB notes; the calendar exists only as a report | P1 | M |
-| Major incident workflow: declare or demote on the record, communication log, stakeholder updates, bridge details, post-incident review | Today it is a flag set only at creation | P2 | M |
 | Known error database view for the desk and the portal (problem workarounds searchable) | Problem records carry workarounds but nothing surfaces them | P2 | S |
 | Ticket templates and quick-create for common incidents | Request catalog covers requests; incidents have none | P2 | S |
 | On-call schedules and rota-based escalation | Escalation rules notify roles and teams, not whoever is on call | P2 | M |
-| Notification channels beyond email and in-app: SMS, Microsoft Teams, Slack, push | Worker currently rejects any other channel | P2 | M |
+| Notification channels beyond email, in-app and WhatsApp: SMS, Microsoft Teams, Slack, push | WhatsApp shipped with a provider interface the others plug into | P3 | M |
 | Announcements and outage banners for staff and portal | Employee Center's most used widget | P2 | S |
 | Visual task boards for engineers and shift handover notes | Common in modern desks | P3 | M |
 | Comment editing in the UI (API exists) | Small polish | P3 | S |
@@ -95,9 +93,10 @@ Note: financial depreciation and contract value tracking were removed by request
 
 ## Suggested order
 
-1. **Now**: approvals inbox and sequential steps (a correctness fix), CSAT survey, inbound email, SSO.
-2. **Next**: change calendar with conflicts and CAB, major incident workflow, announcements and service health page, SMS and Teams notifications, PDF reports, portal preview.
-3. **Later**: software asset management, stockroom, on-call rotas, more adapters, custom report builder.
+1. **Shipped since this review**: the staff approvals inbox with sequential steps, WhatsApp notifications (one business account, personal opt-in), the major incident workflow (declare or demote, bridge and roles, stakeholder updates on a cadence with reminders, child incidents, post-incident review, portal banner, Operations list and NOC tile).
+2. **Now**: on-call schedules and paging, CSAT survey, inbound email, SSO.
+3. **Next**: change calendar with conflicts and CAB, announcements and service health page, PDF reports, Teams and SMS channels, portal preview.
+4. **Later**: software asset management, stockroom, more adapters, custom report builder.
 
 ## Bugs found during the review
 

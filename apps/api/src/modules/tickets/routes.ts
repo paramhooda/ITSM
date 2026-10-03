@@ -8,6 +8,7 @@ import * as act from './activity';
 import * as list from './list';
 import * as views from './views';
 import * as approvals from './approvals';
+import * as major from './major';
 import { scopePreview } from './scope';
 import { loadTicket, loadTicketByNumber } from './common';
 import * as S from './schemas';
@@ -68,6 +69,16 @@ export default async function routes(app: FastifyInstance) {
   r.post('/tickets/:id/assign', { preHandler: app.auth('tickets:assign'), schema: { tags, params: idParam, body: S.assignSchema } }, after((ctx, id, body) => svc.assignTicket(ctx, id, body)));
   r.post('/tickets/:id/escalate', { preHandler: app.auth('tickets:escalate'), schema: { tags, params: idParam, body: S.escalateSchema } }, after((ctx, id, body) => svc.escalateTicket(ctx, id, body)));
   r.post('/tickets/:id/scope', { preHandler: app.auth('tickets:scope'), schema: { tags, params: idParam, body: S.scopeOverrideSchema } }, after((ctx, id, body) => svc.setScope(ctx, id, body)));
+
+  // ---- major incidents
+  const idOf = (req: { params: unknown }) => (req.params as { id: string }).id;
+  r.get('/major-incidents', { preHandler: app.auth('tickets:read'), schema: { tags, querystring: S.majorListQuerySchema } }, h((ctx, req) => major.listMajor(ctx, req.query as S.MajorListQuery)));
+  r.get('/tickets/:id/major', { preHandler: read, schema: { tags, params: idParam } }, h((ctx, req) => major.getMajor(ctx, idOf(req))));
+  r.post('/tickets/:id/major/declare', { preHandler: app.auth('tickets:major'), schema: { tags, params: idParam, body: S.majorDeclareSchema } }, h((ctx, req) => major.declareMajor(ctx, idOf(req), req.body as S.MajorDeclareInput)));
+  r.post('/tickets/:id/major/demote', { preHandler: app.auth('tickets:major'), schema: { tags, params: idParam, body: S.majorDemoteSchema } }, h((ctx, req) => major.demoteMajor(ctx, idOf(req), req.body as { reason?: string | null })));
+  r.patch('/tickets/:id/major', { preHandler: app.auth('tickets:major'), schema: { tags, params: idParam, body: S.majorPatchSchema } }, h((ctx, req) => major.updateMajor(ctx, idOf(req), req.body as S.MajorPatchInput)));
+  r.post('/tickets/:id/major/updates', { preHandler: app.auth('tickets:major'), schema: { tags, params: idParam, body: S.majorUpdateSchema } }, h((ctx, req) => major.postMajorUpdate(ctx, idOf(req), req.body as S.MajorUpdateInput)));
+  r.post('/tickets/:id/major/children', { preHandler: app.auth('tickets:major'), schema: { tags, params: idParam, body: S.majorChildSchema } }, h((ctx, req) => major.addChild(ctx, idOf(req), req.body as { ticketId?: string; number?: string })));
   r.patch('/tickets/:id/problem', { preHandler: app.auth('problems:manage'), schema: { tags, params: idParam, body: S.problemDetailsSchema } }, h((ctx, req) => svc.updateProblemDetails(ctx, (req.params as { id: string }).id, req.body as S.ProblemDetailsInput)));
   r.patch('/tickets/:id/change', { preHandler: app.auth('changes:manage'), schema: { tags, params: idParam, body: S.changeDetailsSchema } }, h((ctx, req) => svc.updateChangeDetails(ctx, (req.params as { id: string }).id, req.body as S.ChangeDetailsInput)));
 

@@ -23,6 +23,8 @@ Grady is the chat assistant in the staff application and the customer portal. Th
 
 **4. Propose-then-commit for actions.** When the model calls an action tool (create ticket, add comment, assign, set status, link), nothing runs. The platform resolves a preview against real records ("Assign INC-001234 ("Core switch down") to Priya Sharma"), stores it on the conversation as the pending action, and the model asks "Shall I proceed?". The next message decides: a plain yes commits it (the platform executes it exactly once, without consulting the model, and replies "Done: …" with the link), a no drops it, anything else drops it and tells the model so it can propose again with the new details. One pending action at a time; it expires after 30 minutes; a second yes cannot run it twice. The chat window shows the held preview with Yes / No buttons driven by the server's state, not by reading the reply's wording.
 
+**4a. Incident command.** The `major_incidents` read tool answers "which major incidents are open, who commands them and which stakeholder update is overdue" from the same rows as the Operations page, and `POST /ai/tickets/:id/major/draft-update` drafts a stakeholder update (customer tone) or a bridge note (internal tone) from the incident record, the communication log and the latest notes; the person reads and edits it before it is sent, and the draft is stored as a suggestion like the other drafts.
+
 **5. Tenant isolation stays underneath all of this** (see "Customer data isolation" in OPERATIONS.md): row-level security, explicit own-customer predicates, the tool-result fence and the answer fence for portal users.
 
 ## Checking it

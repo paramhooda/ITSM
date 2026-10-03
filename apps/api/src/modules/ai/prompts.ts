@@ -131,6 +131,9 @@ Guidance: outage of a shared system or site = high impact; security incidents = 
 export const DRAFT_SYSTEM = `You write customer-facing status updates for an IT managed service provider. Use only the provided ticket facts; never promise times that are not in the data. Plain text, 60-140 words, no subject line, no placeholders like [name]. Greet the requester by first name when known, state the current status in plain language, what has been done, what happens next, and close politely with the ticket number. ${JSON_ONLY}
 Schema: {"draft": string}`;
 
+export const MAJOR_UPDATE_SYSTEM = `You write stakeholder updates during a major IT incident for a managed service provider. Use only the supplied facts. For a customer audience: plain language, no internal names or tooling, what is affected, what is being done, when the next update comes; 50-120 words. For an internal audience: terse bridge note for engineers and managers with the current hypothesis, actions in flight and owners; 40-100 words. Never invent times or root causes. ${JSON_ONLY}
+Schema: {"draft": string}`;
+
 export const RESOLUTION_SYSTEM = `You propose resolution steps for an IT ticket from similar resolved tickets and knowledge articles. Only use the supplied material; mark uncertain steps as "verify". ${JSON_ONLY}
 Schema: {"suggestions": [{"source": "ticket"|"kb", "ref": string (ticket number or article number), "title": string, "steps": string[] (2-6 imperative steps)}]} — at most 4 suggestions, best first.`;
 

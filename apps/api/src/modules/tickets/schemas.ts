@@ -139,6 +139,45 @@ export const assignSchema = z.object({
 
 export const escalateSchema = z.object({ reason: z.string().trim().min(1).max(2000), notifyRoles: z.array(z.string()).optional() });
 
+// ---- major incidents
+const recipientFlagsSchema = z.object({
+  requester: z.boolean().optional(),
+  assignee: z.boolean().optional(),
+  team: z.boolean().optional(),
+  watchers: z.boolean().optional(),
+  manager: z.boolean().optional(),
+  customerContacts: z.boolean().optional(),
+  approvers: z.boolean().optional(),
+  accountManager: z.boolean().optional(),
+  roles: z.array(z.string().max(64)).max(20).optional(),
+  users: z.array(uuid).max(50).optional(),
+  emails: z.array(z.string().email()).max(50).optional(),
+});
+const bridgeUrl = z.string().trim().max(500).refine((v) => !v || /^https?:\/\//i.test(v), 'Bridge link must start with http:// or https://').nullable().optional();
+const pirAction = z.object({ id: z.string().max(64), text: z.string().trim().min(1).max(500), ownerId: nullableUuid, dueAt: z.string().datetime({ offset: true }).nullable().optional(), done: z.boolean().default(false) });
+export const majorDeclareSchema = z.object({ reason: z.string().trim().max(2000).nullable().optional(), bridgeUrl, commanderUserId: nullableUuid, commsLeadUserId: nullableUuid, portalBanner: z.boolean().optional(), updateIntervalMinutes: z.number().int().min(5).max(1440).optional() });
+export type MajorDeclareInput = z.infer<typeof majorDeclareSchema>;
+export const majorDemoteSchema = z.object({ reason: z.string().trim().max(2000).nullable().optional() });
+export const majorPatchSchema = z.object({
+  bridgeUrl,
+  bridgeNotes: z.string().max(4000).nullable().optional(),
+  commanderUserId: nullableUuid,
+  commsLeadUserId: nullableUuid,
+  portalBanner: z.boolean().optional(),
+  updateIntervalMinutes: z.number().int().min(5).max(1440).optional(),
+  pirWhatHappened: z.string().max(8000).nullable().optional(),
+  pirImpact: z.string().max(8000).nullable().optional(),
+  pirRootCause: z.string().max(8000).nullable().optional(),
+  pirActions: z.array(pirAction).max(50).optional(),
+  status: z.enum(['active', 'resolved', 'review_done']).optional(),
+});
+export type MajorPatchInput = z.infer<typeof majorPatchSchema>;
+export const majorUpdateSchema = z.object({ body: z.string().trim().min(1).max(8000), kind: z.enum(['stakeholder', 'internal']).default('stakeholder'), audience: recipientFlagsSchema.optional(), channels: z.array(z.enum(['email', 'in_app', 'whatsapp'])).max(3).optional(), portalBanner: z.boolean().optional() });
+export type MajorUpdateInput = z.infer<typeof majorUpdateSchema>;
+export const majorChildSchema = z.object({ ticketId: uuid.optional(), number: z.string().trim().max(40).optional() }).refine((v) => !!v.ticketId || !!v.number, { message: 'Give a ticket id or number' });
+export const majorListQuerySchema = z.object({ status: z.enum(['active', 'resolved', 'review_done', 'demoted', 'all']).optional(), customerId: uuid.optional(), q: z.string().max(200).optional(), page: z.coerce.number().int().min(1).optional(), pageSize: z.coerce.number().int().min(1).max(100).optional() });
+export type MajorListQuery = z.infer<typeof majorListQuerySchema>;
+
 export const scopeOverrideSchema = z.object({ scopeStatus: z.enum(SCOPE_STATUSES), scopeNote: z.string().max(2000).nullable().optional(), scopeContractId: nullableUuid });
 
 export const scopePreviewSchema = z.object({ customerId: uuid, serviceId: nullableUuid, siteId: nullableUuid, ticketCategoryId: nullableUuid, primaryCiId: nullableUuid });

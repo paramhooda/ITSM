@@ -26,6 +26,7 @@ export default async function routes(app: FastifyInstance) {
   const q = <T extends { customerId?: string }>(req: { query: unknown }) => req.query as T;
 
   r.get('/portal/me', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => svc.me(ctx, q(req).customerId)));
+  r.get('/portal/banners', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => svc.portalBanners(ctx, q(req).customerId)));
   r.get('/portal/catalog', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => svc.portalCatalog(ctx, q(req).customerId)));
 
   // ---- tickets

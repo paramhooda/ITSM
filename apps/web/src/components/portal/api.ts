@@ -84,10 +84,22 @@ export interface PortalAttachment {
   canDelete: boolean;
 }
 
+export interface PortalBanner {
+  kind: 'major_incident';
+  ticketId: string;
+  number: string;
+  title: string;
+  declaredAt: string;
+  lastUpdateAt: string | null;
+  nextUpdateDueAt: string | null;
+  latestUpdate: { body: string; at: string } | null;
+}
+
 export interface PortalTicket {
   id: string;
   number: string;
   type: 'incident' | 'request';
+  isMajor?: boolean;
   typeLabel: string;
   title: string;
   description: string | null;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CheckCircle2, RotateCcw, ShieldCheck, ShieldOff, ShieldQuestion, Check, X, MessageSquare, Info, ClipboardCheck, FileSignature } from 'lucide-react';
+import { CheckCircle2, RotateCcw, ShieldCheck, ShieldOff, ShieldQuestion, Check, X, MessageSquare, Info, ClipboardCheck, FileSignature, Flame } from 'lucide-react';
 import { Button, Badge, LoadingBlock, ErrorBlock, Dialog, Textarea, Field } from '@/components/ui';
 import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, ActivityStream, RailTabs, RailCard, RailRows, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
 import { useUiStore } from '@/stores/ui';
@@ -244,6 +244,7 @@ export default function PortalTicketDetailPage() {
             badges={
               <>
                 <TypeBadge type={ticket.type} />
+                {ticket.isMajor && <Badge color="red" className="gap-1"><Flame className="h-3 w-3" /> Major incident</Badge>}
                 {ticket.reopenCount > 0 && <Badge color="slate">Reopened ×{ticket.reopenCount}</Badge>}
               </>
             }

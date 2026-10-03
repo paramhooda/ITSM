@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone } from 'lucide-react';
+import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone, Undo2 } from 'lucide-react';
 import { Button, Badge, LoadingBlock, ErrorBlock, Textarea, Select, Input, Avatar } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
 import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
@@ -26,6 +26,7 @@ import { LinksPanel } from '@/components/tickets/detail/LinksPanel';
 import { CisAssetsPanel } from '@/components/tickets/detail/CisAssetsPanel';
 import { ProblemForm } from '@/components/tickets/detail/ProblemForm';
 import { ChangeForm } from '@/components/tickets/detail/ChangeForm';
+import { MajorIncidentPanel } from '@/components/tickets/detail/MajorIncidentPanel';
 import { TicketDetailsRail, TicketAssistRail } from '@/components/tickets/detail/TicketRail';
 import { ResolveDialog, CommentDialog, ScopeDialog } from '@/components/tickets/detail/ActionDialogs';
 import { SlaCard } from '@/components/tickets/SlaCard';
@@ -85,8 +86,10 @@ export default function TicketDetailPage() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: qk.detail(id) });
     qc.invalidateQueries({ queryKey: qk.timeline(id) });
+    qc.invalidateQueries({ queryKey: qk.major(id) });
     qc.invalidateQueries({ queryKey: ['tickets', 'list'] });
     qc.invalidateQueries({ queryKey: ['tickets', 'stats'] });
+    qc.invalidateQueries({ queryKey: ['major-incidents'] });
   };
   const act = <T,>(fn: (vars: T) => Promise<unknown>, okMsg?: string) =>
     useMutation({
@@ -107,6 +110,8 @@ export default function TicketDetailPage() {
   const escalate = act((v: { comment: string }) => ticketsApi.escalate(id, { reason: v.comment }), 'Escalated');
   const scope = act((v: { scopeStatus: string; scopeNote: string }) => ticketsApi.scope(id, { scopeStatus: v.scopeStatus, scopeNote: v.scopeNote || null }), 'Scope updated');
   const assignMe = act(() => ticketsApi.assign(id, { assigneeId: user.id, autoProgress: true }), 'Assigned to you');
+  const declareMajor = act((v: { comment: string }) => ticketsApi.declareMajor(id, { reason: v.comment || null }), 'Declared a major incident');
+  const demoteMajor = act((v: { comment: string }) => ticketsApi.demoteMajor(id, { reason: v.comment || null }), 'No longer a major incident');
   const watch = act((remove: boolean) => (remove ? ticketsApi.unwatch(id) : ticketsApi.watch(id)));
   // A note with files: the files go up first and follow the note's audience (a reply is customer-visible, a work note is not).
   const comment = useMutation({
@@ -125,7 +130,7 @@ export default function TicketDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const [dialog, setDialog] = useState<null | 'resolve' | 'close' | 'reopen' | 'cancel' | 'escalate' | 'scope'>(null);
+  const [dialog, setDialog] = useState<null | 'resolve' | 'close' | 'reopen' | 'cancel' | 'escalate' | 'scope' | 'major-declare' | 'major-demote'>(null);
   const [editDesc, setEditDesc] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
   const entries = useMemo(() => (timelineQ.data?.items ?? []).map(fromTimeline), [timelineQ.data]);
@@ -160,6 +165,7 @@ export default function TicketDetailPage() {
         onEscalate: p.escalate && isOpen ? () => setDialog('escalate') : undefined,
         onNudge: p.comment ? focusComposer : undefined,
         onScope: p.update ? () => setDialog('scope') : undefined,
+        onDeclareMajor: p.major && ticket.type === 'incident' && !ticket.isMajor && isOpen ? () => setDialog('major-declare') : undefined,
       });
 
   // ---- header actions: two primary, the rest in the overflow menu
@@ -172,6 +178,8 @@ export default function TicketDetailPage() {
     </>
   );
   const menu: MenuItem[] = [
+    ...(p.major && !ticket.isMajor && isOpen ? [{ label: 'Declare major incident…', icon: <Flame className="h-4 w-4" />, onClick: () => setDialog('major-declare') }] : []),
+    ...(p.major && ticket.isMajor ? [{ label: 'Not a major incident…', icon: <Undo2 className="h-4 w-4" />, onClick: () => setDialog('major-demote') }] : []),
     ...(p.escalate && isOpen ? [{ label: `Escalate to level ${ticket.escalationLevel + 1}`, icon: <ArrowUpRight className="h-4 w-4" />, onClick: () => setDialog('escalate') }] : []),
     ...(p.watch ? [{ label: ticket.isWatching ? 'Stop watching' : 'Watch this ticket', icon: ticket.isWatching ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />, onClick: () => watch.mutate(ticket.isWatching) }] : []),
     ...(p.update && !isCustomer ? [{ label: 'Classify scope…', icon: <Pencil className="h-4 w-4" />, onClick: () => setDialog('scope') }] : []),
@@ -336,6 +344,7 @@ export default function TicketDetailPage() {
 
   // ---- related lists
   const tabs = [
+    { key: 'major', label: 'Major incident', hidden: isCustomer || !(ticket.isMajor || ticket.major), content: <MajorIncidentPanel ticket={ticket} canEdit={p.major} /> },
     { key: 'plan', label: ticket.type === 'problem' ? 'Problem analysis' : 'Change plan', hidden: !(ticket.type === 'problem' || ticket.type === 'change'), content: ticket.type === 'problem' ? <ProblemForm ticketId={ticket.id} details={ticket.problem} canEdit={p.problem} /> : <ChangeForm ticketId={ticket.id} details={ticket.change} canEdit={p.change} /> },
     { key: 'approvals', label: 'Approvals', count: ticket.approvals.length, hidden: !(ticket.approvals.length > 0 || (!isCustomer && (ticket.type === 'change' || ticket.type === 'request'))), content: <ApprovalsPanel ticket={ticket} approvals={ticket.approvals} canApprove={p.approve} canRequest={!isCustomer && (p.change || p.update)} /> },
     { key: 'tasks', label: 'Tasks', count: ticket.tasks.length, hidden: isCustomer, content: <TasksPanel ticketId={ticket.id} tasks={ticket.tasks} canEdit={p.tasks && !isClosed} /> },
@@ -376,7 +385,7 @@ export default function TicketDetailPage() {
           <>
             {!isCustomer && <RecordAttention items={attention} />}
             <RecordForm sections={sections} />
-            <RelatedTabs tabs={tabs} />
+            <RelatedTabs tabs={tabs} defaultTab={ticket.isMajor && !isCustomer ? 'major' : undefined} />
           </>
         }
         aside={
@@ -397,6 +406,8 @@ export default function TicketDetailPage() {
       <CommentDialog open={dialog === 'reopen'} onClose={() => setDialog(null)} title={`Reopen ${ticket.number}`} confirmLabel="Reopen" busy={reopen.isPending} label="Why is this being reopened?" required onSubmit={(v) => reopen.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'cancel'} onClose={() => setDialog(null)} title={`Cancel ${ticket.number}`} confirmLabel="Cancel ticket" danger busy={cancel.isPending} codes={isCustomer ? undefined : closureCodes} label="Reason" required onSubmit={(v) => cancel.mutateAsync(v).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'escalate'} onClose={() => setDialog(null)} title={`Escalate ${ticket.number} to level ${ticket.escalationLevel + 1}`} confirmLabel="Escalate" busy={escalate.isPending} label="Reason" required onSubmit={(v) => escalate.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
+      <CommentDialog open={dialog === 'major-declare'} onClose={() => setDialog(null)} title={`Declare ${ticket.number} a major incident`} confirmLabel="Declare major incident" danger busy={declareMajor.isPending} label="Why is this a major incident? (sent to the response team)" onSubmit={(v) => declareMajor.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
+      <CommentDialog open={dialog === 'major-demote'} onClose={() => setDialog(null)} title={`${ticket.number} is not a major incident`} confirmLabel="Demote" busy={demoteMajor.isPending} label="Reason" required onSubmit={(v) => demoteMajor.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
       <ScopeDialog open={dialog === 'scope'} onClose={() => setDialog(null)} ticket={ticket} busy={scope.isPending} onSubmit={(v) => scope.mutateAsync(v).then(() => setDialog(null))} />
     </>
   );

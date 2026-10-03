@@ -6,12 +6,13 @@ import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { getTicket } from '@/modules/tickets/service';
 import { similarTickets } from '@/modules/tickets/list';
 import { timeline } from '@/modules/tickets/activity';
+import { getMajor } from '@/modules/tickets/major';
 import { loadTicket, optionsOfType, optionById, isCustomerUser, type TicketRow, type OptionRow } from '@/modules/tickets/common';
 import { evaluateAssignment } from '@/modules/tickets/assignment';
 import { suggest as kbSuggest, getArticle } from '@/modules/knowledge/service';
 import { impact as ciImpact } from '@/modules/cmdb/service';
 import { llmJson, enabled } from './service';
-import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, RESOLUTION_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompts';
+import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, MAJOR_UPDATE_SYSTEM, RESOLUTION_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompts';
 import { compactDetail, compactTimeline, ticketLink } from './tools';
 
 /**
@@ -434,6 +435,40 @@ function fallbackDraft(d: Detail, tone: string, engineer: string, notes: Timelin
   const next = cat === 'resolved' ? 'Please let us know if the problem persists; otherwise the ticket will be closed automatically.' : d.sla && !d.sla.breached && d.sla.remainingMinutes > 0 ? `Our target for ${d.sla.metric} is ${new Date(d.sla.dueAt).toISOString().slice(0, 16).replace('T', ' ')} UTC and we will update you as soon as there is progress.` : 'We will update you as soon as there is further progress.';
   const closing = tone === 'friendly' ? 'Thanks for your patience!' : 'Kind regards,';
   return `${greeting}\n\n${opener}This is an update on ticket ${d.number} "${d.title}". ${stateLine}${progress} ${next}\n\n${closing}\n${engineer}`;
+}
+
+// ---------------------------------------------------------------- major incident stakeholder update
+
+/** Drafts the next stakeholder update (customer audience) or bridge note (internal) of a major incident. */
+export async function draftMajorUpdate(ctx: Ctx, ticketId: string, audience: 'customer' | 'internal' = 'customer') {
+  const { row, detail } = await readTicket(ctx, ticketId);
+  if (isCustomerUser(ctx)) throw new ForbiddenError();
+  ctx.require('tickets:major', row.customerId);
+  const major = await getMajor(ctx, ticketId);
+  const tl = await timeline(ctx, ticketId);
+  const notes = tl.items.filter((i) => i.kind === 'comment').slice(-4);
+  const previous = major.updates.filter((u) => u.kind === 'stakeholder').slice(0, 2).map((u) => ({ at: u.createdAt, body: trunc(u.body, 400) }));
+  const compact = compactDetail(ctx, detail);
+  const nextUpdate = major.record?.nextUpdateDueAt ? new Date(major.record.nextUpdateDueAt.getTime() + major.record.updateIntervalMinutes * 60_000) : null;
+  const llm = await llmJson(
+    MAJOR_UPDATE_SYSTEM,
+    JSON.stringify({ audience, ticket: { ...compact, description: trunc(row.description, 600) }, affectedCis: detail.cis.map((c) => c.name).slice(0, 10), children: major.children.length, declaredAt: major.record?.declaredAt, previousUpdates: previous, latestNotes: compactTimeline(notes, 4), updateNumber: major.updates.filter((u) => u.kind === 'stakeholder').length + 1, nextUpdateExpectedAt: nextUpdate?.toISOString() ?? null, author: ctx.user.name }),
+    (v) => draftSchema.parse(v),
+    { maxTokens: 450 },
+  );
+  const draft = llm?.data.draft ?? fallbackMajorUpdate(detail, audience, major.updates.filter((u) => u.kind === 'stakeholder').length + 1, nextUpdate, notes);
+  const suggestionId = await store(ctx, { customerId: row.customerId, entityType: 'ticket', entityId: row.id, kind: 'draft_update', payload: { draft, audience, major: true }, rationale: llm ? 'Drafted by the AI provider from the incident record, the communication log and the latest notes' : 'Template draft (AI provider not configured)' });
+  return { suggestionId, aiGenerated: !!llm, draft, audience };
+}
+
+function fallbackMajorUpdate(d: Detail, audience: 'customer' | 'internal', n: number, nextUpdate: Date | null, notes: TimelineItems) {
+  const latest = notes.length ? trunc(notes[notes.length - 1]!.body?.replace(/\s+/g, ' '), 200) : '';
+  const when = nextUpdate ? `${nextUpdate.toISOString().slice(11, 16)} UTC` : 'as soon as there is news';
+  const affected = d.cis.length ? ` Affected: ${d.cis.map((c) => c.name).slice(0, 3).join(', ')}.` : '';
+  if (audience === 'internal') return `Bridge note ${n} for ${d.number}: ${d.status?.label ?? 'In progress'}, owner ${d.assignee?.name ?? 'unassigned'}.${affected}${latest ? ` Latest: ${latest}` : ''} Next stakeholder update ${when}.`;
+  const cat = d.status?.category;
+  const state = cat === 'resolved' ? 'Service has been restored and we are monitoring closely.' : 'Our engineers are working on it as the highest priority.';
+  return `Update ${n} on major incident ${d.number} "${d.title}".${affected} ${state}${latest ? ` Current status: ${latest}` : ''} The next update will follow by ${when}. We apologise for the disruption.`;
 }
 
 // ---------------------------------------------------------------- duplicate check

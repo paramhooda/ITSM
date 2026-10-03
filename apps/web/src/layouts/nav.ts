@@ -1,5 +1,5 @@
 import type { Permission, NavArea } from '@itsm/shared';
-import { LayoutDashboard, Ticket, Building2, FileSignature, Boxes, Server, Wrench, CalendarCheck, BookOpen, BarChart3, Settings, Layers, ClipboardCheck, UsersRound } from 'lucide-react';
+import { LayoutDashboard, Ticket, Building2, FileSignature, Boxes, Server, Wrench, CalendarCheck, BookOpen, BarChart3, Settings, Layers, ClipboardCheck, UsersRound, Siren } from 'lucide-react';
 
 /** A module inside an application (ServiceNow's navigator: Application → Modules). */
 export interface NavChild {
@@ -43,6 +43,14 @@ export const MSP_NAV: NavItem[] = [
       { to: '/tickets/approvals', label: 'My approvals', perm: ['requests:approve', 'changes:approve'] },
       { to: '/tickets/new', label: 'Create new', perm: ['tickets:create'] },
     ],
+  },
+  {
+    to: '/operations',
+    label: 'Operations',
+    icon: Siren,
+    perm: ['tickets:read'],
+    area: 'operations',
+    children: [{ to: '/operations/major-incidents', label: 'Major incidents' }],
   },
   {
     to: '/customers',

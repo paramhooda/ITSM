@@ -12,3 +12,4 @@ import './reports';
 import './discovery';
 import './integrations';
 import './metrics';
+import './major';

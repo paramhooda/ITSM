@@ -24,6 +24,9 @@ export const routes: AppRoute[] = [
   { path: '/tickets/new', component: page(() => import('@/pages/tickets/TicketCreatePage')), perm: ['tickets:create'] },
   { path: '/tickets/approvals', component: page(() => import('@/pages/tickets/ApprovalsInboxPage')), perm: ['requests:approve', 'changes:approve'] },
   { path: '/tickets/:id', component: page(() => import('@/pages/tickets/TicketDetailPage')), perm: ['tickets:read'] },
+  // Operations: Major incidents (on-call, handover and announcements follow)
+  { path: '/operations', component: page(() => import('@/pages/operations/MajorIncidentsPage')), perm: ['tickets:read'] },
+  { path: '/operations/major-incidents', component: page(() => import('@/pages/operations/MajorIncidentsPage')), perm: ['tickets:read'] },
   // Customers & contracts
   // Customers: Overview · Accounts
   { path: '/customers', component: page(() => import('@/pages/customers/CustomersOverviewPage')), perm: ['customers:read'] },

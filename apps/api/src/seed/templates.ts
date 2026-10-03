@@ -44,6 +44,10 @@ export const NOTIFICATION_TEMPLATE_SEEDS = [
   { event: 'report.delivered', channel: 'email', name: 'Scheduled report', subject: '{{report.name}} - {{report.period}}', body: `<p>Please find attached the <strong>{{report.name}}</strong> for {{report.period}}.</p>{{{report.summaryHtml}}}` },
   { event: 'user.password_reset', channel: 'email', name: 'Password reset', subject: 'Reset your {{platformName}} password', body: `<p>Hello {{user.name}},</p><p>Use the link below to reset your password. It expires in 60 minutes.</p><p><a href="{{resetLink}}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>` },
   { event: 'user.welcome', channel: 'email', name: 'Welcome', subject: 'Welcome to {{platformName}}', body: `<p>Hello {{user.name}},</p><p>An account has been created for you.</p><p>Sign in at <a href="{{appUrl}}">{{appUrl}}</a> with your email address{{#if temporaryPassword}} and temporary password <strong>{{temporaryPassword}}</strong>{{/if}}.</p>` },
+  { event: 'incident.major_declared', channel: 'email', name: 'Major incident declared', subject: '[{{ticket.number}}] MAJOR INCIDENT declared: {{ticket.title}}', body: `<p style="color:#b91c1c"><strong>{{actor}} declared a major incident.</strong>{{#if reason}} {{reason}}{{/if}}</p>${ticketBlock}<p><a href="{{ticket.link}}">Open the incident</a> to join the bridge and follow stakeholder updates.</p>` },
+  { event: 'incident.major_update', channel: 'email', name: 'Major incident update', subject: '[{{ticket.number}}] Update on the major incident: {{ticket.title}}', body: `<p><strong>Update from {{actor}}:</strong></p><blockquote style="border-left:3px solid #ef4444;margin:8px 0;padding:4px 12px">{{comment}}</blockquote>${ticketBlock}` },
+  { event: 'incident.major_resolved', channel: 'email', name: 'Major incident resolved', subject: '[{{ticket.number}}] Major incident resolved: {{ticket.title}}', body: `<p style="color:#047857"><strong>The major incident has been resolved.</strong></p>{{#if comment}}<p>{{comment}}</p>{{/if}}${ticketBlock}` },
+  { event: 'incident.major_update_due', channel: 'email', name: 'Major incident update overdue', subject: '[{{ticket.number}}] Stakeholder update overdue by {{minutesOverdue}} min', body: `<p style="color:#b45309">The next stakeholder update on major incident <strong>{{ticket.number}}</strong> ({{ticket.title}}) was due {{minutesOverdue}} minutes ago (cadence {{intervalMinutes}} min).</p><p><a href="{{ticket.link}}">Post an update</a></p>` },
 ];
 
 /**
@@ -69,6 +73,10 @@ const WHATSAPP_SEEDS = [
   { event: 'field_visit.scheduled', name: 'Field visit scheduled (WhatsApp)', subject: 'Site visit {{visit.number}} scheduled', body: 'A site visit ({{visit.number}}, {{visit.title}}) is scheduled at {{visit.siteName}} on {{date visit.scheduledStart}}. Engineer: {{visit.engineer}}.' },
   { event: 'field_visit.completed', name: 'Field visit completed (WhatsApp)', subject: 'Site visit {{visit.number}} completed', body: 'Site visit {{visit.number}} at {{visit.siteName}} was completed by {{visit.engineer}}. {{visit.workSummary}}' },
   { event: 'pm.scheduled', name: 'Maintenance scheduled (WhatsApp)', subject: 'Maintenance scheduled: {{pm.programName}}', body: 'Preventive maintenance "{{pm.programName}}" for {{pm.customerName}} is scheduled for {{pm.date}}.' },
+  { event: 'incident.major_declared', name: 'Major incident declared (WhatsApp)', subject: 'MAJOR INCIDENT {{ticket.number}}', body: '{{actor}} declared {{ticket.number}} "{{ticket.title}}" ({{ticket.customerName}}) a major incident. {{reason}}' },
+  { event: 'incident.major_update', name: 'Major incident update (WhatsApp)', subject: 'Update on {{ticket.number}}', body: 'Major incident {{ticket.number}} "{{ticket.title}}": {{comment}}' },
+  { event: 'incident.major_resolved', name: 'Major incident resolved (WhatsApp)', subject: '{{ticket.number}} resolved', body: 'The major incident {{ticket.number}} "{{ticket.title}}" has been resolved. {{comment}}' },
+  { event: 'incident.major_update_due', name: 'Major incident update overdue (WhatsApp)', subject: '{{ticket.number}}: update overdue', body: 'The stakeholder update on major incident {{ticket.number}} "{{ticket.title}}" is {{minutesOverdue}} minutes overdue.' },
 ].map((t) => ({ ...t, channel: 'whatsapp' }));
 
 export const NOTIFICATION_TEMPLATE_SEEDS_ALL = [...NOTIFICATION_TEMPLATE_SEEDS, ...WHATSAPP_SEEDS];
@@ -95,6 +103,8 @@ export const NOTIFICATION_RULE_SEEDS = [
   { event: 'contract.renewal_due', name: 'Notify account manager', recipients: { accountManager: true, roles: ['contract_admin'] }, channels: ['email', 'in_app'] },
   { event: 'contract.missing_documents', name: 'Notify contract admins', recipients: { roles: ['contract_admin'] }, channels: ['in_app'] },
   { event: 'entitlement.threshold', name: 'Notify account manager and service manager', recipients: { accountManager: true, roles: ['service_manager', 'contract_admin'] }, channels: ['email', 'in_app'] },
+  { event: 'incident.major_declared', name: 'Notify the team, its manager, the account manager and operations managers', recipients: { assignee: true, team: true, manager: true, accountManager: true, roles: ['noc_manager', 'soc_manager', 'service_manager'] }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'incident.major_resolved', name: 'Notify the requester, watchers, customer contacts and the account manager', recipients: { requester: true, watchers: true, customerContacts: true, accountManager: true }, channels: ['email', 'in_app', 'whatsapp'] },
   { event: 'entitlement.exhausted', name: 'Notify account manager and service manager', recipients: { accountManager: true, roles: ['service_manager', 'contract_admin'] }, channels: ['email', 'in_app'] },
   { event: 'pm.scheduled', name: 'Notify customer contacts and engineer', recipients: { customerContacts: true, assignee: true }, channels: ['email', 'in_app'] },
   { event: 'pm.due', name: 'Notify field team', recipients: { team: true, roles: ['service_manager'] }, channels: ['email', 'in_app'] },

@@ -10,6 +10,7 @@ import { listTickets, ticketStats, similarTickets, problemCandidates } from '@/m
 import { addComment, timeline, addLink } from '@/modules/tickets/activity';
 import { loadTicket, loadTicketByNumber, optionsOfType, optionByKey, type TicketRow } from '@/modules/tickets/common';
 import { applicableStatuses } from '@/modules/tickets/status';
+import { listMajor } from '@/modules/tickets/major';
 import { listCustomers, customerOverview } from '@/modules/customers/service';
 import { listContracts } from '@/modules/contracts/service';
 import { customerEntitlements } from '@/modules/contracts/entitlements';
@@ -516,6 +517,23 @@ export const READ_TOOLS: AiTool[] = [
     summary: (_i, result) => `Listed ${(result as { items: unknown[] }).items.length} engineers`,
   }),
 
+  define({
+    name: 'major_incidents',
+    description: 'Major incidents in progress (or recently resolved): bridge, commander, last and next stakeholder update, child incidents. Use for "any major incidents?", "what is on the bridge", "is the MI update overdue".',
+    inputSchema: z.object({ status: z.enum(['active', 'resolved', 'review_done', 'all']).optional().describe('Defaults to active'), customer: z.string().max(200).optional() }),
+    requires: ['tickets:read'],
+    portal: null,
+    action: false,
+    run: async (ctx, input) => {
+      const customerId = input.customer ? await resolveCustomerId(ctx, input.customer, false) : null;
+      const res = await listMajor(ctx, { status: input.status ?? 'active', customerId: customerId ?? undefined, pageSize: 20 });
+      return {
+        summary: res.summary,
+        items: res.items.map((m) => ({ number: m.number, title: m.title, customer: m.customerName, status: m.status, ticketStatus: m.ticketStatus?.label ?? null, priority: m.priority?.label ?? null, declaredAt: iso(m.declaredAt), commander: m.commanderName, commsLead: m.commsLeadName, lastUpdateAt: iso(m.lastUpdateAt), nextUpdateDueAt: iso(m.nextUpdateDueAt), updateOverdue: m.overdue, stakeholderUpdates: m.updatesCount, childIncidents: m.childrenCount, bridge: m.bridgeUrl, link: ticketLink(ctx, m.ticketId) })),
+      };
+    },
+    summary: (input, result) => `Listed ${(result as { items: unknown[] }).items.length} ${input.status ?? 'active'} major incident(s)`,
+  }),
   define({
     name: 'upcoming_maintenance',
     description: 'Planned preventive-maintenance occurrences and scheduled field visits for a customer in the next N days (default 60).',

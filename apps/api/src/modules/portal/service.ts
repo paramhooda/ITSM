@@ -298,6 +298,7 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
     scope: { status: t.scopeStatus, label: scopeLabel(t.scopeStatus, scopeContract), contract: scopeContract },
     contract: t.contract ? { id: t.contract.id, number: t.contract.number, name: t.contract.name, slaPolicyName: t.contract.slaPolicyName, endDate: t.contract.endDate } : null,
     slaPolicy: t.slaPolicy,
+    isMajor: t.isMajor,
     slas: t.slas,
     sla: t.sla,
     resolutionNotes: cat === 'resolved' || cat === 'closed' ? t.resolutionNotes : null,
@@ -830,3 +831,34 @@ export async function resetPortalUserPassword(ctx: Ctx, id: string) {
 }
 
 export { COVERING_STATUSES, isPortalUser };
+
+// ---------------------------------------------------------------- banners
+
+/**
+ * What the portal shows above every page: active major incidents the service desk chose to
+ * announce (portal banner on), with the latest stakeholder update. Row-level security already
+ * limits the rows to the caller's customer; the scope check keeps previews honest.
+ */
+export async function portalBanners(ctx: Ctx, requested?: string | null) {
+  const scope = resolvePortalCustomer(ctx, 'portal:access', requested);
+  const m = schema.majorIncidents;
+  const t = schema.tickets;
+  const rows = await ctx.tx
+    .select({ ticketId: m.ticketId, number: t.number, title: t.title, declaredAt: m.declaredAt, lastUpdateAt: m.lastUpdateAt, nextUpdateDueAt: m.nextUpdateDueAt, status: m.status })
+    .from(m)
+    .innerJoin(t, eq(t.id, m.ticketId))
+    .where(and(eq(m.customerId, scope.customerId), eq(m.status, 'active'), eq(m.portalBanner, true)))
+    .orderBy(desc(m.declaredAt))
+    .limit(5);
+  const items = [];
+  for (const r of rows) {
+    const [latest] = await ctx.tx
+      .select({ body: schema.majorIncidentUpdates.body, createdAt: schema.majorIncidentUpdates.createdAt })
+      .from(schema.majorIncidentUpdates)
+      .where(and(eq(schema.majorIncidentUpdates.ticketId, r.ticketId), eq(schema.majorIncidentUpdates.kind, 'stakeholder'), eq(schema.majorIncidentUpdates.portalBanner, true)))
+      .orderBy(desc(schema.majorIncidentUpdates.createdAt))
+      .limit(1);
+    items.push({ kind: 'major_incident' as const, ticketId: r.ticketId, number: r.number, title: r.title, declaredAt: r.declaredAt, lastUpdateAt: r.lastUpdateAt, nextUpdateDueAt: r.nextUpdateDueAt, latestUpdate: latest ? { body: latest.body, at: latest.createdAt } : null });
+  }
+  return { items };
+}

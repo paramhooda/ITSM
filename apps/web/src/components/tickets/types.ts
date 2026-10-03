@@ -207,7 +207,127 @@ export interface TicketPermissions {
   tasks: boolean;
   links: boolean;
   watch: boolean;
+  /** Declare, demote and run the major incident (tickets:major, incidents only). */
+  major: boolean;
 }
+
+export type MajorStatus = 'active' | 'resolved' | 'review_done' | 'demoted';
+
+/** The slice of the major incident record the ticket payload carries. */
+export interface MajorSummary {
+  status: MajorStatus;
+  declaredAt: string;
+  resolvedAt: string | null;
+  lastUpdateAt: string | null;
+  nextUpdateDueAt: string | null;
+  updateIntervalMinutes: number;
+  commanderUserId: string | null;
+  commsLeadUserId: string | null;
+  bridgeUrl: string | null;
+  portalBanner: boolean;
+  pirCompletedAt: string | null;
+}
+
+export interface PirAction {
+  id: string;
+  text: string;
+  ownerId?: string | null;
+  ownerName?: string | null;
+  dueAt?: string | null;
+  done?: boolean;
+}
+
+export interface MajorRecord extends MajorSummary {
+  ticketId: string;
+  customerId: string;
+  declaredBy: string | null;
+  declaredByName: string | null;
+  declaredAt: string;
+  demotedAt: string | null;
+  bridgeNotes: string | null;
+  commanderName: string | null;
+  commsLeadName: string | null;
+  lastReminderAt: string | null;
+  pirWhatHappened: string | null;
+  pirImpact: string | null;
+  pirRootCause: string | null;
+  pirActions: PirAction[];
+  overdue: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MajorAudience {
+  requester?: boolean;
+  watchers?: boolean;
+  customerContacts?: boolean;
+  accountManager?: boolean;
+  assignee?: boolean;
+  team?: boolean;
+  manager?: boolean;
+}
+
+export interface MajorUpdate {
+  id: string;
+  ticketId: string;
+  authorId: string | null;
+  authorName: string;
+  kind: 'stakeholder' | 'internal';
+  body: string;
+  audience: MajorAudience;
+  channels: string[];
+  portalBanner: boolean;
+  sentCount: number;
+  createdAt: string;
+}
+
+export interface MajorChild {
+  id: string;
+  number: string;
+  title: string;
+  status: OptionLabel | null;
+  priority: OptionLabel | null;
+  createdAt: string;
+  linkId: string;
+}
+
+export interface MajorDetail {
+  record: MajorRecord | null;
+  updates: MajorUpdate[];
+  children: MajorChild[];
+}
+
+export interface MajorListRow {
+  ticketId: string;
+  number: string;
+  title: string;
+  customerId: string;
+  customerName: string;
+  status: MajorStatus;
+  ticketStatus: OptionLabel | null;
+  priority: OptionLabel | null;
+  declaredAt: string;
+  resolvedAt: string | null;
+  lastUpdateAt: string | null;
+  nextUpdateDueAt: string | null;
+  bridgeUrl: string | null;
+  portalBanner: boolean;
+  commanderName: string | null;
+  commsLeadName: string | null;
+  updatesCount: number;
+  childrenCount: number;
+  overdue: boolean;
+}
+
+export interface MajorList {
+  items: MajorListRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: { active: number; overdue: number; awaitingReview: number; resolved30d: number };
+}
+
+export const MAJOR_STATUS_LABELS: Record<MajorStatus, string> = { active: 'Active', resolved: 'Resolved · review pending', review_done: 'Review complete', demoted: 'Demoted' };
 
 export interface TicketDetail {
   id: string;
@@ -299,6 +419,8 @@ export interface TicketDetail {
   escalations: { id: string; level: number; reason: string; occurredAt: string }[];
   statuses: OptionLabel[];
   permissions: TicketPermissions;
+  /** Present once the ticket has ever been declared a major incident (status says whether it still is). */
+  major?: MajorSummary | null;
 }
 
 export interface TimelineEntry {

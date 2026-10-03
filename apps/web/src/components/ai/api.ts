@@ -166,6 +166,7 @@ export const aiApi = {
   similar: (id: string) => post<SimilarResult>(`/ai/tickets/${id}/similar`),
   resolutionSuggestions: (id: string) => post<ResolutionResult>(`/ai/tickets/${id}/resolution-suggestions`),
   draftCustomerUpdate: (id: string, tone: Tone) => post<DraftResult>(`/ai/tickets/${id}/draft-customer-update`, { tone }),
+  draftMajorUpdate: (id: string, audience: 'customer' | 'internal') => post<{ suggestionId: string; aiGenerated: boolean; draft: string; audience: 'customer' | 'internal' }>(`/ai/tickets/${id}/major/draft-update`, { audience }),
   duplicateCheck: (id: string) => post<DuplicateResult>(`/ai/tickets/${id}/duplicate-check`),
   changeImpact: (id: string) => post<ChangeImpactResult>(`/ai/changes/${id}/impact`),
   problemClusters: (params: { days?: number; customerId?: string; minCount?: number }) => get<ProblemClustersResult>('/ai/problem-clusters', params),

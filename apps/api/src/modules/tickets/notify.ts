@@ -33,6 +33,8 @@ export interface NotifyExtra {
   extraRecipients?: Recipient[];
   /** Replace rule-based recipients entirely (escalation rule actions). */
   recipientOverride?: RecipientFlags;
+  /** Used only when no active notification rule exists for the event (features with a sensible default audience). */
+  recipientFallback?: RecipientFlags;
   /** Channels override (defaults to the union of matching rules, or email+in_app). */
   channels?: NotificationChannel[];
   /** Users who must not be notified in addition to the actor. */
@@ -208,9 +210,13 @@ export async function notifyTicketEvent(ctx: Ctx, event: NotificationEvent, tick
         flags.emails = [...(flags.emails ?? []), ...(f.emails ?? [])];
         (r.channels as NotificationChannel[]).forEach((c) => channels.add(c));
       }
+      if (!rules.length && extra.recipientFallback) {
+        flags = extra.recipientFallback;
+        (extra.channels ?? ['email', 'in_app']).forEach((c) => channels.add(c));
+      }
       if (extra.channels) channels = new Set(extra.channels);
     }
-    if (!rules.length && !extra.recipientOverride && !extra.extraRecipients?.length) return 0;
+    if (!rules.length && !extra.recipientOverride && !extra.recipientFallback && !extra.extraRecipients?.length) return 0;
     if (!channels.size) channels = new Set(['email', 'in_app']);
 
     const { msp, portal } = await resolveRecipients(tx, ticket, flags);

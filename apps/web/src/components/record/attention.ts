@@ -45,6 +45,8 @@ export interface TicketAttentionActions {
   onNudge?: () => void;
   /** Opens the scope dialog; omit when the viewer cannot classify scope. */
   onScope?: () => void;
+  /** Opens the declare-major dialog; omit when the viewer cannot declare or the ticket is not an open incident. */
+  onDeclareMajor?: () => void;
 }
 
 /** Flags for an MSP engineer opening a ticket. Resolved, closed and cancelled tickets have nothing pending, so they get none. */
@@ -64,7 +66,16 @@ export function ticketAttention(t: TicketDetail, now: Clock, act: TicketAttentio
     .sort((a, b) => a.remainingMinutes - b.remainingMinutes)[0];
   if (atRisk) items.push({ key: 'sla-at-risk', tone: 'warn', text: `${atRisk.label} SLA at risk · ${fmtDuration(atRisk.remainingMinutes)} left` });
 
-  if (t.isMajor) items.push({ key: 'major', tone: 'bad', text: 'Major incident' });
+  // Major incident: the stakeholder update cadence is the promise the team made; say when it slips.
+  if (t.isMajor) {
+    const due = t.major?.status === 'active' ? t.major.nextUpdateDueAt : null;
+    const overdueBy = due ? Math.round((ms(now) - at(due)) / MINUTE) : 0;
+    if (due && overdueBy > 0) items.push({ key: 'major', tone: 'bad', text: `Major incident · stakeholder update overdue by ${fmtDuration(overdueBy)}`, action: { label: 'Post update', to: '?tab=major' } });
+    else if (due) items.push({ key: 'major', tone: 'bad', text: `Major incident · next update due in ${fmtDuration(-overdueBy)}`, action: { label: 'Incident command', to: '?tab=major' } });
+    else items.push({ key: 'major', tone: 'bad', text: 'Major incident', action: { label: 'Incident command', to: '?tab=major' } });
+  } else if (t.type === 'incident' && (t.priority?.level ?? 99) === 1 && act.onDeclareMajor) {
+    items.push({ key: 'p1-not-major', tone: 'info', text: 'P1 incident not declared major', action: call('Declare major', act.onDeclareMajor) });
+  }
 
   if (!t.assigneeId) {
     const mins = minutesSince(t.createdAt, now);

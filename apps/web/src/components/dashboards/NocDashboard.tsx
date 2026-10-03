@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { ErrorBlock } from '@/components/ui';
-import { Activity, Flame, Timer, UserX } from 'lucide-react';
+import { Activity, Flame, Timer, UserX, PhoneCall, AlertTriangle } from 'lucide-react';
 import { get } from '@/api/client';
-import { fmtNumber } from '@/lib/format';
+import { fmtNumber, relativeTime, fmtDuration } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
@@ -24,6 +26,41 @@ interface Noc {
   recentlyResolved: TicketRow[];
   aging: { bucket: string; count: number }[];
   series: { day: string; opened: number; incidents: number; security: number; resolved: number; breaches: number }[];
+  majorIncidents: { id: string; number: string; title: string; customerName: string; declaredAt: string; lastUpdateAt: string | null; nextUpdateDueAt: string | null; bridgeUrl: string | null; commander: string | null; overdue: boolean; children: number }[];
+}
+
+/** Active major incidents: who commands them and whether the stakeholders are owed an update. */
+function MajorIncidentsPanel({ items }: { items: Noc['majorIncidents'] }) {
+  return (
+    <Panel title="Major incidents in progress" subtitle={items.length ? 'Bridge, commander and update cadence per incident' : 'None declared'} to="/operations/major-incidents" toLabel="Incident command" padded={false} className={items.length ? 'border-red-200' : undefined}>
+      {items.length === 0 ? (
+        <div className="px-5 pb-4 text-[12.5px] text-muted">No major incident is open. Declare one from an incident's actions menu when an outage needs a bridge and regular stakeholder updates.</div>
+      ) : (
+        <ul className="divide-y divide-[var(--border)]">
+          {items.map((m) => {
+            const due = m.nextUpdateDueAt ? Math.round((new Date(m.nextUpdateDueAt).getTime() - Date.now()) / 60_000) : null;
+            return (
+              <li key={m.id} className="px-5 py-2.5 flex items-center gap-3 text-[13px]">
+                <span className="h-6 w-6 rounded-full bg-red-100 text-red-700 flex items-center justify-center shrink-0"><Flame className="h-3.5 w-3.5" /></span>
+                <Link to={`/tickets/${m.id}?tab=major`} className="font-mono text-[12.5px] text-brand-700 hover:underline whitespace-nowrap">{m.number}</Link>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium" title={m.title}>{m.title}</span>
+                  <span className="block text-[11.5px] text-muted truncate">{m.customerName} · {m.commander ? `commander ${m.commander}` : 'no commander'}{m.children ? ` · ${m.children} child${m.children === 1 ? '' : 'ren'}` : ''}</span>
+                </span>
+                <span className={cn('text-[11.5px] whitespace-nowrap inline-flex items-center gap-1', m.overdue ? 'text-red-600 font-medium' : 'text-muted')}>
+                  {m.overdue && <AlertTriangle className="h-3 w-3" />}
+                  {due === null ? `declared ${relativeTime(m.declaredAt)}` : due < 0 ? `update ${fmtDuration(-due)} overdue` : `next update in ${fmtDuration(due)}`}
+                </span>
+                {m.bridgeUrl && (
+                  <a href={m.bridgeUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 h-7 px-2 rounded-md bg-red-600 text-white text-[12px] font-medium hover:bg-red-700 whitespace-nowrap"><PhoneCall className="h-3 w-3" /> Bridge</a>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Panel>
+  );
 }
 
 export function NocDashboard() {
@@ -47,6 +84,7 @@ export function NocDashboard() {
           { label: 'Unassigned', value: fmtNumber(t.unassigned), icon: <UserX className="h-4 w-4" />, tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', onClick: () => (window.location.href = '/tickets?open=true&unassigned=true') },
         ]}
       />
+      {(d.majorIncidents?.length ?? 0) > 0 && <MajorIncidentsPanel items={d.majorIncidents} />}
       <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" to="/tickets?open=true&priorityId=&type=incident" toLabel="All incidents" padded={false}>
         <div className="px-5">
           <TicketMiniTable rows={d.criticalOpen} max={8} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee']} empty="No P1/P2 or major incidents open" />

@@ -1,5 +1,5 @@
 import { get, post, put, patch, del } from '@/api/client';
-import type { TicketDetail, TicketListRow, TicketStats, TimelineEntry, SimilarTicket, SavedView, TimeEntry, Task, Approval, SlaMetricSummary, ProblemDetails, ChangeDetails, MyApproval } from './types';
+import type { TicketDetail, TicketListRow, TicketStats, TimelineEntry, SimilarTicket, SavedView, TimeEntry, Task, Approval, SlaMetricSummary, ProblemDetails, ChangeDetails, MyApproval, MajorDetail, MajorUpdate, MajorList } from './types';
 
 export interface Paginated<T> {
   items: T[];
@@ -19,6 +19,8 @@ export const qk = {
   approvals: (id: string) => ['tickets', id, 'approvals'] as const,
   views: ['tickets', 'saved-views'] as const,
   mine: ['approvals', 'mine'] as const,
+  major: (id: string) => ['tickets', id, 'major'] as const,
+  majorList: (params: Record<string, unknown>) => ['major-incidents', params] as const,
 };
 
 /** Accepts `{ items }` or a bare array from cross-module endpoints. */
@@ -65,6 +67,14 @@ export const ticketsApi = {
   problem: (id: string, body: Record<string, unknown>) => patch<ProblemDetails>(`/tickets/${id}/problem`, body),
   change: (id: string, body: Record<string, unknown>) => patch<ChangeDetails>(`/tickets/${id}/change`, body),
   bulk: (body: Record<string, unknown>) => post<{ succeeded: number; failed: number }>('/tickets/bulk', body),
+  // Major incidents
+  major: (id: string) => get<MajorDetail>(`/tickets/${id}/major`),
+  declareMajor: (id: string, body: Record<string, unknown> = {}) => post<MajorDetail>(`/tickets/${id}/major/declare`, body),
+  demoteMajor: (id: string, body: Record<string, unknown> = {}) => post<MajorDetail>(`/tickets/${id}/major/demote`, body),
+  updateMajor: (id: string, body: Record<string, unknown>) => patch<MajorDetail>(`/tickets/${id}/major`, body),
+  postMajorUpdate: (id: string, body: Record<string, unknown>) => post<MajorUpdate>(`/tickets/${id}/major/updates`, body),
+  addMajorChild: (id: string, body: { ticketId?: string; number?: string }) => post<MajorDetail>(`/tickets/${id}/major/children`, body),
+  majorList: (params: Record<string, unknown>) => get<MajorList>('/major-incidents', params),
   views: () => get<{ items: SavedView[] }>('/saved-views', { entity: 'ticket' }),
   createView: (body: Record<string, unknown>) => post<SavedView>('/saved-views', body),
   updateView: (id: string, body: Record<string, unknown>) => patch<SavedView>(`/saved-views/${id}`, body),

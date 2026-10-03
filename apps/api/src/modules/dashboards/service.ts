@@ -172,11 +172,18 @@ export async function noc(ctx: Ctx) {
     GROUP BY u.id, u.name ORDER BY open DESC, u.name LIMIT 25`);
   const recentlyResolved = await q<Row>(ctx, sql`SELECT ${TICKET_LIST_COLS}, round(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 60)::int AS mttr_minutes FROM tickets t ${TICKET_LIST_JOINS} WHERE ${base} AND t.resolved_at IS NOT NULL ORDER BY t.resolved_at DESC LIMIT 10`);
   const aging = await q<Row>(ctx, sql`SELECT ${AGE_BUCKET} AS bucket, count(*)::int AS count FROM tickets t WHERE ${base} AND ${openCond()} GROUP BY 1`);
+  const majorIncidents = await q<Row>(ctx, sql`
+    SELECT t.id, t.number, t.title, cu.name AS customer_name, m.declared_at, m.last_update_at, m.next_update_due_at, m.bridge_url, u.name AS commander,
+      (m.next_update_due_at IS NOT NULL AND m.next_update_due_at < now()) AS overdue,
+      (SELECT count(*)::int FROM ticket_links l WHERE l.target_ticket_id = t.id AND l.link_type = 'child_of') AS children
+    FROM major_incidents m JOIN tickets t ON t.id = m.ticket_id JOIN customers cu ON cu.id = t.customer_id LEFT JOIN users u ON u.id = m.commander_user_id
+    WHERE m.status = 'active' ORDER BY m.declared_at DESC LIMIT 10`);
   const order = ['< 4h', '4-24h', '1-3d', '> 3d'];
   const sparkTo = toDay(new Date());
   const spark = await dailySeries(ctx, addDays(sparkTo, -13), sparkTo, null);
   return {
     generatedAt: new Date(),
+    majorIncidents: majorIncidents.map((r) => ({ id: String(r.id), number: String(r.number), title: String(r.title), customerName: String(r.customer_name), declaredAt: r.declared_at, lastUpdateAt: r.last_update_at ?? null, nextUpdateDueAt: r.next_update_due_at ?? null, bridgeUrl: r.bridge_url ?? null, commander: r.commander ?? null, overdue: !!r.overdue, children: num(r.children) })),
     series: spark.map((d) => ({ day: d.day, opened: num(d.opened), incidents: num(d.incidentsOpened), security: num(d.securityOpened), resolved: num(d.resolved), breaches: num(d.slaBreached) })),
     totals: { open: num(totals.open), openIncidents: num(totals.open_incidents), breached: num(totals.breached), atRisk: num(totals.at_risk), unassigned: num(totals.unassigned), major: num(totals.major), escalated: num(totals.escalated), openedToday: num(totals.opened_today), resolvedToday: num(resolvedToday.n), mttrTodayMinutes: resolvedToday.mttr === null || resolvedToday.mttr === undefined ? null : num(resolvedToday.mttr) },
     openIncidents,

@@ -8,6 +8,7 @@ import { applySlas, markAcknowledged, slaSummary, worstSla } from '@/modules/sla
 import { nextTicketNumber } from './numbers';
 import { classifyScope, contractForTicket } from './scope';
 import { evaluateAssignment } from './assignment';
+import { declareCore } from './major';
 import { notifyTicketEvent } from './notify';
 import { escalateManually, escalationHistory } from './escalation';
 import { startApproval } from './approvals';
@@ -219,7 +220,7 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
       formData: input.formData ?? {},
       parentTicketId: input.parentTicketId ?? null,
       securitySeverityId: input.securitySeverityId ?? null,
-      isMajor: customer ? false : (input.isMajor ?? false),
+      isMajor: !customer && type === 'incident' && !!input.isMajor && ctx.can('tickets:major', customerId),
       externalRef: input.externalRef ?? null,
       tags: input.tags ?? [],
       customFields: input.customFields ?? {},
@@ -259,6 +260,7 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
     await addActivity(ctx, ticket, { type: 'assignment', summary: `Assigned to ${[team?.name, user?.name].filter(Boolean).join(' / ')}${assignmentSource ? ` by ${assignmentSource}` : ''}`, data: { teamId, assigneeId, automatic: !!assignmentSource }, customerVisible: true });
   }
   await ctx.audit({ entityType: 'ticket', entityId: ticket.id, entityLabel: number, action: 'ticket.create', customerId, metadata: { type, title: ticket.title, scope: scope.status, catalogItemId: catalog?.id ?? null } });
+  if (ticket.isMajor) await declareCore(ctx, ticket, { reason: 'Flagged as major at creation', notify: false });
 
   let current = ticket;
   await applySlas(ctx.tx, current, actorOf(ctx), { reason: 'created' });
@@ -304,6 +306,7 @@ export async function getTicket(ctx: Ctx, id: string) {
   const approvals = await ctx.tx.select().from(schema.approvals).where(eq(schema.approvals.ticketId, t.id)).orderBy(desc(schema.approvals.createdAt), asc(schema.approvals.step));
   const [problem] = t.type === 'problem' ? await ctx.tx.select().from(schema.problemDetails).where(eq(schema.problemDetails.ticketId, t.id)).limit(1) : [];
   const [change] = t.type === 'change' ? await ctx.tx.select().from(schema.changeDetails).where(eq(schema.changeDetails.ticketId, t.id)).limit(1) : [];
+  const [majorRow] = t.type === 'incident' ? await ctx.tx.select().from(schema.majorIncidents).where(eq(schema.majorIncidents.ticketId, t.id)).limit(1) : [];
   const riskOpt = change?.riskId ? await optionById(ctx.tx, change.riskId) : null;
   const escalations = customer ? [] : await escalationHistory(ctx, t.id);
   const statuses = await applicableStatuses(ctx, t.type);
@@ -347,6 +350,7 @@ export async function getTicket(ctx: Ctx, id: string) {
     approvals,
     problem: problem ?? null,
     change: change ? { ...change, risk: toLabel(riskOpt) } : null,
+    major: majorRow ? { status: majorRow.status, declaredAt: majorRow.declaredAt, resolvedAt: majorRow.resolvedAt, lastUpdateAt: majorRow.lastUpdateAt, nextUpdateDueAt: majorRow.nextUpdateDueAt, updateIntervalMinutes: majorRow.updateIntervalMinutes, commanderUserId: majorRow.commanderUserId, commsLeadUserId: majorRow.commsLeadUserId, bridgeUrl: majorRow.bridgeUrl, portalBanner: majorRow.portalBanner, pirCompletedAt: majorRow.pirCompletedAt } : null,
     escalations,
     statuses: statuses.map((s) => toLabel(s)),
     permissions: permissionsFor(ctx, t),
@@ -367,7 +371,7 @@ export function permissionsFor(ctx: Ctx, t: TicketRow) {
   const c = t.customerId;
   if (isCustomerUser(ctx)) {
     const portal = ctx.can('portal:tickets', c);
-    return { update: false, assign: false, resolve: false, close: false, reopen: portal, cancel: false, comment: portal, workNote: false, time: false, scope: false, escalate: false, problem: false, change: false, approve: ctx.can('portal:approve', c), tasks: false, links: false, watch: portal };
+    return { update: false, assign: false, resolve: false, close: false, reopen: portal, cancel: false, comment: portal, workNote: false, time: false, scope: false, escalate: false, problem: false, change: false, approve: ctx.can('portal:approve', c), tasks: false, links: false, watch: portal, major: false };
   }
   return {
     update: ctx.can('tickets:update', c),
@@ -387,6 +391,7 @@ export function permissionsFor(ctx: Ctx, t: TicketRow) {
     tasks: ctx.can('tickets:update', c),
     links: ctx.can('tickets:update', c),
     watch: true,
+    major: t.type === 'incident' && ctx.can('tickets:major', c),
   };
 }
 
@@ -415,7 +420,7 @@ export async function updateTicket(ctx: Ctx, id: string, patch: UpdateTicketInpu
   requireAction(ctx, t, 'tickets:update');
   await assertCustomerEntities(ctx, t.customerId, patch);
   const values: Partial<typeof schema.tickets.$inferInsert> = {};
-  const keys: (keyof UpdateTicketInput)[] = ['title', 'description', 'siteId', 'serviceId', 'contractId', 'categoryId', 'subcategoryId', 'priorityId', 'impactId', 'urgencyId', 'sourceId', 'requesterUserId', 'requesterContactId', 'primaryCiId', 'primaryAssetId', 'tags', 'customFields', 'formData', 'securitySeverityId', 'isMajor', 'parentTicketId', 'slaPolicyId', 'externalRef', 'resolutionNotes'];
+  const keys: (keyof UpdateTicketInput)[] = ['title', 'description', 'siteId', 'serviceId', 'contractId', 'categoryId', 'subcategoryId', 'priorityId', 'impactId', 'urgencyId', 'sourceId', 'requesterUserId', 'requesterContactId', 'primaryCiId', 'primaryAssetId', 'tags', 'customFields', 'formData', 'securitySeverityId', 'parentTicketId', 'slaPolicyId', 'externalRef', 'resolutionNotes'];
   for (const k of keys) if (patch[k] !== undefined) (values as Record<string, unknown>)[k] = patch[k];
   if (patch.parentTicketId && patch.parentTicketId === t.id) throw new ValidationError('A ticket cannot be its own parent');
 
