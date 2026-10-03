@@ -1,15 +1,28 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { PORTAL_NAV } from './nav';
 import { Sidebar, NotificationBell, UserMenu, MobileNav, BrandLogo } from './AppShell';
 import { GradyWidget } from '@/components/grady/GradyWidget';
+import { PageContextSync } from '@/components/grady/usePageContext';
+import { useUiStore } from '@/stores/ui';
 import { PortalBanners } from '@/components/portal/PortalBanners';
 
 export function PortalShell({ children }: { children: ReactNode }) {
   const can = useAuthStore((s) => s.can);
   const navigate = useNavigate();
+  const toggleAssistant = useUiStore((s) => s.toggleAssistant);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        if (can('ai:use')) toggleAssistant();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleAssistant, can]);
   return (
     <div className="h-full flex bg-app">
       <Sidebar items={PORTAL_NAV} label="Customer Portal" />
@@ -36,6 +49,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
         </div>
         <MobileNav items={PORTAL_NAV} />
       </div>
+      <PageContextSync />
       <GradyWidget />
     </div>
   );

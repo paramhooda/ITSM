@@ -1,4 +1,5 @@
-import { get, post, del } from '@/api/client';
+import { get, post, del, tryRefresh, ApiError } from '@/api/client';
+import { useAuthStore } from '@/stores/auth';
 
 /** Shapes of the AI module (kept in sync with apps/api/src/modules/ai). */
 export interface AiStatus {
@@ -41,6 +42,8 @@ export interface ToolCallRecord {
   proposed?: boolean;
   /** A low-risk write applied without confirmation. */
   auto?: boolean;
+  /** Query caches to refresh after this action ran. */
+  invalidates?: string[];
 }
 
 export interface AiMessage {
@@ -96,8 +99,89 @@ export interface UiAction {
 export interface ChatReply {
   conversationId: string;
   message: AiMessage;
+  usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number };
   pendingAction: PendingAction | null;
   uiActions?: UiAction[];
+}
+
+/** Progress events of a streamed turn, in the order the server emits them. */
+export type StreamEvent =
+  | { type: 'open'; requestId: string }
+  | { type: 'turn'; conversationId: string }
+  | { type: 'toolsets'; active: string[] }
+  | { type: 'step'; status: 'start' | 'done' | 'error'; tool: string; summary: string; action: boolean }
+  | { type: 'message'; data: ChatReply };
+
+/**
+ * One chat turn over server-sent events: progress while the reply is prepared,
+ * then the same result the JSON route returns. Falls back to the JSON reply when
+ * the server does not stream, and refreshes the session once on 401.
+ */
+export async function chatStream(body: ChatBody, opts: { onEvent?: (e: StreamEvent) => void; signal?: AbortSignal } = {}, retry = true): Promise<ChatReply> {
+  const token = useAuthStore.getState().accessToken;
+  const res = await fetch('/api/ai/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+    credentials: 'include',
+    signal: opts.signal,
+  });
+  if (res.status === 401 && retry) {
+    if (await tryRefresh()) return chatStream(body, opts, false);
+    useAuthStore.getState().clear();
+    throw new ApiError(401, 'Session expired');
+  }
+  const ctype = res.headers.get('content-type') ?? '';
+  if (!ctype.includes('text/event-stream') || !res.body) {
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : undefined;
+    if (!res.ok) throw new ApiError(res.status, data?.message ?? res.statusText, data?.error, data?.details);
+    return data as ChatReply;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: ChatReply | null = null;
+  let failure: ApiError | null = null;
+  const handle = (block: string) => {
+    let event = 'message';
+    const data: string[] = [];
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+    }
+    if (!data.length) return;
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(data.join('\n')) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (event === 'message') {
+      result = payload as unknown as ChatReply;
+      opts.onEvent?.({ type: 'message', data: result });
+    } else if (event === 'error') {
+      const e = payload as { statusCode?: number; error?: string; message?: string; details?: unknown };
+      failure = new ApiError(e.statusCode ?? 500, e.message ?? 'The assistant failed', e.error, e.details);
+    } else {
+      opts.onEvent?.({ ...payload, type: event } as StreamEvent);
+    }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let i: number;
+    while ((i = buffer.indexOf('\n\n')) >= 0) {
+      const block = buffer.slice(0, i);
+      buffer = buffer.slice(i + 2);
+      if (block.trim() && !block.startsWith(':')) handle(block);
+    }
+  }
+  if (buffer.trim()) handle(buffer);
+  if (failure) throw failure;
+  if (!result) throw new ApiError(502, 'The assistant closed the connection without a reply', 'ai_stream');
+  return result;
 }
 
 export type Tone = 'neutral' | 'formal' | 'friendly' | 'apologetic';
@@ -203,6 +287,7 @@ export const aiApi = {
   conversation: (id: string) => get<{ id: string; title: string | null; messages: AiMessage[]; pendingAction: PendingAction | null }>(`/ai/conversations/${id}`),
   deleteConversation: (id: string) => del(`/ai/conversations/${id}`),
   chat: (body: ChatBody) => post<ChatReply>('/ai/chat', body),
+  chatStream,
   feedback: (messageId: string, rating: 'up' | 'down' | null, note?: string | null) => post<{ id: string; feedback: 'up' | 'down' | null }>(`/ai/messages/${messageId}/feedback`, { rating, note: note ?? null }),
   summarize: (id: string) => post<SummaryResult>(`/ai/tickets/${id}/summarize`),
   classify: (id: string) => post<ClassificationResult>(`/ai/tickets/${id}/classify`),

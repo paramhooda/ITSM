@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { h } from '@/core/context';
-import { UnauthorizedError } from '@/core/errors';
+import { AppError, UnauthorizedError } from '@/core/errors';
+import { logger } from '@/core/logger';
 import * as svc from './service';
 import * as sug from './suggestions';
 import { chatBodySchema, feedbackBodySchema, idParam, decideBodySchema, draftUpdateBodySchema, classifyDraftBodySchema, problemClustersQuerySchema, suggestionsQuerySchema, type ChatBody, type ClassifyDraftBody } from './schemas';
@@ -36,7 +37,37 @@ export default async function routes(app: FastifyInstance) {
   r.get('/ai/conversations', { preHandler: use, schema: { tags } }, h((ctx) => svc.listConversations(ctx, 20)));
   r.get('/ai/conversations/:id', { preHandler: use, schema: { tags, params: idParam } }, h((ctx, req) => svc.getConversation(ctx, id(req))));
   r.delete('/ai/conversations/:id', { preHandler: use, schema: { tags, params: idParam } }, h((ctx, req) => svc.deleteConversation(ctx, id(req))));
-  r.post('/ai/chat', { preHandler: use, config: chatLimit, schema: { tags, body: chatBodySchema } }, async (req) => svc.chatTurn(principal(req), metaOf(req), req.body as ChatBody));
+  r.post('/ai/chat', { preHandler: use, config: chatLimit, schema: { tags, body: chatBodySchema } }, async (req, reply) => {
+    const wantsStream = String(req.headers.accept ?? '').includes('text/event-stream');
+    if (!wantsStream) return svc.chatTurn(principal(req), metaOf(req), req.body as ChatBody);
+    // Streamed turn: progress events while the reply is prepared, then the same result as the JSON route. The
+    // handler owns the socket from here (hijack), so every outcome, errors included, ends the stream itself.
+    reply.hijack();
+    const raw = reply.raw;
+    raw.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+    raw.flushHeaders?.();
+    let closed = false;
+    req.raw.on('close', () => { closed = true; });
+    const send = (event: string, data: unknown) => {
+      if (closed) return;
+      raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    send('open', { requestId: req.id });
+    const keepAlive = setInterval(() => { if (!closed) raw.write(': ping\n\n'); }, 15_000);
+    try {
+      const result = await svc.chatTurn(principal(req), metaOf(req), req.body as ChatBody, (ev) => send(ev.type, ev));
+      send('message', result);
+    } catch (err) {
+      if (err instanceof AppError) send('error', { statusCode: err.statusCode, error: err.code, message: err.message, details: err.details });
+      else {
+        logger.error({ err, requestId: req.id }, 'ai chat stream failed');
+        send('error', { statusCode: 500, error: 'internal_error', message: 'The assistant failed unexpectedly. Please try again.' });
+      }
+    } finally {
+      clearInterval(keepAlive);
+      if (!closed) raw.end();
+    }
+  });
   r.post('/ai/messages/:id/feedback', { preHandler: use, schema: { tags, params: idParam, body: feedbackBodySchema } }, h((ctx, req) => {
     const body = req.body as z.infer<typeof feedbackBodySchema>;
     return svc.feedback(ctx, id(req), body.rating, body.note ?? null);

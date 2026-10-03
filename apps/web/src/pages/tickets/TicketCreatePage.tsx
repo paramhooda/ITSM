@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -59,6 +59,10 @@ interface FormState {
 const empty = (type: TicketType, customerId = ''): FormState => ({ type, customerId, siteId: '', serviceId: '', contractId: '', title: '', description: '', categoryId: '', subcategoryId: '', impactId: '', urgencyId: '', priorityId: '', securitySeverityId: '', assignedTeamId: '', assigneeId: '', catalogItemId: '', formData: {}, tags: '', isMajor: false, changeType: 'normal', riskId: '', scheduledStart: '', scheduledEnd: '', implementationPlan: '', backoutPlan: '', justification: '', symptoms: '' });
 
 const nn = (v: string) => (v ? v : null);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Prefill parameters (from the assistant or a link): ids must be well formed, text is capped. */
+const idParam = (v: string | null) => (v && UUID.test(v) ? v : '');
+const textParam = (v: string | null, max: number) => (v ?? '').slice(0, max);
 
 export default function TicketCreatePage() {
   const navigate = useNavigate();
@@ -68,7 +72,17 @@ export default function TicketCreatePage() {
   const { options, byId, lookups } = useLookups();
   const engineers = useEngineers();
   const customers = useCustomersLookup();
-  const [f, setF] = useState<FormState>(() => empty((search.get('type') as TicketType) || 'incident', isCustomer ? (user.customerId ?? '') : (search.get('customerId') ?? '')));
+  const [f, setF] = useState<FormState>(() => ({
+    ...empty((search.get('type') as TicketType) || 'incident', isCustomer ? (user.customerId ?? '') : idParam(search.get('customerId'))),
+    title: textParam(search.get('title'), 300),
+    description: textParam(search.get('description'), 20000),
+    priorityId: isCustomer ? '' : idParam(search.get('priorityId')),
+    serviceId: idParam(search.get('serviceId')),
+    siteId: idParam(search.get('siteId')),
+    categoryId: idParam(search.get('categoryId')),
+    catalogItemId: idParam(search.get('catalogItemId')),
+  }));
+  const mounted = useRef(false);
   const [cis, setCis] = useState<PickerItem[]>([]);
   const [assets, setAssets] = useState<PickerItem[]>([]);
   // Files chosen now are uploaded to the ticket right after it is created.
@@ -109,6 +123,11 @@ export default function TicketCreatePage() {
     if (f.type !== 'request' && f.catalogItemId) patch({ catalogItemId: '', formData: {} });
   }, [f.type, f.catalogItemId]);
   useEffect(() => {
+    // The first run keeps a prefilled site; later customer changes reset what depends on the customer.
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
     setCis([]);
     setAssets([]);
     patch({ siteId: '', contractId: '' });

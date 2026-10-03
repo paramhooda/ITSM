@@ -200,6 +200,8 @@ export interface ToolCallRecord {
   proposed?: boolean;
   /** A low-risk write applied without confirmation (autonomy auto_low). */
   auto?: boolean;
+  /** Web query caches to refresh after this action ran. */
+  invalidates?: string[];
 }
 
 /**
@@ -468,7 +470,7 @@ export async function executeToolCall(ctx: Ctx, call: ToolCall, index: number, f
       summary = `Ran ${tool.name}`;
     }
     await audit('ok', { fenced: fenced.dropped, auto: !!opts.auto });
-    return { record: { ...base, input: trace, ok: true, summary, ...(fenced.dropped ? { fenced: fenced.dropped } : {}), ...(opts.auto ? { auto: true } : {}) }, content: truncateResult(result), isError: false };
+    return { record: { ...base, input: trace, ok: true, summary, ...(fenced.dropped ? { fenced: fenced.dropped } : {}), ...(opts.auto ? { auto: true } : {}), ...(tool.action && tool.invalidates?.length ? { invalidates: tool.invalidates } : {}) }, content: truncateResult(result), isError: false };
   } catch (err) {
     try {
       await ctx.tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${sp}`));

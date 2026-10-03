@@ -11,6 +11,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { MSP_NAV, visibleNav, type NavItem, type NavChild } from './nav';
 import { GlobalSearch } from '@/components/GlobalSearch';
 import { GradyWidget } from '@/components/grady/GradyWidget';
+import { PageContextSync } from '@/components/grady/usePageContext';
 import { Menu } from '@/components/Menu';
 
 export function BrandLogo({ className }: { className?: string }) {
@@ -230,20 +231,23 @@ export function Sidebar({ items, label }: { items: NavItem[]; label: string }) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { setSearchOpen } = useUiStore();
+  const { setSearchOpen, toggleAssistant } = useUiStore();
   const can = useAuthStore((s) => s.can);
   const navigate = useNavigate();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen(true);
+      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        if (can('ai:use')) toggleAssistant();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setSearchOpen]);
+  }, [setSearchOpen, toggleAssistant, can]);
 
   return (
     <div className="h-full flex bg-app">
@@ -273,6 +277,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <MobileNav items={MSP_NAV} />
       </div>
       <GlobalSearch />
+      <PageContextSync />
       <GradyWidget />
     </div>
   );

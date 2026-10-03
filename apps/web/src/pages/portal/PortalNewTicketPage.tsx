@@ -19,12 +19,16 @@ const IMPACT_HINT: Record<string, string> = { high: 'Everyone, or a whole site, 
 const URGENCY_HINT: Record<string, string> = { high: 'Work has stopped — I need this now', medium: 'It is slowing us down', low: 'It can wait a few days' };
 
 const plain = (label: string, hints: Record<string, string>, key: string) => hints[key] ?? label;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Prefill parameters (from the assistant or a link): ids must be well formed, text is capped. */
+const idParam = (v: string | null) => (v && UUID.test(v) ? v : '');
+const textParam = (v: string | null, max: number) => (v ?? '').slice(0, max);
 
 export default function PortalNewTicketPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useSearchParams();
   const can = useAuthStore((s) => s.can);
-  const kind = (search.get('kind') as Kind) || 'issue';
+  const kind = (search.get('kind') as Kind) || (search.get('type') === 'request' ? 'request' : 'issue');
   const setKind = (k: Kind) => setSearch(k === 'issue' ? {} : { kind: k }, { replace: true });
   const { options } = useLookups();
 
@@ -36,19 +40,19 @@ export default function PortalNewTicketPage() {
   const cis = useQuery({ queryKey: pk.cis({ picker: true }), queryFn: () => portalApi.cis({ pageSize: 200, sort: 'name', order: 'asc' }), enabled: canDevices && kind === 'issue', staleTime: 5 * 60_000 });
 
   // ---- issue form
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [siteId, setSiteId] = useState('');
-  const [serviceId, setServiceId] = useState('');
+  const [title, setTitle] = useState(() => textParam(search.get('title'), 300));
+  const [description, setDescription] = useState(() => textParam(search.get('description'), 20000));
+  const [siteId, setSiteId] = useState(() => idParam(search.get('siteId')));
+  const [serviceId, setServiceId] = useState(() => idParam(search.get('serviceId')));
   const [impactId, setImpactId] = useState('');
   const [urgencyId, setUrgencyId] = useState('');
   const [device, setDevice] = useState('');
   // ---- request form
   const [itemQ, setItemQ] = useState('');
-  const [itemId, setItemId] = useState('');
+  const [itemId, setItemId] = useState(() => idParam(search.get('catalogItemId')));
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [reqSummary, setReqSummary] = useState('');
-  const [reqNotes, setReqNotes] = useState('');
+  const [reqNotes, setReqNotes] = useState(() => (search.get('type') === 'request' || search.get('kind') === 'request' ? textParam(search.get('description'), 20000) : ''));
   // Screenshots and files chosen now go onto the ticket as soon as it is raised.
   const [files, setFiles] = useState<File[]>([]);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
