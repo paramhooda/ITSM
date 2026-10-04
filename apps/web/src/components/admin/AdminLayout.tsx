@@ -20,7 +20,9 @@ export interface AdminNavGroup {
 
 const CONFIG: Permission[] = ['admin:config'];
 const USERS: Permission[] = ['admin:users'];
+const SYSTEM: Permission[] = ['admin:system', 'admin:config'];
 
+/** The administration rail, grouped the way the staff navigator is (every `to` has a route in AdminPage.tsx and an APP_PAGES entry). */
 export const ADMIN_NAV: AdminNavGroup[] = [
   { label: 'Overview', items: [{ to: '/admin', label: 'Overview' }] },
   {
@@ -30,10 +32,11 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       { to: '/admin/priority-matrix', label: 'Priority matrix', perm: CONFIG },
       { to: '/admin/custom-fields', label: 'Custom fields', perm: CONFIG },
       { to: '/admin/services', label: 'Service catalog', perm: ['services:manage'] },
+      { to: '/admin/catalog', label: 'Request catalog', perm: CONFIG, prefix: true },
     ],
   },
   {
-    label: 'SLA & time',
+    label: 'Service levels',
     items: [
       { to: '/admin/sla', label: 'SLA policies', perm: CONFIG, prefix: true },
       { to: '/admin/calendars', label: 'Business calendars', perm: CONFIG },
@@ -41,14 +44,12 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     ],
   },
   {
-    label: 'Automation',
+    label: 'Workflow & automation',
     items: [
       { to: '/admin/assignment-rules', label: 'Assignment rules', perm: CONFIG },
       { to: '/admin/escalation-rules', label: 'Escalation rules', perm: CONFIG },
-      { to: '/admin/notifications/templates', label: 'Notification templates', perm: CONFIG },
-      { to: '/admin/notifications/rules', label: 'Notification rules', perm: CONFIG },
       { to: '/admin/approvals', label: 'Approval workflows', perm: CONFIG },
-      { to: '/admin/catalog', label: 'Request catalog', perm: CONFIG, prefix: true },
+      // slot #6: { to: '/admin/surveys', label: 'Satisfaction surveys', perm: ['surveys:manage', 'admin:config'] }
     ],
   },
   {
@@ -67,6 +68,15 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    label: 'Notifications',
+    items: [
+      { to: '/admin/notifications/templates', label: 'Notification templates', perm: CONFIG },
+      { to: '/admin/notifications/rules', label: 'Notification rules', perm: CONFIG },
+      { to: '/admin/whatsapp', label: 'WhatsApp', perm: SYSTEM },
+      { to: '/admin/outbox', label: 'Notification outbox', perm: SYSTEM },
+    ],
+  },
+  {
     label: 'Access',
     items: [
       { to: '/admin/users', label: 'Users', perm: USERS },
@@ -78,10 +88,8 @@ export const ADMIN_NAV: AdminNavGroup[] = [
   {
     label: 'System',
     items: [
-      { to: '/admin/settings', label: 'Settings', perm: ['admin:system', 'admin:config'] },
-      { to: '/admin/ai', label: 'AI assistant', perm: ['admin:system', 'admin:config'] },
-      { to: '/admin/outbox', label: 'Notification outbox', perm: ['admin:system', 'admin:config'] },
-      { to: '/admin/whatsapp', label: 'WhatsApp', perm: ['admin:system', 'admin:config'] },
+      { to: '/admin/settings', label: 'Settings', perm: SYSTEM },
+      { to: '/admin/ai', label: 'AI assistant', perm: SYSTEM },
       { to: '/admin/audit', label: 'Audit log', perm: ['admin:audit'] },
       { to: '/admin/integrations', label: 'Monitoring & SIEM', perm: ['integrations:events', 'integrations:manage'] },
     ],

@@ -17,7 +17,7 @@ import { useAdminMutation } from '@/components/admin/api';
 export const OPTION_GROUPS: { group: string; types: [string, string][] }[] = [
   { group: 'Tickets', types: [['ticket_category', 'Categories'], ['ticket_subcategory', 'Subcategories'], ['ticket_priority', 'Priorities'], ['ticket_impact', 'Impact'], ['ticket_urgency', 'Urgency'], ['ticket_status', 'Statuses'], ['ticket_source', 'Sources'], ['resolution_code', 'Resolution codes'], ['closure_code', 'Closure codes']] },
   { group: 'Customers', types: [['customer_type', 'Customer types'], ['customer_status', 'Customer statuses'], ['customer_industry', 'Industries'], ['site_type', 'Site types']] },
-  { group: 'Contracts & Scope', types: [['contract_type', 'Contract types'], ['contract_status', 'Contract statuses'], ['entitlement_type', 'Entitlement types'], ['scope_header', 'Scope headers'], ['scope_category', 'Scope categories'], ['scope_type', 'Scope types'], ['scope_status', 'Scope statuses']] },
+  { group: 'Contracts & scope', types: [['contract_type', 'Contract types'], ['contract_status', 'Contract statuses'], ['entitlement_type', 'Entitlement types'], ['scope_header', 'Scope headers'], ['scope_category', 'Scope categories'], ['scope_type', 'Scope types'], ['scope_status', 'Scope statuses']] },
   { group: 'Services', types: [['service_category', 'Service categories'], ['service_subcategory', 'Service subcategories'], ['service_status', 'Service statuses']] },
   { group: 'Assets', types: [['asset_category', 'Asset categories'], ['asset_status', 'Asset statuses']] },
   { group: 'Field & Maintenance', types: [['field_visit_type', 'Visit types'], ['field_visit_status', 'Visit statuses'], ['pm_frequency', 'PM frequencies']] },

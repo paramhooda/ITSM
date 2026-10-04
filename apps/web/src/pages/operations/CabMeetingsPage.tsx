@@ -9,7 +9,7 @@ import { FormDialog, type FieldSpec } from '@/components/admin/FormDialog';
 import { useListState } from '@/hooks/useListState';
 import { useEngineers } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
-import { OPERATIONS_MODULES } from '@/layouts/modules';
+import { CHANGE_MODULES } from '@/layouts/modules';
 import { fmtDateTime, relativeTime } from '@/lib/format';
 import { changesApi, changeKeys, type CabMeeting } from '@/components/changes/api';
 
@@ -66,7 +66,7 @@ export default function CabMeetingsPage() {
       {q.isError && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
       <ListShell
         id="cab-meetings"
-        modules={OPERATIONS_MODULES}
+        modules={CHANGE_MODULES}
         filters={
           <FilterGroup label="State">
             <FilterOptions options={STATUS_OPTIONS} value={state.status || 'upcoming'} onChange={(v) => set({ status: (v as string | undefined) ?? 'upcoming' })} />

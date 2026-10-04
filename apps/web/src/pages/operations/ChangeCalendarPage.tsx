@@ -7,7 +7,7 @@ import { KpiGrid } from '@/components/dashboards/KpiGrid';
 import { Segmented } from '@/components/dashboards/Panel';
 import { useListState } from '@/hooks/useListState';
 import { useCustomersLookup } from '@/hooks/useLookups';
-import { OPERATIONS_MODULES } from '@/layouts/modules';
+import { CHANGE_MODULES } from '@/layouts/modules';
 import { startOfWeek, addDays, ymd } from '@/components/field/VisitCalendar';
 import { ChangeCalendar, startOfMonth, addMonths, type CalendarView } from '@/components/changes/ChangeCalendar';
 import { changesApi, changeKeys } from '@/components/changes/api';
@@ -73,7 +73,7 @@ export default function ChangeCalendarPage() {
       {q.isError && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
       <ListShell
         id="change-calendar"
-        modules={OPERATIONS_MODULES}
+        modules={CHANGE_MODULES}
         filters={filters}
         applied={applied}
         activeCount={applied.length}

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Play, Download, FileText, FileSpreadsheet, Printer, CalendarClock, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-import { PageHeader, Tabs, Card, Button, Drawer, DataTable, Badge, Pagination, Select, ConfirmDialog, LoadingBlock, EmptyState, type Column } from '@/components/ui';
+import { PageHeader, ModuleNav, Tabs, Card, Button, Drawer, DataTable, Badge, Pagination, Select, ConfirmDialog, LoadingBlock, EmptyState, type Column } from '@/components/ui';
+import { REPORT_MODULES } from '@/layouts/modules';
 import { get, post, patch, del, download, ApiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useListState } from '@/hooks/useListState';
@@ -30,6 +31,7 @@ export default function ReportsPage() {
   return (
     <div>
       <PageHeader title="Reports" subtitle={isCustomer ? 'Service reports for your organization' : 'Ad-hoc reporting, scheduled customer reports and history'} />
+      <ModuleNav items={REPORT_MODULES} />
       <Tabs tabs={tabs} value={tab} onChange={(t) => set({ tab: t }, false)} className="mb-4" />
       {defs.isPending && <LoadingBlock />}
       {defs.data && tab === 'run' && <RunTab definitions={defs.data.items} isCustomer={!!isCustomer} canManage={canManage} pdf={defs.data.pdf} initialKey={state.report} onSaveAsSchedule={(d) => { setScheduleDraft(d); set({ tab: 'schedules' }, false); }} />}

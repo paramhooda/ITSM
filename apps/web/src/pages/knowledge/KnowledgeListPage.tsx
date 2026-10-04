@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
 import { useListState } from '@/hooks/useListState';
 import { Button, PageHeader, Select, Pagination, EmptyState, LoadingBlock, ErrorBlock, ListShell, FilterGroup, FilterOptions, FilterSelect, FilterDateRange, FilterToggle, type AppliedFilter } from '@/components/ui';
-import { KNOWLEDGE_MODULES } from '@/layouts/modules';
+import { KNOWLEDGE_MODULES, PORTAL_KNOWLEDGE_MODULES } from '@/layouts/modules';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { Panel, RowList } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
@@ -182,7 +182,7 @@ export default function KnowledgeListPage() {
 
       <ListShell
         id={isCustomer ? 'portal-knowledge' : 'knowledge-articles'}
-        modules={isCustomer ? undefined : KNOWLEDGE_MODULES}
+        modules={isCustomer ? PORTAL_KNOWLEDGE_MODULES : KNOWLEDGE_MODULES}
         search={{ value: state.q ?? '', onChange: (v) => set({ q: v }), placeholder: 'Search titles, numbers and content…' }}
         filters={filters}
         activeCount={activeCount}

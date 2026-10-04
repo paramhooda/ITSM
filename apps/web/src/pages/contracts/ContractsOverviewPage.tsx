@@ -44,7 +44,7 @@ export default function ContractsOverviewPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="Contracts & Scope"
+        title="Contracts & scope"
         subtitle="Expiries, entitlement consumption and scope coverage"
         actions={
           <>

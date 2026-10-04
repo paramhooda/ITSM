@@ -39,7 +39,7 @@ export default function FieldOverviewPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="Field Service"
+        title="Field service"
         subtitle="Today, this week, engineer load and maintenance due"
         actions={<Select className="w-48 h-8 py-0 text-[13px]" value={customerId} onChange={(e) => setCustomerId(e.target.value)} placeholder="All customers" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />}
       />

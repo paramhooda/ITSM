@@ -1,10 +1,14 @@
+// Imported by apps/api/test/navigation.test.ts under the API tsconfig: no `@/` imports and no DOM types in this file.
 import type { Permission } from '@itsm/shared';
 
 /**
  * Module strips: every major application opens on an Overview and offers its
  * modules in one strip under the page header (the ServiceNow shape CMDB already
  * had: Overview · Configuration items · Business services …). The navigator's
- * children mirror these lists, so the left rail and the strip never disagree.
+ * children mirror these lists, so the left rail and the strip never disagree
+ * (`apps/api/test/navigation.test.ts` checks every strip against its
+ * application). A strip renders nothing below two visible entries, and
+ * `visibleNav` hides an application's modules by the same rule.
  */
 export interface ModuleItem {
   to: string;
@@ -22,8 +26,12 @@ export const OPERATIONS_MODULES: ModuleItem[] = [
   { to: '/operations/on-call', label: 'On-call', perm: ['oncall:read'] },
   { to: '/operations/announcements', label: 'Announcements', perm: ['announcements:manage'] },
   { to: '/operations/handover', label: 'Handover', perm: ['handover:write', 'oncall:manage'] },
+];
+
+export const CHANGE_MODULES: ModuleItem[] = [
   { to: '/operations/change-calendar', label: 'Change calendar' },
   { to: '/operations/cab', label: 'CAB', perm: ['changes:cab', 'changes:approve', 'changes:manage'], match: (p) => p.startsWith('/operations/cab') },
+  // slot #5: { to: '/operations/change-catalog', label: 'Change catalog' }
 ];
 
 export const CMDB_MODULES: ModuleItem[] = [
@@ -40,6 +48,7 @@ export const ASSET_MODULES: ModuleItem[] = [
   { to: '/assets/inventory', label: 'Inventory' },
   { to: '/assets/coverage', label: 'Warranty & AMC' },
   { to: '/assets/lifecycle', label: 'Lifecycle' },
+  // slot #2: { to: '/assets/software', label: 'Software', perm: ['software:read'], match: (p) => p.startsWith('/assets/software') }
 ];
 
 export const CUSTOMER_MODULES: ModuleItem[] = [
@@ -55,16 +64,23 @@ export const CONTRACT_MODULES: ModuleItem[] = [
 ];
 
 export const FIELD_MODULES: ModuleItem[] = [
-  { to: '/field', label: 'Overview', end: true },
-  { to: '/field/visits', label: 'Visits' },
-  { to: '/field/calendar', label: 'Calendar' },
+  { to: '/field', label: 'Overview', end: true, perm: ['field:read'] },
+  { to: '/field/visits', label: 'Visits', perm: ['field:read'] },
+  { to: '/field/calendar', label: 'Calendar', perm: ['field:read'] },
   { to: '/maintenance', label: 'Preventive maintenance', perm: ['pm:read'], match: (p) => p.startsWith('/maintenance') },
 ];
 
 export const KNOWLEDGE_MODULES: ModuleItem[] = [
   { to: '/knowledge', label: 'Overview', end: true, perm: ['kb:read'] },
   { to: '/knowledge/articles', label: 'Articles' },
+  // slot #4: { to: '/knowledge/known-errors', label: 'Known errors', perm: ['kedb:read'], match: (p) => p.startsWith('/knowledge/known-errors') }
   { to: '/knowledge/categories', label: 'Categories', perm: ['kb:manage'] },
+];
+
+export const REPORT_MODULES: ModuleItem[] = [
+  { to: '/reports', label: 'Catalogue', end: true },
+  // slot #1: { to: '/reports/builder', label: 'Report builder', perm: ['reports:build'], match: (p) => p.startsWith('/reports/builder') }
+  // slot #6: { to: '/reports/csat', label: 'Customer satisfaction', perm: ['surveys:read'] }
 ];
 
 // ---- customer portal
@@ -73,6 +89,7 @@ export const PORTAL_ASSET_MODULES: ModuleItem[] = [
   { to: '/portal/assets', label: 'Overview', end: true },
   { to: '/portal/assets/inventory', label: 'Inventory' },
   { to: '/portal/assets/coverage', label: 'Warranty & AMC' },
+  // slot #2: { to: '/portal/assets/software', label: 'Software', perm: ['portal:software'] }
 ];
 
 export const PORTAL_SERVICE_MODULES: ModuleItem[] = [
@@ -85,3 +102,11 @@ export const PORTAL_MAINTENANCE_MODULES: ModuleItem[] = [
   { to: '/portal/maintenance', label: 'Upcoming', end: true },
   { to: '/portal/maintenance/history', label: 'History' },
 ];
+
+export const PORTAL_KNOWLEDGE_MODULES: ModuleItem[] = [
+  { to: '/knowledge', label: 'Overview', end: true },
+  { to: '/knowledge/articles', label: 'Articles' },
+  // slot #4: { to: '/knowledge/known-errors', label: 'Known errors', perm: ['portal:kedb'], match: (p) => p.startsWith('/knowledge/known-errors') }
+];
+
+// slot #5: PORTAL_STATUS_MODULES = [{ to: '/portal/status', label: 'Status', end: true }, { to: '/portal/changes', label: 'Planned changes' }]

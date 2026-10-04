@@ -141,7 +141,7 @@ export default function ContractListPage() {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="Contracts & Scope"
+        title="Contracts & scope"
         subtitle={sm ? `${fmtNumber(sm.active)} active contracts · ${fmtNumber(sm.expiring90)} ending within 90 days` : 'Coverage, SLA policy, entitlements and scope per customer'}
         actions={can('contracts:manage') && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>New contract</Button>}
       />

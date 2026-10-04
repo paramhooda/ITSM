@@ -38,7 +38,7 @@ export const routes: AppRoute[] = [
   { path: '/customers', component: page(() => import('@/pages/customers/CustomersOverviewPage')), perm: ['customers:read'] },
   { path: '/customers/accounts', component: page(() => import('@/pages/customers/CustomerListPage')), perm: ['customers:read'] },
   { path: '/customers/:id', component: page(() => import('@/pages/customers/CustomerDetailPage')), perm: ['customers:read'] },
-  // Contracts & Scope: Overview · Contracts · Entitlements · Service levels
+  // Contracts & scope: Overview · Contracts · Entitlements · Service levels
   { path: '/contracts', component: page(() => import('@/pages/contracts/ContractsOverviewPage')), perm: ['contracts:read'] },
   { path: '/contracts/list', component: page(() => import('@/pages/contracts/ContractListPage')), perm: ['contracts:read'] },
   { path: '/contracts/entitlements', component: page(() => import('@/pages/contracts/EntitlementsPage')), perm: ['contracts:read'] },
@@ -75,7 +75,7 @@ export const routes: AppRoute[] = [
   /** Monitoring & SIEM lives under Administration now; keep old links working. */
   { path: '/integrations', component: page(() => import('@/pages/integrations/IntegrationsRedirect')), perm: ['integrations:events', 'integrations:manage'] },
   // Field & maintenance
-  // Field Service: Overview · Visits · Calendar · Preventive maintenance
+  // Field service: Overview · Visits · Calendar · Preventive maintenance
   { path: '/field', component: page(() => import('@/pages/field/FieldOverviewPage')), perm: ['field:read'] },
   { path: '/field/visits', component: page(() => import('@/pages/field/FieldVisitListPage')), perm: ['field:read'] },
   { path: '/field/calendar', component: page(() => import('@/pages/field/FieldCalendarPage')), perm: ['field:read'] },

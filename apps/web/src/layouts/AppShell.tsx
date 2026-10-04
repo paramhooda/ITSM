@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { NavLink, useNavigate, Link, useLocation } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Bell, Search, LogOut, User, Plus, ChevronLeft, ChevronRight, ChevronDown, Filter } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/auth';
@@ -8,7 +8,7 @@ import { api, get } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { Avatar, Kbd } from '@/components/ui';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { MSP_NAV, visibleNav, type NavItem, type NavChild } from './nav';
+import { MSP_NAV, visibleNav, isAppActive, groupNav, type NavItem, type NavChild } from './nav';
 import { GlobalSearch } from '@/components/GlobalSearch';
 import { GradyWidget } from '@/components/grady/GradyWidget';
 import { AnnouncementBanner } from '@/components/announcements/AnnouncementStrip';
@@ -23,10 +23,29 @@ export function BrandLogo({ className }: { className?: string }) {
   );
 }
 
+/** The Progression mark on its own: the collapsed navigator rail (28 px, centred, same box as the wordmark). */
+export function BrandMark({ className }: { className?: string }) {
+  return (
+    <Tooltip label="Progression home">
+      <Link to="/" className={cn('flex h-7 w-7 items-center justify-center shrink-0 rounded-md focus:outline-none focus-visible:ring-[3px] focus-visible:ring-brand-500/30', className)} aria-label="Progression home">
+        <img src="/mark.svg" alt="" width={28} height={28} className="h-7 w-7 select-none" draggable={false} />
+      </Link>
+    </Tooltip>
+  );
+}
+
 const NAV_OPEN_KEY = 'itsm.nav.open';
 const readOpen = (): Record<string, boolean> => {
   try {
     return JSON.parse(localStorage.getItem(NAV_OPEN_KEY) ?? '{}') as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+};
+const NAV_SECTIONS_KEY = 'itsm.nav.sections';
+const readSections = (): Record<string, boolean> => {
+  try {
+    return JSON.parse(localStorage.getItem(NAV_SECTIONS_KEY) ?? '{}') as Record<string, boolean>;
   } catch {
     return {};
   }
@@ -42,7 +61,8 @@ function activeChild(children: NavChild[], pathname: string, search: string): Na
 }
 
 /**
- * Application navigator: applications grouped by section, each expandable into its
+ * Application navigator: applications grouped by collapsible section (remembered per
+ * browser; the application you are on always stays visible), each expandable into its
  * modules, with a "Filter navigator" box like ServiceNow's.
  */
 export function SidebarNav({ items, label }: { items: NavItem[]; label?: string }) {
@@ -52,6 +72,7 @@ export function SidebarNav({ items, label }: { items: NavItem[]; label?: string 
   const { pathname, search } = useLocation();
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState<Record<string, boolean>>(readOpen);
+  const [closedSections, setClosedSections] = useState<Record<string, boolean>>(readSections);
   const visible = useMemo(() => visibleNav(items, can, areas), [items, can, areas]);
   const needle = filter.trim().toLowerCase();
   const shown = useMemo(
@@ -73,7 +94,16 @@ export function SidebarNav({ items, label }: { items: NavItem[]; label?: string 
       }
       return next;
     });
-  const isAppActive = (item: NavItem) => (item.to === '/' ? pathname === '/' : pathname === item.to || pathname.startsWith(item.to + '/'));
+  const toggleSection = (section: string) =>
+    setClosedSections((c) => {
+      const next = { ...c, [section]: !(c[section] ?? false) };
+      try {
+        localStorage.setItem(NAV_SECTIONS_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
   return (
     <nav className={cn('flex-1 overflow-y-auto py-3', collapsed ? 'px-2' : 'px-3')} aria-label={label}>
       {!collapsed && (
@@ -83,59 +113,76 @@ export function SidebarNav({ items, label }: { items: NavItem[]; label?: string 
         </div>
       )}
       {label && !collapsed && !needle && <div className="px-2.5 pb-1.5 text-[11px] uppercase tracking-[0.08em] text-subtle font-medium">{label}</div>}
-      {shown.map((item) => {
-        const children = item.children ?? [];
-        const appActive = isAppActive(item);
-        const expanded = children.length > 0 && !collapsed && (needle ? true : (open[item.to] ?? appActive));
-        const current = activeChild(children, pathname, search);
+      {groupNav(shown).map((group, gi) => {
+        const closed = !!group.section && !needle && !collapsed && !!closedSections[group.section];
         return (
-          <div key={item.to}>
-            {item.section && !needle && (collapsed ? <div className="my-2 mx-2 border-t border-default" aria-hidden /> : <div className="px-2.5 pt-5 pb-1.5 text-[11px] uppercase tracking-[0.08em] text-subtle font-medium">{item.section}</div>)}
-            <div className="flex items-center">
-              <Tooltip label={collapsed ? item.label : undefined} className="flex-1 min-w-0">
-                <NavLink
-                  to={item.to}
-                  end={item.to === '/'}
-                  aria-label={item.label}
-                  className={({ isActive }) =>
-                    cn(
-                      'flex items-center gap-2.5 rounded-lg h-8.5 text-[13.5px] my-0.5 transition-colors',
-                      (isActive || appActive) && !(expanded && current && current.to !== item.to) ? 'bg-white text-default font-medium border border-default shadow-[0_1px_2px_rgba(9,9,11,0.05)]' : 'text-secondary border border-transparent hover:bg-white/70 hover:text-default',
-                      collapsed ? 'justify-center px-0' : 'px-2.5',
-                    )
-                  }
-                >
-                  <item.icon className={cn('h-[17px] w-[17px] shrink-0', !appActive && item.tint)} strokeWidth={1.9} />
-                  {!collapsed && <span className="truncate flex-1">{item.label}</span>}
-                  {!collapsed && children.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        toggle(item.to);
-                      }}
-                      aria-label={expanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
-                      aria-expanded={expanded}
-                      className="h-6 w-6 -mr-1 rounded-md inline-flex items-center justify-center text-subtle hover:text-default hover:bg-surface-2"
-                    >
-                      <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', !expanded && '-rotate-90')} />
-                    </button>
+          <div key={group.section ?? `group-${gi}`}>
+            {group.section && !needle && (collapsed ? (
+              gi > 0 && <div className="my-2 mx-2 border-t border-default" aria-hidden />
+            ) : (
+              <button type="button" data-nav-section={group.section} onClick={() => toggleSection(group.section!)} aria-expanded={!closed} className={cn('w-full flex items-center justify-between px-2.5 pb-1.5 text-[11px] uppercase tracking-[0.08em] text-subtle font-medium hover:text-default', gi === 0 ? 'pt-2' : 'pt-5')}>
+                <span>{group.section}</span>
+                <ChevronDown className={cn('h-3 w-3 transition-transform', closed && '-rotate-90')} />
+              </button>
+            ))}
+            {group.items.map((item) => {
+              const children = item.children ?? [];
+              const appActive = isAppActive(item, pathname);
+              if (closed && !appActive) return null; // a collapsed section still shows the application you are on
+              const expanded = children.length > 0 && !collapsed && (needle ? true : (open[item.to] ?? appActive));
+              const current = activeChild(children, pathname, search);
+              // The row is the current page unless one of its listed modules (other than its own entry) is; `isAppActive`
+              // alone decides, so a row owning several prefixes (Changes, Contracts & scope) and a row whose prefix another
+              // application owns (Operations on /operations/cab) both highlight correctly, and aria-current follows the highlight.
+              const rowCurrent = appActive && !(expanded && current && current.to !== item.to);
+              return (
+                <div key={item.to}>
+                  <div className="flex items-center">
+                    <Tooltip label={collapsed ? item.label : undefined} className="flex-1 min-w-0">
+                      <Link
+                        to={item.to}
+                        aria-label={item.label}
+                        aria-current={rowCurrent ? 'page' : undefined}
+                        className={cn(
+                          'flex items-center gap-2.5 rounded-lg h-8.5 text-[13.5px] my-0.5 transition-colors',
+                          rowCurrent ? 'bg-white text-default font-medium border border-default shadow-[0_1px_2px_rgba(9,9,11,0.05)]' : 'text-secondary border border-transparent hover:bg-white/70 hover:text-default',
+                          collapsed ? 'justify-center px-0' : 'px-2.5',
+                        )}
+                      >
+                        <item.icon className={cn('h-[17px] w-[17px] shrink-0', !appActive && item.tint)} strokeWidth={1.9} />
+                        {!collapsed && <span className="truncate flex-1">{item.label}</span>}
+                        {!collapsed && children.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggle(item.to);
+                            }}
+                            aria-label={expanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
+                            aria-expanded={expanded}
+                            className="h-6 w-6 -mr-1 rounded-md inline-flex items-center justify-center text-subtle hover:text-default hover:bg-surface-2"
+                          >
+                            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', !expanded && '-rotate-90')} />
+                          </button>
+                        )}
+                      </Link>
+                    </Tooltip>
+                  </div>
+                  {expanded && (
+                    <ul className="ml-[21px] border-l border-default pl-2 my-0.5">
+                      {children.map((c) => (
+                        <li key={c.to}>
+                          <Link to={c.to} className={cn('flex items-center h-7 rounded-md px-2 text-[12.5px] transition-colors truncate', current?.to === c.to ? 'bg-white text-default font-medium border border-default' : 'text-muted border border-transparent hover:text-default hover:bg-white/70')} aria-current={current?.to === c.to ? 'page' : undefined}>
+                            {c.label}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
                   )}
-                </NavLink>
-              </Tooltip>
-            </div>
-            {expanded && (
-              <ul className="ml-[21px] border-l border-default pl-2 my-0.5">
-                {children.map((c) => (
-                  <li key={c.to}>
-                    <Link to={c.to} className={cn('flex items-center h-7 rounded-md px-2 text-[12.5px] transition-colors truncate', current?.to === c.to ? 'bg-white text-default font-medium border border-default' : 'text-muted border border-transparent hover:text-default hover:bg-white/70')} aria-current={current?.to === c.to ? 'page' : undefined}>
-                      {c.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
+                </div>
+              );
+            })}
           </div>
         );
       })}
@@ -204,13 +251,7 @@ export function Sidebar({ items, label }: { items: NavItem[]; label: string }) {
   return (
     <aside className={cn('group/side relative hidden md:flex flex-col border-r border-default bg-app shrink-0 transition-[width] duration-200', sidebarCollapsed ? 'w-[60px]' : 'w-60')} data-collapsed={sidebarCollapsed || undefined}>
       <div className={cn('flex items-center h-14 border-b border-default shrink-0', sidebarCollapsed ? 'justify-center px-0' : 'px-4')}>
-        {sidebarCollapsed ? (
-          <Link to="/" aria-label="Progression home" className="inline-flex">
-            <img src="/favicon.svg" alt="" className="h-7 w-7 rounded-md" draggable={false} />
-          </Link>
-        ) : (
-          <BrandLogo />
-        )}
+        {sidebarCollapsed ? <BrandMark /> : <BrandLogo />}
       </div>
       <Tooltip label={tip} className="absolute -right-3 top-[18px] z-20">
         <button
@@ -285,18 +326,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
+/** Phone bar: the first five visible applications with their `short` labels, highlighted by the same rule as the sidebar. */
 export function MobileNav({ items }: { items: NavItem[] }) {
   const can = useAuthStore((s) => s.can);
   const areas = useAuthStore((s) => s.user?.areas);
+  const { pathname } = useLocation();
   const visible = visibleNav(items, can, areas).slice(0, 5);
   return (
-    <nav className="md:hidden flex border-t border-default bg-surface shrink-0">
-      {visible.map((item) => (
-        <NavLink key={item.to} to={item.to} end={item.to === '/'} className={({ isActive }) => cn('flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px]', isActive ? 'text-default' : 'text-muted')}>
-          <item.icon className="h-4 w-4" />
-          {item.label.split(' ')[0]}
-        </NavLink>
-      ))}
+    <nav className="md:hidden flex border-t border-default bg-surface shrink-0" aria-label="Primary">
+      {visible.map((item) => {
+        const active = isAppActive(item, pathname);
+        return (
+          <Link key={item.to} to={item.to} aria-current={active ? 'page' : undefined} className={cn('flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px]', active ? 'text-default' : 'text-muted')}>
+            <item.icon className="h-4 w-4" />
+            {item.short ?? item.label.split(' ')[0]}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

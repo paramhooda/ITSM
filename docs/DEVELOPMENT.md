@@ -39,6 +39,11 @@ Rules:
 * Use the UI kit in `components/ui` (Button, Input, Select, Field, Badge, Card, DataTable, Pagination, Dialog, Drawer, Tabs, KeyValue, StatTile, EmptyState...) and `useLookups()` for option lists/teams/services; `useListState()` keeps filters in the URL.
 * Permissions: `useAuthStore(s => s.can)('tickets:resolve')`. Hide what the user cannot do; the API enforces anyway.
 * Keep screens dense and quick: one list page with filters + a detail page with a right-hand context panel is the standard layout. Avoid wizards and nested dialogs.
+* Adding a page: the route in `routes.tsx` (or `AdminPage.tsx`), its `APP_PAGES` entry in `packages/shared/src/appmap.ts`, the navigator child under its application in `layouts/nav.ts` (sections are fixed; add an application only with an `APPLICATIONS` entry), the matching strip entry in `layouts/modules.ts` (or the administration rail group in `components/admin/AdminLayout.tsx`); `navigation.test.ts` and `ai-appmap.test.ts` fail until all four agree.
+
+## Brand assets
+
+`apps/web/public/mark.svg` is the single vector source of the favicon set. After editing it, regenerate the rasters with `node apps/web/scripts/make-icons.mjs` (needs Playwright's Chromium: `npx playwright install chromium`, or set `PLAYWRIGHT_MODULE` to an installed copy and `PLAYWRIGHT_CHROMIUM` to a Chromium binary; Playwright is deliberately not a dependency of the repository). The script writes `favicon-16.png`, `favicon-32.png`, `favicon.ico`, `apple-touch-icon.png`, `icon-192.png` and `icon-512.png` next to the SVG; `favicon.svg` is a copy of `mark.svg`. `apps/api/test/branding.test.ts` checks the files, their sizes and the links in `index.html`, so run it after regenerating.
 
 ## Adding a configurable option list
 
