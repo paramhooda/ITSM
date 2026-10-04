@@ -8,6 +8,7 @@ import { AppError, NotFoundError, ForbiddenError, ValidationError } from '@/core
 import { aiProvider, aiEnabled, AiUpstreamError, type AiProvider, type ChatMessage, type ToolCall } from '@/lib/ai';
 import { loadTicket } from '@/modules/tickets/common';
 import { listTickets } from '@/modules/tickets/list';
+import { CAB_READ, requireAny as requireAnyPermission } from '@/modules/changes/service';
 import { matchRoute } from '@itsm/shared';
 import { availableTools, availableToolsets, toolDefinitions, toolByName, toolAvailable, tierOf, previewDetail, isCustomerUser, listQuery, TOOLSET_KEYS, type AiTool, type Who, type ToolsetKey } from './tools';
 import { buildSystemPrompt, describeScope, PROMPT_VERSION, skillsFor } from './prompt';
@@ -364,6 +365,13 @@ async function describeEntity(ctx: Ctx, c: ChatContext | null | undefined): Prom
       }
       case 'kb_article':
         return `User is viewing knowledge article ${label ?? ''}${c.title ? ` "${sanitizeText(String(c.title), 120)}"` : ''}.`;
+      case 'cab_meeting': {
+        requireAnyPermission(ctx, CAB_READ);
+        const [m] = await ctx.tx.select({ title: schema.cabMeetings.title, scheduledAt: schema.cabMeetings.scheduledAt, status: schema.cabMeetings.status }).from(schema.cabMeetings).where(eq(schema.cabMeetings.id, c.entityId)).limit(1);
+        if (!m) return null;
+        const title = sanitizeText(m.title, 120);
+        return `User is viewing CAB meeting "${title}" scheduled ${m.scheduledAt.toISOString()} (${m.status}). Use cab_agenda with meeting "${title}".`;
+      }
       default:
         return label ? `User is viewing ${sanitizeText(String(c.entityType), 40)} "${label}".` : null;
     }

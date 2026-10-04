@@ -11,6 +11,7 @@ import { seedServices } from './demo/services';
 import { seedContracts } from './demo/contracts';
 import { seedInventory } from './demo/inventory';
 import { seedTickets } from './demo/tickets';
+import { seedChanges } from './demo/changes';
 import { seedFieldService } from './demo/field';
 import { seedKnowledge } from './demo/knowledge';
 import { seedIntegrationRows, seedIntegrationEvents } from './demo/integrations';
@@ -90,6 +91,7 @@ export async function loadDemoData() {
   });
   await phase('inventory (assets, CIs, relationships)', () => withSystem((tx) => seedInventory(state, tx)));
   await phase('tickets', () => seedTickets(state));
+  await phase('change management (blackouts, risk, CAB)', () => withSystem((tx) => seedChanges(state, tx)));
   await phase('field service (visits, PM)', () => withSystem((tx) => seedFieldService(state, tx)));
   await phase('knowledge', () => withSystem((tx) => seedKnowledge(state, tx)));
   await phase('integration events, discovery', () => withSystem((tx) => seedIntegrationEvents(state, tx)));

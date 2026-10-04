@@ -81,6 +81,17 @@ function buildWhere(ctx: Ctx, q: StatsQuery): SQL | undefined {
   if (q.securitySeverityId) conds.push(eq(T.securitySeverityId, q.securitySeverityId));
   if (q.requesterUserId) conds.push(eq(T.requesterUserId, q.requesterUserId));
   if (q.parentTicketId) conds.push(eq(T.parentTicketId, q.parentTicketId));
+  // Change filters read the change_details row of the ticket.
+  if (q.changeType) conds.push(sql`EXISTS (SELECT 1 FROM change_details cd WHERE cd.ticket_id = ${T.id} AND cd.change_type = ${q.changeType})`);
+  if (q.riskLevel === 'none') conds.push(eq(T.type, 'change'), sql`EXISTS (SELECT 1 FROM change_details cd WHERE cd.ticket_id = ${T.id} AND cd.risk_level IS NULL)`);
+  else if (q.riskLevel) conds.push(sql`EXISTS (SELECT 1 FROM change_details cd WHERE cd.ticket_id = ${T.id} AND cd.risk_level = ${q.riskLevel})`);
+  // The schema refuses malformed dates; callers that bypass it (tools) are guarded here so an invalid date never reaches the query.
+  if (q.scheduledFrom && !Number.isNaN(Date.parse(q.scheduledFrom))) conds.push(sql`EXISTS (SELECT 1 FROM change_details cd WHERE cd.ticket_id = ${T.id} AND cd.scheduled_start >= ${new Date(q.scheduledFrom)})`);
+  if (q.scheduledTo && !Number.isNaN(Date.parse(q.scheduledTo))) {
+    const to = new Date(q.scheduledTo);
+    if (q.scheduledTo.length <= 10) to.setUTCDate(to.getUTCDate() + 1);
+    conds.push(sql`EXISTS (SELECT 1 FROM change_details cd WHERE cd.ticket_id = ${T.id} AND cd.scheduled_start <= ${to})`);
+  }
   const fts = searchFts(q.q, T.searchVector, T.number, T.title);
   if (fts) conds.push(fts);
   return conds.length ? and(...conds) : undefined;

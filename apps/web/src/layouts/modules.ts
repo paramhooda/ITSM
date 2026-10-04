@@ -31,7 +31,7 @@ export const OPERATIONS_MODULES: ModuleItem[] = [
 export const CHANGE_MODULES: ModuleItem[] = [
   { to: '/operations/change-calendar', label: 'Change calendar' },
   { to: '/operations/cab', label: 'CAB', perm: ['changes:cab', 'changes:approve', 'changes:manage'], match: (p) => p.startsWith('/operations/cab') },
-  // slot #5: { to: '/operations/change-catalog', label: 'Change catalog' }
+  { to: '/operations/change-catalog', label: 'Change catalog' },
 ];
 
 export const CMDB_MODULES: ModuleItem[] = [
@@ -109,4 +109,7 @@ export const PORTAL_KNOWLEDGE_MODULES: ModuleItem[] = [
   // slot #4: { to: '/knowledge/known-errors', label: 'Known errors', perm: ['portal:kedb'], match: (p) => p.startsWith('/knowledge/known-errors') }
 ];
 
-// slot #5: PORTAL_STATUS_MODULES = [{ to: '/portal/status', label: 'Status', end: true }, { to: '/portal/changes', label: 'Planned changes' }]
+export const PORTAL_STATUS_MODULES: ModuleItem[] = [
+  { to: '/portal/status', label: 'Status', end: true },
+  { to: '/portal/changes', label: 'Planned changes' },
+];

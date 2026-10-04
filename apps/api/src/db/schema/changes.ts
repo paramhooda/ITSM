@@ -86,13 +86,17 @@ export const cabMeetings = pgTable('cab_meetings', {
   title: text('title').notNull(),
   scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
   chairUserId: uuid('chair_user_id').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
+  /** Room, or the bridge link, shown on the meeting page and in the generated minutes (never in a notification: the requester may be a customer). */
+  location: text('location'),
+  /** People expected at the table; listed in the generated minutes. */
+  attendeeUserIds: uuid('attendee_user_ids').array().notNull().default([]),
   /** scheduled | in_progress | closed | cancelled */
   status: text('status').notNull().default('scheduled'),
   minutes: text('minutes'),
   closedAt: timestamp('closed_at', { withTimezone: true }),
   createdBy: uuid('created_by').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
   ...timestamps,
-}, (t) => [index('cab_meetings_scheduled_idx').on(t.scheduledAt)]);
+}, (t) => [index('cab_meetings_scheduled_idx').on(t.scheduledAt), index('cab_meetings_status_idx').on(t.status)]);
 
 export const cabMeetingItems = pgTable('cab_meeting_items', {
   id: id(),

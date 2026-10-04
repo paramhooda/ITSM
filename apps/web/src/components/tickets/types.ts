@@ -1,4 +1,5 @@
 import { TICKET_TYPE_COLORS } from '@/lib/statusColors';
+import type { Conflict } from '@/components/changes/api';
 /** API shapes of the tickets module (kept in sync with apps/api/src/modules/tickets). */
 export type TicketType = 'incident' | 'request' | 'problem' | 'change';
 export type ScopeStatus = 'in_scope' | 'out_of_scope' | 'unknown';
@@ -215,6 +216,10 @@ export interface ChangeDetails {
   templateId?: string | null;
   cabMeetingId?: string | null;
   windowReminderAt?: string | null;
+  /** Staff-only extras: the live clashes of the window, the template it came from and its latest CAB slot. */
+  conflicts?: Conflict[];
+  template?: { id: string; key: string; name: string } | null;
+  cabMeeting?: { id: string; title: string; scheduledAt: string; status: string; decision: string; notes: string | null; decidedAt: string | null } | null;
 }
 
 export interface TicketPermissions {
@@ -231,6 +236,8 @@ export interface TicketPermissions {
   escalate: boolean;
   problem: boolean;
   change: boolean;
+  /** The risk questionnaire: a change manager, or the raiser or assignee holding tickets:update. */
+  assessRisk: boolean;
   approve: boolean;
   tasks: boolean;
   links: boolean;

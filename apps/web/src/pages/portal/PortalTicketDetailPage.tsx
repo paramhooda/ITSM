@@ -192,6 +192,21 @@ export default function PortalTicketDetailPage() {
         </div>
       ),
     },
+    // A change ticket: the window only; plans, risk, CAB and conflicts stay internal.
+    {
+      key: 'planned-window',
+      title: 'Planned window',
+      columns: 2,
+      hidden: !ticket.change,
+      fields: [
+        { label: 'Scheduled start', value: ticket.change?.scheduledStart ? fmtDateTime(ticket.change.scheduledStart) : <span className="text-muted">To be scheduled</span> },
+        { label: 'Scheduled end', value: ticket.change?.scheduledEnd ? fmtDateTime(ticket.change.scheduledEnd) : null, hidden: !ticket.change?.scheduledEnd },
+        { label: 'Expected downtime', value: ticket.change?.downtimeExpectedMinutes != null ? (ticket.change.downtimeExpectedMinutes ? fmtDuration(ticket.change.downtimeExpectedMinutes) : 'None expected') : null, hidden: ticket.change?.downtimeExpectedMinutes == null },
+        { label: 'Type', value: ticket.change?.changeType === 'emergency' ? <Badge color="red">Emergency</Badge> : ticket.change?.changeType === 'standard' ? 'Standard' : 'Normal' },
+        { label: 'Actual start', value: ticket.change?.actualStart ? fmtDateTime(ticket.change.actualStart) : null, hidden: !ticket.change?.actualStart },
+        { label: 'Actual end', value: ticket.change?.actualEnd ? fmtDateTime(ticket.change.actualEnd) : null, hidden: !ticket.change?.actualEnd },
+      ],
+    },
   ];
 
   const pending = a.approve ? ticket.pendingForMe[0] : undefined;

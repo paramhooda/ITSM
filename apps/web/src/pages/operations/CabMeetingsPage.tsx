@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Gavel, CalendarClock, CheckCircle2 } from 'lucide-react';
+import { Plus, Gavel, CalendarClock, CheckCircle2, Hourglass } from 'lucide-react';
 import { PageHeader, DataTable, Pagination, EmptyState, ErrorBlock, Badge, Button, ListShell, FilterGroup, FilterOptions, type AppliedFilter, type Column } from '@/components/ui';
 import { KpiGrid } from '@/components/dashboards/KpiGrid';
 import { FormDialog, type FieldSpec } from '@/components/admin/FormDialog';
@@ -11,7 +11,9 @@ import { useEngineers } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
 import { CHANGE_MODULES } from '@/layouts/modules';
 import { fmtDateTime, relativeTime } from '@/lib/format';
+import { CAB_STATUS_COLORS } from '@/lib/statusColors';
 import { changesApi, changeKeys, type CabMeeting } from '@/components/changes/api';
+import { CabQueueDrawer } from '@/components/changes/CabQueueDrawer';
 
 const STATUS_OPTIONS = [
   { value: 'upcoming', label: 'Upcoming' },
@@ -19,7 +21,6 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'all', label: 'Everything' },
 ];
-export const CAB_STATUS_COLOR: Record<string, string> = { scheduled: 'blue', in_progress: 'amber', closed: 'green', cancelled: 'slate' };
 export const CAB_STATUS_LABEL: Record<string, string> = { scheduled: 'Scheduled', in_progress: 'In progress', closed: 'Closed', cancelled: 'Cancelled' };
 type Values = Record<string, unknown>;
 
@@ -32,9 +33,12 @@ export default function CabMeetingsPage() {
   const engineers = useEngineers();
   const params = useMemo(() => ({ status: state.status || 'upcoming', q: state.q || undefined, page, pageSize }), [state.status, state.q, page, pageSize]);
   const q = useQuery({ queryKey: changeKeys.meetings(params), queryFn: () => changesApi.meetings(params), placeholderData: (p) => p });
+  // Changes with a pending CAB step that sit on no open agenda: the board's backlog.
+  const queue = useQuery({ queryKey: changeKeys.queue({ limit: 50 }), queryFn: () => changesApi.queue({ limit: 50 }), staleTime: 30_000 });
+  const [queueOpen, setQueueOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const create = useMutation({
-    mutationFn: (v: Values) => changesApi.createMeeting({ title: String(v.title), scheduledAt: new Date(String(v.scheduledAt)).toISOString(), chairUserId: (v.chairUserId as string) || null }),
+    mutationFn: (v: Values) => changesApi.createMeeting({ title: String(v.title), scheduledAt: new Date(String(v.scheduledAt)).toISOString(), chairUserId: (v.chairUserId as string) || null, location: ((v.location as string) || '').trim() || null, attendeeUserIds: (v.attendeeUserIds as string[]) ?? [] }),
     onSuccess: (m) => {
       toast.success('Meeting created');
       void qc.invalidateQueries({ queryKey: ['cab'] });
@@ -50,14 +54,17 @@ export default function CabMeetingsPage() {
   const columns: Column<CabMeeting>[] = [
     { key: 'title', header: 'Meeting', width: '100%', render: (r) => <div className="min-w-0"><div className="font-medium truncate">{r.title}</div><div className="text-[11.5px] text-muted">{r.chairName ? `Chair: ${r.chairName}` : 'No chair set'}</div></div> },
     { key: 'scheduledAt', header: 'When', width: '200px', render: (r) => <div className="text-[12.5px]"><div>{fmtDateTime(r.scheduledAt)}</div><div className="text-[11.5px] text-muted">{relativeTime(r.scheduledAt)}</div></div> },
-    { key: 'status', header: 'State', width: '120px', render: (r) => <Badge color={CAB_STATUS_COLOR[r.status] ?? 'slate'} dot>{CAB_STATUS_LABEL[r.status] ?? r.status}</Badge> },
+    { key: 'status', header: 'State', width: '120px', render: (r) => <Badge color={CAB_STATUS_COLORS[r.status] ?? 'slate'} dot>{CAB_STATUS_LABEL[r.status] ?? r.status}</Badge> },
     { key: 'items', header: 'Agenda', width: '150px', render: (r) => <span className="text-[12.5px] tabular-nums">{r.items} change{r.items === 1 ? '' : 's'}{r.pending ? <span className="text-amber-700"> · {r.pending} pending</span> : ''}</span> },
   ];
   const fields: FieldSpec<Values>[] = [
     { key: 'title', label: 'Title', type: 'text', required: true, span: 2, placeholder: 'Weekly CAB' },
     { key: 'scheduledAt', label: 'When', type: 'datetime', required: true },
     { key: 'chairUserId', label: 'Chair', type: 'select', options: (engineers.data ?? []).map((e) => ({ value: e.id, label: e.name })), hint: 'Defaults to you' },
+    { key: 'location', label: 'Location or bridge', type: 'text', span: 2, placeholder: 'Room 4, or the bridge link' },
+    { key: 'attendeeUserIds', label: 'Attendees', type: 'multiselect', options: (engineers.data ?? []).map((e) => ({ value: e.id, label: e.name })), hint: 'Listed in the generated minutes' },
   ];
+  const awaiting = queue.data?.items.length ?? 0;
   const summary = data ? { upcoming: data.items.filter((m) => m.status === 'scheduled' || m.status === 'in_progress').length, pending: data.items.reduce((n, m) => n + m.pending, 0), closed: data.items.filter((m) => m.status === 'closed').length } : null;
 
   return (
@@ -79,10 +86,11 @@ export default function CabMeetingsPage() {
         insights={
           summary && (
             <KpiGrid
-              columns={3}
+              columns={4}
               items={[
                 { label: 'Upcoming meetings', value: summary.upcoming, icon: <CalendarClock className="h-4 w-4" />, hint: 'scheduled or in progress' },
                 { label: 'Changes awaiting a decision', value: summary.pending, tone: summary.pending ? 'warn' : 'good', icon: <Gavel className="h-4 w-4" />, hint: 'on the agenda, not yet decided' },
+                { label: 'Awaiting CAB', value: queue.isLoading ? '…' : awaiting, tone: awaiting ? 'warn' : 'good', icon: <Hourglass className="h-4 w-4" />, hint: 'pending CAB step, on no agenda yet', onClick: () => setQueueOpen(true) },
                 { label: 'Closed in this list', value: summary.closed, icon: <CheckCircle2 className="h-4 w-4" />, hint: 'minutes recorded' },
               ]}
             />
@@ -95,7 +103,8 @@ export default function CabMeetingsPage() {
           {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onPage={(p) => set({ page: p }, false)} />}
         </div>
       </ListShell>
-      <FormDialog<Values> open={creating} onClose={() => setCreating(false)} title="New CAB meeting" fields={fields} initial={{ title: '', scheduledAt: '', chairUserId: '' }} onSubmit={(v) => create.mutateAsync(v).then(() => undefined)} submitLabel="Create" />
+      <FormDialog<Values> open={creating} onClose={() => setCreating(false)} title="New CAB meeting" fields={fields} initial={{ title: '', scheduledAt: '', chairUserId: '', location: '', attendeeUserIds: [] }} onSubmit={(v) => create.mutateAsync(v).then(() => undefined)} submitLabel="Create" />
+      <CabQueueDrawer open={queueOpen} onClose={() => setQueueOpen(false)} />
     </div>
   );
 }

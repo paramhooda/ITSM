@@ -68,7 +68,19 @@ const ASSIGNEE_VIEWS = [
 ];
 const DOMAIN_LABELS: Record<string, string> = { general: 'General', noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk' };
 /** Every filter the page owns; sort/order live beside them in the URL but are not filters. */
-const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId'];
+const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo'];
+/** The Change group (shown on the Changes tab): type, questionnaire level and the scheduled window. */
+const CHANGE_TYPE_OPTIONS = [
+  { value: 'standard', label: 'Standard' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'emergency', label: 'Emergency' },
+];
+const RISK_LEVEL_OPTIONS = [
+  { value: 'low', label: 'Low', color: 'green' },
+  { value: 'medium', label: 'Medium', color: 'amber' },
+  { value: 'high', label: 'High', color: 'red' },
+  { value: 'none', label: 'Not assessed', color: 'slate' },
+];
 const DEFAULTS = { statusCategory: 'new,open,pending', sort: 'lastActivityAt', order: 'desc' };
 /**
  * Parameters that dashboards and record pages link with (`mine=true`, `open=true`,
@@ -129,7 +141,7 @@ export default function TicketListPage() {
     const p: Record<string, unknown> = {};
     if (state.q) p.q = state.q;
     if (tab !== 'all') p.type = tab;
-    for (const k of ['customerId', 'statusCategory', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'domain', 'categoryId', 'securitySeverityId'] as const) if (state[k]) p[k] = state[k];
+    for (const k of ['customerId', 'statusCategory', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo'] as const) if (state[k]) p[k] = state[k];
     if (state.isMajor === 'true') p.isMajor = 'true';
     if (assigneeFilter === 'me') p.mine = 'true';
     else if (assigneeFilter === 'unassigned') p.unassigned = 'true';
@@ -335,6 +347,9 @@ export default function TicketListPage() {
   if (state.sentiment) addApplied('sentiment', `Customer mood: ${SENTIMENT_OPTIONS.find((o) => o.value === state.sentiment)?.label ?? state.sentiment}`);
   if (state.createdFrom || state.createdTo) addApplied('created', `Created: ${dateRangeLabel(state.createdFrom, state.createdTo)}`, ['createdFrom', 'createdTo']);
   if (state.isMajor === 'true') addApplied('isMajor', 'Major incidents only');
+  if (state.changeType) addApplied('changeType', `Type: ${CHANGE_TYPE_OPTIONS.find((o) => o.value === state.changeType)?.label ?? state.changeType}`);
+  if (state.riskLevel) addApplied('riskLevel', `Risk: ${RISK_LEVEL_OPTIONS.find((o) => o.value === state.riskLevel)?.label ?? state.riskLevel}`);
+  if (state.scheduledFrom || state.scheduledTo) addApplied('window', `Window: ${dateRangeLabel(state.scheduledFrom, state.scheduledTo)}`, ['scheduledFrom', 'scheduledTo']);
 
   const total = list.data?.total;
   const rail = (
@@ -370,6 +385,19 @@ export default function TicketListPage() {
       <FilterGroup label="Created">
         <FilterDateRange from={state.createdFrom} to={state.createdTo} onChange={(r) => set({ createdFrom: r.from, createdTo: r.to })} />
       </FilterGroup>
+      {tab === 'change' && (
+        <>
+          <FilterGroup label="Change type" hint="Standard, normal or emergency" defaultOpen={!!state.changeType}>
+            <FilterOptions options={CHANGE_TYPE_OPTIONS} value={state.changeType} onChange={(v) => set({ changeType: v as string | undefined })} />
+          </FilterGroup>
+          <FilterGroup label="Risk level" hint="From the risk questionnaire on the change plan" defaultOpen={!!state.riskLevel}>
+            <FilterOptions options={RISK_LEVEL_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(o.color) }))} value={state.riskLevel} onChange={(v) => set({ riskLevel: v as string | undefined })} />
+          </FilterGroup>
+          <FilterGroup label="Window" hint="The scheduled start of the change" defaultOpen={!!(state.scheduledFrom || state.scheduledTo)}>
+            <FilterDateRange from={state.scheduledFrom} to={state.scheduledTo} onChange={(r) => set({ scheduledFrom: r.from, scheduledTo: r.to })} />
+          </FilterGroup>
+        </>
+      )}
       <FilterGroup label="Domain" defaultOpen={!!state.domain}>
         <FilterOptions options={DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABELS[d] ?? d }))} value={state.domain} onChange={(v) => set({ domain: v as string | undefined })} />
       </FilterGroup>
@@ -452,7 +480,13 @@ export default function TicketListPage() {
         count={total !== undefined ? `${fmtNumber(total)} ${total === 1 ? 'ticket' : 'tickets'}` : undefined}
         quick={
           <>
-            <Segmented size="sm" options={TABS.map((t) => ({ value: t.key, label: t.label, count: t.key === 'all' ? openTotal : (byType[t.key] ?? 0) }))} value={tab} onChange={(v) => set({ type: v === 'all' ? undefined : v })} />
+            <Segmented
+              size="sm"
+              options={TABS.map((t) => ({ value: t.key, label: t.label, count: t.key === 'all' ? openTotal : (byType[t.key] ?? 0) }))}
+              value={tab}
+              // Leaving the Changes tab drops its pills' values too: hidden pills must not keep filtering the other tabs.
+              onChange={(v) => set(v === 'change' ? { type: v } : { type: v === 'all' ? undefined : v, changeType: undefined, riskLevel: undefined, scheduledFrom: undefined, scheduledTo: undefined })}
+            />
             <span className="hidden sm:block h-5 w-px bg-[var(--border)] mx-0.5" aria-hidden />
             {STATUS_CATEGORIES.map((c) => (
               <FilterChip key={c.key} active={cats.includes(c.key)} onClick={() => toggleCat(c.key)} dot={dotClass(TICKET_CATEGORY_COLORS[c.key])} count={s?.byStatusCategory?.[c.key] ?? 0}>

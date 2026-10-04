@@ -144,7 +144,35 @@ export interface PortalTicket {
   timeline: TimelineEntry[];
   attachments: { items: PortalAttachment[]; canUpload: boolean };
   actions: { comment: boolean; reopen: boolean; confirmClose: boolean; approve: boolean; reopenWindowDays: number };
+  /** The planned window of a change ticket; nothing else of the change reaches the portal. */
+  change?: { changeType: string; scheduledStart: string | null; scheduledEnd: string | null; actualStart: string | null; actualEnd: string | null; downtimeExpectedMinutes: number | null } | null;
 }
+
+/** Customer-facing state of a planned change (never the internal workflow status). */
+export type PortalChangeState = 'planned' | 'approved' | 'in_progress' | 'implemented' | 'cancelled';
+export interface PortalChange {
+  id: string;
+  number: string;
+  title: string;
+  changeType: string;
+  state: PortalChangeState;
+  outcome: 'failed' | 'backed_out' | null;
+  scheduledStart: string;
+  scheduledEnd: string | null;
+  actualStart: string | null;
+  actualEnd: string | null;
+  downtimeExpectedMinutes: number | null;
+  service: { id: string; name: string | null } | null;
+  businessServices: { id: string; name: string }[];
+  isMine: boolean;
+}
+export interface PortalChanges {
+  window: { from: string; to: string };
+  items: PortalChange[];
+  counts: { upcoming: number; inProgress: number; past: number };
+  preview: boolean;
+}
+export type PortalChangesParams = { state?: 'upcoming' | 'in_progress' | 'past' | 'all'; serviceId?: string; customerId?: string };
 
 export interface PortalCatalogItem {
   id: string;
@@ -456,6 +484,7 @@ export const pk = {
   assetsOverview: ['portal', 'assets', 'overview'] as const,
   cis: (params: Record<string, unknown>) => ['portal', 'cis', params] as const,
   maintenance: ['portal', 'maintenance'] as const,
+  changes: (params: Record<string, unknown>) => ['portal', 'changes', params] as const,
   users: (params: Record<string, unknown>) => ['portal', 'users', params] as const,
 };
 
@@ -477,6 +506,7 @@ export const portalApi = {
   assetsOverview: () => get<PortalAssetsOverview>('/portal/assets/overview'),
   cis: (params: Record<string, unknown>) => get<Paginated<PortalCi>>('/portal/cis', params),
   maintenance: () => get<PortalMaintenance>('/portal/maintenance'),
+  changes: (params: PortalChangesParams = {}) => get<PortalChanges>('/portal/changes', params as Record<string, unknown>),
   acknowledge: (visitId: string, body: { name: string; title?: string | null; notes?: string | null; rating?: number | null }) => post<PortalVisit>(`/portal/visits/${visitId}/acknowledge`, body),
   users: (params: Record<string, unknown>) => get<Paginated<PortalUser>>('/portal/users', params),
   createUser: (body: Record<string, unknown>) => post<{ user: PortalUser; temporaryPassword: string | null }>('/portal/users', body),

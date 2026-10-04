@@ -60,6 +60,7 @@ Customer ─┬─ Sites ─┬─ Assets ──── CIs ──┬── CI Re
 * **Scope** is a classification (`in_scope`, `out_of_scope`, `unknown`) computed from the customer's contracts, services, sites, ticket category and CI type and recorded on the ticket. It is informational: nothing in the ticket workflow is blocked by scope.
 * **SLA**: policies contain targets per ticket type × priority × metric (acknowledgement, response, restoration, resolution). Each ticket gets one `ticket_slas` row per applicable metric with the calendar snapshot used, `due_at`, pause accounting and an event trail. Policy selection order: catalog item → contract service override → contract → service default → platform default.
 * **Assets vs CIs**: assets hold the financial/lifecycle view (purchase, warranty, AMC, location, ownership); CIs hold the operational/relationship view. They may link 1:1 but either can exist alone.
+* **Changes**: `change_details` extends a change ticket (window, plans, risk answers and score, template, CAB meeting); `change_templates` (standard changes), `change_risk_questions`, `change_blackout_windows` (global or per customer) and `cab_meetings` / `cab_meeting_items` are the change-management tables; conflicts are computed, never stored (an activity records them); `change-window-reminder` runs hourly on the `sla` queue. The three definition tables carry no customer column and are fenced to staff by an explicit row-level policy; the portal reads planned changes from `tickets` and `change_details` only.
 
 ## 5. Scale and reliability
 

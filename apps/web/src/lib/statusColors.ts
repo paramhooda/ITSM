@@ -21,6 +21,11 @@ export const ANNOUNCEMENT_TYPE_COLORS: Record<string, string> = { info: 'blue', 
 export const APPROVAL_STATUS_COLORS: Record<string, string> = { pending: 'amber', waiting: 'slate', approved: 'green', rejected: 'red', skipped: 'gray', superseded: 'gray', not_required: 'green' };
 /** Change risk from the questionnaire (low/medium/high) and the CAB decision on an agenda item. */
 export const CHANGE_RISK_COLORS: Record<string, string> = { low: 'green', medium: 'amber', high: 'red' };
+/** CAB meetings (scheduled → closed) and the board's decision on an agenda item. */
+export const CAB_STATUS_COLORS: Record<string, string> = { scheduled: 'blue', in_progress: 'amber', closed: 'green', cancelled: 'slate' };
+export const CAB_DECISION_COLORS: Record<string, string> = { pending: 'slate', approved: 'green', rejected: 'red', deferred: 'amber' };
+/** The customer-facing state of a planned change on the portal. */
+export const PORTAL_CHANGE_STATE_COLORS: Record<string, string> = { planned: 'slate', approved: 'teal', in_progress: 'blue', implemented: 'green', cancelled: 'gray' };
 
 export const VISIT_STATUS_COLORS: Record<string, string> = { requested: 'slate', scheduled: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'gray' };
 export const PM_STATUS_COLORS: Record<string, string> = { planned: 'slate', scheduled: 'blue', rescheduled: 'indigo', completed: 'green', missed: 'red', cancelled: 'gray' };

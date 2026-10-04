@@ -78,6 +78,10 @@ export const ciListQuery = paginationSchema.extend({
 });
 export type CiListQuery = z.infer<typeof ciListQuery>;
 
+/** Planned changes on the organisation's services: upcoming by default, or in progress, past (implemented or cancelled) or everything. */
+export const plannedChangesQuery = previewQuery.extend({ state: z.enum(['upcoming', 'in_progress', 'past', 'all']).default('upcoming'), serviceId: uuid.optional() });
+export type PlannedChangesQuery = z.infer<typeof plannedChangesQuery>;
+
 export const maintenanceQuery = previewQuery.extend({ pastDays: z.coerce.number().int().min(1).max(365).default(90), futureDays: z.coerce.number().int().min(1).max(365).default(90) });
 
 export const acknowledgeBody = z.object({

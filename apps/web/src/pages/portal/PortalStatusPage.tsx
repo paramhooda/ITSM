@@ -2,7 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Activity, CalendarCheck, Wrench, Siren, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
 import { PageHeader, Badge, EmptyState, LoadingBlock, ErrorBlock } from '@/components/ui';
+import { ModuleNav } from '@/components/ui/ModuleNav';
 import { Panel } from '@/components/tickets/Panel';
+import { PORTAL_STATUS_MODULES } from '@/layouts/modules';
 import { fmtDate, fmtDateTime, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { SERVICE_HEALTH_COLORS } from '@/lib/statusColors';
@@ -72,6 +74,7 @@ export default function PortalStatusPage() {
   return (
     <div className="flex flex-col gap-5">
       <PageHeader title="Service status" subtitle="How your services are doing right now, what is planned, and what we have announced" />
+      <ModuleNav items={PORTAL_STATUS_MODULES} />
       {q.isLoading && <LoadingBlock label="Checking your services…" />}
       {q.isError && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
       {d && (
@@ -96,7 +99,7 @@ export default function PortalStatusPage() {
                   <div className="divide-y divide-[var(--border)]">{d.services.map((s) => <ServiceRow key={s.id} s={s} reasons={s.reasons.map((r) => r.text)} />)}</div>
                 )}
               </Panel>
-              <Panel title={<><CalendarCheck className="h-4 w-4 text-subtle" /> Planned maintenance · next 14 days</>}>
+              <Panel title={<><CalendarCheck className="h-4 w-4 text-subtle" /> Planned maintenance · next 14 days</>} actions={<Link to="/portal/changes" className="text-[12.5px] text-brand-700 hover:underline" data-testid="see-planned-changes">See all planned changes</Link>}>
                 {d.maintenance.length === 0 ? <div className="text-[13px] text-muted py-2">Nothing planned in the next two weeks.</div> : <div className="divide-y divide-[var(--border)]">{d.maintenance.map((m) => <MaintenanceRow key={`${m.kind}-${m.id}`} m={m} />)}</div>}
               </Panel>
             </div>

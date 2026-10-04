@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { paginationSchema } from '@/core/pagination';
+import { boolQ } from '@/modules/tickets/schemas';
 
 const uuid = z.string().uuid();
 const when = z.coerce.date();
@@ -54,6 +55,11 @@ export type RiskQuestionPatch = z.infer<typeof riskQuestionPatchSchema>;
 export const riskAnswersSchema = z.record(key, key);
 export type RiskAnswers = z.infer<typeof riskAnswersSchema>;
 export const assessBodySchema = z.object({ answers: riskAnswersSchema });
+export const thresholdsBodySchema = z
+  .object({ medium: z.number().int().min(1).max(99), high: z.number().int().min(2).max(100) })
+  .refine((t) => t.high > t.medium, { message: 'High must be above medium', path: ['high'] });
+export type ThresholdsBody = z.infer<typeof thresholdsBodySchema>;
+export const reorderSchema = z.object({ ids: z.array(uuid).min(1).max(500) });
 
 // ---------------------------------------------------------------- templates
 
@@ -80,7 +86,17 @@ export const templateBodySchema = z.object({
 export type TemplateBody = z.infer<typeof templateBodySchema>;
 export const templatePatchSchema = templateBodySchema.partial();
 export type TemplatePatch = z.infer<typeof templatePatchSchema>;
-export const templatesQuerySchema = z.object({ customerId: uuid.optional(), all: z.coerce.boolean().optional() });
+export const templatesQuerySchema = z.object({
+  customerId: uuid.optional(),
+  all: boolQ,
+  q: z.string().max(200).optional(),
+  categoryId: uuid.optional(),
+  serviceId: uuid.optional(),
+  changeType: z.enum(CHANGE_TYPES).optional(),
+  /** Only templates that skip approval (pre-approved standard changes). */
+  preApproved: boolQ,
+});
+export type TemplatesQuery = z.infer<typeof templatesQuerySchema>;
 
 // ---------------------------------------------------------------- calendar and conflicts
 
@@ -111,6 +127,10 @@ export const cabMeetingBodySchema = z.object({
   title: z.string().trim().min(1).max(200),
   scheduledAt: when,
   chairUserId: uuid.nullable().optional(),
+  /** Room, or the bridge link. */
+  location: z.string().trim().max(300).nullable().optional(),
+  /** Staff expected at the table. */
+  attendeeUserIds: z.array(uuid).max(50).optional(),
   status: z.enum(CAB_STATUSES).optional(),
   minutes: z.string().trim().max(20000).nullable().optional(),
   /** Change tickets to put on the agenda at creation. */
@@ -130,3 +150,12 @@ export const cabDecideSchema = z.object({
   applyToApproval: z.boolean().optional(),
 });
 export type CabDecideBody = z.infer<typeof cabDecideSchema>;
+/** Changes awaiting the board: a pending CAB step (or pending approval) and no open agenda slot. */
+export const cabQueueSchema = z.object({ q: z.string().max(200).optional(), customerId: uuid.optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
+export type CabQueueQuery = z.infer<typeof cabQueueSchema>;
+export const cabItemPatchSchema = z.object({ notes: z.string().trim().max(2000).nullable() });
+export type CabItemPatch = z.infer<typeof cabItemPatchSchema>;
+export const cabCancelSchema = z.object({ reason: z.string().trim().max(1000).nullable().optional() });
+export type CabCancel = z.infer<typeof cabCancelSchema>;
+export const cabReorderSchema = z.object({ itemIds: z.array(uuid).min(1).max(200) });
+export type CabReorder = z.infer<typeof cabReorderSchema>;

@@ -1,12 +1,13 @@
 import { useMemo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays, AlertTriangle, Ban, ListChecks } from 'lucide-react';
-import { PageHeader, ErrorBlock, EmptyState, ListShell, FilterGroup, FilterSelect, FilterOptions, type AppliedFilter } from '@/components/ui';
+import { CalendarDays, AlertTriangle, Ban, ListChecks, Gavel, Rocket } from 'lucide-react';
+import { PageHeader, ErrorBlock, EmptyState, ListShell, FilterGroup, FilterSelect, FilterOptions, Button, type AppliedFilter } from '@/components/ui';
 import { KpiGrid } from '@/components/dashboards/KpiGrid';
 import { Segmented } from '@/components/dashboards/Panel';
 import { useListState } from '@/hooks/useListState';
 import { useCustomersLookup } from '@/hooks/useLookups';
+import { useAuthStore } from '@/stores/auth';
 import { CHANGE_MODULES } from '@/layouts/modules';
 import { startOfWeek, addDays, ymd } from '@/components/field/VisitCalendar';
 import { ChangeCalendar, startOfMonth, addMonths, type CalendarView } from '@/components/changes/ChangeCalendar';
@@ -25,6 +26,7 @@ const FILTER_KEYS = ['customerId', 'type', 'conflicts'];
  */
 export default function ChangeCalendarPage() {
   const navigate = useNavigate();
+  const can = useAuthStore((s) => s.can);
   const { state, set } = useListState({ view: 'week' });
   const view: CalendarView = state.view === 'month' ? 'month' : 'week';
   const anchor = useMemo(() => (state.day ? new Date(`${state.day}T00:00:00`) : new Date()), [state.day]);
@@ -68,7 +70,12 @@ export default function ChangeCalendarPage() {
       <PageHeader
         title="Change calendar"
         subtitle="Every scheduled change window, the clashes between them and the blackout windows in force"
-        actions={<Segmented value={view} onChange={(v) => set({ view: v === 'month' ? 'month' : undefined })} options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]} />}
+        actions={
+          <>
+            {can('tickets:create') && <Button variant="outline" icon={<Rocket className="h-4 w-4" />} onClick={() => navigate('/operations/change-catalog')}>Raise a standard change</Button>}
+            <Segmented value={view} onChange={(v) => set({ view: v === 'month' ? 'month' : undefined })} options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]} />
+          </>
+        }
       />
       {q.isError && <ErrorBlock error={q.error} retry={() => q.refetch()} />}
       <ListShell
@@ -81,18 +88,19 @@ export default function ChangeCalendarPage() {
         insights={
           data && (
             <KpiGrid
-              columns={3}
+              columns={4}
               items={[
                 { label: view === 'week' ? 'Changes this week' : 'Changes this month', value: items.length, icon: <CalendarDays className="h-4 w-4" />, hint: `${data.items.filter((c) => c.changeType === 'emergency').length} emergency` },
                 { label: 'With conflicts', value: data.items.filter((c) => c.conflicts.length).length, tone: data.counts.conflicts ? 'warn' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'shared systems, same service or a blackout', onClick: () => set({ conflicts: state.conflicts === 'true' ? undefined : 'true' }), active: state.conflicts === 'true' },
                 { label: 'Blackout windows', value: data.counts.blackouts, tone: data.counts.blackouts ? 'warn' : 'default', icon: <Ban className="h-4 w-4" />, hint: 'change freezes in the period', to: '/admin/change-blackouts' },
+                { label: 'CAB meetings', value: data.counts.meetings ?? 0, icon: <Gavel className="h-4 w-4" />, hint: `${(data.meetings ?? []).reduce((n, m) => n + m.pending, 0)} changes awaiting a decision`, to: '/operations/cab' },
               ]}
             />
           )
         }
         count={data ? `${items.length} change${items.length === 1 ? '' : 's'}` : undefined}
       >
-        <ChangeCalendar view={view} anchor={anchor} items={items} blackouts={data?.blackouts ?? []} loading={q.isFetching} onNavigate={(d) => set({ day: ymd(d) })} onSelect={(id) => navigate(`/tickets/${id}?tab=plan`)} />
+        <ChangeCalendar view={view} anchor={anchor} items={items} blackouts={data?.blackouts ?? []} meetings={data?.meetings ?? []} loading={q.isFetching} onNavigate={(d) => set({ day: ymd(d) })} onSelect={(id) => navigate(`/tickets/${id}?tab=plan`)} />
         {data && data.items.length === 0 && <EmptyState icon={<ListChecks className="h-5 w-5" />} title="No change has a window in this period" description="Set the scheduled start and end on a change's plan tab and it appears here, with any clash marked." />}
       </ListShell>
     </div>

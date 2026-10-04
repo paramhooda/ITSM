@@ -23,7 +23,10 @@ import { listCisFull } from '@/modules/cmdb/service';
 import { slaCompliance } from '@/modules/sla/policies';
 import * as iam from '@/modules/iam/service';
 import { acknowledgeVisit } from '@/modules/field/service';
-import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PortalRoleKey, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
+import { getSetting } from '@/modules/config/service';
+import { plannedChangeState } from '@/modules/changes/service';
+import { windowOf } from '@/modules/changes/conflicts';
+import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalRoleKey, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
 
 /**
  * Customer portal: a thin, customer-safe facade over the module services.
@@ -316,6 +319,8 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     lastActivityAt: t.lastActivityAt,
+    // The planned window of a change; nothing else of the change (plans, risk, CAB, conflicts) reaches the portal.
+    change: t.change ? { changeType: t.change.changeType, scheduledStart: t.change.scheduledStart, scheduledEnd: t.change.scheduledEnd, actualStart: t.change.actualStart, actualEnd: t.change.actualEnd, downtimeExpectedMinutes: t.change.downtimeExpectedMinutes } : null,
     timeline: timelineItems,
     attachments: { items: attachments, canUpload: canAct },
     actions: {
@@ -611,6 +616,63 @@ export async function portalCis(ctx: Ctx, q: CiListQuery) {
     page: res.page,
     pageSize: res.pageSize,
   };
+}
+
+// ---------------------------------------------------------------- planned changes
+
+/**
+ * Changes scheduled on the organisation's services: the next
+ * `changes.portal_horizon_days` days and the last 30. Each item carries the
+ * window, a customer-facing state and the services touched, nothing of the
+ * plan, the risk, the CAB or the clashes.
+ */
+export async function portalPlannedChanges(ctx: Ctx, q: PlannedChangesQuery) {
+  const scope = resolvePortalCustomer(ctx, 'portal:status', q.customerId);
+  const cid = scope.customerId;
+  const horizon = Math.max(7, Math.min(365, Number(await getSetting(ctx, 'changes.portal_horizon_days', 60)) || 60));
+  const now = new Date();
+  const from = new Date(now.getTime() - 30 * 86_400_000);
+  const to = new Date(now.getTime() + horizon * 86_400_000);
+  const cd = schema.changeDetails;
+  const st = alias(schema.configOptions, 'portal_chg_st');
+  const conds: SQL[] = [eq(T.customerId, cid), eq(T.type, 'change'), sql`${cd.scheduledStart} IS NOT NULL`, sql`${cd.scheduledStart} < ${to}`, sql`coalesce(${cd.scheduledEnd}, ${cd.scheduledStart} + interval '1 hour') > ${from}`];
+  if (q.serviceId) conds.push(eq(T.serviceId, q.serviceId));
+  const rows = await ctx.tx
+    .select({ id: T.id, number: T.number, title: T.title, serviceId: T.serviceId, serviceName: schema.services.name, requesterUserId: T.requesterUserId, approvalStatus: T.approvalStatus, statusKey: st.key, statusCategory: st.statusCategory, changeType: cd.changeType, scheduledStart: cd.scheduledStart, scheduledEnd: cd.scheduledEnd, actualStart: cd.actualStart, actualEnd: cd.actualEnd, downtimeExpectedMinutes: cd.downtimeExpectedMinutes, pirOutcome: cd.pirOutcome })
+    .from(cd)
+    .innerJoin(T, eq(T.id, cd.ticketId))
+    .leftJoin(st, eq(st.id, T.statusId))
+    .leftJoin(schema.services, eq(schema.services.id, T.serviceId))
+    .where(and(...conds))
+    .orderBy(asc(cd.scheduledStart))
+    .limit(500);
+  const ids = rows.map((r) => r.id);
+  const bsRows = ids.length
+    ? await ctx.tx
+        .select({ ticketId: schema.ticketCis.ticketId, id: schema.cis.id, name: schema.cis.name })
+        .from(schema.ticketCis)
+        .innerJoin(schema.cis, eq(schema.cis.id, schema.ticketCis.ciId))
+        .innerJoin(schema.ciTypes, eq(schema.ciTypes.id, schema.cis.typeId))
+        .where(and(inArray(schema.ticketCis.ticketId, ids), eq(schema.ciTypes.key, 'business_service')))
+    : [];
+  const all = rows.map((r) => {
+    const { state, outcome } = plannedChangeState({ statusKey: r.statusKey, statusCategory: r.statusCategory, approvalStatus: r.approvalStatus, pirOutcome: r.pirOutcome, start: r.scheduledStart!, end: r.scheduledEnd }, now);
+    const w = windowOf(r.scheduledStart!, r.scheduledEnd);
+    const bucket: 'upcoming' | 'in_progress' | 'past' = state === 'in_progress' ? 'in_progress' : state === 'implemented' || state === 'cancelled' || w.end.getTime() <= now.getTime() ? 'past' : 'upcoming';
+    return {
+      bucket,
+      item: {
+        id: r.id, number: r.number, title: r.title, changeType: r.changeType, state, outcome,
+        scheduledStart: r.scheduledStart, scheduledEnd: r.scheduledEnd, actualStart: r.actualStart, actualEnd: r.actualEnd, downtimeExpectedMinutes: r.downtimeExpectedMinutes,
+        service: r.serviceId ? { id: r.serviceId, name: r.serviceName } : null,
+        businessServices: bsRows.filter((b) => b.ticketId === r.id).map((b) => ({ id: b.id, name: b.name })),
+        isMine: !scope.preview && r.requesterUserId === ctx.user.id,
+      },
+    };
+  });
+  const counts = { upcoming: all.filter((x) => x.bucket === 'upcoming').length, inProgress: all.filter((x) => x.bucket === 'in_progress').length, past: all.filter((x) => x.bucket === 'past').length };
+  const items = (q.state === 'all' ? all : all.filter((x) => x.bucket === q.state)).map((x) => x.item);
+  return { window: { from, to }, items, counts, preview: scope.preview };
 }
 
 // ---------------------------------------------------------------- maintenance & visits

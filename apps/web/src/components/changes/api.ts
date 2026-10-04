@@ -1,4 +1,4 @@
-import { get, post, patch, del } from '@/api/client';
+import { get, post, put, patch, del } from '@/api/client';
 
 /** API shapes of the change management module (apps/api/src/modules/changes). */
 
@@ -49,12 +49,22 @@ export interface Blackout {
   createdAt: string;
   updatedAt: string;
 }
+/** A CAB meeting in the calendar period, drawn as a gavel pill on its day. */
+export interface CalendarMeeting {
+  id: string;
+  title: string;
+  scheduledAt: string;
+  status: CabStatus | string;
+  items: number;
+  pending: number;
+}
 export interface Calendar {
   from: string;
   to: string;
   items: CalendarChange[];
   blackouts: Blackout[];
-  counts: { changes: number; conflicts: number; blackouts: number };
+  meetings: CalendarMeeting[];
+  counts: { changes: number; conflicts: number; blackouts: number; meetings: number };
 }
 
 export interface RiskOption {
@@ -113,8 +123,21 @@ export interface ChangeTemplate {
   skipApproval: boolean;
   customerIds: string[];
   isActive: boolean;
+  /** How often the template was raised: all time, the last 90 days, and when last. */
+  usageCount: number;
+  usage90d: number;
+  lastUsedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+export interface TemplatesQuery {
+  customerId?: string;
+  all?: boolean;
+  q?: string;
+  categoryId?: string;
+  serviceId?: string;
+  changeType?: string;
+  preApproved?: boolean;
 }
 
 export interface CabMeeting {
@@ -123,6 +146,10 @@ export interface CabMeeting {
   scheduledAt: string;
   chairUserId: string | null;
   chairName: string | null;
+  /** Room, or the bridge link. */
+  location: string | null;
+  attendeeUserIds: string[];
+  attendees: { id: string; name: string }[];
   status: CabStatus;
   minutes: string | null;
   closedAt: string | null;
@@ -161,6 +188,8 @@ export interface CabMeetingDetail extends Omit<CabMeeting, 'items'> {
 }
 /** The decide call also says whether the ticket's approval step was decided with it. */
 export type CabDecideResult = CabMeetingDetail & { approval: { applied: boolean; note: string | null } };
+/** A change awaiting the board: a pending CAB step (or approval) and no open agenda; it may have no window yet. */
+export type CabQueueItem = Omit<CalendarChange, 'scheduledStart' | 'conflicts'> & { scheduledStart: string | null; pendingStep: { id: string; stepName: string | null; step: number } | null };
 
 export const changeKeys = {
   all: ['changes'] as const,
@@ -172,6 +201,7 @@ export const changeKeys = {
   templates: (params: Record<string, unknown> = {}) => ['changes', 'templates', params] as const,
   meetings: (params: Record<string, unknown>) => ['cab', 'meetings', params] as const,
   meeting: (id: string) => ['cab', 'meeting', id] as const,
+  queue: (params: Record<string, unknown> = {}) => ['cab', 'queue', params] as const,
 };
 
 export const changesApi = {
@@ -179,6 +209,8 @@ export const changesApi = {
   previewConflicts: (body: { ticketId?: string; customerId: string; scheduledStart: string; scheduledEnd?: string; changeType?: string; ciIds?: string[]; primaryCiId?: string | null }) => post<{ window: { start: string; end: string }; conflicts: Conflict[] }>('/changes/conflicts', body),
   conflicts: (ticketId: string) => get<{ window: { start: string; end: string } | null; conflicts: Conflict[] }>(`/changes/${ticketId}/conflicts`),
   questionnaire: () => get<{ questions: RiskQuestion[]; thresholds: RiskThresholds }>('/changes/risk-questionnaire'),
+  updateThresholds: (body: RiskThresholds) => put<{ thresholds: RiskThresholds }>('/changes/risk-thresholds', body),
+  reorderQuestions: (ids: string[]) => post<{ items: RiskQuestion[] }>('/changes/risk-questions/reorder', { ids }),
   assessRisk: (ticketId: string, answers: Record<string, string>) => post<RiskResult>(`/changes/${ticketId}/assess-risk`, { answers }),
   blackouts: (params: Record<string, unknown> = {}) => get<{ items: Blackout[] }>('/changes/blackouts', params),
   createBlackout: (body: Record<string, unknown>) => post<Blackout>('/changes/blackouts', body),
@@ -188,15 +220,19 @@ export const changesApi = {
   createQuestion: (body: Record<string, unknown>) => post<RiskQuestion>('/changes/risk-questions', body),
   updateQuestion: (id: string, body: Record<string, unknown>) => patch<RiskQuestion>(`/changes/risk-questions/${id}`, body),
   deleteQuestion: (id: string) => del(`/changes/risk-questions/${id}`),
-  templates: (params: { customerId?: string; all?: boolean } = {}) => get<{ items: ChangeTemplate[] }>('/changes/templates', params),
+  templates: (params: TemplatesQuery = {}) => get<{ items: ChangeTemplate[] }>('/changes/templates', params as Record<string, unknown>),
   createTemplate: (body: Record<string, unknown>) => post<ChangeTemplate>('/changes/templates', body),
   updateTemplate: (id: string, body: Record<string, unknown>) => patch<ChangeTemplate>(`/changes/templates/${id}`, body),
   deleteTemplate: (id: string) => del(`/changes/templates/${id}`),
   meetings: (params: Record<string, unknown>) => get<{ items: CabMeeting[]; total: number; page: number; pageSize: number }>('/cab/meetings', params),
   meeting: (id: string) => get<CabMeetingDetail>(`/cab/meetings/${id}`),
-  createMeeting: (body: { title: string; scheduledAt: string; chairUserId?: string | null; ticketIds?: string[] }) => post<CabMeetingDetail>('/cab/meetings', body),
+  queue: (params: { q?: string; customerId?: string; limit?: number } = {}) => get<{ items: CabQueueItem[] }>('/cab/queue', params as Record<string, unknown>),
+  createMeeting: (body: { title: string; scheduledAt: string; chairUserId?: string | null; location?: string | null; attendeeUserIds?: string[]; ticketIds?: string[] }) => post<CabMeetingDetail>('/cab/meetings', body),
   updateMeeting: (id: string, body: Record<string, unknown>) => patch<CabMeetingDetail>(`/cab/meetings/${id}`, body),
+  cancelMeeting: (id: string, body: { reason?: string | null } = {}) => post<CabMeetingDetail>(`/cab/meetings/${id}/cancel`, body),
   addItem: (id: string, body: { ticketId: string; notes?: string | null }) => post<CabMeetingDetail>(`/cab/meetings/${id}/items`, body),
+  reorderItems: (id: string, itemIds: string[]) => post<CabMeetingDetail>(`/cab/meetings/${id}/items/reorder`, { itemIds }),
+  updateItem: (id: string, itemId: string, body: { notes: string | null }) => patch<CabMeetingDetail>(`/cab/meetings/${id}/items/${itemId}`, body),
   removeItem: (id: string, itemId: string) => del<CabMeetingDetail>(`/cab/meetings/${id}/items/${itemId}`),
   decideItem: (id: string, itemId: string, body: { decision: 'approved' | 'rejected' | 'deferred'; notes?: string | null; applyToApproval?: boolean }) => post<CabDecideResult>(`/cab/meetings/${id}/items/${itemId}/decide`, body),
   closeMeeting: (id: string, minutes: string | null) => post<CabMeetingDetail>(`/cab/meetings/${id}/close`, { minutes }),

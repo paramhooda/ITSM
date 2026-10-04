@@ -175,8 +175,10 @@ registerReport({
   async run(ctx, p): Promise<ReportResult> {
     const list = await rows<Record<string, unknown>>(ctx, sql`
       SELECT t.id, t.number, t.title, cu.name AS customer, cd.change_type, rk.label AS risk, st.label AS status, st.status_category, t.approval_status,
-        cd.scheduled_start, cd.scheduled_end, cd.actual_start, cd.actual_end, cd.downtime_expected_minutes, asg.name AS assignee, sv.name AS service, cat.label AS category
-      FROM tickets t JOIN change_details cd ON cd.ticket_id = t.id LEFT JOIN config_options rk ON rk.id = cd.risk_id ${ticketJoins}
+        cd.scheduled_start, cd.scheduled_end, cd.actual_start, cd.actual_end, cd.downtime_expected_minutes, asg.name AS assignee, sv.name AS service, cat.label AS category,
+        cd.risk_level, cd.risk_score, tpl.name AS template, cm.title AS cab_meeting, ci.decision AS cab_decision
+      FROM tickets t JOIN change_details cd ON cd.ticket_id = t.id LEFT JOIN config_options rk ON rk.id = cd.risk_id
+        LEFT JOIN change_templates tpl ON tpl.id = cd.template_id LEFT JOIN cab_meetings cm ON cm.id = cd.cab_meeting_id LEFT JOIN cab_meeting_items ci ON ci.meeting_id = cm.id AND ci.ticket_id = t.id ${ticketJoins}
       WHERE t.type = 'change' ${rangeCond(sql`coalesce(cd.scheduled_start, t.created_at)`, p.from, p.to)} ${customerCond(p.customerId)} ${socCond(ctx)}
       ORDER BY cd.scheduled_start NULLS LAST, t.created_at ${limitSql()}`);
     const weeks = new Map<string, number>();
@@ -188,7 +190,7 @@ registerReport({
       weeks.set(k, (weeks.get(k) ?? 0) + 1);
     }
     return {
-      columns: [col('number', 'Number'), col('title', 'Title'), col('customer', 'Customer'), col('change_type', 'Type'), col('risk', 'Risk'), col('status', 'Status'), col('approval_status', 'Approval'), col('scheduled_start', 'Scheduled start', 'datetime'), col('scheduled_end', 'Scheduled end', 'datetime'), col('downtime_expected_minutes', 'Downtime', 'minutes'), col('assignee', 'Assignee'), col('service', 'Service')],
+      columns: [col('number', 'Number'), col('title', 'Title'), col('customer', 'Customer'), col('change_type', 'Type'), col('risk', 'Risk'), col('status', 'Status'), col('approval_status', 'Approval'), col('scheduled_start', 'Scheduled start', 'datetime'), col('scheduled_end', 'Scheduled end', 'datetime'), col('downtime_expected_minutes', 'Downtime', 'minutes'), col('assignee', 'Assignee'), col('service', 'Service'), col('risk_level', 'Risk level'), col('risk_score', 'Risk score', 'number'), col('template', 'Template'), col('cab_meeting', 'CAB meeting'), col('cab_decision', 'CAB decision')],
       rows: list,
       summary: [
         { label: 'Changes', value: list.length },
@@ -196,8 +198,55 @@ registerReport({
         { label: 'Standard', value: list.filter((r) => r.change_type === 'standard').length },
         { label: 'Implemented', value: list.filter((r) => r.status_category === 'resolved' || r.status_category === 'closed').length },
         { label: 'Awaiting approval', value: list.filter((r) => r.approval_status === 'pending').length },
+        { label: 'High risk', value: list.filter((r) => r.risk_level === 'high').length },
+        { label: 'From a template', value: list.filter((r) => r.template != null).length },
       ],
       charts: [{ type: 'bar', title: 'Scheduled changes per week', data: [...weeks].sort().map(([label, count]) => ({ label, count })), x: 'label', y: 'count' }],
+    };
+  },
+});
+
+// ---------------------------------------------------------------- cab_decisions
+registerReport({
+  key: 'cab_decisions',
+  name: 'CAB decisions',
+  description: 'Every decision taken at CAB meetings in the period, by meeting, with the deferred and still-pending items.',
+  category: 'tickets',
+  permissions: ['reports:run'],
+  portal: false,
+  parameters: [customerParam, dateRangeParam, { key: 'decision', label: 'Decision', type: 'select', options: [{ value: '', label: 'All' }, { value: 'approved', label: 'Approved' }, { value: 'rejected', label: 'Rejected' }, { value: 'deferred', label: 'Deferred' }, { value: 'pending', label: 'Pending' }] }],
+  defaultDateRange: 'last_30_days',
+  async run(ctx, p): Promise<ReportResult> {
+    const decision = strParam(p, 'decision');
+    const list = await rows<Record<string, unknown>>(ctx, sql`
+      SELECT m.id AS meeting_id, m.title AS meeting, m.scheduled_at, m.status AS meeting_status, ch.name AS chair, t.id, t.number, t.title, cu.name AS customer, cd.change_type, cd.risk_level,
+        i.decision, d.name AS decided_by, i.decided_at, i.notes
+      FROM cab_meeting_items i JOIN cab_meetings m ON m.id = i.meeting_id JOIN tickets t ON t.id = i.ticket_id
+        LEFT JOIN users d ON d.id = i.decided_by LEFT JOIN users ch ON ch.id = m.chair_user_id LEFT JOIN customers cu ON cu.id = t.customer_id LEFT JOIN change_details cd ON cd.ticket_id = t.id
+      WHERE true ${rangeCond(sql`m.scheduled_at`, p.from, p.to)} ${customerCond(p.customerId)} ${socCond(ctx)} ${decision ? sql`AND i.decision = ${decision}` : sql``}
+      ORDER BY m.scheduled_at DESC, i.sort_order, i.created_at ${limitSql()}`);
+    const weeks = new Map<string, { approved: number; rejected: number; deferred: number }>();
+    for (const r of list) {
+      const d = new Date(r.scheduled_at as string);
+      const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7)));
+      const k = monday.toISOString().slice(0, 10);
+      const w = weeks.get(k) ?? { approved: 0, rejected: 0, deferred: 0 };
+      if (r.decision === 'approved' || r.decision === 'rejected' || r.decision === 'deferred') w[r.decision as 'approved' | 'rejected' | 'deferred']++;
+      weeks.set(k, w);
+    }
+    const by = (v: string) => list.filter((r) => r.decision === v).length;
+    return {
+      columns: [col('meeting', 'Meeting'), col('scheduled_at', 'Scheduled', 'datetime'), col('chair', 'Chair'), col('number', 'Number'), col('title', 'Title'), col('customer', 'Customer'), col('change_type', 'Type'), col('risk_level', 'Risk level'), col('decision', 'Decision'), col('decided_by', 'Decided by'), col('decided_at', 'Decided at', 'datetime'), col('notes', 'Notes')],
+      rows: list,
+      summary: [
+        { label: 'Meetings', value: new Set(list.map((r) => String(r.meeting_id))).size },
+        { label: 'Items', value: list.length },
+        { label: 'Approved', value: by('approved') },
+        { label: 'Rejected', value: by('rejected') },
+        { label: 'Deferred', value: by('deferred') },
+        { label: 'Pending', value: by('pending') },
+      ],
+      charts: [{ type: 'bar', title: 'Decisions per week', data: [...weeks].sort().map(([label, w]) => ({ label, ...w })), x: 'label', y: ['approved', 'rejected', 'deferred'], labels: { approved: 'Approved', rejected: 'Rejected', deferred: 'Deferred' } }],
     };
   },
 });

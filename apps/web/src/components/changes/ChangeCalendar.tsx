@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
-import { ChevronLeft, ChevronRight, AlertTriangle, Ban } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, AlertTriangle, Ban, Gavel } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { startOfWeek, addDays, ymd } from '@/components/field/VisitCalendar';
-import type { CalendarChange, Blackout } from './api';
+import type { CalendarChange, Blackout, CalendarMeeting } from './api';
 
 export type CalendarView = 'week' | 'month';
 
@@ -60,6 +61,35 @@ function blackoutsByDay(blackouts: Blackout[], days: Date[]) {
   return map;
 }
 
+function meetingsByDay(meetings: CalendarMeeting[], days: Date[]) {
+  const map = new Map<string, CalendarMeeting[]>();
+  for (const d of days) map.set(ymd(d), []);
+  for (const m of meetings) {
+    const key = ymd(new Date(m.scheduledAt));
+    map.get(key)?.push(m);
+  }
+  for (const list of map.values()) list.sort((x, y) => new Date(x.scheduledAt).getTime() - new Date(y.scheduledAt).getTime());
+  return map;
+}
+
+/** A CAB meeting on its day: a small gavel pill that opens the meeting. */
+function MeetingPill({ m, compact }: { m: CalendarMeeting; compact?: boolean }) {
+  const when = new Date(m.scheduledAt);
+  const title = `CAB · ${m.title}\n${when.toLocaleString()}\n${m.items} on the agenda${m.pending ? `, ${m.pending} pending` : ''}${m.status === 'closed' ? '\nClosed' : ''}`;
+  return (
+    <Link
+      to={`/operations/cab/${m.id}`}
+      title={title}
+      className={cn('w-full rounded-md border border-default bg-surface-2 text-default px-1.5 py-0.5 text-[11px] inline-flex items-center gap-1 hover:border-strong hover:shadow-sm transition-shadow min-w-0', m.status === 'closed' && 'opacity-70')}
+      data-testid="cab-pill"
+    >
+      <Gavel className="h-3 w-3 shrink-0 text-purple-700" />
+      <span className="truncate">{compact ? `CAB · ${m.items}` : `CAB · ${m.title} · ${m.items} item${m.items === 1 ? '' : 's'}`}</span>
+      {!compact && <span className="ml-auto tabular-nums opacity-70 shrink-0">{hhmm(when)}</span>}
+    </Link>
+  );
+}
+
 function Chip({ seg, compact, onSelect }: { seg: Segment; compact?: boolean; onSelect: (id: string) => void }) {
   const c = seg.change;
   const tone = TONE[c.status.category ?? 'open'] ?? TONE.open;
@@ -96,9 +126,9 @@ function BlackoutBar({ b }: { b: Blackout }) {
 
 /**
  * The change calendar: a week of day columns with each window cut into per-day segments, or a
- * month grid with the first few chips per day. Blackout windows are drawn above the chips.
+ * month grid with the first few chips per day. Blackout windows and CAB meetings are drawn above the chips.
  */
-export function ChangeCalendar({ view, anchor, items, blackouts, onNavigate, onSelect, loading }: { view: CalendarView; anchor: Date; items: CalendarChange[]; blackouts: Blackout[]; onNavigate: (d: Date) => void; onSelect: (ticketId: string) => void; loading?: boolean }) {
+export function ChangeCalendar({ view, anchor, items, blackouts, meetings = [], onNavigate, onSelect, loading }: { view: CalendarView; anchor: Date; items: CalendarChange[]; blackouts: Blackout[]; meetings?: CalendarMeeting[]; onNavigate: (d: Date) => void; onSelect: (ticketId: string) => void; loading?: boolean }) {
   const today = ymd(new Date());
   const days = useMemo(() => {
     if (view === 'week') {
@@ -114,6 +144,7 @@ export function ChangeCalendar({ view, anchor, items, blackouts, onNavigate, onS
   }, [view, anchor]);
   const segs = useMemo(() => segmentsByDay(items, days), [items, days]);
   const bl = useMemo(() => blackoutsByDay(blackouts, days), [blackouts, days]);
+  const mt = useMemo(() => meetingsByDay(meetings, days), [meetings, days]);
   const label =
     view === 'week'
       ? `${days[0]!.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${days[6]!.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
@@ -131,6 +162,7 @@ export function ChangeCalendar({ view, anchor, items, blackouts, onNavigate, onS
         <span className="ml-auto text-[11.5px] text-subtle inline-flex items-center gap-3">
           <span className="inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3 text-red-600" /> conflict</span>
           <span className="inline-flex items-center gap-1"><Ban className="h-3 w-3 text-amber-700" /> blackout</span>
+          <span className="inline-flex items-center gap-1"><Gavel className="h-3 w-3 text-purple-700" /> CAB</span>
         </span>
       </div>
       <div className="overflow-x-auto">
@@ -144,12 +176,14 @@ export function ChangeCalendar({ view, anchor, items, blackouts, onNavigate, onS
             const key = ymd(d);
             const list = segs.get(key) ?? [];
             const bls = bl.get(key) ?? [];
+            const mts = mt.get(key) ?? [];
             const isToday = key === today;
             const outside = view === 'month' && d.getMonth() !== month;
             const shown = view === 'week' ? list : list.slice(0, 3);
             return (
               <div key={key} className={cn('border-b border-r border-default p-1.5 flex flex-col gap-1', view === 'week' ? 'min-h-[320px]' : 'min-h-[96px]', isToday && 'bg-brand-50/40', bls.length && 'bg-amber-50/40', outside && 'opacity-50')} data-day={key}>
                 <div className={cn('text-[11.5px] tabular-nums', isToday ? 'font-semibold text-brand-700' : 'text-muted')}>{d.getDate()}{view === 'week' ? ` ${d.toLocaleDateString(undefined, { month: 'short' })}` : ''}</div>
+                {mts.map((m) => <MeetingPill key={m.id} m={m} compact={view === 'month'} />)}
                 {bls.map((b) => <BlackoutBar key={b.id} b={b} />)}
                 {shown.map((seg) => <Chip key={`${seg.change.ticketId}-${key}`} seg={seg} compact={view === 'month'} onSelect={onSelect} />)}
                 {view === 'month' && list.length > 3 && <div className="text-[11px] text-subtle">+{list.length - 3} more</div>}

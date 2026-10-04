@@ -34,6 +34,9 @@ function validateSetting(key: string, value: unknown) {
     case 'ai.disabled_features': return expect(Array.isArray(value) && value.every((v) => (AI_FEATURES as readonly string[]).includes(String(v))), `must be a list of: ${AI_FEATURES.join(', ')}`);
     case 'changes.reminder_hours': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 168, 'must be between 1 and 168 hours');
     case 'changes.conflict_warnings': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'changes.block_blackout_scheduling': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'changes.require_assessment_for_approval': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'changes.portal_horizon_days': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 7 && value <= 365, 'must be between 7 and 365 days');
     case 'ai.triage.auto_apply_confidence': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 100, 'must be between 50 and 100');
     case 'ai.triage.storm_window_minutes': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 5 && value <= 1440, 'must be between 5 and 1440 minutes');
     case 'ai.triage.storm_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 50, 'must be between 2 and 50');

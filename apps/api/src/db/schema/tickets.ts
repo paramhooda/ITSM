@@ -266,7 +266,11 @@ export const changeDetails = pgTable('change_details', {
   /** When the window reminder went out (once per scheduled start). */
   windowReminderAt: timestamp('window_reminder_at', { withTimezone: true }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => [
+  index('change_details_window_idx').on(t.scheduledStart),
+  index('change_details_template_idx').on(t.templateId),
+  index('change_details_cab_idx').on(t.cabMeetingId),
+]);
 
 export const ticketWatchers = pgTable('ticket_watchers', {
   ticketId: uuid('ticket_id').notNull().references(() => tickets.id, { onDelete: 'cascade' }),

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, Flame, Save, X } from 'lucide-react';
@@ -337,6 +337,7 @@ export default function TicketCreatePage() {
                 {!isCustomer && (
                   <Field label="Standard change template" className="sm:col-span-2" hint={template ? `${template.skipApproval ? 'Pre-approved: no approval workflow. ' : ''}${template.description ?? ''}`.trim() || undefined : 'Prefills the plans; a pre-approved template skips approval'}>
                     <Select value={f.changeTemplateId} onChange={(e) => patch({ changeTemplateId: e.target.value })} placeholder="No template" options={(templates.data?.items ?? []).map((t) => ({ value: t.id, label: `${t.name}${t.skipApproval ? ' · pre-approved' : ''}` }))} />
+                    <div className="mt-1 text-[12px]"><Link to="/operations/change-catalog" className="text-brand-700 hover:underline">Browse the catalog</Link></div>
                   </Field>
                 )}
                 <Field label="Change type">

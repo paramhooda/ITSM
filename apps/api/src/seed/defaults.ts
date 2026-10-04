@@ -21,6 +21,7 @@ export async function seedDefaults(tx: Tx) {
   await seedNotificationRules(tx);
   await seedEscalationRules(tx);
   await seedApprovalWorkflows(tx);
+  await seedChangeConfig(tx);
   await seedCatalogItems(tx);
   await seedSystemSettings(tx);
 }
@@ -247,6 +248,40 @@ async function seedApprovalWorkflows(tx: Tx) {
   ]);
 }
 
+/**
+ * Change management defaults: the six risk questions and four standard change
+ * templates a fresh installation starts with. Each table is filled only when it
+ * is empty, so administrators' edits and deletions survive every restart.
+ */
+export async function seedChangeConfig(tx: Tx) {
+  const [anyQuestion] = await tx.select({ id: schema.changeRiskQuestions.id }).from(schema.changeRiskQuestions).limit(1);
+  if (!anyQuestion) {
+    const questions = [
+      { key: 'scope', question: 'How many users or sites are affected?', hint: 'Count the people who lose a service, not the devices', weight: 3, options: [{ key: 'single_user', label: 'A single user or device', score: 1 }, { key: 'one_site', label: 'One site or team', score: 3 }, { key: 'many_sites', label: 'Several sites', score: 4 }, { key: 'all', label: 'Every user of the customer', score: 5 }] },
+      { key: 'service_impact', question: 'Will a business service be unavailable during the window?', hint: null, weight: 3, options: [{ key: 'none', label: 'No outage expected', score: 0 }, { key: 'degraded', label: 'Degraded for part of the window', score: 3 }, { key: 'outage', label: 'Full outage in the window', score: 5 }] },
+      { key: 'dependencies', question: 'Does the change touch shared or critical infrastructure?', hint: null, weight: 3, options: [{ key: 'isolated', label: 'An isolated system', score: 0 }, { key: 'shared', label: 'A shared component (switch, hypervisor, firewall)', score: 3 }, { key: 'critical', label: 'The critical path (core switch, identity, storage)', score: 5 }] },
+      { key: 'backout', question: 'How reliable is the backout plan?', hint: 'Under 15 minutes means the service is back before anyone notices', weight: 2, options: [{ key: 'tested', label: 'Tested and quick, under 15 minutes', score: 0 }, { key: 'documented', label: 'Documented but not rehearsed', score: 3 }, { key: 'none', label: 'No backout possible', score: 5 }] },
+      { key: 'experience', question: 'Has this change been done before?', hint: null, weight: 2, options: [{ key: 'routine', label: 'Routinely, same procedure', score: 0 }, { key: 'similar', label: 'A similar change was done', score: 2 }, { key: 'first', label: 'First time', score: 5 }] },
+      { key: 'timing', question: 'When is the window?', hint: null, weight: 1, options: [{ key: 'maintenance_window', label: 'The agreed maintenance window', score: 0 }, { key: 'off_hours', label: 'Outside business hours', score: 1 }, { key: 'business_hours', label: 'During business hours', score: 4 }] },
+    ];
+    await tx.insert(schema.changeRiskQuestions).values(questions.map((q, i) => ({ ...q, sortOrder: i, isActive: true }))).onConflictDoNothing();
+  }
+  const [anyTemplate] = await tx.select({ id: schema.changeTemplates.id }).from(schema.changeTemplates).limit(1);
+  if (!anyTemplate) {
+    const riskId = await optionId(tx, 'change_risk', 'low');
+    const network = await optionId(tx, 'ticket_category', 'network');
+    const server = await optionId(tx, 'ticket_category', 'server');
+    const software = await optionId(tx, 'ticket_category', 'software');
+    const templates = [
+      { key: 'fw_patch', name: 'Firewall firmware patch (maintenance release)', categoryId: network, downtimeExpectedMinutes: 15, titleTemplate: 'Firewall firmware patch', descriptionTemplate: 'Apply the vendor maintenance release to the HA firewall pair, node by node, in the agreed window.', justification: 'Vendor maintenance release; keeps the pair on a supported build.', implementationPlan: '1. Back up the configuration. 2. Upgrade the secondary node and verify HA sync. 3. Fail over and upgrade the primary. 4. Verify policies, VPN tunnels and logging.', testPlan: 'HA sync, VPN tunnel status, SSL-VPN login, IPS logs reaching the SIEM.', backoutPlan: 'Boot the previous firmware partition on each node and restore the saved configuration.', communicationPlan: 'Customer IT notified 48 hours ahead; ticket updates during the window.' },
+      { key: 'server_patching', name: 'Monthly server patching', categoryId: server, downtimeExpectedMinutes: 30, titleTemplate: 'Monthly server patching', descriptionTemplate: "Install the month's operating-system patches on the covered servers and reboot in the agreed window.", justification: 'Monthly patch cycle agreed in the service description.', implementationPlan: '1. Snapshot or confirm last backup. 2. Install patches in the staging group, then production. 3. Reboot and confirm services.', testPlan: 'Service health checks and monitoring sensors green within 15 minutes of reboot.', backoutPlan: 'Uninstall the patch set or revert the snapshot.', communicationPlan: 'Standing maintenance window; no separate notice.' },
+      { key: 'switch_port_change', name: 'Switch port or VLAN change', categoryId: network, downtimeExpectedMinutes: 0, titleTemplate: 'Switch port change', descriptionTemplate: 'Move or reconfigure access ports and VLAN assignments on a distribution or access switch.', justification: 'Standard move/add/change on the access layer.', implementationPlan: '1. Record the current port configuration. 2. Apply the new VLAN or port settings. 3. Verify link and connectivity with the requester.', testPlan: 'Link up, correct VLAN, requester confirms access.', backoutPlan: 'Re-apply the recorded configuration.', communicationPlan: 'Requester informed on completion.' },
+      { key: 'cert_renewal', name: 'TLS certificate renewal', categoryId: software, downtimeExpectedMinutes: 0, titleTemplate: 'TLS certificate renewal', descriptionTemplate: 'Replace an expiring TLS certificate on a public service and restart the listener.', justification: 'Certificate expiry; avoids a browser warning or a failed integration.', implementationPlan: '1. Obtain the renewed certificate and key. 2. Install and bind. 3. Restart the listener.', testPlan: 'External check: chain valid, expiry date updated, no warnings.', backoutPlan: 'Re-bind the previous certificate (kept until the next renewal).', communicationPlan: 'None unless a restart is customer-visible.' },
+    ];
+    await tx.insert(schema.changeTemplates).values(templates.map((t) => ({ ...t, description: t.descriptionTemplate, changeType: 'standard', riskId, skipApproval: true, customerIds: [], isActive: true }))).onConflictDoNothing();
+  }
+}
+
 async function seedCatalogItems(tx: Tx) {
   const [existing] = await tx.select({ id: schema.catalogItems.id }).from(schema.catalogItems).limit(1);
   if (existing) return;
@@ -308,6 +343,9 @@ async function seedSystemSettings(tx: Tx) {
     'changes.risk_thresholds': { value: { medium: 35, high: 65 }, description: 'Change risk questionnaire: scores (0-100) at or above these are medium and high' },
     'changes.reminder_hours': { value: 24, description: 'Remind the implementer and the requester this many hours before a scheduled change window opens' },
     'changes.conflict_warnings': { value: true, description: 'Record overlapping changes on shared systems and blackout windows as warnings on the change (never a block)' },
+    'changes.block_blackout_scheduling': { value: false, description: 'Refuse a normal or standard change window that falls inside an active blackout window (emergency changes pass when the window allows them); off = warn only' },
+    'changes.require_assessment_for_approval': { value: false, description: 'A change must carry a risk assessment (score and level) before approval can be requested or it is put on a CAB agenda' },
+    'changes.portal_horizon_days': { value: 60, description: 'How many days ahead the customer portal lists planned changes (the last 30 days of completed ones are always shown)' },
     'notifications.outbox_retention_days': { value: 90, description: 'Days to keep sent and failed outbox messages' },
     'whatsapp.enabled': { value: false, description: 'Send WhatsApp notifications to people who opted in' },
     'whatsapp.phone_number_id': { value: '', description: 'Meta WhatsApp Cloud API phone number id' },

@@ -99,6 +99,15 @@ export function ticketAttention(t: TicketDetail, now: Clock, act: TicketAttentio
   if (t.approvalStatus === 'pending') items.push({ key: 'approval', tone: 'info', text: 'Approval pending', action: { label: 'Approvals', to: '?tab=approvals' } });
   // A change the questionnaire rates high that nobody has approved yet.
   if (t.type === 'change' && t.change?.riskLevel === 'high' && t.approvalStatus !== 'approved' && t.approvalStatus !== 'not_required') items.push({ key: 'change-risk', tone: 'warn', text: `High-risk change${t.change.riskScore != null ? ` (${t.change.riskScore}/100)` : ''} not yet approved`, action: { label: 'Plan', to: '?tab=plan' } });
+  // Scheduling: the live clashes of the window (a blackout is the louder one), an unscored window, and the CAB slot.
+  if (t.type === 'change' && t.change?.conflicts?.length) {
+    const blackout = t.change.conflicts.find((c) => c.kind === 'blackout');
+    if (blackout?.blackout) items.push({ key: 'change-blackout', tone: 'bad', text: `Scheduled inside the blackout window "${blackout.blackout.name}"`, action: { label: 'Plan', to: '?tab=plan' } });
+    const clashes = t.change.conflicts.filter((c) => c.kind !== 'blackout').length;
+    if (clashes) items.push({ key: 'change-conflict', tone: 'warn', text: `Clashes with ${plural(clashes, 'other change')} (shared systems or the same service)`, action: { label: 'Plan', to: '?tab=plan' } });
+  }
+  if (t.type === 'change' && t.change?.scheduledStart && t.change.riskLevel == null) items.push({ key: 'change-unassessed', tone: 'info', text: 'Risk not assessed', action: { label: 'Plan', to: '?tab=plan' } });
+  if (t.type === 'change' && t.change?.cabMeeting && t.change.cabMeeting.status !== 'cancelled') items.push({ key: 'change-cab', tone: 'info', text: `On the CAB agenda: ${t.change.cabMeeting.title} · ${fmtDate(t.change.cabMeeting.scheduledAt)}${t.change.cabMeeting.decision !== 'pending' ? ` · ${titleCase(t.change.cabMeeting.decision)}` : ''}`, action: { label: 'Meeting', to: `/operations/cab/${t.change.cabMeeting.id}` } });
   if (t.scopeStatus === 'out_of_scope') items.push({ key: 'scope', tone: 'warn', text: 'Out of contract scope', action: call('Scope', act.onScope) });
   if (t.reopenCount > 0) items.push({ key: 'reopened', tone: 'info', text: `Reopened ${t.reopenCount}×` });
 

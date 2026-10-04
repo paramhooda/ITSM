@@ -74,6 +74,8 @@ export async function startApproval(ctx: Ctx, ticket: TicketRow, workflowId: str
 export async function requestApproval(ctx: Ctx, ticketId: string, workflowId?: string | null) {
   const ticket = await loadTicket(ctx, ticketId);
   requireAction(ctx, ticket, ticket.type === 'change' ? 'changes:manage' : 'tickets:update');
+  // Dynamic import: changes/service imports `decide` from this file, a static import back would be a cycle.
+  if (ticket.type === 'change') await (await import('@/modules/changes/service')).requireAssessment(ctx, ticket.id);
   let wfId = workflowId ?? null;
   if (!wfId && ticket.catalogItemId) {
     const [item] = await ctx.tx.select({ approvalWorkflowId: schema.catalogItems.approvalWorkflowId }).from(schema.catalogItems).where(eq(schema.catalogItems.id, ticket.catalogItemId)).limit(1);

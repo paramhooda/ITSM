@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
-import { Button, Badge, Input, type Column } from '@/components/ui';
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Gauge, Save } from 'lucide-react';
+import { Button, Badge, Input, Card, Field, type Column } from '@/components/ui';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MonoCell, MutedCell } from '@/components/admin/ConfigTable';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
@@ -30,23 +31,58 @@ function OptionsEditor({ value, onChange, disabled }: { value: RiskOption[]; onC
   );
 }
 
+/** Where the 0–100 score turns medium and high; saved with `admin:config`, read back from the lookups. */
+function ThresholdsCard({ current, onSave, saving }: { current: { medium: number; high: number }; onSave: (t: { medium: number; high: number }) => void; saving: boolean }) {
+  const [medium, setMedium] = useState(String(current.medium));
+  const [high, setHigh] = useState(String(current.high));
+  useEffect(() => {
+    setMedium(String(current.medium));
+    setHigh(String(current.high));
+  }, [current.medium, current.high]);
+  const m = Number(medium);
+  const h = Number(high);
+  const valid = Number.isInteger(m) && Number.isInteger(h) && m >= 1 && m <= 99 && h >= 2 && h <= 100 && h > m;
+  const dirty = m !== current.medium || h !== current.high;
+  return (
+    <Card className="mb-4" title={<span className="inline-flex items-center gap-2"><Gauge className="h-4 w-4 text-subtle" /> Thresholds</span>} actions={<Button size="sm" icon={<Save className="h-3.5 w-3.5" />} disabled={!valid || !dirty} loading={saving} onClick={() => onSave({ medium: m, high: h })} data-testid="thresholds-save">Save</Button>} data-testid="thresholds-card">
+      <div className="grid grid-cols-1 sm:grid-cols-[160px_160px_1fr] gap-3 items-end">
+        <Field label="Medium from" hint="score 0–100">
+          <Input type="number" min={1} max={99} value={medium} onChange={(e) => setMedium(e.target.value)} aria-label="Medium from" />
+        </Field>
+        <Field label="High from" hint="above medium">
+          <Input type="number" min={2} max={100} value={high} onChange={(e) => setHigh(e.target.value)} aria-label="High from" />
+        </Field>
+        <div className="text-[12.5px] text-muted pb-1.5">
+          Each answer's score times the question's weight adds up and is scaled to 0–100: below {valid ? m : current.medium} is <Badge color="green">low</Badge>, from {valid ? m : current.medium} <Badge color="amber">medium</Badge>, from {valid ? h : current.high} <Badge color="red">high</Badge>. The level also sets the change's Risk field.
+          {!valid && <span className="text-red-700"> High must be above medium, both within 1–100.</span>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 /** The change risk questionnaire: weighted questions whose answers score a change low, medium or high. */
 export default function ChangeRiskQuestionsPage() {
   const q = useQuery({ queryKey: changeKeys.questions, queryFn: () => changesApi.questions(true) });
   const editor = useEditor<RiskQuestion>();
   const lookups = useLookups();
-  const thresholds = (lookups.lookups?.settings?.['changes.risk_thresholds'] as { medium?: number; high?: number } | undefined) ?? { medium: 35, high: 65 };
+  const stored = lookups.lookups?.settings?.['changes.risk_thresholds'] as { medium?: number; high?: number } | undefined;
+  const thresholds = { medium: Number(stored?.medium ?? 35), high: Number(stored?.high ?? 65) };
   const invalidate = [['changes']];
+  const saveThresholds = useAdminMutation((body: { medium: number; high: number }) => changesApi.updateThresholds(body), { invalidate: [['changes'], ['lookups']], success: 'Thresholds saved' });
+  const reorder = useAdminMutation((ids: string[]) => changesApi.reorderQuestions(ids), { invalidate });
   const create = useAdminMutation((body: Values) => changesApi.createQuestion(body), { invalidate, success: 'Question added' });
   const update = useAdminMutation(({ id, ...body }: Values & { id: string }) => changesApi.updateQuestion(id, body), { invalidate });
   const remove = useAdminMutation((id: string) => changesApi.deleteQuestion(id), { invalidate, success: 'Question deleted' });
   const rows = q.data?.items ?? [];
+  // One call with the whole order: the server writes sort_order = position for every id.
   const move = (r: RiskQuestion, dir: -1 | 1) => {
-    const i = rows.findIndex((x) => x.id === r.id);
-    const other = rows[i + dir];
-    if (!other) return;
-    void update.mutateAsync({ id: r.id, sortOrder: other.sortOrder === r.sortOrder ? other.sortOrder + dir : other.sortOrder });
-    void update.mutateAsync({ id: other.id, sortOrder: r.sortOrder });
+    const ids = rows.map((x) => x.id);
+    const i = ids.indexOf(r.id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+    reorder.mutate(ids);
   };
 
   const fields: FieldSpec<Values>[] = [
@@ -79,7 +115,8 @@ export default function ChangeRiskQuestionsPage() {
   ];
   return (
     <div>
-      <SectionHeader title="Change risk questions" description={`Each answer's score times the question's weight adds up and is scaled to 0–100: medium from ${thresholds.medium ?? 35}, high from ${thresholds.high ?? 65} (changes.risk_thresholds in Settings). The level also sets the change's Risk field.`} actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New question</Button>} />
+      <SectionHeader title="Change risk questions" description="Weighted questions an implementer answers on the change plan; the answers score the change low, medium or high against the thresholds below. A fresh installation ships six." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New question</Button>} />
+      <ThresholdsCard current={thresholds} onSave={(t) => saveThresholds.mutate(t)} saving={saveThresholds.isPending} />
       <ConfigTable<RiskQuestion>
         columns={columns}
         rows={rows}

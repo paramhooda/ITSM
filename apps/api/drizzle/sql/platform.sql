@@ -112,6 +112,26 @@ CREATE POLICY tenant_isolation ON briefings
   USING (app_all_customers() OR user_id = app_user_id())
   WITH CHECK (app_all_customers() OR user_id = app_user_id());
 
+-- change management definitions and CAB meetings are shared staff rows: never a customer scope.
+ALTER TABLE change_risk_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE change_risk_questions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON change_risk_questions;
+CREATE POLICY tenant_isolation ON change_risk_questions
+  USING (app_all_customers() OR app_is_msp())
+  WITH CHECK (app_all_customers() OR app_is_msp());
+ALTER TABLE change_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE change_templates FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON change_templates;
+CREATE POLICY tenant_isolation ON change_templates
+  USING (app_all_customers() OR app_is_msp())
+  WITH CHECK (app_all_customers() OR app_is_msp());
+ALTER TABLE cab_meetings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cab_meetings FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON cab_meetings;
+CREATE POLICY tenant_isolation ON cab_meetings
+  USING (app_all_customers() OR app_is_msp())
+  WITH CHECK (app_all_customers() OR app_is_msp());
+
 -- ---------------------------------------------------------------------------
 -- Partitioned high-volume tables
 -- ---------------------------------------------------------------------------

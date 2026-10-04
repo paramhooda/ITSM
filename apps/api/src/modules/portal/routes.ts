@@ -61,6 +61,9 @@ export default async function routes(app: FastifyInstance) {
   r.get('/portal/assets', { preHandler: read, schema: { tags, querystring: S.assetListQuery } }, h((ctx, req) => svc.portalAssets(ctx, req.query as S.AssetListQuery)));
   r.get('/portal/cis', { preHandler: read, schema: { tags, querystring: S.ciListQuery } }, h((ctx, req) => svc.portalCis(ctx, req.query as S.CiListQuery)));
 
+  // ---- planned changes (the organisation's own; plans, risk, CAB and conflicts never leave the MSP side)
+  r.get('/portal/changes', { preHandler: read, schema: { tags, querystring: S.plannedChangesQuery } }, h((ctx, req) => svc.portalPlannedChanges(ctx, req.query as S.PlannedChangesQuery)));
+
   // ---- maintenance & visits
   r.get('/portal/maintenance', { preHandler: read, schema: { tags, querystring: S.maintenanceQuery } }, h((ctx, req) => svc.portalMaintenance(ctx, req.query as { customerId?: string; pastDays: number; futureDays: number })));
   r.post('/portal/visits/:id/acknowledge', { preHandler: act, schema: { tags, params: idParam, body: S.acknowledgeBody } }, h((ctx, req) => svc.acknowledgePortalVisit(ctx, (req.params as { id: string }).id, req.body as S.AcknowledgeBody)));

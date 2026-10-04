@@ -27,7 +27,7 @@ const can1 = (p: Permission) => (...x: Permission[]) => x.includes(p);
 /** Strip ↔ application pairs (case 8). A plain array: #5 pushes `['PORTAL_STATUS_MODULES', 'Service status']` here. */
 const PAIRS: [keyof typeof strips, string][] = [
   ['OPERATIONS_MODULES', 'Operations'], ['CHANGE_MODULES', 'Changes'], ['CMDB_MODULES', 'Configuration (CMDB)'], ['ASSET_MODULES', 'Assets'], ['CUSTOMER_MODULES', 'Customers'], ['CONTRACT_MODULES', 'Contracts & scope'], ['FIELD_MODULES', 'Field service'], ['KNOWLEDGE_MODULES', 'Knowledge'], ['REPORT_MODULES', 'Reports'],
-  ['PORTAL_ASSET_MODULES', 'Assets'], ['PORTAL_SERVICE_MODULES', 'Services & contracts'], ['PORTAL_MAINTENANCE_MODULES', 'Maintenance & visits'], ['PORTAL_KNOWLEDGE_MODULES', 'Knowledge'],
+  ['PORTAL_ASSET_MODULES', 'Assets'], ['PORTAL_SERVICE_MODULES', 'Services & contracts'], ['PORTAL_MAINTENANCE_MODULES', 'Maintenance & visits'], ['PORTAL_KNOWLEDGE_MODULES', 'Knowledge'], ['PORTAL_STATUS_MODULES', 'Service status'],
 ];
 const itemOf = (tree: NavItem[], label: string) => {
   const item = tree.find((i) => i.label === label);

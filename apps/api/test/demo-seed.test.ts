@@ -43,6 +43,14 @@ describe('demo dataset', () => {
     expect(await count('integration_events')).toBeGreaterThanOrEqual(50);
     expect(await count('metric_rollups_daily')).toBeGreaterThan(0);
     expect(await count('users', "where user_type = 'customer'")).toBeGreaterThanOrEqual(10);
+    // Change management: blackouts, scored risk, standard changes from the catalog, CAB meetings with agendas.
+    expect(await count('change_blackout_windows')).toBeGreaterThanOrEqual(3);
+    expect(await count('cab_meetings')).toBeGreaterThanOrEqual(2);
+    expect(await count('cab_meeting_items')).toBeGreaterThanOrEqual(5);
+    expect(await count('change_details', 'where risk_score is not null')).toBeGreaterThanOrEqual(10);
+    expect(await count('change_details', 'where template_id is not null')).toBeGreaterThanOrEqual(3);
+    expect(await count('change_risk_questions')).toBeGreaterThanOrEqual(6);
+    expect(await count('change_templates')).toBeGreaterThanOrEqual(4);
   });
 
   it('keeps every customer-scoped row inside its parent customer', async () => {
@@ -66,7 +74,8 @@ describe('demo dataset', () => {
     expect(await count('ticket_slas', "where state = 'met' and completed_at > due_at")).toBe(0);
     expect(await count('ticket_slas', "where state = 'breached' and completed_at is not null and completed_at <= due_at")).toBe(0);
     expect(await count('ticket_slas', "where state in ('met','breached','cancelled') and completed_at is not null and completed_at < started_at")).toBe(0);
-    expect(await count('ticket_slas', "where state = 'running' and due_at < now()")).toBe(0);
+    // The generator decides running/breached against the load's start time; a clock due minutes later is swept by the SLA job in a running system, so allow that latency here.
+    expect(await count('ticket_slas', "where state = 'running' and due_at < now() - interval '15 minutes'")).toBe(0);
     expect(await count('ticket_slas', "where state = 'paused' and paused_at is null")).toBe(0);
     // every incident / request carries SLA clocks; changes and problems may not
     expect(await count('tickets', "t where t.type in ('incident','request') and not exists (select 1 from ticket_slas s where s.ticket_id = t.id)")).toBe(0);

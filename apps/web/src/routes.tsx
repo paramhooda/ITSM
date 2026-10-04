@@ -33,6 +33,7 @@ export const routes: AppRoute[] = [
   { path: '/operations/change-calendar', component: page(() => import('@/pages/operations/ChangeCalendarPage')), perm: ['tickets:read'] },
   { path: '/operations/cab', component: page(() => import('@/pages/operations/CabMeetingsPage')), perm: ['changes:cab', 'changes:approve', 'changes:manage'] },
   { path: '/operations/cab/:id', component: page(() => import('@/pages/operations/CabMeetingPage')), perm: ['changes:cab', 'changes:approve', 'changes:manage'] },
+  { path: '/operations/change-catalog', component: page(() => import('@/pages/operations/ChangeCatalogPage')), perm: ['tickets:read'] },
   // Customers & contracts
   // Customers: Overview · Accounts
   { path: '/customers', component: page(() => import('@/pages/customers/CustomersOverviewPage')), perm: ['customers:read'] },
@@ -107,6 +108,7 @@ export const routes: AppRoute[] = [
   { path: '/portal/maintenance', component: page(() => import('@/pages/portal/PortalMaintenancePage')), perm: ['portal:access'], portal: true },
   { path: '/portal/maintenance/history', component: page(() => import('@/pages/portal/PortalMaintenanceHistoryPage')), perm: ['portal:access'], portal: true },
   { path: '/portal/status', component: page(() => import('@/pages/portal/PortalStatusPage')), perm: ['portal:status'], portal: true },
+  { path: '/portal/changes', component: page(() => import('@/pages/portal/PortalChangesPage')), perm: ['portal:status'], portal: true },
   { path: '/portal/approvals', component: page(() => import('@/pages/portal/PortalApprovalsPage')), perm: ['portal:approve'], portal: true },
   { path: '/portal/users', component: page(() => import('@/pages/portal/PortalUsersPage')), perm: ['portal:manage_users'], portal: true },
 ];

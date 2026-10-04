@@ -37,7 +37,7 @@ import {
   userIdOf,
 } from './common';
 import type { CreateTicketInput, UpdateTicketInput, ChangeDetailsInput, ProblemDetailsInput } from './schemas';
-import { loadTemplate, recordConflicts, type TemplateRow as ChangeTemplateRow } from '@/modules/changes/service';
+import { loadTemplate, recordConflicts, detectConflicts, assertWindowAllowed, canAssessRisk, type TemplateRow as ChangeTemplateRow } from '@/modules/changes/service';
 
 // ---------------------------------------------------------------- helpers
 
@@ -139,6 +139,14 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
     if (!template) throw new NotFoundError('Change template');
     categoryId = categoryId ?? template.categoryId ?? null;
     serviceId = serviceId ?? template.serviceId ?? null;
+  }
+  // What the form sent wins over the template; the template fills the rest. A window inside a blackout is refused when the setting says so.
+  let changeInput: NonNullable<CreateTicketInput['change']> = {};
+  if (type === 'change') {
+    const given = Object.fromEntries(Object.entries(input.change ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== '')) as NonNullable<CreateTicketInput['change']>;
+    const tpl = template ? { changeType: template.changeType as ChangeDetailsInput['changeType'], riskId: template.riskId, justification: template.justification, implementationPlan: template.implementationPlan, testPlan: template.testPlan, backoutPlan: template.backoutPlan, communicationPlan: template.communicationPlan, downtimeExpectedMinutes: template.downtimeExpectedMinutes } : {};
+    changeInput = { ...tpl, ...given };
+    if (changeInput.scheduledStart) await assertWindowAllowed(ctx, { customerId, changeType: changeInput.changeType ?? 'normal', start: changeInput.scheduledStart, end: changeInput.scheduledEnd ?? null });
   }
 
   // Validate option ids by type
@@ -258,10 +266,7 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
 
   // Type extensions
   if (type === 'change') {
-    // What the form sent wins over the template; the template fills the rest.
-    const given = Object.fromEntries(Object.entries(input.change ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== '')) as NonNullable<CreateTicketInput['change']>;
-    const tpl = template ? { changeType: template.changeType as ChangeDetailsInput['changeType'], riskId: template.riskId, justification: template.justification, implementationPlan: template.implementationPlan, testPlan: template.testPlan, backoutPlan: template.backoutPlan, communicationPlan: template.communicationPlan, downtimeExpectedMinutes: template.downtimeExpectedMinutes } : {};
-    const c = { ...tpl, ...given };
+    const c = changeInput;
     await ctx.tx.insert(schema.changeDetails).values({ ticketId: ticket.id, customerId, changeType: c.changeType ?? 'normal', riskId: c.riskId ?? (await defaultOption(ctx, 'change_risk'))?.id ?? null, riskAssessment: c.riskAssessment ?? null, impactAssessment: c.impactAssessment ?? null, justification: c.justification ?? null, implementationPlan: c.implementationPlan ?? null, testPlan: c.testPlan ?? null, backoutPlan: c.backoutPlan ?? null, communicationPlan: c.communicationPlan ?? null, scheduledStart: c.scheduledStart ?? null, scheduledEnd: c.scheduledEnd ?? null, downtimeExpectedMinutes: c.downtimeExpectedMinutes ?? null, cabNotes: c.cabNotes ?? null, templateId: template?.id ?? null });
     if (template?.skipApproval) {
       await ctx.tx.update(schema.tickets).set({ approvalStatus: 'not_required' }).where(eq(schema.tickets.id, ticket.id));
@@ -376,12 +381,33 @@ export async function getTicket(ctx: Ctx, id: string) {
     tasks,
     approvals,
     problem: problem ?? null,
-    change: change ? { ...change, risk: toLabel(riskOpt) } : null,
+    change: change ? { ...change, risk: toLabel(riskOpt), ...(customer ? {} : await enrichChange(ctx, t, change, statuses.find((s) => s.id === t.statusId)?.statusCategory ?? 'open')) } : null,
     major: majorRow ? { status: majorRow.status, declaredAt: majorRow.declaredAt, resolvedAt: majorRow.resolvedAt, lastUpdateAt: majorRow.lastUpdateAt, nextUpdateDueAt: majorRow.nextUpdateDueAt, updateIntervalMinutes: majorRow.updateIntervalMinutes, commanderUserId: majorRow.commanderUserId, commsLeadUserId: majorRow.commsLeadUserId, bridgeUrl: majorRow.bridgeUrl, portalBanner: majorRow.portalBanner, pirCompletedAt: majorRow.pirCompletedAt } : null,
     escalations,
     statuses: statuses.map((s) => toLabel(s)),
     permissions: permissionsFor(ctx, t),
   };
+}
+
+/**
+ * Staff-only extras on a change record: the live clashes, the template it came
+ * from and its latest CAB slot. Conflict detection walks the dependency graph,
+ * so it runs only while it can still matter: an open change whose window has
+ * not ended (a window without an end counts as a day).
+ */
+async function enrichChange(ctx: Ctx, t: TicketRow, change: typeof schema.changeDetails.$inferSelect, statusCategory: string) {
+  const endsAt = change.scheduledEnd ?? (change.scheduledStart ? new Date(change.scheduledStart.getTime() + 24 * 3600_000) : null);
+  const live = !!endsAt && endsAt.getTime() > Date.now() && ['new', 'open', 'pending'].includes(statusCategory);
+  const conflicts = live ? (await detectConflicts(ctx, t.id)).conflicts : [];
+  const [template] = change.templateId ? await ctx.tx.select({ id: schema.changeTemplates.id, key: schema.changeTemplates.key, name: schema.changeTemplates.name }).from(schema.changeTemplates).where(eq(schema.changeTemplates.id, change.templateId)).limit(1) : [];
+  const [cab] = await ctx.tx
+    .select({ id: schema.cabMeetings.id, title: schema.cabMeetings.title, scheduledAt: schema.cabMeetings.scheduledAt, status: schema.cabMeetings.status, decision: schema.cabMeetingItems.decision, notes: schema.cabMeetingItems.notes, decidedAt: schema.cabMeetingItems.decidedAt })
+    .from(schema.cabMeetingItems)
+    .innerJoin(schema.cabMeetings, eq(schema.cabMeetings.id, schema.cabMeetingItems.meetingId))
+    .where(eq(schema.cabMeetingItems.ticketId, t.id))
+    .orderBy(desc(schema.cabMeetings.scheduledAt))
+    .limit(1);
+  return { conflicts, template: template ?? null, cabMeeting: cab ?? null };
 }
 
 function stripInternal(t: TicketRow) {
@@ -399,7 +425,7 @@ export function permissionsFor(ctx: Ctx, t: TicketRow) {
   const c = t.customerId;
   if (isCustomerUser(ctx)) {
     const portal = ctx.can('portal:tickets', c);
-    return { update: false, assign: false, resolve: false, close: false, reopen: portal, cancel: false, comment: portal, workNote: false, time: false, scope: false, escalate: false, problem: false, change: false, approve: ctx.can('portal:approve', c), tasks: false, links: false, watch: portal, major: false };
+    return { update: false, assign: false, resolve: false, close: false, reopen: portal, cancel: false, comment: portal, workNote: false, time: false, scope: false, escalate: false, problem: false, change: false, assessRisk: false, approve: ctx.can('portal:approve', c), tasks: false, links: false, watch: portal, major: false };
   }
   return {
     update: ctx.can('tickets:update', c),
@@ -415,6 +441,8 @@ export function permissionsFor(ctx: Ctx, t: TicketRow) {
     escalate: ctx.can('tickets:escalate', c),
     problem: ctx.can('problems:manage', c),
     change: ctx.can('changes:manage', c),
+    /** The questionnaire: a change manager, or the raiser or assignee holding tickets:update. */
+    assessRisk: t.type === 'change' && canAssessRisk(ctx, t),
     approve: ctx.can(t.type === 'change' ? 'changes:approve' : 'requests:approve', c),
     tasks: ctx.can('tickets:update', c),
     links: ctx.can('tickets:update', c),
@@ -687,6 +715,10 @@ export async function updateChangeDetails(ctx: Ctx, id: string, patch: ChangeDet
   const values: Partial<typeof schema.changeDetails.$inferInsert> = {};
   for (const k of ['changeType', 'riskId', 'riskAssessment', 'impactAssessment', 'justification', 'implementationPlan', 'testPlan', 'backoutPlan', 'communicationPlan', 'scheduledStart', 'scheduledEnd', 'actualStart', 'actualEnd', 'downtimeExpectedMinutes', 'cabNotes', 'implementationNotes', 'pirNotes', 'pirOutcome'] as const) if (patch[k] !== undefined) (values as Record<string, unknown>)[k] = patch[k];
   if (values.scheduledStart && values.scheduledEnd && values.scheduledEnd < values.scheduledStart) throw new ValidationError('Scheduled end must be after the start');
+  if (['scheduledStart', 'scheduledEnd', 'changeType'].some((k) => k in values)) {
+    const start = values.scheduledStart !== undefined ? values.scheduledStart : (before?.scheduledStart ?? null);
+    if (start) await assertWindowAllowed(ctx, { ticketId: t.id, customerId: t.customerId, changeType: (values.changeType ?? before?.changeType ?? 'normal') as string, start, end: values.scheduledEnd !== undefined ? (values.scheduledEnd ?? null) : (before?.scheduledEnd ?? null) });
+  }
   if (patch.pirNotes !== undefined || patch.pirOutcome !== undefined) values.reviewedAt = new Date();
   values.updatedAt = new Date();
   let after;

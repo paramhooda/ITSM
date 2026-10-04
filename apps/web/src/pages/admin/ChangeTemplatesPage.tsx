@@ -7,6 +7,7 @@ import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDi
 import { MultiSelect } from '@/components/admin/inputs';
 import { useAdminMutation } from '@/components/admin/api';
 import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
+import { relativeTime } from '@/lib/format';
 import { changesApi, changeKeys, type ChangeTemplate } from '@/components/changes/api';
 
 type Values = Record<string, unknown>;
@@ -29,6 +30,7 @@ export default function ChangeTemplatesPage() {
   const customerOpts = (customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name, hint: c.code }));
   const categoryOpts = lookups.options('ticket_category').map((o) => ({ value: o.id, label: o.label }));
   const riskOpts = lookups.options('change_risk').map((o) => ({ value: o.id, label: o.label }));
+  const serviceOpts = (lookups.lookups?.services ?? []).map((s) => ({ value: s.id, label: s.name }));
 
   const fields: FieldSpec<Values>[] = [
     { key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'Firewall firmware patch' },
@@ -37,6 +39,7 @@ export default function ChangeTemplatesPage() {
     { key: 'changeType', label: 'Change type', type: 'select', options: TYPE_OPTIONS, required: true },
     { key: 'riskId', label: 'Risk', type: 'select', options: riskOpts },
     { key: 'categoryId', label: 'Category', type: 'select', options: categoryOpts },
+    { key: 'serviceId', label: 'Service', type: 'select', options: serviceOpts, hint: 'Prefilled on the change' },
     { key: 'downtimeExpectedMinutes', label: 'Expected downtime (min)', type: 'number', min: 0 },
     { key: 'titleTemplate', label: 'Default title', type: 'text', span: 2, section: 'Prefilled change' },
     { key: 'descriptionTemplate', label: 'Default description', type: 'textarea', rows: 2, span: 2 },
@@ -50,12 +53,12 @@ export default function ChangeTemplatesPage() {
     { key: 'customerIds', label: 'Offered to', type: 'custom', span: 2, hint: 'Empty = every customer', render: ({ value, onChange, disabled }) => <MultiSelect value={(value as string[]) ?? []} onChange={(ids) => onChange(ids)} options={customerOpts} disabled={disabled} placeholder="Search customers…" /> },
   ];
   const initial: Values = editor.row
-    ? { ...editor.row, riskId: editor.row.riskId ?? '', categoryId: editor.row.categoryId ?? '' }
-    : { name: '', key: '', description: '', changeType: 'standard', riskId: '', categoryId: '', downtimeExpectedMinutes: '', titleTemplate: '', descriptionTemplate: '', justification: '', implementationPlan: '', testPlan: '', backoutPlan: '', communicationPlan: '', skipApproval: true, isActive: true, customerIds: [] };
+    ? { ...editor.row, riskId: editor.row.riskId ?? '', categoryId: editor.row.categoryId ?? '', serviceId: editor.row.serviceId ?? '' }
+    : { name: '', key: '', description: '', changeType: 'standard', riskId: '', categoryId: '', serviceId: '', downtimeExpectedMinutes: '', titleTemplate: '', descriptionTemplate: '', justification: '', implementationPlan: '', testPlan: '', backoutPlan: '', communicationPlan: '', skipApproval: true, isActive: true, customerIds: [] };
   async function submit(v: Values) {
     const str = (k: string) => ((v[k] as string) || '').trim() || null;
     const body = {
-      name: v.name, key: v.key, description: str('description'), changeType: v.changeType || 'standard', riskId: (v.riskId as string) || null, categoryId: (v.categoryId as string) || null,
+      name: v.name, key: v.key, description: str('description'), changeType: v.changeType || 'standard', riskId: (v.riskId as string) || null, categoryId: (v.categoryId as string) || null, serviceId: (v.serviceId as string) || null,
       downtimeExpectedMinutes: v.downtimeExpectedMinutes === '' || v.downtimeExpectedMinutes == null ? null : Number(v.downtimeExpectedMinutes),
       titleTemplate: str('titleTemplate'), descriptionTemplate: str('descriptionTemplate'), justification: str('justification'), implementationPlan: str('implementationPlan'), testPlan: str('testPlan'), backoutPlan: str('backoutPlan'), communicationPlan: str('communicationPlan'),
       skipApproval: !!v.skipApproval, isActive: !!v.isActive, customerIds: (v.customerIds as string[]) ?? [],
@@ -69,6 +72,8 @@ export default function ChangeTemplatesPage() {
     { key: 'risk', header: 'Risk', render: (r) => <MutedCell>{r.riskLabel ?? '—'}</MutedCell> },
     { key: 'approval', header: 'Approval', render: (r) => (r.skipApproval ? <Badge color="green"><ShieldCheck className="h-3 w-3" /> pre-approved</Badge> : <Badge color="amber">workflow</Badge>) },
     { key: 'customers', header: 'Offered to', render: (r) => <MutedCell>{r.customerIds.length ? `${r.customerIds.length} customer${r.customerIds.length === 1 ? '' : 's'}` : 'Every customer'}</MutedCell> },
+    { key: 'used', header: 'Used', width: '80px', render: (r) => <span className="tabular-nums text-[12.5px]">{r.usageCount}</span> },
+    { key: 'lastUsed', header: 'Last used', width: '120px', render: (r) => <MutedCell>{r.lastUsedAt ? relativeTime(r.lastUsedAt) : 'never'}</MutedCell> },
     { key: 'isActive', header: 'Status', width: '90px', render: (r) => <ActiveDot active={r.isActive} /> },
   ];
   return (

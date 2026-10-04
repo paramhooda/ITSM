@@ -106,7 +106,7 @@ export const MSP_NAV: NavItem[] = [
       { to: '/tickets?type=change', label: 'All changes' },
       { to: '/operations/change-calendar', label: 'Change calendar' },
       { to: '/operations/cab', label: 'CAB', perm: ['changes:cab', 'changes:approve', 'changes:manage'] },
-      // slot #5: { to: '/operations/change-catalog', label: 'Change catalog' }
+      { to: '/operations/change-catalog', label: 'Change catalog' },
     ],
   },
   {
@@ -174,7 +174,7 @@ export const PORTAL_NAV: NavItem[] = [
   // ---- Support
   {
     to: '/portal/status', label: 'Service status', short: 'Status', icon: Activity, tint: 'text-emerald-600', perm: ['portal:status'], section: P.support,
-    // slot #5: children: [{ to: '/portal/status', label: 'Status' }, { to: '/portal/changes', label: 'Planned changes' }]
+    children: [{ to: '/portal/status', label: 'Status' }, { to: '/portal/changes', label: 'Planned changes' }],
   },
   { to: '/portal/tickets', label: 'My tickets', short: 'Tickets', icon: Ticket, tint: 'text-blue-600', perm: ['portal:tickets'], section: P.support },
   { to: '/portal/approvals', label: 'Approvals', icon: ClipboardCheck, tint: 'text-amber-600', perm: ['portal:approve'], section: P.support },

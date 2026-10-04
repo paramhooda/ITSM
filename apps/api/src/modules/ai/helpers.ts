@@ -1,4 +1,4 @@
-import { eq, and, or, ilike, asc } from 'drizzle-orm';
+import { eq, and, or, ilike, asc, desc, gte, inArray } from 'drizzle-orm';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { NotFoundError, ValidationError } from '@/core/errors';
@@ -195,6 +195,44 @@ export async function resolveUser(ctx: Ctx, ref?: string | null) {
   if (pick.length === 1) return pick[0]!;
   if (!pick.length) throw new NotFoundError('User', `No user matching "${r}"`);
   throw new ValidationError(`User "${r}" is ambiguous: ${pick.map((u) => `${u.name} <${u.email}>`).join(', ')}`);
+}
+
+/** Standard change template by id, exact key or name (active ones only). */
+export async function resolveChangeTemplate(ctx: Ctx, ref: string) {
+  const r = ref.trim();
+  if (!r) throw new ValidationError('Template reference is required (name or key)');
+  const tpl = schema.changeTemplates;
+  if (UUID_RE.test(r)) {
+    const [row] = await ctx.tx.select().from(tpl).where(eq(tpl.id, r)).limit(1);
+    if (!row || !row.isActive) throw new NotFoundError('Change template');
+    return row;
+  }
+  const low = r.toLowerCase();
+  const rows = await ctx.tx.select().from(tpl).where(and(eq(tpl.isActive, true), or(eq(tpl.key, low), ilike(tpl.name, like(r))))).orderBy(asc(tpl.name)).limit(6);
+  const exact = rows.filter((t) => t.key === low || t.name.toLowerCase() === low);
+  const pick = exact.length === 1 ? exact : rows;
+  if (pick.length === 1) return pick[0]!;
+  if (!pick.length) throw new NotFoundError('Change template', `No standard change template matching "${r}"`);
+  throw new ValidationError(`Template "${r}" is ambiguous: ${pick.map((t) => `${t.name} (${t.key})`).join(', ')}. Ask the user which one.`);
+}
+
+/** CAB meeting by id or title: upcoming meetings first, then every meeting. */
+export async function resolveCabMeeting(ctx: Ctx, ref: string) {
+  const r = ref.trim();
+  if (!r) throw new ValidationError('Meeting reference is required (title or id)');
+  const m = schema.cabMeetings;
+  if (UUID_RE.test(r)) {
+    const [row] = await ctx.tx.select().from(m).where(eq(m.id, r)).limit(1);
+    if (!row) throw new NotFoundError('CAB meeting');
+    return row;
+  }
+  let rows = await ctx.tx.select().from(m).where(and(inArray(m.status, ['scheduled', 'in_progress']), gte(m.scheduledAt, new Date(Date.now() - 86_400_000)), ilike(m.title, like(r)))).orderBy(asc(m.scheduledAt)).limit(6);
+  if (!rows.length) rows = await ctx.tx.select().from(m).where(ilike(m.title, like(r))).orderBy(desc(m.scheduledAt)).limit(6);
+  const exact = rows.filter((x) => x.title.toLowerCase() === r.toLowerCase());
+  const pick = exact.length === 1 ? exact : rows;
+  if (pick.length === 1) return pick[0]!;
+  if (!pick.length) throw new NotFoundError('CAB meeting', `No CAB meeting matching "${r}"`);
+  throw new ValidationError(`Meeting "${r}" is ambiguous: ${pick.map((x) => `${x.title} (${x.scheduledAt.toISOString().slice(0, 16).replace('T', ' ')} UTC)`).join(', ')}. Ask the user which one.`);
 }
 
 /** Parses a date or date-time the model produced; throws a clear error otherwise. */

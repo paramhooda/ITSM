@@ -14,7 +14,7 @@ Vercel and shadcn inspired: neutral zinc surfaces, 1px borders, Geist type, blac
 |---|---|---|
 | Home dashboard | `/` staff views, portal home | `DashboardHero` (date, title, view switcher) with the global filter row, then the KPI row, then panels. Nothing else uses the hero. |
 | Module overview | Customers, Contracts, Assets, CMDB, Field, Knowledge, Discovery, portal Assets; Operations, Changes and Reports carry the same strip on their pages | `PageHeader` + `ModuleNav` + KPI row + panels. Tiles and panel rows are links into the module's list. |
-| List | the `ListShell` pages, the service catalog included | `PageHeader` + optional `ModuleNav` + filter bar + quick views + count line + `InsightBand` + results card. Tiles and breakdown rows are quick filters on the same page. |
+| List | the `ListShell` pages, the service catalog, the change catalog (cards instead of a table) and the portal planned changes included | `PageHeader` + optional `ModuleNav` + filter bar + quick views + count line + `InsightBand` + results card. Tiles and breakdown rows are quick filters on the same page. |
 | Record | the `RecordLayout` pages | `RecordHeader` (two primary actions, an overflow menu), ribbon, form sections, related tabs, activity rail. |
 
 Administration screens use `SectionHeader`, which renders the same `PageHeader` as everywhere else, inside `AdminLayout`.

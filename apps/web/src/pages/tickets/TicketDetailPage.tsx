@@ -343,6 +343,7 @@ export default function TicketDetailPage() {
   }
   const relatedFields: FieldDef[] = [
     { label: 'Parent', value: ticket.parent ? <TicketRef t={ticket.parent} /> : null, hidden: !ticket.parent },
+    { label: 'Standard change template', value: ticket.change?.template ? <Link to="/operations/change-catalog" className="text-brand-700 hover:underline">{ticket.change.template.name}</Link> : null, hidden: !ticket.change?.template },
     ...[...linkGroups.entries()].map(([label, links]): FieldDef => ({
       label,
       value: (
@@ -360,7 +361,7 @@ export default function TicketDetailPage() {
   // ---- related lists
   const tabs = [
     { key: 'major', label: 'Major incident', hidden: isCustomer || !(ticket.isMajor || ticket.major), content: <MajorIncidentPanel ticket={ticket} canEdit={p.major} /> },
-    { key: 'plan', label: ticket.type === 'problem' ? 'Problem analysis' : 'Change plan', hidden: !(ticket.type === 'problem' || ticket.type === 'change'), content: ticket.type === 'problem' ? <ProblemForm ticketId={ticket.id} details={ticket.problem} canEdit={p.problem} /> : <div className="flex flex-col gap-4">{!isCustomer && <ChangeRiskCard ticketId={ticket.id} details={ticket.change} canEdit={p.change} />}<ChangeForm ticketId={ticket.id} details={ticket.change} canEdit={p.change} /></div> },
+    { key: 'plan', label: ticket.type === 'problem' ? 'Problem analysis' : 'Change plan', hidden: !(ticket.type === 'problem' || ticket.type === 'change'), content: ticket.type === 'problem' ? <ProblemForm ticketId={ticket.id} details={ticket.problem} canEdit={p.problem} /> : <div className="flex flex-col gap-4">{!isCustomer && <ChangeRiskCard ticketId={ticket.id} details={ticket.change} canEdit={p.assessRisk} />}<ChangeForm ticketId={ticket.id} ticketNumber={ticket.number} details={ticket.change} canEdit={p.change} customerId={ticket.customerId} ciIds={ticket.cis.map((c) => c.id)} primaryCiId={ticket.primaryCiId} /></div> },
     { key: 'approvals', label: 'Approvals', count: ticket.approvals.length, hidden: !(ticket.approvals.length > 0 || (!isCustomer && (ticket.type === 'change' || ticket.type === 'request'))), content: <ApprovalsPanel ticket={ticket} approvals={ticket.approvals} canApprove={p.approve} canRequest={!isCustomer && (p.change || p.update)} /> },
     { key: 'tasks', label: 'Tasks', count: ticket.tasks.length, hidden: isCustomer, content: <TasksPanel ticketId={ticket.id} tasks={ticket.tasks} canEdit={p.tasks && !isClosed} /> },
     { key: 'items', label: 'Affected CIs & assets', count: ticket.cis.length + ticket.assets.length, content: <CisAssetsPanel ticket={ticket} canEdit={p.update} /> },

@@ -261,6 +261,11 @@ export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   securitySeverityId: uuid.optional(),
   requesterUserId: uuid.optional(),
   parentTicketId: uuid.optional(),
+  /** Change filters (type, risk level with `none` = not assessed, window start between two dates). */
+  changeType: z.enum(CHANGE_TYPES).optional(),
+  riskLevel: z.enum(['low', 'medium', 'high', 'none']).optional(),
+  scheduledFrom: z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date').optional(),
+  scheduledTo: z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date').optional(),
   fields: z.enum(['min', 'full']).optional(),
 });
 export type ListQuery = z.infer<typeof listQuerySchema>;
