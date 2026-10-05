@@ -55,6 +55,9 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
       count(*) FILTER (WHERE o.status IN ('completed', 'missed'))::int AS done, count(*) FILTER (WHERE o.status = 'missed')::int AS missed,
       count(*) FILTER (WHERE o.status IN ('planned', 'scheduled') AND o.planned_date < current_date)::int AS overdue
     FROM pm_occurrences o JOIN pm_programs p ON p.id = o.program_id WHERE o.planned_date >= ${from}::date AND o.planned_date <= ${today}::date ${custCond(customerId, sql`o.customer_id`)}`);
+  const knownErrors = await one<Row>(ctx, sql`
+    SELECT count(*) FILTER (WHERE coalesce(pd.ke_status, 'open') IN ('open', 'fix_in_progress'))::int AS ke_open, count(*) FILTER (WHERE pd.portal_visible)::int AS ke_published
+    FROM problem_details pd JOIN tickets t ON t.id = pd.ticket_id WHERE pd.is_known_error ${custCond(customerId)} ${soc}`);
 
   const byService = await q<Row>(ctx, sql`
     SELECT sv.id, coalesce(sv.name, 'No service') AS name, count(*)::int AS tickets, count(*) FILTER (WHERE t.resolved_at IS NOT NULL)::int AS resolved,
@@ -120,6 +123,8 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
     pmOverdue: num(pm.overdue),
     visitsCompleted: sumOf(series, 'visitsCompleted'),
     engineeringHours: Math.round(sumOf(series, 'engineeringMinutes') / 6) / 10,
+    knownErrorsOpen: num(knownErrors.ke_open),
+    knownErrorsPublished: num(knownErrors.ke_published),
   };
   return {
     period: { days, from, to: today, previousFrom: prevFrom, previousTo: prevTo },
@@ -167,6 +172,7 @@ export async function noc(ctx: Ctx, opts: { days?: number; customerId?: string |
       count(*) FILTER (WHERE t.last_sentiment IN ('negative', 'angry'))::int AS unhappy
     FROM tickets t WHERE ${base} ${cust} AND ${openCond()}`);
   const resolvedToday = await one<Row>(ctx, sql`SELECT count(*)::int AS n, round((avg(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 60))::numeric)::int AS mttr FROM tickets t WHERE ${base} ${cust} AND t.resolved_at >= current_date`);
+  const knownErrors = await one<Row>(ctx, sql`SELECT count(*)::int AS n FROM problem_details pd JOIN tickets t ON t.id = pd.ticket_id WHERE pd.is_known_error AND coalesce(pd.ke_status, 'open') IN ('open', 'fix_in_progress') AND ${base} ${cust}`);
   const criticalOpen = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`
     SELECT ${TICKET_LIST_COLS_STAFF}, ci.name AS ci_name, ci.id AS ci_id FROM tickets t ${TICKET_LIST_JOINS} LEFT JOIN cis ci ON ci.id = t.primary_ci_id
     WHERE ${base} ${cust} AND ${openCond()} AND (pr.level <= 2 OR t.is_major) ORDER BY pr.level NULLS LAST, t.created_at LIMIT 25`));
@@ -206,7 +212,7 @@ export async function noc(ctx: Ctx, opts: { days?: number; customerId?: string |
     onCall,
     majorIncidents: majorIncidents.map((r) => ({ id: String(r.id), number: String(r.number), title: String(r.title), customerName: String(r.customer_name), declaredAt: r.declared_at, lastUpdateAt: r.last_update_at ?? null, nextUpdateDueAt: r.next_update_due_at ?? null, bridgeUrl: r.bridge_url ?? null, commander: r.commander ?? null, overdue: !!r.overdue, children: num(r.children) })),
     series: spark.map((d) => ({ day: d.day, opened: num(d.opened), incidents: num(d.incidentsOpened), security: num(d.securityOpened), resolved: num(d.resolved), breaches: num(d.slaBreached) })),
-    totals: { open: num(totals.open), openIncidents: num(totals.open_incidents), breached: num(totals.breached), atRisk: num(totals.at_risk), unassigned: num(totals.unassigned), major: num(totals.major), escalated: num(totals.escalated), openedToday: num(totals.opened_today), highRisk: num(totals.high_risk), mediumRisk: num(totals.medium_risk), unhappy: num(totals.unhappy), resolvedToday: num(resolvedToday.n), mttrTodayMinutes: resolvedToday.mttr === null || resolvedToday.mttr === undefined ? null : num(resolvedToday.mttr) },
+    totals: { open: num(totals.open), openIncidents: num(totals.open_incidents), breached: num(totals.breached), atRisk: num(totals.at_risk), unassigned: num(totals.unassigned), major: num(totals.major), escalated: num(totals.escalated), openedToday: num(totals.opened_today), highRisk: num(totals.high_risk), mediumRisk: num(totals.medium_risk), unhappy: num(totals.unhappy), resolvedToday: num(resolvedToday.n), mttrTodayMinutes: resolvedToday.mttr === null || resolvedToday.mttr === undefined ? null : num(resolvedToday.mttr), knownErrorsOpen: num(knownErrors.n) },
     openIncidents,
     criticalOpen,
     slaAtRisk: { atRisk: num(totals.at_risk), breached: num(totals.breached), items: slaList },
@@ -398,6 +404,13 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
   const teams = await q<Row>(ctx, sql`
     SELECT te.id, te.name, te.team_type, te.email, m.name AS manager_name FROM teams te LEFT JOIN users m ON m.id = te.manager_user_id
     WHERE te.is_active AND (te.id IN (SELECT ct.team_id FROM customer_teams ct WHERE ct.customer_id = ${customerId}::uuid) OR te.team_type = 'service_desk') ORDER BY (te.team_type = 'service_desk') DESC, te.name LIMIT 10`);
+  // Known issues with a workaround: the organisation's published known errors (customer-safe fields only); empty for portal users without portal:kedb.
+  const canKedb = !isCustomerUser(ctx) || ctx.can('portal:kedb', customerId);
+  const keConds = sql`pd.is_known_error AND pd.portal_visible AND coalesce(pd.ke_status, 'open') <> 'retired' AND ${cust}`;
+  const kePublished = canKedb ? await one<Row>(ctx, sql`SELECT count(*)::int AS n FROM problem_details pd JOIN tickets t ON t.id = pd.ticket_id WHERE ${keConds}`) : { n: 0 };
+  const keItems = canKedb
+    ? await q<Row>(ctx, sql`SELECT t.id, t.number, t.title, coalesce(pd.ke_status, 'open') AS ke_status, pd.published_at FROM problem_details pd JOIN tickets t ON t.id = pd.ticket_id WHERE ${keConds} AND coalesce(pd.ke_status, 'open') IN ('open', 'fix_in_progress') ORDER BY pd.published_at DESC NULLS LAST LIMIT 5`)
+    : [];
   const openTotal = num(counts.open);
   return {
     generatedAt: now,
@@ -427,6 +440,7 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
       accountManager: info?.account_manager_id ? { id: info.account_manager_id, name: info.account_manager_name, email: info.account_manager_email, phone: info.account_manager_phone } : null,
       teams,
     },
+    knownErrors: { published: num(kePublished.n), items: keItems.map((r) => ({ id: String(r.id), number: String(r.number), title: String(r.title), keStatus: String(r.ke_status), publishedAt: r.published_at ?? null })) },
   };
 }
 

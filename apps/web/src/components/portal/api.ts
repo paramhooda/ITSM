@@ -2,6 +2,7 @@ import { get, post, patch } from '@/api/client';
 import type { OptionLabel, SlaCompact, SlaMetricSummary, TimelineEntry, CatalogField } from '@/components/tickets/types';
 import type { PortalAssetsOverview } from '@/components/overview/types';
 import type { Announcement } from '@/components/announcements/api';
+import type { PortalKnownError, PortalKnownErrorList } from '@/components/known-errors/api';
 
 /** API shapes of the customer portal module (apps/api/src/modules/portal). */
 
@@ -146,6 +147,8 @@ export interface PortalTicket {
   actions: { comment: boolean; reopen: boolean; confirmClose: boolean; approve: boolean; reopenWindowDays: number };
   /** The planned window of a change ticket; nothing else of the change reaches the portal. */
   change?: { changeType: string; scheduledStart: string | null; scheduledEnd: string | null; actualStart: string | null; actualEnd: string | null; downtimeExpectedMinutes: number | null } | null;
+  /** The published known error the incident is linked to (customer wording only), or matches while nothing is linked; null without portal:kedb. */
+  knownError?: { linked: PortalKnownError | null; suggestions: PortalKnownError[] } | null;
 }
 
 /** Customer-facing state of a planned change (never the internal workflow status). */
@@ -486,6 +489,9 @@ export const pk = {
   maintenance: ['portal', 'maintenance'] as const,
   changes: (params: Record<string, unknown>) => ['portal', 'changes', params] as const,
   users: (params: Record<string, unknown>) => ['portal', 'users', params] as const,
+  knownErrors: (params: Record<string, unknown>) => ['portal', 'known-errors', params] as const,
+  knownError: (id: string) => ['portal', 'known-error', id] as const,
+  knownErrorSuggest: (params: Record<string, unknown>) => ['portal', 'known-errors', 'suggest', params] as const,
 };
 
 export const portalApi = {
@@ -512,6 +518,10 @@ export const portalApi = {
   createUser: (body: Record<string, unknown>) => post<{ user: PortalUser; temporaryPassword: string | null }>('/portal/users', body),
   updateUser: (id: string, body: Record<string, unknown>) => patch<PortalUser>(`/portal/users/${id}`, body),
   resetPassword: (id: string) => post<{ temporaryPassword: string | null }>(`/portal/users/${id}/reset-password`),
+  /** Published known errors of the organisation (customer wording only). */
+  knownErrors: (params: Record<string, unknown>) => get<PortalKnownErrorList>('/portal/known-errors', params),
+  knownError: (id: string) => get<PortalKnownError>(`/portal/known-errors/${id}`),
+  knownErrorSuggest: (params: Record<string, unknown>) => get<{ items: PortalKnownError[] }>('/portal/known-errors/suggest', params),
 };
 
 /** Plain-language status for an SLA metric shown to customers. */

@@ -132,6 +132,7 @@ export async function changeStatusCore(ctx: Ctx, ticket: TicketRow, to: OptionRo
 
   await onStatusChange(ctx.tx, updated, from, to, actorOf(ctx));
   if (updated.isMajor || (ticket.isMajor && !updated.isMajor)) await syncMajorOnStatus(ctx, updated, toCat, fromCat, patch.resolutionNotes ?? null);
+  if (ticket.type === 'change' && toCat === 'resolved') await (await import('@/modules/known-errors/service')).onChangeImplemented(ctx, updated);
   if (toCat === 'resolved' || toCat === 'closed' || toCat === 'cancelled') await cancelPages(ctx, updated, `the ticket is ${to.label.toLowerCase()}`);
 
   if (!opts.silent) {

@@ -20,6 +20,7 @@ import type { TicketType, CatalogItem, ScopeStatus } from '@/components/tickets/
 import { ClassifyDraftButton } from '@/components/ai/ClassifyDraftButton';
 import { FilePicker, pastedFiles } from '@/components/attachments/FilePicker';
 import { addFiles, uploadAttachments, reportUploadFailures, UPLOAD_HINT } from '@/components/attachments/upload';
+import { KnownErrorSuggestions } from '@/components/known-errors/KnownErrorSuggestions';
 
 const TYPES: { key: TicketType; label: string; hint: string }[] = [
   { key: 'incident', label: 'Incident', hint: 'Something is broken or degraded' },
@@ -379,6 +380,7 @@ export default function TicketCreatePage() {
         </div>
 
         <div className="flex flex-col gap-4 lg:sticky lg:top-4">
+          {f.type === 'incident' && <KnownErrorSuggestions q={f.title} customerId={f.customerId || undefined} serviceId={f.serviceId || undefined} title="Known errors with a workaround" />}
           <Card title="Scope">
             {!f.customerId || (!f.serviceId && !f.siteId) ? (
               <div className="text-[12.5px] text-muted">Select a customer and service (or site) to preview the scope classification.</div>

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, PenLine, AlertTriangle, Eye, FileText } from 'lucide-react';
+import { BookOpen, PenLine, AlertTriangle, Eye, FileText, Bug } from 'lucide-react';
 import { PageHeader, ModuleNav, ErrorBlock, Badge } from '@/components/ui';
 import { KNOWLEDGE_MODULES } from '@/layouts/modules';
 import { KpiGrid } from '@/components/dashboards/KpiGrid';
@@ -45,7 +45,9 @@ export default function KnowledgeOverviewPage() {
             { label: 'Drafts', value: fmtNumber(d.drafts), tone: d.drafts ? 'warn' : 'default', icon: <PenLine className="h-4 w-4" />, hint: 'waiting to be published', to: articles({ status: 'draft' }) },
             { label: 'Needs review', value: fmtNumber(needsReview), tone: d.expired ? 'bad' : needsReview ? 'warn' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: `${fmtNumber(d.stale)} stale · ${fmtNumber(d.expired)} expired · ${fmtNumber(d.expiringSoon30d)} expiring`, to: articles({ status: 'published', sort: 'updatedAt', order: 'asc' }) },
             { label: 'Views · 30d', value: fmtNumber(d.viewsLast30d), icon: <Eye className="h-4 w-4" />, hint: 'article opens by staff and customers', to: articles({ sort: 'viewCount', order: 'desc' }) },
+            ...(can('kedb:read') && d.knownErrors ? [{ label: 'Known errors', value: fmtNumber(d.knownErrors.open + d.knownErrors.fixInProgress), tone: d.knownErrors.open > 0 ? ('warn' as const) : ('default' as const), icon: <Bug className="h-4 w-4" />, hint: `${fmtNumber(d.knownErrors.published)} published to the portal`, to: '/knowledge/known-errors' }] : []),
           ]}
+          columns={can('kedb:read') ? 5 : 4}
         />
       )}
 

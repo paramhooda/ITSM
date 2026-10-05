@@ -25,7 +25,7 @@ export async function knowledgeOverview(ctx: Ctx) {
   const published = eq(a.status, 'published');
   const f = (cond: unknown) => sql<number>`count(*) filter (where ${cond as never})::int`;
 
-  const [[totals], statusRows, typeRows, visibilityRows, categoryRows, topViewed, recentlyUpdated] = await sequential([
+  const [[totals], statusRows, typeRows, visibilityRows, categoryRows, topViewed, recentlyUpdated, knownErrorRows] = await sequential([
     () => ctx.tx
       .select({
         total: count,
@@ -44,7 +44,11 @@ export async function knowledgeOverview(ctx: Ctx) {
     () => ctx.tx.select({ key: a.categoryId, label: schema.kbCategories.name, count }).from(a).leftJoin(schema.kbCategories, eq(schema.kbCategories.id, a.categoryId)).where(live).groupBy(a.categoryId, schema.kbCategories.name),
     () => ctx.tx.select({ id: a.id, number: a.number, title: a.title, viewCount: a.viewCount, visibility: a.visibility }).from(a).where(published).orderBy(desc(a.viewCount), desc(a.helpfulCount), desc(a.updatedAt)).limit(10),
     () => ctx.tx.select({ id: a.id, number: a.number, title: a.title, updatedAt: a.updatedAt, status: a.status }).from(a).where(live).orderBy(desc(a.updatedAt)).limit(10),
+    // Known error database: problems flagged as known errors (SOC fenced like the ticket list; RLS fences customers).
+    () => ctx.tx.execute(sql`SELECT count(*) FILTER (WHERE coalesce(pd.ke_status, 'open') = 'open')::int AS open, count(*) FILTER (WHERE pd.ke_status = 'fix_in_progress')::int AS fix_in_progress, count(*) FILTER (WHERE pd.portal_visible)::int AS published
+      FROM problem_details pd JOIN tickets t ON t.id = pd.ticket_id WHERE pd.is_known_error ${ctx.can('soc:read') ? sql`` : sql`AND t.domain <> 'soc'`}`),
   ]);
+  const ke = (knownErrorRows.rows[0] ?? {}) as { open?: number; fix_in_progress?: number; published?: number };
 
   return {
     total: totals?.total ?? 0,
@@ -60,5 +64,6 @@ export async function knowledgeOverview(ctx: Ctx) {
     viewsLast30d: totals?.views ?? 0,
     topViewed,
     recentlyUpdated: recentlyUpdated.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() })),
+    knownErrors: { open: Number(ke.open ?? 0), fixInProgress: Number(ke.fix_in_progress ?? 0), published: Number(ke.published ?? 0) },
   };
 }

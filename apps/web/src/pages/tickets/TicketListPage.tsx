@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Bookmark, Trash2, Share2, AlertTriangle, Flame, ChevronDown, Inbox, Timer, UserX, UserCheck, Gauge } from 'lucide-react';
+import { Plus, Bookmark, Trash2, Share2, AlertTriangle, Flame, ChevronDown, Inbox, Timer, UserX, UserCheck, Gauge, Bug } from 'lucide-react';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { TrendChart } from '@/components/dashboards/TrendChart';
 import { BreakdownBar, type BreakdownItem } from '@/components/dashboards/BreakdownBar';
@@ -68,7 +68,7 @@ const ASSIGNEE_VIEWS = [
 ];
 const DOMAIN_LABELS: Record<string, string> = { general: 'General', noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk' };
 /** Every filter the page owns; sort/order live beside them in the URL but are not filters. */
-const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo'];
+const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError'];
 /** The Change group (shown on the Changes tab): type, questionnaire level and the scheduled window. */
 const CHANGE_TYPE_OPTIONS = [
   { value: 'standard', label: 'Standard' },
@@ -143,6 +143,7 @@ export default function TicketListPage() {
     if (tab !== 'all') p.type = tab;
     for (const k of ['customerId', 'statusCategory', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo'] as const) if (state[k]) p[k] = state[k];
     if (state.isMajor === 'true') p.isMajor = 'true';
+    if (state.knownError === 'true') p.knownError = 'true';
     if (assigneeFilter === 'me') p.mine = 'true';
     else if (assigneeFilter === 'unassigned') p.unassigned = 'true';
     else if (assigneeFilter === 'watching') p.watching = 'true';
@@ -252,6 +253,7 @@ export default function TicketListPage() {
           <div className="flex items-center gap-1.5 min-w-0">
             {r.isMajor && <Flame className="h-3.5 w-3.5 text-red-500 shrink-0" aria-label="Major incident" />}
             {r.escalationLevel > 0 && <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" aria-label={`Escalation level ${r.escalationLevel}`} />}
+            {r.isKnownError && <Bug className="h-3.5 w-3.5 text-orange-500 shrink-0" aria-label="Known error" />}
             <span className="truncate font-medium text-[13.5px]">{r.title}</span>
           </div>
           <div className="text-[11.5px] text-muted truncate">
@@ -347,6 +349,7 @@ export default function TicketListPage() {
   if (state.sentiment) addApplied('sentiment', `Customer mood: ${SENTIMENT_OPTIONS.find((o) => o.value === state.sentiment)?.label ?? state.sentiment}`);
   if (state.createdFrom || state.createdTo) addApplied('created', `Created: ${dateRangeLabel(state.createdFrom, state.createdTo)}`, ['createdFrom', 'createdTo']);
   if (state.isMajor === 'true') addApplied('isMajor', 'Major incidents only');
+  if (state.knownError === 'true') addApplied('knownError', 'Known errors only');
   if (state.changeType) addApplied('changeType', `Type: ${CHANGE_TYPE_OPTIONS.find((o) => o.value === state.changeType)?.label ?? state.changeType}`);
   if (state.riskLevel) addApplied('riskLevel', `Risk: ${RISK_LEVEL_OPTIONS.find((o) => o.value === state.riskLevel)?.label ?? state.riskLevel}`);
   if (state.scheduledFrom || state.scheduledTo) addApplied('window', `Window: ${dateRangeLabel(state.scheduledFrom, state.scheduledTo)}`, ['scheduledFrom', 'scheduledTo']);
@@ -385,6 +388,11 @@ export default function TicketListPage() {
       <FilterGroup label="Created">
         <FilterDateRange from={state.createdFrom} to={state.createdTo} onChange={(r) => set({ createdFrom: r.from, createdTo: r.to })} />
       </FilterGroup>
+      {tab === 'problem' && (
+        <FilterGroup label="Known errors" hint="Problems flagged as known errors on their Problem analysis tab" defaultOpen={state.knownError === 'true'}>
+          <FilterToggle label="Known errors only" checked={state.knownError === 'true'} onChange={(v) => set({ knownError: v ? 'true' : undefined })} />
+        </FilterGroup>
+      )}
       {tab === 'change' && (
         <>
           <FilterGroup label="Change type" hint="Standard, normal or emergency" defaultOpen={!!state.changeType}>
@@ -485,7 +493,7 @@ export default function TicketListPage() {
               options={TABS.map((t) => ({ value: t.key, label: t.label, count: t.key === 'all' ? openTotal : (byType[t.key] ?? 0) }))}
               value={tab}
               // Leaving the Changes tab drops its pills' values too: hidden pills must not keep filtering the other tabs.
-              onChange={(v) => set(v === 'change' ? { type: v } : { type: v === 'all' ? undefined : v, changeType: undefined, riskLevel: undefined, scheduledFrom: undefined, scheduledTo: undefined })}
+              onChange={(v) => set({ type: v === 'all' ? undefined : v, ...(v === 'change' ? {} : { changeType: undefined, riskLevel: undefined, scheduledFrom: undefined, scheduledTo: undefined }), ...(v === 'problem' ? {} : { knownError: undefined }) })}
             />
             <span className="hidden sm:block h-5 w-px bg-[var(--border)] mx-0.5" aria-hidden />
             {STATUS_CATEGORIES.map((c) => (
@@ -527,7 +535,9 @@ export default function TicketListPage() {
                 ? [
                     { label: 'Open tickets', value: fmtNumber(s.open), icon: <Inbox className="h-4 w-4" />, hint: `${fmtNumber(s.createdToday)} opened today · ${fmtNumber(s.resolvedToday)} resolved`, spark: series.map((d) => d.opened), sparkLabel: 'Tickets opened per day', onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: undefined, assignee: undefined }), scrollTo: true },
                     { label: 'SLA breached', value: fmtNumber(s.breached), tone: s.breached > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: `${fmtNumber(s.atRisk)} at risk · ${fmtNumber(s.overdue)} overdue`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: state.slaState === 'breached' ? undefined : 'breached' }), scrollTo: true, active: state.slaState === 'breached' },
-                    { label: 'Likely to breach', value: fmtNumber(s.highRisk ?? 0), tone: (s.highRisk ?? 0) > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: `${fmtNumber(s.unhappy ?? 0)} unhappy customer${s.unhappy === 1 ? '' : 's'}`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, breachRisk: state.breachRisk === 'high' ? undefined : 'high' }), scrollTo: true, active: state.breachRisk === 'high' },
+                    tab === 'problem'
+                      ? { label: 'Known errors', value: fmtNumber(s.knownErrors ?? 0), tone: 'accent', icon: <Bug className="h-4 w-4" />, hint: 'problems with a documented workaround', onClick: () => set({ knownError: state.knownError === 'true' ? undefined : 'true' }), scrollTo: true, active: state.knownError === 'true' }
+                      : { label: 'Likely to breach', value: fmtNumber(s.highRisk ?? 0), tone: (s.highRisk ?? 0) > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: `${fmtNumber(s.unhappy ?? 0)} unhappy customer${s.unhappy === 1 ? '' : 's'}`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, breachRisk: state.breachRisk === 'high' ? undefined : 'high' }), scrollTo: true, active: state.breachRisk === 'high' },
                     { label: 'Unassigned', value: fmtNumber(s.unassigned), tone: s.unassigned > 0 ? 'warn' : 'good', icon: <UserX className="h-4 w-4" />, hint: `${fmtNumber(s.major)} major open`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: assigneeFilter === 'unassigned' ? undefined : 'unassigned' }), scrollTo: true, active: assigneeFilter === 'unassigned' },
                     { label: 'Assigned to me', value: fmtNumber(s.mine), icon: <UserCheck className="h-4 w-4" />, hint: `${fmtNumber(s.dueToday)} due today · ${fmtNumber(s.pendingApprovals)} awaiting approval`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: assigneeFilter === 'me' ? undefined : 'me' }), scrollTo: true, active: assigneeFilter === 'me' },
                   ]

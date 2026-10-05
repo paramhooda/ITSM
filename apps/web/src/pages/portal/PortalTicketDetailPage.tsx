@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CheckCircle2, RotateCcw, ShieldCheck, ShieldOff, ShieldQuestion, Check, X, MessageSquare, Info, ClipboardCheck, FileSignature, Flame } from 'lucide-react';
@@ -158,6 +158,19 @@ export default function PortalTicketDetailPage() {
         { label: 'Due', value: ticket.dueAt ? fmtDateTime(ticket.dueAt) : null, hidden: !ticket.dueAt || ended },
         { label: 'Resolved', value: ticket.resolvedAt ? fmtDateTime(ticket.resolvedAt) : null, hidden: !ticket.resolvedAt },
         { label: 'Closed', value: ticket.closedAt ? fmtDateTime(ticket.closedAt) : null, hidden: !ticket.closedAt },
+      ],
+    },
+    // A known issue the ticket is linked to: the customer wording only.
+    {
+      key: 'known-issue',
+      title: 'Known issue',
+      description: ticket.knownError?.linked?.title,
+      hidden: !ticket.knownError?.linked,
+      columns: 1,
+      actions: ticket.knownError?.linked ? <Link to={`/knowledge/known-errors/${ticket.knownError.linked.id}`} className="text-[12px] text-brand-700 hover:underline">Read more</Link> : undefined,
+      fields: [
+        { label: 'What you may notice', kind: 'prose', value: ticket.knownError?.linked?.summary ?? '' },
+        { label: 'In the meantime', kind: 'prose', value: ticket.knownError?.linked?.workaround ?? '' },
       ],
     },
     {

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Lock, ChevronDown, ChevronRight, MessageSquare, History, Sparkles, Bot, ArrowRightLeft, UserCheck, Flag, ShieldCheck, Link2, Server, ListChecks, Timer, AlertTriangle, ClipboardCheck, Eye, Pencil, Flame, Megaphone, Frown, Gavel, type LucideIcon } from 'lucide-react';
+import { Lock, ChevronDown, ChevronRight, MessageSquare, History, Sparkles, Bot, ArrowRightLeft, UserCheck, Flag, ShieldCheck, Link2, Server, ListChecks, Timer, AlertTriangle, ClipboardCheck, Eye, Pencil, Flame, Megaphone, Frown, Gavel, Bug, type LucideIcon } from 'lucide-react';
 import { get } from '@/api/client';
 import { Avatar } from '@/components/ui';
 import { Segmented } from '@/components/dashboards/Panel';
@@ -29,7 +29,7 @@ export interface StreamEntry {
   editedAt?: string | null;
 }
 
-const ICONS: Record<string, LucideIcon> = { created: Sparkles, status: ArrowRightLeft, assignment: UserCheck, priority: Flag, scope: ShieldCheck, link: Link2, ci: Server, task: ListChecks, time: Timer, sla: Timer, escalation: AlertTriangle, approval: ClipboardCheck, watcher: Eye, update: Pencil, history: History, major: Flame, major_update: Megaphone, ai: Bot, page: Megaphone, sentiment: Frown, change_conflict: AlertTriangle, cab: Gavel };
+const ICONS: Record<string, LucideIcon> = { created: Sparkles, status: ArrowRightLeft, assignment: UserCheck, priority: Flag, scope: ShieldCheck, link: Link2, ci: Server, task: ListChecks, time: Timer, sla: Timer, escalation: AlertTriangle, approval: ClipboardCheck, watcher: Eye, update: Pencil, history: History, major: Flame, major_update: Megaphone, ai: Bot, page: Megaphone, sentiment: Frown, change_conflict: AlertTriangle, cab: Gavel, known_error: Bug };
 const SECRET = /(password|secret|token|key|community)/i;
 
 export const fromTimeline = (t: TimelineEntry): StreamEntry =>

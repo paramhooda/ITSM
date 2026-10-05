@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { TICKET_TYPES, LINK_TYPES, CHANGE_TYPES, SCOPE_STATUSES } from '@itsm/shared';
 import { paginationSchema, sortSchema } from '@/core/pagination';
+import { knownErrorPatchSchema } from '@/modules/known-errors/schemas';
 
 const uuid = z.string().uuid();
 const nullableUuid = uuid.nullable().optional();
@@ -43,7 +44,8 @@ export const problemDetailsSchema = z.object({
   permanentFix: z.string().max(20000).nullable().optional(),
   kbArticleId: nullableUuid,
   impactSummary: z.string().max(10000).nullable().optional(),
-});
+  // Known-error lifecycle fields (status, fix change, customer wording) share the problem patch so the ProblemForm saves everything at once.
+}).extend(knownErrorPatchSchema.shape);
 export type ProblemDetailsInput = z.infer<typeof problemDetailsSchema>;
 
 export const createTicketSchema = z.object({
@@ -266,6 +268,8 @@ export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   riskLevel: z.enum(['low', 'medium', 'high', 'none']).optional(),
   scheduledFrom: z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date').optional(),
   scheduledTo: z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date').optional(),
+  /** Problems flagged as known errors (true) or not (false). */
+  knownError: boolQ,
   fields: z.enum(['min', 'full']).optional(),
 });
 export type ListQuery = z.infer<typeof listQuerySchema>;

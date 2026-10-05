@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/auth';
 import { cn } from '@/lib/utils';
 import { CatalogForm } from '@/components/tickets/CatalogForm';
 import { KbSuggestions } from '@/components/knowledge/KbSuggestions';
+import { KnownErrorSuggestions } from '@/components/known-errors/KnownErrorSuggestions';
 import { portalApi, pk, type PortalCatalogItem } from '@/components/portal/api';
 import { FilePicker, pastedFiles } from '@/components/attachments/FilePicker';
 import { addFiles, uploadAttachments, reportUploadFailures } from '@/components/attachments/upload';
@@ -200,6 +201,7 @@ export default function PortalNewTicketPage() {
             </div>
           </Card>
           <div className="flex flex-col gap-3">
+            <KnownErrorSuggestions q={title} serviceId={serviceId || null} title="Known issues with a workaround" />
             <KbSuggestions q={title} serviceId={serviceId || null} title="This might help right away" />
             <Card title="What happens next">
               <ul className="text-[12.5px] text-muted flex flex-col gap-2">

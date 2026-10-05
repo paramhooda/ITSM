@@ -1,3 +1,4 @@
+import type { KnownErrorRow } from '@/components/known-errors/api';
 import { TICKET_TYPE_COLORS } from '@/lib/statusColors';
 import type { Conflict } from '@/components/changes/api';
 /** API shapes of the tickets module (kept in sync with apps/api/src/modules/tickets). */
@@ -95,6 +96,8 @@ export interface TicketListRow {
   sla: SlaCompact | null;
   breachRisk: BreachRisk | null;
   lastSentiment: SentimentFlag | null;
+  /** A problem flagged as a known error. */
+  isKnownError?: boolean;
 }
 
 export interface TicketStats {
@@ -122,6 +125,8 @@ export interface TicketStats {
   highRisk: number;
   /** Open tickets whose customer sounded negative or angry in the last comment. */
   unhappy: number;
+  /** Problems flagged as known errors in the filtered set. */
+  knownErrors?: number;
 }
 
 export interface UserLite {
@@ -136,7 +141,7 @@ export interface LinkedTicket {
   linkType: string;
   direction: 'inbound' | 'outbound';
   createdAt: string;
-  ticket: { id: string; number: string; title: string; type: TicketType; status: OptionLabel | null; priority: OptionLabel | null };
+  ticket: { id: string; number: string; title: string; type: TicketType; status: OptionLabel | null; priority: OptionLabel | null; /** A problem flagged as a known error. */ isKnownError?: boolean };
 }
 
 export interface Task {
@@ -186,6 +191,15 @@ export interface ProblemDetails {
   permanentFix: string | null;
   kbArticleId: string | null;
   impactSummary: string | null;
+  /** Known error database fields (null until the problem is flagged as a known error). */
+  keStatus?: string | null;
+  keStatusAt?: string | null;
+  keIdentifiedAt?: string | null;
+  fixChangeId?: string | null;
+  portalVisible?: boolean;
+  customerSummary?: string | null;
+  customerWorkaround?: string | null;
+  publishedAt?: string | null;
 }
 
 export interface ChangeDetails {
@@ -244,6 +258,8 @@ export interface TicketPermissions {
   watch: boolean;
   /** Declare, demote and run the major incident (tickets:major, incidents only). */
   major: boolean;
+  /** Publish the problem's customer wording to the portal (kedb:publish). */
+  publish?: boolean;
 }
 
 export type MajorStatus = 'active' | 'resolved' | 'review_done' | 'demoted';
@@ -458,6 +474,8 @@ export interface TicketDetail {
   permissions: TicketPermissions;
   /** Present once the ticket has ever been declared a major incident (status says whether it still is). */
   major?: MajorSummary | null;
+  /** Incidents only: the linked known error, or the best matches while nothing is linked; null without kedb:read. */
+  knownError?: { linked: KnownErrorRow | null; suggestions: KnownErrorRow[] } | null;
 }
 
 export interface TimelineEntry {

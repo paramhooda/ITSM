@@ -17,7 +17,7 @@ import type { TicketRow, Breakdown } from './types';
 
 interface Noc {
   generatedAt: string;
-  totals: { open: number; openIncidents: number; breached: number; atRisk: number; unassigned: number; major: number; escalated: number; openedToday: number; resolvedToday: number; mttrTodayMinutes: number | null; highRisk?: number; mediumRisk?: number; unhappy?: number };
+  totals: { open: number; openIncidents: number; breached: number; atRisk: number; unassigned: number; major: number; escalated: number; openedToday: number; resolvedToday: number; mttrTodayMinutes: number | null; highRisk?: number; mediumRisk?: number; unhappy?: number; knownErrorsOpen?: number };
   openIncidents: Breakdown[];
   criticalOpen: TicketRow[];
   slaAtRisk: { atRisk: number; breached: number; items: TicketRow[] };
@@ -110,10 +110,11 @@ export function NocDashboard({ days = 30, customerId = '' }: { days?: number; cu
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="Ticket aging" subtitle="How long open tickets have been waiting" className="xl:col-span-1">
           <TrendChart data={d.aging} x="bucket" kind="bar" series={[{ key: 'count', label: 'Open tickets' }]} height={170} xFormatter={(v) => v} />
-          <div className="mt-4 pt-4 border-t border-default grid grid-cols-3 gap-3">
+          <div className="mt-4 pt-4 border-t border-default grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Stat label="PRTG events · 24h" value={fmtNumber(d.monitoringEvents24h.total)} />
             <Stat label="Tickets from monitoring" value={fmtNumber(d.monitoringEvents24h.ticketsCreated)} />
             <Stat label="Ticket rate" value={d.monitoringEvents24h.total ? `${Math.round((d.monitoringEvents24h.ticketsCreated / d.monitoringEvents24h.total) * 100)}%` : '—'} />
+            <Stat label="Known errors" value={fmtNumber(d.totals.knownErrorsOpen)} tone={(d.totals.knownErrorsOpen ?? 0) > 0 ? 'warn' : 'default'} />
           </div>
         </Panel>
         <Panel title="At risk or breached" subtitle={riskOrder === 'deadline' ? 'Soonest SLA deadline first' : 'Highest priority first'} to="/tickets?open=true&slaState=breached" toLabel="All breached" padded={false} action={<Segmented size="sm" options={[{ value: 'deadline', label: 'Deadline' }, { value: 'priority', label: 'Priority' }]} value={riskOrder} onChange={setRiskOrder} />}>

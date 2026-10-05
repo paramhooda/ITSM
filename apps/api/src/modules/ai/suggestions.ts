@@ -34,7 +34,7 @@ const trunc = (s: string | null | undefined, n: number) => (s ? (s.length > n ? 
 const firstName = (name?: string | null) => (name ? name.split(/\s+/)[0]! : '');
 const minutesLabel = (m: number) => (Math.abs(m) >= 120 ? `${Math.round(Math.abs(m) / 60)}h` : `${Math.abs(m)}m`);
 
-export type SuggestionKind = 'summary' | 'classification' | 'assignment' | 'similar' | 'knowledge' | 'resolution' | 'resolution_notes' | 'draft_update' | 'duplicates' | 'change_impact' | 'problem_cluster';
+export type SuggestionKind = 'summary' | 'classification' | 'assignment' | 'similar' | 'knowledge' | 'resolution' | 'resolution_notes' | 'draft_update' | 'duplicates' | 'change_impact' | 'problem_cluster' | 'known_error_wording';
 /** proposed: waits for a person; accepted / rejected: decided; applied: the change was made (by the person accepting, or by triage above the confidence threshold). */
 export type SuggestionStatus = 'proposed' | 'accepted' | 'rejected' | 'applied';
 

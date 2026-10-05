@@ -14,6 +14,7 @@ import { seedTickets } from './demo/tickets';
 import { seedChanges } from './demo/changes';
 import { seedFieldService } from './demo/field';
 import { seedKnowledge } from './demo/knowledge';
+import { seedKnownErrors } from './demo/known-errors';
 import { seedIntegrationRows, seedIntegrationEvents } from './demo/integrations';
 import { seedExtras, cleanupNotifications } from './demo/extras';
 
@@ -94,6 +95,7 @@ export async function loadDemoData() {
   await phase('change management (blackouts, risk, CAB)', () => withSystem((tx) => seedChanges(state, tx)));
   await phase('field service (visits, PM)', () => withSystem((tx) => seedFieldService(state, tx)));
   await phase('knowledge', () => withSystem((tx) => seedKnowledge(state, tx)));
+  await phase('known errors', () => withSystem((tx) => seedKnownErrors(state, tx)));
   await phase('integration events, discovery', () => withSystem((tx) => seedIntegrationEvents(state, tx)));
   await phase('reports, notifications, saved views', () =>
     withSystem(async (tx) => {

@@ -92,6 +92,8 @@ function buildWhere(ctx: Ctx, q: StatsQuery): SQL | undefined {
     if (q.scheduledTo.length <= 10) to.setUTCDate(to.getUTCDate() + 1);
     conds.push(sql`EXISTS (SELECT 1 FROM change_details cd WHERE cd.ticket_id = ${T.id} AND cd.scheduled_start <= ${to})`);
   }
+  // Known error database: problems flagged as known errors (true) or not (false).
+  if (q.knownError !== undefined) conds.push(q.knownError ? sql`EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error)` : sql`NOT EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error)`);
   const fts = searchFts(q.q, T.searchVector, T.number, T.title);
   if (fts) conds.push(fts);
   return conds.length ? and(...conds) : undefined;
@@ -161,6 +163,7 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
       breachRiskReason: T.breachRiskReason,
       lastSentiment: T.lastSentiment,
       lastSentimentAt: T.lastSentimentAt,
+      isKnownError: sql<boolean>`EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error)`,
     })
     .from(T)
     .leftJoin(st, eq(st.id, T.statusId))
@@ -213,6 +216,7 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
     catalogItemId: r.catalogItemId,
     securitySeverityId: r.securitySeverityId,
     sla: worstSla(slas.get(r.id)),
+    isKnownError: !!r.isKnownError,
     // Staff only: the risk forecast and the customer's mood are internal signals.
     breachRisk: staff && r.breachRisk ? { level: r.breachRisk as RiskLevel, score: r.breachRiskScore ?? 0, reason: r.breachRiskReason ?? '' } : null,
     lastSentiment: staff && r.lastSentiment && r.lastSentiment !== 'n/a' ? { sentiment: r.lastSentiment as Sentiment, at: r.lastSentimentAt } : null,
@@ -280,6 +284,7 @@ export async function ticketStats(ctx: Ctx, q: StatsQuery) {
       unhappy: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${T.lastSentiment} IN ('negative', 'angry'))::int`,
       createdToday: sql<number>`count(*) FILTER (WHERE ${T.createdAt} >= ${todayStart})::int`,
       resolvedToday: sql<number>`count(*) FILTER (WHERE ${T.resolvedAt} >= ${todayStart})::int`,
+      knownErrors: sql<number>`count(*) FILTER (WHERE EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error))::int`,
     })
     .from(T)
     .where(base);

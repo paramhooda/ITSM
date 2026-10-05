@@ -48,13 +48,13 @@ export const CORE: ReturnType<typeof define>[] = [
   define({
     name: 'search',
     toolset: 'core',
-    description: 'Global search across tickets, customers, assets, CIs, contracts, services, knowledge articles and visits. Use when you do not know which kind of record the user means.',
-    inputSchema: z.object({ q: z.string().min(2).max(200), types: z.array(z.enum(['ticket', 'customer', 'asset', 'ci', 'contract', 'service', 'kb', 'visit'])).optional(), limit: z.number().int().min(1).max(20).optional() }),
+    description: 'Global search across tickets, customers, assets, CIs, contracts, services, knowledge articles, known errors and visits. Use when you do not know which kind of record the user means.',
+    inputSchema: z.object({ q: z.string().min(2).max(200), types: z.array(z.enum(['ticket', 'customer', 'asset', 'ci', 'contract', 'service', 'kb', 'visit', 'known_error'])).optional(), limit: z.number().int().min(1).max(20).optional() }),
     requires: [],
     portal: ['portal:access'],
     action: false,
     run: async (ctx, input) => {
-      const types = (input.types ?? ['ticket', 'customer', 'asset', 'ci', 'contract', 'service', 'kb', 'visit']) as SearchType[];
+      const types = (input.types ?? ['ticket', 'customer', 'asset', 'ci', 'contract', 'service', 'kb', 'visit', 'known_error']) as SearchType[];
       const hits = await postgresSearchProvider.search(ctx, input.q, types, input.limit ?? 10);
       return { hits: hits.slice(0, 40).map((h) => ({ type: h.type, id: h.id, title: h.title, subtitle: h.subtitle ?? null, badge: h.badge ?? null, link: h.link })) };
     },

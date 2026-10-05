@@ -381,6 +381,8 @@ export async function getTicket(ctx: Ctx, id: string) {
     tasks,
     approvals,
     problem: problem ?? null,
+    // Incidents: the known error they are linked to, or the best matches (customer users get the portal shape; roles without the key get null).
+    knownError: t.type === 'incident' ? await (await import('@/modules/known-errors/service')).matchForIncident(ctx, t) : null,
     change: change ? { ...change, risk: toLabel(riskOpt), ...(customer ? {} : await enrichChange(ctx, t, change, statuses.find((s) => s.id === t.statusId)?.statusCategory ?? 'open')) } : null,
     major: majorRow ? { status: majorRow.status, declaredAt: majorRow.declaredAt, resolvedAt: majorRow.resolvedAt, lastUpdateAt: majorRow.lastUpdateAt, nextUpdateDueAt: majorRow.nextUpdateDueAt, updateIntervalMinutes: majorRow.updateIntervalMinutes, commanderUserId: majorRow.commanderUserId, commsLeadUserId: majorRow.commsLeadUserId, bridgeUrl: majorRow.bridgeUrl, portalBanner: majorRow.portalBanner, pirCompletedAt: majorRow.pirCompletedAt } : null,
     escalations,
@@ -425,7 +427,7 @@ export function permissionsFor(ctx: Ctx, t: TicketRow) {
   const c = t.customerId;
   if (isCustomerUser(ctx)) {
     const portal = ctx.can('portal:tickets', c);
-    return { update: false, assign: false, resolve: false, close: false, reopen: portal, cancel: false, comment: portal, workNote: false, time: false, scope: false, escalate: false, problem: false, change: false, assessRisk: false, approve: ctx.can('portal:approve', c), tasks: false, links: false, watch: portal, major: false };
+    return { update: false, assign: false, resolve: false, close: false, reopen: portal, cancel: false, comment: portal, workNote: false, time: false, scope: false, escalate: false, problem: false, change: false, assessRisk: false, approve: ctx.can('portal:approve', c), tasks: false, links: false, watch: portal, major: false, publish: false };
   }
   return {
     update: ctx.can('tickets:update', c),
@@ -448,6 +450,8 @@ export function permissionsFor(ctx: Ctx, t: TicketRow) {
     links: ctx.can('tickets:update', c),
     watch: true,
     major: t.type === 'incident' && ctx.can('tickets:major', c),
+    /** Publish a known error (a flagged problem) to the customer portal. */
+    publish: ctx.can('kedb:publish', c),
   };
 }
 
@@ -457,14 +461,14 @@ async function listLinks(ctx: Ctx, t: TicketRow) {
   const all = [...rows, ...inbound.filter((l) => !rows.some((r) => r.id === l.id))];
   const otherIds = [...new Set(all.map((l) => (l.sourceTicketId === t.id ? l.targetTicketId : l.sourceTicketId)))];
   if (!otherIds.length) return [];
-  const others = await ctx.tx.select({ id: schema.tickets.id, number: schema.tickets.number, title: schema.tickets.title, type: schema.tickets.type, statusId: schema.tickets.statusId, priorityId: schema.tickets.priorityId, customerId: schema.tickets.customerId }).from(schema.tickets).where(inArray(schema.tickets.id, otherIds));
+  const others = await ctx.tx.select({ id: schema.tickets.id, number: schema.tickets.number, title: schema.tickets.title, type: schema.tickets.type, statusId: schema.tickets.statusId, priorityId: schema.tickets.priorityId, customerId: schema.tickets.customerId, isKnownError: sql<boolean>`EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${schema.tickets.id} AND pd.is_known_error)` }).from(schema.tickets).where(inArray(schema.tickets.id, otherIds));
   const opts = await optionMap(ctx.tx, others.flatMap((o) => [o.statusId, o.priorityId]));
   return all
     .map((l) => {
       const otherId = l.sourceTicketId === t.id ? l.targetTicketId : l.sourceTicketId;
       const o = others.find((x) => x.id === otherId);
       if (!o) return null;
-      return { id: l.id, linkType: l.linkType, direction: l.sourceTicketId === t.id ? 'outbound' : 'inbound', createdAt: l.createdAt, ticket: { id: o.id, number: o.number, title: o.title, type: o.type, status: toLabel(opts.get(o.statusId)), priority: toLabel(opts.get(o.priorityId ?? '')) } };
+      return { id: l.id, linkType: l.linkType, direction: l.sourceTicketId === t.id ? 'outbound' : 'inbound', createdAt: l.createdAt, ticket: { id: o.id, number: o.number, title: o.title, type: o.type, status: toLabel(opts.get(o.statusId)), priority: toLabel(opts.get(o.priorityId ?? '')), isKnownError: !!o.isKnownError } };
     })
     .filter((x): x is NonNullable<typeof x> => !!x);
 }
@@ -687,8 +691,16 @@ export async function updateProblemDetails(ctx: Ctx, id: string, patch: ProblemD
   if (t.type !== 'problem') throw new ValidationError('Not a problem record');
   requireAction(ctx, t, 'problems:manage');
   const [before] = await ctx.tx.select().from(schema.problemDetails).where(eq(schema.problemDetails.ticketId, t.id)).limit(1);
+  // The known-error lifecycle keys (status, fix change, customer wording) belong to a flagged problem only: refused on an
+  // unflagged one, ignored when the same patch withdraws the flag.
+  const keKeys = ['keStatus', 'fixChangeId', 'fixChangeNumber', 'customerSummary', 'customerWorkaround'] as const;
+  const lifecycle = keKeys.some((k) => patch[k] !== undefined);
+  const flagged = patch.isKnownError ?? before?.isKnownError ?? false;
+  if (lifecycle && patch.isKnownError !== false && !flagged) throw new ValidationError('Flag the problem as a known error first');
   const values: Partial<typeof schema.problemDetails.$inferInsert> = {};
   for (const k of ['symptoms', 'investigation', 'rootCause', 'workaround', 'isKnownError', 'permanentFix', 'kbArticleId', 'impactSummary'] as const) if (patch[k] !== undefined) (values as Record<string, unknown>)[k] = patch[k];
+  // Withdrawing the known-error flag also withdraws the entry from the customer portal.
+  if (patch.isKnownError === false && before?.isKnownError) values.portalVisible = false;
   values.updatedAt = new Date();
   let after;
   if (before) [after] = await ctx.tx.update(schema.problemDetails).set(values).where(eq(schema.problemDetails.ticketId, t.id)).returning();
@@ -702,6 +714,13 @@ export async function updateProblemDetails(ctx: Ctx, id: string, patch: ProblemD
       const cur = await optionById(ctx.tx, t.statusId);
       if (ke && ke.isActive && statusApplies(ke, t.type) && cur?.statusCategory && ['new', 'open'].includes(cur.statusCategory) && cur.id !== ke.id) await changeStatusCore(ctx, t, ke, { action: 'status' });
     }
+  }
+  // The known-error lifecycle is one audited path shared with the known error database (it stamps the identification date
+  // when the flag is new); loaded dynamically because that module imports this one's helpers.
+  if (flagged && ((patch.isKnownError && !before?.isKnownError) || lifecycle)) {
+    const { updateKnownError } = await import('@/modules/known-errors/service');
+    await updateKnownError(ctx, t.id, { keStatus: patch.keStatus, fixChangeId: patch.fixChangeId, fixChangeNumber: patch.fixChangeNumber, customerSummary: patch.customerSummary, customerWorkaround: patch.customerWorkaround });
+    [after] = await ctx.tx.select().from(schema.problemDetails).where(eq(schema.problemDetails.ticketId, t.id)).limit(1);
   }
   return after;
 }

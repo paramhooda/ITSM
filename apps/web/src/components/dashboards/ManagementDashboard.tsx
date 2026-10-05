@@ -115,6 +115,8 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             <Stat label="Out of scope" value={fmtNumber(k.outOfScopeCount)} tone={(k.outOfScopeCount ?? 0) > 0 ? 'warn' : 'default'} />
             <Stat label="AMC utilization" value={fmtPct(k.amcUtilizationPct)} />
             <Stat label="PM on time" value={fmtPct(k.pmOnTimePct)} tone={(k.pmMissed ?? 0) > 0 ? 'warn' : 'default'} />
+            <Stat label="Known errors open" value={fmtNumber(k.knownErrorsOpen)} tone={(k.knownErrorsOpen ?? 0) > 0 ? 'warn' : 'default'} />
+            <Stat label="Known errors published" value={fmtNumber(k.knownErrorsPublished)} />
           </div>
         </Panel>
       </div>

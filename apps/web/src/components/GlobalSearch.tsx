@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Ticket, Building2, Boxes, Server, FileSignature, BookOpen, Layers, Wrench } from 'lucide-react';
+import { Search, Ticket, Building2, Boxes, Server, FileSignature, BookOpen, Layers, Wrench, Bug } from 'lucide-react';
 import { useUiStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { get } from '@/api/client';
@@ -17,7 +17,7 @@ interface SearchHit {
   link: string;
 }
 
-const ICONS: Record<string, typeof Ticket> = { ticket: Ticket, customer: Building2, asset: Boxes, ci: Server, contract: FileSignature, kb: BookOpen, service: Layers, visit: Wrench };
+const ICONS: Record<string, typeof Ticket> = { ticket: Ticket, customer: Building2, asset: Boxes, ci: Server, contract: FileSignature, kb: BookOpen, service: Layers, visit: Wrench, known_error: Bug };
 
 export function GlobalSearch() {
   const { searchOpen, setSearchOpen } = useUiStore();

@@ -17,6 +17,7 @@ import { TicketStatusBadge, TypeBadge } from '../TicketStatusBadge';
 import type { TicketDetail } from '../types';
 import { TicketAiPanel } from '@/components/ai/TicketAiPanel';
 import { ChangeImpactCard } from '@/components/ai/ChangeImpactCard';
+import { KnownErrorRailCard } from '@/components/known-errors/KnownErrorRailCard';
 
 /** Right-rail "Details": who the ticket is for, the SLA clocks, the people around it. Attachments live in the form. */
 export function TicketDetailsRail({ ticket }: { ticket: TicketDetail }) {
@@ -112,6 +113,7 @@ export function TicketAssistRail({ ticket }: { ticket: TicketDetail }) {
     <>
       <TicketAiPanel ticket={ticket} />
       {ticket.type === 'change' && !isCustomer && <ChangeImpactCard ticketId={ticket.id} canManage={p.change} />}
+      {ticket.type === 'incident' && !isCustomer && <KnownErrorRailCard ticket={ticket} />}
       <RailCard title={<><Copy className="h-3.5 w-3.5 text-subtle" /> Similar tickets</>} padded={false}>
         {similar.isLoading ? (
           <div className="px-4 py-3 text-[12.5px] text-muted">Searching…</div>

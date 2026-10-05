@@ -26,6 +26,7 @@ import { acknowledgeVisit } from '@/modules/field/service';
 import { getSetting } from '@/modules/config/service';
 import { plannedChangeState } from '@/modules/changes/service';
 import { windowOf } from '@/modules/changes/conflicts';
+import type { PortalKnownError } from '@/modules/known-errors/service';
 import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalRoleKey, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
 
 /**
@@ -38,7 +39,7 @@ import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiLis
  * activities, hidden attachments, MSP user e-mails) never leaves the MSP side.
  */
 
-const PORTAL_PERMISSIONS: Permission[] = ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'portal:status'];
+const PORTAL_PERMISSIONS: Permission[] = ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'portal:status', 'portal:kedb'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_CATEGORIES = ['new', 'open', 'pending'];
 const AWAITING_STATUS_KEY = 'pending_customer';
@@ -189,6 +190,7 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     watching: undefined,
     isMajor: undefined,
     open: undefined,
+    knownError: undefined,
   });
   const requesterNames = await userNamesOnly(ctx, res.items.map((r) => r.requesterUserId));
   const items = res.items.map((r) => ({
@@ -321,6 +323,8 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
     lastActivityAt: t.lastActivityAt,
     // The planned window of a change; nothing else of the change (plans, risk, CAB, conflicts) reaches the portal.
     change: t.change ? { changeType: t.change.changeType, scheduledStart: t.change.scheduledStart, scheduledEnd: t.change.scheduledEnd, actualStart: t.change.actualStart, actualEnd: t.change.actualEnd, downtimeExpectedMinutes: t.change.downtimeExpectedMinutes } : null,
+    // The published known error this incident is linked to (customer wording only) or published matches; never the internal workaround.
+    knownError: await portalKnownErrorOf(ctx, t, scope),
     timeline: timelineItems,
     attachments: { items: attachments, canUpload: canAct },
     actions: {
@@ -331,6 +335,25 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
       reopenWindowDays: windowDays,
     },
   };
+}
+
+/**
+ * The known-error block of a portal ticket. A customer ctx already received the
+ * portal shape from the ticket read (or null without portal:kedb); a staff
+ * preview carries the staff shape, so it is recomputed from the published entry
+ * alone and the matches are dropped.
+ */
+async function portalKnownErrorOf(ctx: Ctx, t: { type: string; knownError: { linked: { id: string } | null; suggestions: unknown[] } | null }, scope: PortalScope): Promise<{ linked: PortalKnownError | null; suggestions: PortalKnownError[] } | null> {
+  if (t.type !== 'incident') return null;
+  if (!scope.preview) return (t.knownError as { linked: PortalKnownError | null; suggestions: PortalKnownError[] } | null) ?? null;
+  if (!t.knownError?.linked) return { linked: null, suggestions: [] };
+  const { getPortalKnownError } = await import('@/modules/known-errors/service');
+  try {
+    return { linked: await getPortalKnownError(ctx, t.knownError.linked.id, scope.customerId), suggestions: [] };
+  } catch (err) {
+    if (err instanceof NotFoundError) return { linked: null, suggestions: [] };
+    throw err;
+  }
 }
 
 export async function createPortalTicket(ctx: Ctx, input: CreateTicketBody) {

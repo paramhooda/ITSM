@@ -16,7 +16,7 @@ import { RULE_KINDS, SECRET_SETTING_KEY, settingVisible, type RuleKind } from '.
  */
 
 /** Settings the assistant may change, by prefix; anything else is read-only or hidden. */
-export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.'];
+export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.', 'known_errors.'];
 const settingValue = z.union([z.string().max(2000), z.number(), z.boolean(), z.null(), z.array(z.string().max(100)).max(50)]);
 
 /** Validation for the settings whose shape the platform depends on. */
@@ -37,6 +37,9 @@ function validateSetting(key: string, value: unknown) {
     case 'changes.block_blackout_scheduling': return expect(typeof value === 'boolean', 'must be true or false');
     case 'changes.require_assessment_for_approval': return expect(typeof value === 'boolean', 'must be true or false');
     case 'changes.portal_horizon_days': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 7 && value <= 365, 'must be between 7 and 365 days');
+    case 'known_errors.notify_customers': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'known_errors.resolve_on_fix': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'known_errors.suggest_limit': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10, 'must be between 1 and 10');
     case 'ai.triage.auto_apply_confidence': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 100, 'must be between 50 and 100');
     case 'ai.triage.storm_window_minutes': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 5 && value <= 1440, 'must be between 5 and 1440 minutes');
     case 'ai.triage.storm_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 50, 'must be between 2 and 50');

@@ -320,7 +320,7 @@ export const compactTimeline = (items: Awaited<ReturnType<typeof timeline>>['ite
 export const period = (days: number) => new Date(Date.now() - days * 86_400_000);
 
 /** Fills the flag keys `ListQuery` requires (zod transforms make them required-but-undefined). */
-export const listQuery = (q: Partial<ListQuery>): ListQuery => ({ page: 1, pageSize: 20, order: 'desc', unassigned: undefined, mine: undefined, watching: undefined, isMajor: undefined, open: undefined, ...q });
+export const listQuery = (q: Partial<ListQuery>): ListQuery => ({ page: 1, pageSize: 20, order: 'desc', unassigned: undefined, mine: undefined, watching: undefined, isMajor: undefined, open: undefined, knownError: undefined, ...q });
 
 /** Display name of a customer the caller may see (used in previews). */
 export async function customerName(ctx: Ctx, id: string): Promise<string> {
@@ -335,3 +335,13 @@ export const forCustomer = async (ctx: Ctx, customerId?: string | null): Promise
 
 /** Knowledge pages are shared by both shells. */
 export const articleLink = (_ctx: Ctx, id: string) => `/knowledge/${id}`;
+/** The known error database is a shared route too: one link serves staff and the portal. */
+export const knownErrorLink = (_ctx: Ctx, id: string) => `/knowledge/known-errors/${id}`;
+
+/** A known error by problem number (PRB-…) or id: a problem flagged as a known error (published, for customer users). */
+export async function resolveKnownError(ctx: Ctx, ref: string): Promise<TicketRow> {
+  const t = await resolveTicket(ctx, ref);
+  const [pd] = t.type === 'problem' ? await ctx.tx.select({ isKnownError: schema.problemDetails.isKnownError, portalVisible: schema.problemDetails.portalVisible }).from(schema.problemDetails).where(eq(schema.problemDetails.ticketId, t.id)).limit(1) : [];
+  if (!pd?.isKnownError || (isCustomerUser(ctx) && !pd.portalVisible)) throw new NotFoundError('Known error', `${t.number} is not a known error${isCustomerUser(ctx) ? ' published for your organisation' : ''}`);
+  return t;
+}

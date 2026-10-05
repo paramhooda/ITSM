@@ -12,6 +12,7 @@ import { BreakdownBar } from './BreakdownBar';
 import { SlaGauge } from './SlaGauge';
 import { TicketMiniTable } from './TicketMiniTable';
 import { Panel, KpiSkeleton, Skeleton, RowList, Segmented, type RowItem } from './Panel';
+import { PORTAL_KE_STATUS_LABELS } from '@/components/known-errors/api';
 import type { TicketRow } from './types';
 
 interface SlaBlock { totals: { met: number; breached: number; running: number; compliancePct: number | null; avgElapsedMinutes: number | null }; groups: { key: string; label: string; met: number; breached: number; running: number; compliancePct: number | null }[] }
@@ -30,10 +31,13 @@ interface Customer {
   reports: { id: string; name: string; report_key: string; format: string; created_at: string; attachment_id: string | null; filename: string | null; size: number | null; period: string | null }[];
   recentTickets: TicketRow[];
   serviceTeam: { accountManager: { id: string; name: string; email: string; phone: string | null } | null; teams: { id: string; name: string; team_type: string; email: string | null; manager_name: string | null }[] };
+  /** Published known errors of the organisation (empty for a customer user without portal:kedb). */
+  knownErrors?: { published: number; items: { id: string; number: string; title: string; keStatus: string; publishedAt: string | null }[] };
 }
 
 export function CustomerDashboard({ customerId, days = 30 }: { customerId?: string; days?: number }) {
   const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
+  const can = useAuthStore((s) => s.can);
   const [upcomingView, setUpcomingView] = useState<'both' | 'visits' | 'pm'>('both');
   const q = useQuery({ queryKey: ['dashboards', 'customer', customerId ?? 'me', days], queryFn: () => get<Customer>('/dashboards/customer', { customerId, days }), placeholderData: (p) => p, staleTime: 30_000 });
   const d = q.data;
@@ -101,16 +105,23 @@ export function CustomerDashboard({ customerId, days = 30 }: { customerId?: stri
             <TicketMiniTable rows={openTickets.length ? openTickets : d.recentTickets} max={8} columns={['priority', 'status', 'sla', 'activity']} empty="No open tickets. Raise one from the portal whenever you need us." />
           </div>
         </Panel>
-        <Panel title="Your service team" subtitle="Who to contact">
-          <RowList
-            dense
-            empty="No team assigned yet"
-            items={[
-              ...(d.serviceTeam.accountManager ? [{ key: 'am', primary: d.serviceTeam.accountManager.name, secondary: `Account manager · ${d.serviceTeam.accountManager.email}${d.serviceTeam.accountManager.phone ? ` · ${d.serviceTeam.accountManager.phone}` : ''}` }] : []),
-              ...d.serviceTeam.teams.slice(0, 4).map((tm) => ({ key: tm.id, primary: tm.name, secondary: tm.email ?? (tm.manager_name ? `Managed by ${tm.manager_name}` : '') })),
-            ]}
-          />
-        </Panel>
+        <div className="flex flex-col gap-6 min-w-0">
+          {(!isCustomer || can('portal:kedb')) && (
+            <Panel title="Known issues with a workaround" subtitle={d.knownErrors?.published ? `${fmtNumber(d.knownErrors.published)} published for your organisation` : 'Published for your organisation'} to="/knowledge/known-errors" toLabel="All known issues">
+              <RowList dense empty="No known issues right now" items={(d.knownErrors?.items ?? []).map((k) => ({ key: k.id, primary: k.title, secondary: PORTAL_KE_STATUS_LABELS[k.keStatus] ?? k.keStatus, right: k.publishedAt ? fmtDate(k.publishedAt) : undefined, href: `/knowledge/known-errors/${k.id}` }))} />
+            </Panel>
+          )}
+          <Panel title="Your service team" subtitle="Who to contact">
+            <RowList
+              dense
+              empty="No team assigned yet"
+              items={[
+                ...(d.serviceTeam.accountManager ? [{ key: 'am', primary: d.serviceTeam.accountManager.name, secondary: `Account manager · ${d.serviceTeam.accountManager.email}${d.serviceTeam.accountManager.phone ? ` · ${d.serviceTeam.accountManager.phone}` : ''}` }] : []),
+                ...d.serviceTeam.teams.slice(0, 4).map((tm) => ({ key: tm.id, primary: tm.name, secondary: tm.email ?? (tm.manager_name ? `Managed by ${tm.manager_name}` : '') })),
+              ]}
+            />
+          </Panel>
+        </div>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="Upcoming maintenance & visits" subtitle="Next 30 days" to={isCustomer ? '/portal/maintenance' : '/maintenance'} action={<Segmented size="sm" options={[{ value: 'both', label: 'Both' }, { value: 'visits', label: 'Visits' }, { value: 'pm', label: 'Maintenance' }]} value={upcomingView} onChange={setUpcomingView} />}>

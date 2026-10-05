@@ -84,7 +84,7 @@ export const MSP_NAV: NavItem[] = [
     children: [
       { to: '/knowledge', label: 'Overview', perm: ['kb:read'] },
       { to: '/knowledge/articles', label: 'Articles' },
-      // slot #4: { to: '/knowledge/known-errors', label: 'Known errors', perm: ['kedb:read'] }
+      { to: '/knowledge/known-errors', label: 'Known errors', perm: ['kedb:read'] },
       { to: '/knowledge/categories', label: 'Categories', perm: ['kb:manage'] },
     ],
   },
@@ -183,7 +183,7 @@ export const PORTAL_NAV: NavItem[] = [
     children: [
       { to: '/knowledge', label: 'Overview' },
       { to: '/knowledge/articles', label: 'Articles' },
-      // slot #4: { to: '/knowledge/known-errors', label: 'Known errors', perm: ['portal:kedb'] }
+      { to: '/knowledge/known-errors', label: 'Known errors', perm: ['portal:kedb'] },
     ],
   },
   // ---- Your services

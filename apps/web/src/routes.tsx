@@ -83,10 +83,12 @@ export const routes: AppRoute[] = [
   { path: '/field/:id', component: page(() => import('@/pages/field/FieldVisitDetailPage')), perm: ['field:read'] },
   { path: '/maintenance', component: page(() => import('@/pages/pm/MaintenancePage')), perm: ['pm:read'] },
   // Knowledge
-  // Knowledge: Overview · Articles · Categories (portal users land on the articles)
+  // Knowledge: Overview · Articles · Known errors · Categories (portal users land on the articles)
   { path: '/knowledge', component: page(() => import('@/pages/knowledge/KnowledgeOverviewPage')), perm: ['kb:read', 'portal:access'], shared: true, portal: true },
   { path: '/knowledge/articles', component: page(() => import('@/pages/knowledge/KnowledgeListPage')), perm: ['kb:read', 'portal:access'], shared: true, portal: true },
   { path: '/knowledge/categories', component: page(() => import('@/pages/knowledge/KnowledgeCategoriesPage')), perm: ['kb:manage'] },
+  { path: '/knowledge/known-errors', component: page(() => import('@/pages/knowledge/KnownErrorsPage')), perm: ['kedb:read', 'portal:kedb'], shared: true, portal: true },
+  { path: '/knowledge/known-errors/:id', component: page(() => import('@/pages/knowledge/KnownErrorPage')), perm: ['kedb:read', 'portal:kedb'], shared: true, portal: true },
   { path: '/knowledge/:id', component: page(() => import('@/pages/knowledge/KnowledgeArticlePage')), perm: ['kb:read', 'portal:access'], shared: true, portal: true },
   // Reports
   { path: '/reports', component: page(() => import('@/pages/reports/ReportsPage')), perm: ['reports:run', 'portal:reports'], shared: true, portal: true },

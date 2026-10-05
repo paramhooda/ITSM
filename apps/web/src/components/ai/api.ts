@@ -300,6 +300,10 @@ export interface KnowledgeResult extends Base {
 export interface ResolutionNotesResult extends Base {
   notes: string;
 }
+export interface KnownErrorWordingResult extends Base {
+  summary: string;
+  workaround: string;
+}
 /** A stored suggestion row (what triage on arrival or the Assist rail produced). */
 export interface StoredSuggestion {
   id: string;
@@ -336,5 +340,7 @@ export const aiApi = {
   decide: (id: string, status: 'accepted' | 'rejected', note?: string | null, opts?: { apply?: boolean; targetTicketId?: string | null }) => post<{ id: string; status: string; changes?: string[] }>(`/ai/suggestions/${id}/decide`, { status, note: note ?? undefined, ...(opts ?? {}) }),
   suggestKnowledge: (id: string) => post<KnowledgeResult>(`/ai/tickets/${id}/suggest-knowledge`),
   draftResolution: (id: string) => post<ResolutionNotesResult>(`/ai/tickets/${id}/draft-resolution`),
+  /** Customer-facing wording of a known error (feature kedb_draft; deterministic fallback without a provider). */
+  draftKnownError: (id: string) => post<KnownErrorWordingResult>(`/ai/known-errors/${id}/draft`),
   listSuggestions: (id: string, kind?: string) => get<{ items: StoredSuggestion[] }>(`/ai/tickets/${id}/suggestions`, kind ? { kind } : undefined),
 };

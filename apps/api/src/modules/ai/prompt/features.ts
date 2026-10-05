@@ -39,3 +39,5 @@ export const BRIEFING_SYSTEM = `You write the short morning briefing an IT manag
 
 export const CLUSTER_SYSTEM = `You name problem-management clusters of related incidents. For each cluster propose a short problem title (max 80 chars) describing the likely common cause. ${JSON_ONLY}
 Schema: {"clusters": [{"key": string, "title": string}]}`;
+
+export const KNOWN_ERROR_SYSTEM = `You write the customer-facing entry of a known error for an IT managed service provider's portal from the engineers' problem record (title, symptoms, impact, internal workaround, service, customer). Reply with JSON {"summary": string, "workaround": string}: summary = what the customer may notice, one or two plain sentences, no hostnames, IP addresses, vendor case numbers, internal tooling or blame; workaround = what the customer can do in the meantime, imperative, at most four sentences, only steps a non-technical person can follow or "No action is needed on your side" plus what the provider does. Never invent causes, dates or commitments. ${JSON_ONLY}`;

@@ -51,6 +51,10 @@ describe('demo dataset', () => {
     expect(await count('change_details', 'where template_id is not null')).toBeGreaterThanOrEqual(3);
     expect(await count('change_risk_questions')).toBeGreaterThanOrEqual(6);
     expect(await count('change_templates')).toBeGreaterThanOrEqual(4);
+    // Known error database: flagged problems carry a status and customer wording; some are published to the portal.
+    expect(await count('problem_details', 'where is_known_error')).toBeGreaterThanOrEqual(10);
+    expect(await count('problem_details', 'where portal_visible')).toBeGreaterThanOrEqual(5);
+    expect(await count('problem_details', "where is_known_error and ke_status is not null and customer_workaround is not null")).toBeGreaterThanOrEqual(10);
   });
 
   it('keeps every customer-scoped row inside its parent customer', async () => {

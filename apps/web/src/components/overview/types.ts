@@ -135,6 +135,8 @@ export interface KnowledgeOverview {
   viewsLast30d: number;
   topViewed: { id: string; number: string; title: string; viewCount: number; visibility: string }[];
   recentlyUpdated: { id: string; number: string; title: string; updatedAt: string; status: string }[];
+  /** The known error database: open and fix-in-progress entries, and how many are published to the portal. */
+  knownErrors: { open: number; fixInProgress: number; published: number };
 }
 
 export interface PortalAssetsOverview {

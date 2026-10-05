@@ -45,6 +45,8 @@ export const PROCESSING_COLORS: Record<string, string> = { received: 'blue', cor
 
 export const KB_STATUS_COLORS: Record<string, string> = { draft: 'amber', review: 'blue', published: 'green', archived: 'slate' };
 export const KB_VISIBILITY_COLORS: Record<string, string> = { internal: 'slate', customer: 'violet', public: 'green' };
+/** Known-error lifecycle on problem records (open → fix in progress → resolved; retired leaves the portal). */
+export const KNOWN_ERROR_STATUS_COLORS: Record<string, string> = { open: 'orange', fix_in_progress: 'blue', resolved: 'green', retired: 'slate' };
 
 /** Identity colours for service domains / team types (categorical, not status). */
 export const DOMAIN_COLORS: Record<string, string> = { noc: 'blue', soc: 'red', amc: 'amber', field: 'amber', service_desk: 'teal', infrastructure: 'indigo', network: 'sky', security: 'rose', cloud: 'violet', general: 'slate' };

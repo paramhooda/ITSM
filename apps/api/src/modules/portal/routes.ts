@@ -4,6 +4,8 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { h } from '@/core/context';
 import * as svc from './service';
 import * as S from './schemas';
+import * as kedb from '@/modules/known-errors/service';
+import * as KE from '@/modules/known-errors/schemas';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -70,6 +72,11 @@ export default async function routes(app: FastifyInstance) {
 
   // ---- reports
   r.get('/portal/reports', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => svc.portalReports(ctx, q(req).customerId)));
+
+  // ---- known errors (the organisation's published entries, customer wording only; literal /suggest before /:id)
+  r.get('/portal/known-errors', { preHandler: read, schema: { tags, querystring: KE.portalListQuerySchema } }, h((ctx, req) => kedb.listPortalKnownErrors(ctx, req.query as KE.PortalListQuery)));
+  r.get('/portal/known-errors/suggest', { preHandler: read, schema: { tags, querystring: KE.portalSuggestQuerySchema } }, h((ctx, req) => kedb.suggestPortalKnownErrors(ctx, req.query as KE.PortalSuggestQuery)));
+  r.get('/portal/known-errors/:id', { preHandler: read, schema: { tags, params: idParam, querystring: S.previewQuery } }, h((ctx, req) => kedb.getPortalKnownError(ctx, (req.params as { id: string }).id, q(req).customerId)));
 
   // ---- users (customer administrators)
   r.get('/portal/users', { preHandler: read, schema: { tags, querystring: S.userListQuery } }, h((ctx, req) => svc.listPortalUsers(ctx, req.query as S.UserListQuery)));

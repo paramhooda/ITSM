@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { Ctx } from '@/core/context';
 import { isCustomerUser } from '@/core/authz';
+import { KNOWN_ERROR_STATUS_LABELS } from '@itsm/shared';
 import type { SearchHit, SearchProvider, SearchType } from './provider';
 
 type Row = Record<string, unknown>;
@@ -38,6 +39,7 @@ export class PostgresSearchProvider implements SearchProvider {
     if (customer) {
       if (type === 'ticket') return ctx.can('portal:tickets');
       if (type === 'kb') return ctx.can('portal:access');
+      if (type === 'known_error') return ctx.can('portal:kedb');
       return false;
     }
     switch (type) {
@@ -57,6 +59,8 @@ export class PostgresSearchProvider implements SearchProvider {
         return ctx.can('kb:read') || ctx.can('kb:manage');
       case 'visit':
         return ctx.can('field:read') || ctx.can('field:execute');
+      case 'known_error':
+        return ctx.can('kedb:read');
       default:
         return false;
     }
@@ -267,6 +271,41 @@ export class PostgresSearchProvider implements SearchProvider {
         link: `/field/${r.id}`,
         score: Number(r.score),
       }));
+    },
+
+    known_error: async (ctx, q, limit, customer) => {
+      const prefix = `${escapeLike(q)}%`;
+      const cid = ctx.user.customerId ?? '00000000-0000-0000-0000-000000000000';
+      // Customers match the title and the customer wording of their organisation's published entries only; staff match the whole problem text.
+      const text = customer ? sql`to_tsvector('simple', coalesce(t.title, '') || ' ' || coalesce(pd.customer_summary, '') || ' ' || coalesce(pd.customer_workaround, ''))` : sql`(t.search_vector || pd.ke_search_vector)`;
+      const visibility = customer ? sql`and pd.portal_visible and t.customer_id = ${cid}::uuid and coalesce(pd.ke_status, 'open') <> 'retired'` : !ctx.can('soc:read') ? sql`and t.domain <> 'soc'` : sql``;
+      const res = await ctx.tx.execute(sql`
+        select t.id, t.number, t.title, coalesce(pd.ke_status, 'open') as ke_status, pd.portal_visible, c.name as customer_name, s.name as service_name,
+          (case when t.number ilike ${prefix} then 3 else 0 end)
+          + ts_rank_cd(${text}, websearch_to_tsquery('simple', ${q}))
+          + similarity(t.title, ${q}) as score
+        from tickets t
+        join problem_details pd on pd.ticket_id = t.id
+        left join customers c on c.id = t.customer_id
+        left join services s on s.id = t.service_id
+        where t.type = 'problem' and pd.is_known_error
+          and (t.number ilike ${prefix} or ${text} @@ websearch_to_tsquery('simple', ${q}) or similarity(t.title, ${q}) > 0.3)
+        ${visibility}
+        order by score desc, pd.updated_at desc
+        limit ${limit}`);
+      return (res.rows as Row[]).map((r) => {
+        const status = KNOWN_ERROR_STATUS_LABELS[String(r.ke_status) as keyof typeof KNOWN_ERROR_STATUS_LABELS] ?? titleCase(String(r.ke_status));
+        return {
+          type: 'known_error',
+          id: String(r.id),
+          title: customer ? String(r.title) : `${r.number} · ${r.title}`,
+          subtitle: (customer ? [r.service_name, status] : [r.customer_name, r.service_name, status, r.portal_visible ? 'Published' : null]).filter(Boolean).join(' · '),
+          badge: 'Known error',
+          badgeColor: 'orange',
+          link: `/knowledge/known-errors/${r.id}`,
+          score: Number(r.score),
+        };
+      });
     },
   };
 }

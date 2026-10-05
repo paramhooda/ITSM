@@ -18,6 +18,8 @@ import { INCIDENT_TEMPLATES, REQUEST_TEMPLATES, PROBLEM_TEMPLATES, CHANGE_TEMPLA
 import { addDays, addMinutes, atIst, DAY, HOUR, isoDate, istWeekday, MINUTE, randomTimeOfDay, type Rng } from './rng';
 
 type Actor = { kind: 'msp'; key: string } | { kind: 'portal'; userId: string; name: string } | { kind: 'integration'; name: string };
+/** Customers whose portal logins the demo advertises: each gets at least one active known error. */
+const SHOWCASE_PORTAL_CUSTOMERS = ['abc', 'meridian', 'northwind'];
 
 type Outcome = 'new' | 'in_progress' | 'pending_customer' | 'pending_vendor' | 'resolved';
 
@@ -235,6 +237,9 @@ function buildPlans(state: DemoState): Plan[] {
     }
 
     // ------------------------------------------------------------ problems
+    // The first open problem of a customer whose portal login the demo advertises always reaches the known-error
+    // stage, so the portal has an active known issue to show; the random draw is still taken to keep the sequence.
+    let showcaseKnownError = !SHOWCASE_PORTAL_CUSTOMERS.includes(cust.key);
     for (let i = 0; i < problems; i++) {
       const t = rng.pick(PROBLEM_TEMPLATES);
       const site = pickSite(rng, cust, null);
@@ -244,12 +249,19 @@ function buildPlans(state: DemoState): Plan[] {
       const createdAt = sampleCreatedAt(rng, now, false, false, false);
       const assigneeKey = assigneeFor(rng, 'noc', t.categoryKey, cust);
       const vars = varsFor(rng, cust, effectiveSite, ci, cust.contacts.find((c) => c.isPrimary)!.name);
+      const problemStageFor = (isOpen: boolean): Plan['problemStage'] => {
+        if (!isOpen) return 'resolved';
+        const drawn = rng.weighted([['investigating', 0.4], ['rca', 0.3], ['known_error', 0.3]]) as Plan['problemStage'];
+        if (showcaseKnownError) return drawn;
+        showcaseKnownError = true;
+        return 'known_error';
+      };
       plans.push({
         key: `prb-${++seq}`, type: 'problem', cust, site: effectiveSite, ci, vars, problem: t,
         categoryKey: t.categoryKey, subcategoryKey: t.subcategoryKey ?? null, serviceKey: t.serviceKey, impactKey: 'medium', urgencyKey: 'medium', priorityKey: 'p3', sourceKey: 'engineer',
         creator: { kind: 'msp', key: assigneeKey }, requesterContactId: null, requesterUserId: null, teamKey: 'noc', assigneeKey, managerKey: 'rajesh', assignedAtCreation: true,
         createdAt, outcome: open ? 'in_progress' : 'resolved', responseMet: true, resolutionMet: true, workNotes: 1, reopen: false, customerComment: false,
-        approvalDecision: null, changeStage: null, problemStage: open ? rng.weighted([['investigating', 0.4], ['rca', 0.3], ['known_error', 0.3]]) : 'resolved', title: t.title(vars),
+        approvalDecision: null, changeStage: null, problemStage: problemStageFor(open), title: t.title(vars),
       });
     }
 
@@ -978,7 +990,7 @@ export async function seedTickets(state: DemoState) {
         try {
           const run = await runPlan(state, tx, plan);
           runs.push(run);
-          state.tickets.set(plan.key, { id: run.ticketId, number: run.number, customerKey: plan.cust.key, type: plan.type, createdAt: plan.createdAt, title: plan.title, categoryKey: plan.categoryKey ?? '', ciId: plan.ci?.id ?? null, siteKey: plan.site?.key ?? null, resolvedAt: run.tl.resolvedAt, open: !run.tl.resolvedAt && !run.tl.cancelledAt, priorityKey: plan.priorityKey });
+          state.tickets.set(plan.key, { id: run.ticketId, number: run.number, customerKey: plan.cust.key, type: plan.type, createdAt: plan.createdAt, title: plan.title, categoryKey: plan.categoryKey ?? '', ciId: plan.ci?.id ?? null, siteKey: plan.site?.key ?? null, resolvedAt: run.tl.resolvedAt, open: !run.tl.resolvedAt && !run.tl.cancelledAt, priorityKey: plan.priorityKey, templateKey: plan.problem?.key });
         } catch (err) {
           logger.error({ err, plan: plan.key, title: plan.title, type: plan.type, customer: plan.cust.key }, 'demo ticket failed');
           throw err;

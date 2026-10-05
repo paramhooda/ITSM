@@ -73,7 +73,7 @@ export const FIELD_MODULES: ModuleItem[] = [
 export const KNOWLEDGE_MODULES: ModuleItem[] = [
   { to: '/knowledge', label: 'Overview', end: true, perm: ['kb:read'] },
   { to: '/knowledge/articles', label: 'Articles' },
-  // slot #4: { to: '/knowledge/known-errors', label: 'Known errors', perm: ['kedb:read'], match: (p) => p.startsWith('/knowledge/known-errors') }
+  { to: '/knowledge/known-errors', label: 'Known errors', perm: ['kedb:read'], match: (p) => p.startsWith('/knowledge/known-errors') },
   { to: '/knowledge/categories', label: 'Categories', perm: ['kb:manage'] },
 ];
 
@@ -106,7 +106,7 @@ export const PORTAL_MAINTENANCE_MODULES: ModuleItem[] = [
 export const PORTAL_KNOWLEDGE_MODULES: ModuleItem[] = [
   { to: '/knowledge', label: 'Overview', end: true },
   { to: '/knowledge/articles', label: 'Articles' },
-  // slot #4: { to: '/knowledge/known-errors', label: 'Known errors', perm: ['portal:kedb'], match: (p) => p.startsWith('/knowledge/known-errors') }
+  { to: '/knowledge/known-errors', label: 'Known errors', perm: ['portal:kedb'], match: (p) => p.startsWith('/knowledge/known-errors') },
 ];
 
 export const PORTAL_STATUS_MODULES: ModuleItem[] = [

@@ -8,6 +8,7 @@ import * as svc from './service';
 import * as sug from './suggestions';
 import * as admin from './admin';
 import { draftAnnouncement } from '@/modules/status/draft';
+import { draftCustomerWording } from '@/modules/known-errors/draft';
 import { draftAnnouncementSchema, type DraftAnnouncementInput } from '@/modules/status/schemas';
 import { chatBodySchema, feedbackBodySchema, idParam, decideBodySchema, draftUpdateBodySchema, classifyDraftBodySchema, problemClustersQuerySchema, suggestionsQuerySchema, type ChatBody, type ClassifyDraftBody } from './schemas';
 
@@ -90,6 +91,7 @@ export default async function routes(app: FastifyInstance) {
   r.post('/ai/tickets/:id/suggest-knowledge', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.suggestKnowledge(steps(req), id(req)));
   r.post('/ai/tickets/:id/resolution-suggestions', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.resolutionSuggestions(steps(req), id(req)));
   r.post('/ai/tickets/:id/draft-resolution', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => sug.draftResolutionNotes(steps(req), id(req)));
+  r.post('/ai/known-errors/:id/draft', { preHandler: use, config: chatLimit, schema: { tags, params: idParam } }, async (req) => draftCustomerWording(steps(req), id(req)));
   r.post('/ai/tickets/:id/draft-customer-update', { preHandler: use, config: chatLimit, schema: { tags, params: idParam, body: draftUpdateBodySchema } }, async (req) => sug.draftCustomerUpdate(steps(req), id(req), (req.body as { tone?: 'neutral' | 'formal' | 'friendly' | 'apologetic' } | undefined)?.tone ?? 'neutral'));
   r.post('/ai/tickets/:id/major/draft-update', { preHandler: use, config: chatLimit, schema: { tags, params: idParam, body: z.object({ audience: z.enum(['customer', 'internal']).optional() }).optional() } }, async (req) => sug.draftMajorUpdate(steps(req), id(req), (req.body as { audience?: 'customer' | 'internal' } | undefined)?.audience ?? 'customer'));
   r.post('/ai/announcements/draft', { preHandler: use, config: chatLimit, schema: { tags, body: draftAnnouncementSchema } }, async (req) => draftAnnouncement(steps(req), req.body as DraftAnnouncementInput));

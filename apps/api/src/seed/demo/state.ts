@@ -148,7 +148,7 @@ export interface DemoState {
   services: Map<string, DemoService>;
   counts: Record<string, number>;
   /** Ticket ids by plan key, filled by the ticket phase. */
-  tickets: Map<string, { id: string; number: string; customerKey: string; type: string; createdAt: Date; title: string; categoryKey: string; ciId: string | null; siteKey: string | null; resolvedAt: Date | null; open: boolean; priorityKey: string }>;
+  tickets: Map<string, { id: string; number: string; customerKey: string; type: string; createdAt: Date; title: string; categoryKey: string; ciId: string | null; siteKey: string | null; resolvedAt: Date | null; open: boolean; priorityKey: string; templateKey?: string }>;
   /** Field visit ids created by the field phase. */
   visits: { id: string; number: string; customerKey: string; ticketId: string | null }[];
   /** Knowledge article ids by key. */

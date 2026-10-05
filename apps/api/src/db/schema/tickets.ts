@@ -230,8 +230,26 @@ export const problemDetails = pgTable('problem_details', {
   permanentFix: text('permanent_fix'),
   kbArticleId: uuid('kb_article_id'),
   impactSummary: text('impact_summary'),
+  /** Known-error lifecycle (KNOWN_ERROR_STATUSES): open | fix_in_progress | resolved | retired. NULL until the problem is flagged as a known error. */
+  keStatus: text('ke_status'),
+  keStatusAt: timestamp('ke_status_at', { withTimezone: true }),
+  /** When the problem was first flagged as a known error. */
+  keIdentifiedAt: timestamp('ke_identified_at', { withTimezone: true }),
+  /** The change ticket that delivers the permanent fix (same customer, type change). */
+  fixChangeId: uuid('fix_change_id').references(() => tickets.id, { onDelete: 'set null' }),
+  /** Customer-facing copy shown in the portal; the internal fields above never leave the API for customer users. */
+  portalVisible: boolean('portal_visible').notNull().default(false),
+  customerSummary: text('customer_summary'),
+  customerWorkaround: text('customer_workaround'),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  publishedBy: uuid('published_by').references(() => users.id, { onDelete: 'set null' }),
+  keSearchVector: tsvector('ke_search_vector').generatedAlwaysAs(searchExpr('symptoms', 'root_cause', 'workaround', 'permanent_fix', 'customer_summary', 'customer_workaround')),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (t) => [
+  index('problem_details_ke_idx').on(t.customerId, t.isKnownError),
+  index('problem_details_fix_change_idx').on(t.fixChangeId),
+  index('problem_details_ke_search_idx').using('gin', t.keSearchVector),
+]);
 
 export const changeDetails = pgTable('change_details', {
   ticketId: uuid('ticket_id').primaryKey().references(() => tickets.id, { onDelete: 'cascade' }),

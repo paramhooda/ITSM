@@ -91,6 +91,10 @@ export const IMPACT_DIRECTIONS = ['downstream', 'upstream', 'none'] as const;
 export type ImpactDirection = (typeof IMPACT_DIRECTIONS)[number];
 export const ASSET_LIFECYCLE = ['ordered', 'in_stock', 'deployed', 'in_repair', 'retired', 'disposed'] as const;
 export const KB_VISIBILITY = ['internal', 'customer', 'public'] as const;
+/** Known error lifecycle carried on a problem record flagged as a known error. */
+export const KNOWN_ERROR_STATUSES = ['open', 'fix_in_progress', 'resolved', 'retired'] as const;
+export type KnownErrorStatus = (typeof KNOWN_ERROR_STATUSES)[number];
+export const KNOWN_ERROR_STATUS_LABELS: Record<KnownErrorStatus, string> = { open: 'Open known error', fix_in_progress: 'Fix in progress', resolved: 'Resolved', retired: 'Retired' };
 export const NOTIFICATION_EVENTS = [
   'ticket.created', 'ticket.assigned', 'ticket.status_changed', 'ticket.customer_comment', 'ticket.engineer_comment',
   'ticket.resolved', 'ticket.closed', 'ticket.escalated', 'sla.warning', 'sla.breached',
@@ -107,6 +111,7 @@ export const NOTIFICATION_EVENTS = [
   'handover.published',
   'briefing.daily',
   'change.cab_scheduled',
+  'known_error.published',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

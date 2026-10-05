@@ -1,7 +1,7 @@
 import type { Ctx } from '@/core/context';
 
 /** Result types the global search can return. */
-export const SEARCH_TYPES = ['ticket', 'customer', 'asset', 'ci', 'contract', 'service', 'kb', 'visit'] as const;
+export const SEARCH_TYPES = ['ticket', 'customer', 'asset', 'ci', 'contract', 'service', 'kb', 'visit', 'known_error'] as const;
 export type SearchType = (typeof SEARCH_TYPES)[number];
 
 export interface SearchHit {

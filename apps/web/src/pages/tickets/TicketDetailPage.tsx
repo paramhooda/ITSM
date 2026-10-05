@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone, Undo2, BellRing } from 'lucide-react';
+import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone, Undo2, BellRing, Bug } from 'lucide-react';
 import { Button, Badge, LoadingBlock, ErrorBlock, Textarea, Select, Input, Avatar } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
 import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
@@ -77,6 +77,7 @@ export default function TicketDetailPage() {
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user)!;
   const can = useAuthStore((s) => s.can);
+  const navigate = useNavigate();
   const isCustomer = user.userType === 'customer';
   const aiOn = !isCustomer && can('ai:use');
   const aiStatus = useQuery({ queryKey: aiQk.status, queryFn: aiApi.status, staleTime: 60_000, retry: false, enabled: aiOn });
@@ -198,6 +199,7 @@ export default function TicketDetailPage() {
     ...(aiFeature('summarize') ? [{ label: 'Summarise for handover…', icon: <Sparkles className="h-4 w-4" />, onClick: () => setDialog('handover') }] : []),
     ...(p.watch ? [{ label: ticket.isWatching ? 'Stop watching' : 'Watch this ticket', icon: ticket.isWatching ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />, onClick: () => watch.mutate(ticket.isWatching) }] : []),
     ...(p.update && !isCustomer ? [{ label: 'Classify scope…', icon: <Pencil className="h-4 w-4" />, onClick: () => setDialog('scope') }] : []),
+    ...(ticket.type === 'problem' && ticket.problem?.isKnownError && !isCustomer && can('kedb:read') ? [{ label: 'Open in the known error database', icon: <Bug className="h-4 w-4" />, onClick: () => navigate(`/knowledge/known-errors/${ticket.id}`) }] : []),
     ...(p.cancel && isOpen ? [{ label: 'Cancel ticket', icon: <Ban className="h-4 w-4" />, onClick: () => setDialog('cancel'), danger: true }] : []),
   ];
 
@@ -338,7 +340,7 @@ export default function TicketDetailPage() {
   // ---- Related records: the parent and the typed links, read-only (managed on the Linked tickets tab)
   const linkGroups = new Map<string, LinkedTicket[]>();
   for (const l of ticket.links) {
-    const label = l.direction === 'outbound' ? LINK_TYPE_LABELS[l.linkType] ?? l.linkType : INBOUND_LINK_LABELS[l.linkType] ?? `← ${LINK_TYPE_LABELS[l.linkType] ?? l.linkType}`;
+    const label = l.direction === 'outbound' && l.linkType === 'problem_of' && l.ticket.isKnownError ? 'Known error' : l.direction === 'outbound' ? LINK_TYPE_LABELS[l.linkType] ?? l.linkType : INBOUND_LINK_LABELS[l.linkType] ?? `← ${LINK_TYPE_LABELS[l.linkType] ?? l.linkType}`;
     linkGroups.set(label, [...(linkGroups.get(label) ?? []), l]);
   }
   const relatedFields: FieldDef[] = [
@@ -361,7 +363,7 @@ export default function TicketDetailPage() {
   // ---- related lists
   const tabs = [
     { key: 'major', label: 'Major incident', hidden: isCustomer || !(ticket.isMajor || ticket.major), content: <MajorIncidentPanel ticket={ticket} canEdit={p.major} /> },
-    { key: 'plan', label: ticket.type === 'problem' ? 'Problem analysis' : 'Change plan', hidden: !(ticket.type === 'problem' || ticket.type === 'change'), content: ticket.type === 'problem' ? <ProblemForm ticketId={ticket.id} details={ticket.problem} canEdit={p.problem} /> : <div className="flex flex-col gap-4">{!isCustomer && <ChangeRiskCard ticketId={ticket.id} details={ticket.change} canEdit={p.assessRisk} />}<ChangeForm ticketId={ticket.id} ticketNumber={ticket.number} details={ticket.change} canEdit={p.change} customerId={ticket.customerId} ciIds={ticket.cis.map((c) => c.id)} primaryCiId={ticket.primaryCiId} /></div> },
+    { key: 'plan', label: ticket.type === 'problem' ? 'Problem analysis' : 'Change plan', hidden: !(ticket.type === 'problem' || ticket.type === 'change'), content: ticket.type === 'problem' ? <ProblemForm ticketId={ticket.id} ticketNumber={ticket.number} ticketTitle={ticket.title} customerId={ticket.customerId} customerName={ticket.customer?.name ?? null} details={ticket.problem} canEdit={p.problem} canPublish={!!p.publish} /> : <div className="flex flex-col gap-4">{!isCustomer && <ChangeRiskCard ticketId={ticket.id} details={ticket.change} canEdit={p.assessRisk} />}<ChangeForm ticketId={ticket.id} ticketNumber={ticket.number} details={ticket.change} canEdit={p.change} customerId={ticket.customerId} ciIds={ticket.cis.map((c) => c.id)} primaryCiId={ticket.primaryCiId} /></div> },
     { key: 'approvals', label: 'Approvals', count: ticket.approvals.length, hidden: !(ticket.approvals.length > 0 || (!isCustomer && (ticket.type === 'change' || ticket.type === 'request'))), content: <ApprovalsPanel ticket={ticket} approvals={ticket.approvals} canApprove={p.approve} canRequest={!isCustomer && (p.change || p.update)} /> },
     { key: 'tasks', label: 'Tasks', count: ticket.tasks.length, hidden: isCustomer, content: <TasksPanel ticketId={ticket.id} tasks={ticket.tasks} canEdit={p.tasks && !isClosed} /> },
     { key: 'items', label: 'Affected CIs & assets', count: ticket.cis.length + ticket.assets.length, content: <CisAssetsPanel ticket={ticket} canEdit={p.update} /> },
@@ -384,6 +386,7 @@ export default function TicketDetailPage() {
               <>
                 <TypeBadge type={ticket.type} />
                 {ticket.isMajor && <Badge color="red" className="gap-1"><Flame className="h-3 w-3" /> Major incident</Badge>}
+                {ticket.type === 'problem' && ticket.problem?.isKnownError && (!isCustomer && can('kedb:read') ? <Link to={`/knowledge/known-errors/${ticket.id}`} title="Open in the known error database"><Badge color="orange" className="gap-1 hover:underline"><Bug className="h-3 w-3" /> Known error</Badge></Link> : <Badge color="orange" className="gap-1"><Bug className="h-3 w-3" /> Known error</Badge>)}
                 {ticket.escalationLevel > 0 && <Badge color="amber" className="gap-1"><AlertTriangle className="h-3 w-3" /> Escalation L{ticket.escalationLevel}</Badge>}
                 {ticket.reopenCount > 0 && <Badge color="slate">Reopened ×{ticket.reopenCount}</Badge>}
               </>

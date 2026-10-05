@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import { KNOWN_ERROR_STATUS_LABELS } from '@itsm/shared';
 import { registerReport, type ReportResult } from '../registry';
 import { rows, customerCond, rangeCond, socCond, openCond, limitSql, pct, num, round1, col, listParam, strParam, boolParam, inUuids, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
 
@@ -265,19 +266,21 @@ registerReport({
     const list = await rows<Record<string, unknown>>(ctx, sql`
       SELECT t.id, t.number, t.title, cu.name AS customer, pr.label AS priority, st.label AS status, st.status_category, cat.label AS category, sv.name AS service, asg.name AS assignee,
         t.created_at, t.resolved_at, left(pd.root_cause, 300) AS root_cause, pd.is_known_error, (pd.workaround IS NOT NULL AND pd.workaround <> '') AS has_workaround, (pd.permanent_fix IS NOT NULL AND pd.permanent_fix <> '') AS has_permanent_fix,
-        (SELECT count(*)::int FROM ticket_links l WHERE (l.target_ticket_id = t.id OR l.source_ticket_id = t.id) AND l.link_type IN ('problem_of', 'caused_by', 'related')) AS linked_incidents
-      FROM tickets t LEFT JOIN problem_details pd ON pd.ticket_id = t.id ${ticketJoins}
+        (SELECT count(*)::int FROM ticket_links l WHERE (l.target_ticket_id = t.id OR l.source_ticket_id = t.id) AND l.link_type IN ('problem_of', 'caused_by', 'related')) AS linked_incidents,
+        CASE WHEN pd.is_known_error THEN coalesce(pd.ke_status, 'open') END AS ke_status, coalesce(pd.portal_visible, false) AS portal_visible, fc.number AS fix_change
+      FROM tickets t LEFT JOIN problem_details pd ON pd.ticket_id = t.id LEFT JOIN tickets fc ON fc.id = pd.fix_change_id ${ticketJoins}
       WHERE t.type = 'problem' ${boolParam(p, 'openOnly') ? openCond() : rangeCond(sql`t.created_at`, p.from, p.to)} ${customerCond(p.customerId)} ${socCond(ctx)}
       ORDER BY t.created_at DESC ${limitSql()}`);
     return {
-      columns: [col('number', 'Number'), col('title', 'Title'), col('customer', 'Customer'), col('priority', 'Priority'), col('status', 'Status'), col('category', 'Category'), col('is_known_error', 'Known error', 'boolean'), col('has_workaround', 'Workaround', 'boolean'), col('has_permanent_fix', 'Permanent fix', 'boolean'), col('linked_incidents', 'Linked incidents', 'number'), col('root_cause', 'Root cause'), col('assignee', 'Owner'), col('created_at', 'Created', 'datetime'), col('resolved_at', 'Resolved', 'datetime')],
-      rows: list,
+      columns: [col('number', 'Number'), col('title', 'Title'), col('customer', 'Customer'), col('priority', 'Priority'), col('status', 'Status'), col('category', 'Category'), col('is_known_error', 'Known error', 'boolean'), col('has_workaround', 'Workaround', 'boolean'), col('has_permanent_fix', 'Permanent fix', 'boolean'), col('ke_status', 'Known error status'), col('portal_visible', 'Published to portal', 'boolean'), col('fix_change', 'Fix change'), col('linked_incidents', 'Linked incidents', 'number'), col('root_cause', 'Root cause'), col('assignee', 'Owner'), col('created_at', 'Created', 'datetime'), col('resolved_at', 'Resolved', 'datetime')],
+      rows: list.map((r) => ({ ...r, ke_status: r.ke_status ? (KNOWN_ERROR_STATUS_LABELS[String(r.ke_status) as keyof typeof KNOWN_ERROR_STATUS_LABELS] ?? r.ke_status) : null })),
       summary: [
         { label: 'Problems', value: list.length },
         { label: 'Open', value: list.filter((r) => ['new', 'open', 'pending'].includes(String(r.status_category))).length },
         { label: 'Known errors', value: list.filter((r) => r.is_known_error).length },
         { label: 'With root cause', value: list.filter((r) => r.root_cause).length },
         { label: 'Linked incidents', value: list.reduce((s, r) => s + num(r.linked_incidents), 0) },
+        { label: 'Published to portal', value: list.filter((r) => r.portal_visible).length },
       ],
       charts: [{ type: 'bar', title: 'Problems by status', data: Object.entries(list.reduce<Record<string, number>>((m, r) => ((m[String(r.status)] = (m[String(r.status)] ?? 0) + 1), m), {})).map(([label, count]) => ({ label, count })), x: 'label', y: 'count' }],
     };
