@@ -1,7 +1,7 @@
 import { get } from '@/api/client';
-import type { AssetsOverview, CustomersOverview, ContractsOverview, EntitlementRow, FieldOverview, KnowledgeOverview } from './types';
+import type { AssetsOverview, CustomersOverview, ContractsOverview, EntitlementRow, FieldOverview, KnowledgeOverview, SoftwareOverview } from './types';
 
-export type { AssetsOverview, CustomersOverview, ContractsOverview, EntitlementRow, FieldOverview, KnowledgeOverview, Bucket, CoverageBuckets, SeriesPoint } from './types';
+export type { AssetsOverview, CustomersOverview, ContractsOverview, EntitlementRow, FieldOverview, KnowledgeOverview, SoftwareOverview, Bucket, CoverageBuckets, SeriesPoint } from './types';
 
 /** Filters of the paged entitlements list (`GET /contracts/entitlements`). */
 export interface EntitlementListParams {
@@ -33,6 +33,7 @@ export const ovKeys = {
   entitlements: (params: EntitlementListParams) => ['overview', 'entitlements', clean(params as Record<string, unknown>)] as const,
   field: (customerId?: string) => ['overview', 'field', customerId ?? ''] as const,
   knowledge: ['overview', 'knowledge'] as const,
+  software: (customerId?: string) => ['overview', 'software', customerId ?? ''] as const,
 };
 
 export const overviewApi = {
@@ -42,6 +43,7 @@ export const overviewApi = {
   entitlements: (params: EntitlementListParams) => get<EntitlementList>('/contracts/entitlements', clean(params as Record<string, unknown>)),
   field: (customerId?: string) => get<FieldOverview>('/field/overview', { customerId: customerId || undefined }),
   knowledge: () => get<KnowledgeOverview>('/knowledge/overview'),
+  software: (customerId?: string) => get<SoftwareOverview>('/software/overview', { customerId: customerId || undefined }),
 };
 
 /** Links built from a bucket key: option ids go straight into list filters, anything else falls back to the plain list. */

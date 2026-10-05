@@ -44,12 +44,14 @@ Rows with `customer_id IS NULL` are *shared* (global knowledge articles, platfor
 
 ```
 Customer ─┬─ Sites ─┬─ Assets ──── CIs ──┬── CI Relationships
-          │         └─ Contacts          └── Tickets (incident/request/problem/change)
-          │                                   └── Known errors (problem_details)
+          │         └─ Contacts          ├── Tickets (incident/request/problem/change)
+          │                              │    └── Known errors (problem_details)
+          │                              └── Software installations (per CI / asset / user) ── Software catalogue (shared titles)
           ├─ Contracts ─┬─ Covered services (→ Service catalog) ─ SLA policy override
           │             ├─ Covered sites
           │             ├─ Entitlements ── Consumptions (field visits, time entries, PM visits)
-          │             └─ Scope items (in/out of scope definitions)
+          │             ├─ Scope items (in/out of scope definitions)
+          │             └─ Software licences (seats, metric, term, cost, proof of purchase)
           ├─ Field visits ── parts, notes, acknowledgement
           ├─ PM programs ── occurrences
           ├─ Knowledge (customer-specific) / shared knowledge
@@ -63,6 +65,7 @@ Customer ─┬─ Sites ─┬─ Assets ──── CIs ──┬── CI Re
 * **Assets vs CIs**: assets hold the financial/lifecycle view (purchase, warranty, AMC, location, ownership); CIs hold the operational/relationship view. They may link 1:1 but either can exist alone.
 * **Changes**: `change_details` extends a change ticket (window, plans, risk answers and score, template, CAB meeting); `change_templates` (standard changes), `change_risk_questions`, `change_blackout_windows` (global or per customer) and `cab_meetings` / `cab_meeting_items` are the change-management tables; conflicts are computed, never stored (an activity records them); `change-window-reminder` runs hourly on the `sla` queue. The three definition tables carry no customer column and are fenced to staff by an explicit row-level policy; the portal reads planned changes from `tickets` and `change_details` only.
 * **Satisfaction surveys**: one `ticket_surveys` row per ticket (the recipient, the hashed and encrypted token behind the email links, the rating, the comment, the channel and a snapshot of the engineer and team at the time), `survey_configs` overrides per customer or contract over the `surveys.*` settings; `tickets.csat_rating` denormalises the answer for lists and filters. CSAT figures are computed live from the surveys table.
+* **Software**: a shared catalogue of titles (`software_products`, no customer); installations (`software_installations`, on a CI, an asset, a host name or a user) and licences (`software_licences`, with a self-reference to the licence that continues a renewed one) belong to one customer; the compliance position is computed live (never stored) from live hosts and licences in term; `software_notifications` records the once-only notification milestones.
 * **Task boards** are views over tickets and `ticket_tasks` (lanes by status or assignee, scoped by person, team or engineer); every move runs the ticket's own status, assignment and task transitions. Only `board_notes` (one person's sticky notes, per-user row-level security) is new; board layout lives in `users.preferences`.
 
 ## 5. Scale and reliability
@@ -73,6 +76,7 @@ Customer ─┬─ Sites ─┬─ Assets ──── CIs ──┬── CI Re
 * **Transactions per request** keep multi-table changes atomic; the audit record is part of the same transaction.
 * **Outbox pattern** for notifications: emails are written to `notification_outbox` inside the business transaction and delivered by the worker with retries. Nothing is sent for a rolled-back operation. The `survey-sweep` job (`notifications` queue, hourly) sends the one reminder for unanswered satisfaction surveys and marks the expired ones.
 * **Task boards** read `ticket_tasks` through the `(assignee_id, status)` and `(team_id, status)` indexes and cap the cards at `boards.card_limit` with exact lane counts from one grouped query; the nightly `board-notes-purge` job (`maintenance` queue) removes done sticky notes past `boards.note_retention_days`.
+* **Software** positions come from two grouped queries (installations on live hosts, licences in term) joined in memory per customer and title; the `software-daily` job (`maintenance` queue, 06:30) sends the licence expiry and over-deployment notifications once per milestone.
 * **Idempotent jobs** with Redis-backed schedulers; API replicas can start concurrently (migrations use an advisory lock).
 * **Health endpoint** `/api/health`, structured JSON logs, request IDs, graceful shutdown.
 * Backups: PostgreSQL base backups + WAL (see `OPERATIONS.md`); attachments volume snapshot; Redis is reconstructible (jobs are re-derived from the database on worker start).
@@ -96,7 +100,7 @@ Discovery follows the same pattern: `discovery_sources` of a given `source_type`
 ## 9. Repository layout
 
 ```
-apps/api        Fastify API, workers, migrations, seeds   (see src/modules/* for each capability)
+apps/api        Fastify API, workers, migrations, seeds   (see src/modules/* for each capability; software/ holds the catalogue, installations, licences, compliance, import and overview)
 apps/web        React SPA (pages per module, shared UI kit)
 apps/web/public Static brand assets: wordmark, mark, favicon set, web manifest (generated by apps/web/scripts/make-icons.mjs)
 packages/shared Permissions catalogue, constants, DTO types shared by API and web

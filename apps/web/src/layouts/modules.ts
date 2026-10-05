@@ -48,7 +48,17 @@ export const ASSET_MODULES: ModuleItem[] = [
   { to: '/assets/inventory', label: 'Inventory' },
   { to: '/assets/coverage', label: 'Warranty & AMC' },
   { to: '/assets/lifecycle', label: 'Lifecycle' },
-  // slot #2: { to: '/assets/software', label: 'Software', perm: ['software:read'], match: (p) => p.startsWith('/assets/software') }
+  { to: '/assets/software', label: 'Software', perm: ['software:read'], match: (p) => p.startsWith('/assets/software') },
+];
+
+/** Secondary strip inside Software (rendered by components/software/SoftwareNav.tsx), not mirrored by navigator children. */
+export const SOFTWARE_MODULES: ModuleItem[] = [
+  { to: '/assets/software', label: 'Overview', end: true },
+  { to: '/assets/software/titles', label: 'Titles' },
+  { to: '/assets/software/installations', label: 'Installations' },
+  { to: '/assets/software/licences', label: 'Licences' },
+  { to: '/assets/software/compliance', label: 'Compliance' },
+  { to: '/assets/software/renewals', label: 'Renewals' },
 ];
 
 export const CUSTOMER_MODULES: ModuleItem[] = [
@@ -89,7 +99,7 @@ export const PORTAL_ASSET_MODULES: ModuleItem[] = [
   { to: '/portal/assets', label: 'Overview', end: true },
   { to: '/portal/assets/inventory', label: 'Inventory' },
   { to: '/portal/assets/coverage', label: 'Warranty & AMC' },
-  // slot #2: { to: '/portal/assets/software', label: 'Software', perm: ['portal:software'] }
+  { to: '/portal/assets/software', label: 'Software', perm: ['portal:software'] },
 ];
 
 export const PORTAL_SERVICE_MODULES: ModuleItem[] = [

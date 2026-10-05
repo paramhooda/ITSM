@@ -8,3 +8,4 @@ import './audit';
 import './service-review';
 import './known-errors';
 import './csat';
+import './software';

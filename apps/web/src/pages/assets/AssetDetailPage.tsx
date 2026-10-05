@@ -18,6 +18,7 @@ import { CiPicker, type CiMin } from '@/components/cmdb/CiPicker';
 import { CiTypeBadge, CiStatusBadge } from '@/components/cmdb/CiTypeBadge';
 import { LazyBlock } from '@/components/cmdb/LazyBlock';
 import { errorMessage } from '@/components/cmdb/hooks';
+import { SoftwareTable, type HostSoftware } from '@/components/software/SoftwareTable';
 
 const AttachmentList = lazy(() => import('@/components/attachments/AttachmentList').then((m) => ({ default: m.AttachmentList ?? m.default })));
 
@@ -40,6 +41,8 @@ interface AssetDetail extends AssetRecord {
   amcContract: { id: string; number: string; name: string; status: string; startDate: string; endDate: string } | null;
   openTickets: { id: string; number: string; title: string; type: string; status: string; statusColor?: string | null; createdAt: string }[];
   visitParts: { id: string; visitId: string; visitNumber: string; visitTitle: string; visitStatus: string; name: string; partNumber?: string | null; serialNumber?: string | null; quantity: number; createdAt: string }[];
+  /** Software installations recorded on this asset (software:read holders; empty otherwise). */
+  software?: HostSoftware[];
   createdAt: string;
   updatedAt: string;
 }
@@ -195,6 +198,18 @@ export default function AssetDetailPage() {
               </tbody>
             </table>
           ) : <EmptyState icon={<Wrench className="h-5 w-5" />} title="No parts recorded" />}
+        </Card>
+      ),
+    },
+    {
+      key: 'software',
+      label: 'Software',
+      count: a.software?.length ?? 0,
+      hidden: !can('software:read'),
+      content: (
+        <Card padded={false}>
+          <SoftwareTable rows={a.software ?? []} customerId={a.customerId} />
+          {(a.software?.length ?? 0) > 0 && <div className="px-4 py-2 text-[12px] text-muted border-t border-default"><Link to={`/assets/software/installations?assetId=${a.id}&customerId=${a.customerId}`} className="text-brand-700 hover:underline">Open in Software</Link></div>}
         </Card>
       ),
     },

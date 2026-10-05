@@ -481,6 +481,61 @@ export interface PortalUser {
 export const ROLE_LABELS: Record<PortalRole, string> = { customer_user: 'User', customer_admin: 'Administrator' };
 
 /** Query keys start with 'portal' so pages can invalidate the module. */
+/** GET /portal/software: the organisation's titles and their licence position (never cost, keys or paperwork). */
+export interface PortalPosition {
+  /** Positions have no id of their own; tables key rows on productId. */
+  id?: string;
+  productId: string;
+  publisher: string;
+  name: string;
+  versionFamily: string | null;
+  categoryLabel: string | null;
+  metric: string;
+  installed: number;
+  entitled: number | null;
+  unused: number | null;
+  utilisationPct: number | null;
+  position: string;
+  nextEndDate: string | null;
+}
+export interface PortalSoftware {
+  totals: { titles: number; installations: number; overDeployed: number; unlicensed: number; expiring90: number };
+  positions: PortalPosition[];
+  preview: boolean;
+}
+export interface PortalLicence {
+  id: string;
+  name: string;
+  productId: string;
+  publisher: string;
+  product: string;
+  versionFamily: string | null;
+  metric: string;
+  term: string;
+  quantity: number;
+  startDate: string | null;
+  endDate: string | null;
+  renewalDate: string | null;
+  autoRenew: boolean;
+  status: string;
+  daysLeft: number | null;
+  installed: number;
+  contractNumber: string | null;
+}
+export interface PortalInstallation {
+  id: string;
+  productId: string;
+  publisher: string;
+  product: string;
+  versionFamily: string | null;
+  version: string | null;
+  edition: string | null;
+  host: string | null;
+  assignedUser: string | null;
+  source: string;
+  lastSeenAt: string | null;
+}
+
 export const pk = {
   me: ['portal', 'me'] as const,
   catalog: ['portal', 'catalog'] as const,
@@ -498,6 +553,9 @@ export const pk = {
   knownErrors: (params: Record<string, unknown>) => ['portal', 'known-errors', params] as const,
   knownError: (id: string) => ['portal', 'known-error', id] as const,
   knownErrorSuggest: (params: Record<string, unknown>) => ['portal', 'known-errors', 'suggest', params] as const,
+  software: (customerId?: string) => ['portal', 'software', customerId ?? ''] as const,
+  softwareLicences: (params: Record<string, unknown>) => ['portal', 'software', 'licences', params] as const,
+  softwareInstallations: (params: Record<string, unknown>) => ['portal', 'software', 'installations', params] as const,
 };
 
 export const portalApi = {
@@ -528,6 +586,10 @@ export const portalApi = {
   knownErrors: (params: Record<string, unknown>) => get<PortalKnownErrorList>('/portal/known-errors', params),
   knownError: (id: string) => get<PortalKnownError>(`/portal/known-errors/${id}`),
   knownErrorSuggest: (params: Record<string, unknown>) => get<{ items: PortalKnownError[] }>('/portal/known-errors/suggest', params),
+  /** Software titles and their licence position for customer administrators (portal:software); MSP staff may preview with customerId. */
+  software: (customerId?: string) => get<PortalSoftware>('/portal/software', { customerId: customerId || undefined }),
+  softwareLicences: (params: Record<string, unknown>) => get<Paginated<PortalLicence> & { preview: boolean }>('/portal/software/licences', params),
+  softwareInstallations: (params: Record<string, unknown>) => get<Paginated<PortalInstallation> & { preview: boolean }>('/portal/software/installations', params),
 };
 
 /** Plain-language status for an SLA metric shown to customers. */

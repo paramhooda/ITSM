@@ -160,8 +160,8 @@ export const MSP_NAV: NavItem[] = [
       { to: '/assets/inventory', label: 'Inventory' },
       { to: '/assets/coverage', label: 'Warranty & AMC' },
       { to: '/assets/lifecycle', label: 'Lifecycle' },
-      // slot #2: { to: '/assets/software', label: 'Software', perm: ['software:read'] }
-      // slot #2: { to: '/assets/software/licences', label: 'Licences', perm: ['software:read'] }
+      { to: '/assets/software', label: 'Software', perm: ['software:read'] },
+      { to: '/assets/software/licences', label: 'Licences', perm: ['software:read'] },
     ],
   },
   // ---- System
@@ -201,7 +201,7 @@ export const PORTAL_NAV: NavItem[] = [
       { to: '/portal/assets', label: 'Overview' },
       { to: '/portal/assets/inventory', label: 'Inventory' },
       { to: '/portal/assets/coverage', label: 'Warranty & AMC' },
-      // slot #2: { to: '/portal/assets/software', label: 'Software', perm: ['portal:software'] }
+      { to: '/portal/assets/software', label: 'Software', perm: ['portal:software'] },
     ],
   },
   {

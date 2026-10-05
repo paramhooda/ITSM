@@ -19,7 +19,7 @@ export const OPTION_GROUPS: { group: string; types: [string, string][] }[] = [
   { group: 'Customers', types: [['customer_type', 'Customer types'], ['customer_status', 'Customer statuses'], ['customer_industry', 'Industries'], ['site_type', 'Site types']] },
   { group: 'Contracts & scope', types: [['contract_type', 'Contract types'], ['contract_status', 'Contract statuses'], ['entitlement_type', 'Entitlement types'], ['scope_header', 'Scope headers'], ['scope_category', 'Scope categories'], ['scope_type', 'Scope types'], ['scope_status', 'Scope statuses']] },
   { group: 'Services', types: [['service_category', 'Service categories'], ['service_subcategory', 'Service subcategories'], ['service_status', 'Service statuses']] },
-  { group: 'Assets', types: [['asset_category', 'Asset categories'], ['asset_status', 'Asset statuses']] },
+  { group: 'Assets', types: [['asset_category', 'Asset categories'], ['asset_status', 'Asset statuses'], ['software_category', 'Software categories']] },
   { group: 'Field & Maintenance', types: [['field_visit_type', 'Visit types'], ['field_visit_status', 'Visit statuses'], ['pm_frequency', 'PM frequencies']] },
   { group: 'Changes & Security', types: [['change_type', 'Change types'], ['change_risk', 'Change risk levels'], ['security_severity', 'Security severities']] },
   { group: 'Other', types: [['kb_type', 'Knowledge article types'], ['team_type', 'Team types']] },

@@ -60,6 +60,8 @@ export const PERMISSIONS = {
   'cmdb:manage': 'Create and edit configuration items and relationships',
   'discovery:run': 'Run network discovery and reconcile findings',
   'discovery:manage': 'Configure discovery sources',
+  'software:read': 'View software titles, installations, licences and compliance',
+  'software:manage': 'Create and edit software titles, installations and licences; import CSV',
 
   // Field service & maintenance
   'field:read': 'View field visits',
@@ -110,6 +112,7 @@ export const PERMISSIONS = {
   'portal:manage_users': 'Manage portal users for the customer',
   'portal:status': 'View the service status page in the portal',
   'portal:kedb': 'View published known errors and their workarounds in the portal',
+  'portal:software': "View the organisation's software inventory and licence position in the portal",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -127,7 +130,7 @@ export const PERMISSION_MODULES: Record<string, Permission[]> = {
   ],
   Security: ['soc:read', 'soc:manage'],
   Operations: ['tickets:major', 'oncall:read', 'oncall:manage', 'changes:cab', 'announcements:manage', 'handover:write'],
-  'Assets & CMDB': ['assets:read', 'assets:manage', 'cmdb:read', 'cmdb:manage', 'discovery:run', 'discovery:manage'],
+  'Assets & CMDB': ['assets:read', 'assets:manage', 'cmdb:read', 'cmdb:manage', 'discovery:run', 'discovery:manage', 'software:read', 'software:manage'],
   'Field Service': ['field:read', 'field:manage', 'field:execute', 'pm:read', 'pm:manage'],
   Knowledge: ['kb:read', 'kb:manage', 'kedb:read', 'kedb:publish'],
   Reporting: ['reports:run', 'reports:manage', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'dashboards:amc'],
@@ -135,7 +138,7 @@ export const PERMISSION_MODULES: Record<string, Permission[]> = {
   Integrations: ['integrations:manage', 'integrations:events'],
   AI: ['ai:use', 'ai:act'],
   Administration: ['admin:config', 'admin:users', 'admin:audit', 'admin:system'],
-  Portal: ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'portal:status', 'portal:kedb'],
+  Portal: ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'portal:status', 'portal:kedb', 'portal:software'],
 };
 
 /** System roles shipped by default. Administrators can add more. */
@@ -174,79 +177,79 @@ export const SYSTEM_ROLES: Record<string, { name: string; description: string; u
     name: 'Service Manager',
     description: 'Manages service delivery, SLAs and customer relationships.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:scope', 'tickets:escalate', 'problems:manage', 'changes:manage', 'changes:approve', 'requests:approve', 'assets:read', 'cmdb:read', 'field:read', 'field:manage', 'pm:read', 'pm:manage', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:amc', 'reports:manage', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'soc:read', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'oncall:manage', 'changes:cab', 'announcements:manage', 'handover:write', 'kedb:read', 'kedb:publish', 'surveys:read', 'surveys:manage'],
+    permissions: ['tenant:all', 'customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:scope', 'tickets:escalate', 'problems:manage', 'changes:manage', 'changes:approve', 'requests:approve', 'assets:read', 'cmdb:read', 'field:read', 'field:manage', 'pm:read', 'pm:manage', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:amc', 'reports:manage', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'soc:read', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'oncall:manage', 'changes:cab', 'announcements:manage', 'handover:write', 'kedb:read', 'kedb:publish', 'surveys:read', 'surveys:manage', 'software:read', 'software:manage'],
   },
   account_manager: {
     name: 'Account Manager',
     description: 'Account ownership of customers and contracts.',
     userType: 'msp',
-    permissions: ['customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:comment', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'ai:use', 'oncall:read', 'kedb:read', 'surveys:read', 'surveys:manage'],
+    permissions: ['customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:comment', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'ai:use', 'oncall:read', 'kedb:read', 'surveys:read', 'surveys:manage', 'software:read'],
   },
   engineer: {
     name: 'Engineer',
     description: 'Works tickets, assets and CIs for assigned customers.',
     userType: 'msp',
-    permissions: ['customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:escalate', 'assets:read', 'assets:manage', 'cmdb:read', 'cmdb:manage', 'field:read', 'field:execute', 'pm:read', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:amc', 'ai:use', 'ai:act', 'oncall:read', 'handover:write', 'kedb:read'],
+    permissions: ['customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:escalate', 'assets:read', 'assets:manage', 'cmdb:read', 'cmdb:manage', 'field:read', 'field:execute', 'pm:read', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:amc', 'ai:use', 'ai:act', 'oncall:read', 'handover:write', 'kedb:read', 'software:read', 'software:manage'],
   },
   service_desk: {
     name: 'Service Desk Engineer',
     description: 'First-line ticket handling across all customers.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:escalate', 'assets:read', 'cmdb:read', 'field:read', 'field:manage', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'handover:write', 'kedb:read', 'surveys:read'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:escalate', 'assets:read', 'cmdb:read', 'field:read', 'field:manage', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'handover:write', 'kedb:read', 'surveys:read', 'software:read'],
   },
   noc_engineer: {
     name: 'NOC Engineer',
     description: 'Infrastructure monitoring and incident handling across all customers.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:escalate', 'problems:manage', 'assets:read', 'cmdb:read', 'cmdb:manage', 'discovery:run', 'integrations:events', 'field:read', 'pm:read', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:noc', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'handover:write', 'kedb:read'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:escalate', 'problems:manage', 'assets:read', 'cmdb:read', 'cmdb:manage', 'discovery:run', 'integrations:events', 'field:read', 'pm:read', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:noc', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'handover:write', 'kedb:read', 'software:read'],
   },
   noc_manager: {
     name: 'NOC Manager',
     description: 'Manages NOC operations, escalations and engineer workload.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:scope', 'tickets:escalate', 'problems:manage', 'changes:manage', 'changes:approve', 'assets:read', 'cmdb:read', 'cmdb:manage', 'discovery:run', 'discovery:manage', 'integrations:events', 'integrations:manage', 'field:read', 'field:manage', 'pm:read', 'pm:manage', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:amc', 'reports:manage', 'dashboards:noc', 'dashboards:management', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'oncall:manage', 'changes:cab', 'announcements:manage', 'handover:write', 'kedb:read', 'kedb:publish', 'surveys:read'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:scope', 'tickets:escalate', 'problems:manage', 'changes:manage', 'changes:approve', 'assets:read', 'cmdb:read', 'cmdb:manage', 'discovery:run', 'discovery:manage', 'integrations:events', 'integrations:manage', 'field:read', 'field:manage', 'pm:read', 'pm:manage', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:amc', 'reports:manage', 'dashboards:noc', 'dashboards:management', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'oncall:manage', 'changes:cab', 'announcements:manage', 'handover:write', 'kedb:read', 'kedb:publish', 'surveys:read', 'software:read'],
   },
   soc_analyst: {
     name: 'SOC Analyst',
     description: 'Security incident investigation across all customers.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:escalate', 'soc:read', 'soc:manage', 'problems:manage', 'assets:read', 'cmdb:read', 'integrations:events', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:soc', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'handover:write', 'kedb:read'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:escalate', 'soc:read', 'soc:manage', 'problems:manage', 'assets:read', 'cmdb:read', 'integrations:events', 'kb:read', 'kb:manage', 'reports:run', 'dashboards:soc', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'handover:write', 'kedb:read', 'software:read'],
   },
   soc_manager: {
     name: 'SOC Manager',
     description: 'Manages SOC operations and security escalations.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:scope', 'tickets:escalate', 'soc:read', 'soc:manage', 'problems:manage', 'changes:manage', 'changes:approve', 'assets:read', 'cmdb:read', 'integrations:events', 'integrations:manage', 'kb:read', 'kb:manage', 'reports:run', 'reports:manage', 'dashboards:soc', 'dashboards:management', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'oncall:manage', 'changes:cab', 'announcements:manage', 'handover:write', 'kedb:read', 'kedb:publish', 'surveys:read'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'tickets:create', 'tickets:update', 'tickets:assign', 'tickets:resolve', 'tickets:work_notes', 'tickets:comment', 'tickets:time', 'tickets:scope', 'tickets:escalate', 'soc:read', 'soc:manage', 'problems:manage', 'changes:manage', 'changes:approve', 'assets:read', 'cmdb:read', 'integrations:events', 'integrations:manage', 'kb:read', 'kb:manage', 'reports:run', 'reports:manage', 'dashboards:soc', 'dashboards:management', 'ai:use', 'ai:act', 'tickets:major', 'oncall:read', 'oncall:manage', 'changes:cab', 'announcements:manage', 'handover:write', 'kedb:read', 'kedb:publish', 'surveys:read', 'software:read'],
   },
   cmdb_admin: {
     name: 'CMDB Administrator',
     description: 'Owns asset and configuration data quality.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'assets:read', 'assets:manage', 'cmdb:read', 'cmdb:manage', 'discovery:run', 'discovery:manage', 'integrations:events', 'kb:read', 'reports:run', 'ai:use', 'oncall:read', 'kedb:read'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'assets:read', 'assets:manage', 'cmdb:read', 'cmdb:manage', 'discovery:run', 'discovery:manage', 'integrations:events', 'kb:read', 'reports:run', 'ai:use', 'oncall:read', 'kedb:read', 'software:read', 'software:manage'],
   },
   contract_admin: {
     name: 'Contract Administrator',
     description: 'Maintains contracts, entitlements and scope definitions.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:scope', 'field:read', 'pm:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'ai:use', 'oncall:read', 'surveys:read'],
+    permissions: ['tenant:all', 'customers:read', 'customers:manage', 'contracts:read', 'contracts:manage', 'services:read', 'tickets:read', 'tickets:scope', 'field:read', 'pm:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'ai:use', 'oncall:read', 'surveys:read', 'software:read', 'software:manage'],
   },
   management: {
     name: 'Management',
     description: 'Read-only management visibility across the business.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'soc:read', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'ai:use', 'oncall:read', 'kedb:read', 'surveys:read'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'soc:read', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'ai:use', 'oncall:read', 'kedb:read', 'surveys:read', 'software:read'],
   },
   auditor: {
     name: 'Auditor',
     description: 'Read-only access including the audit trail.',
     userType: 'msp',
-    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'soc:read', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'admin:audit', 'dashboards:management', 'oncall:read', 'kedb:read', 'surveys:read'],
+    permissions: ['tenant:all', 'customers:read', 'contracts:read', 'services:read', 'tickets:read', 'soc:read', 'assets:read', 'cmdb:read', 'field:read', 'pm:read', 'kb:read', 'reports:run', 'dashboards:amc', 'admin:audit', 'dashboards:management', 'oncall:read', 'kedb:read', 'surveys:read', 'software:read'],
   },
   customer_admin: {
     name: 'Customer Administrator',
     description: 'Customer portal administrator for their own organization.',
     userType: 'customer',
-    permissions: ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'ai:use', 'ai:act', 'portal:status', 'portal:kedb'],
+    permissions: ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'ai:use', 'ai:act', 'portal:status', 'portal:kedb', 'portal:software'],
   },
   customer_user: {
     name: 'Customer User',

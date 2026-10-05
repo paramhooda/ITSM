@@ -11,6 +11,7 @@ import { q as rawRows, one as rawOne, num, pct, asDate } from '@/modules/dashboa
 import { validateAttributes } from './attributes';
 import { buildGraph, buildImpact, buildDependencyMap, openTicketSummary } from './graph';
 import { normaliseMac } from './match';
+import { installationsForHost } from '@/modules/software/service';
 import { CI_CRITICALITIES, CI_ENVIRONMENTS, CI_IMPORT_COLUMNS, type CiBulkInput, type CiCreateInput, type CiListQuery, type CiPatchInput, type InterfaceInput } from './schemas';
 
 const { cis, ciTypes, ciRelationships, ciRelationshipTypes, ciInterfaces, ciServices, customers, sites, teams, assets, services, tickets, ticketCis, configOptions, auditLog } = schema;
@@ -222,10 +223,12 @@ export async function getCi(ctx: Ctx, id: string) {
     .limit(100);
   const openTickets = ticketRows.filter((t) => t.statusCategory && (OPEN as readonly string[]).includes(t.statusCategory));
   const recentChanges = ticketRows.filter((t) => t.type === 'change').slice(0, 20);
+  const software = ctx.can('software:read', ci.customerId) ? await installationsForHost(ctx.tx, { ciId: id }) : [];
 
   return {
     ...ci,
     ...meta,
+    software,
     type: { id: type.id, key: type.key, name: type.name, icon: type.icon, color: type.color },
     attributeSchema: type.attributeSchema,
     asset: asset ?? null,

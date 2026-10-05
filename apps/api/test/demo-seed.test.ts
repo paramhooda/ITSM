@@ -70,6 +70,13 @@ describe('demo dataset', () => {
     expect(await count('board_notes', 'where pinned')).toBeGreaterThanOrEqual(2);
     expect(await count('ticket_tasks', "where status in ('open', 'in_progress') and due_at < now()")).toBeGreaterThanOrEqual(2);
     expect(await count('ticket_tasks', "where status = 'in_progress'")).toBeGreaterThanOrEqual(3);
+    // Software asset management: a shared catalogue, installations on the committed CIs and imported hosts, licences in every position, one renewed.
+    expect(await count('software_products')).toBeGreaterThanOrEqual(10);
+    expect(await count('software_installations')).toBeGreaterThanOrEqual(300);
+    expect(await count('software_licences')).toBeGreaterThanOrEqual(15);
+    expect(await count('software_licences', 'where successor_id is not null')).toBeGreaterThanOrEqual(1);
+    expect(await count('software_licences', 'where end_date < current_date and successor_id is null')).toBeGreaterThanOrEqual(1);
+    expect(await count('assets', "a join config_options o on o.id = a.category_id where o.key = 'software_license'")).toBe(0);
   });
 
   it('keeps every customer-scoped row inside its parent customer', async () => {
@@ -86,9 +93,11 @@ describe('demo dataset', () => {
         contractDates: await q('select count(*)::int as n from contracts where end_date < start_date'),
         surveys: await q('select count(*)::int as n from ticket_surveys s join tickets t on t.id = s.ticket_id where s.customer_id <> t.customer_id'),
         surveyTimes: await q('select count(*)::int as n from ticket_surveys where (answered_at is not null and answered_at < requested_at) or expires_at <= requested_at'),
+        installs: await q('select count(*)::int as n from software_installations i join cis c on c.id = i.ci_id where c.customer_id <> i.customer_id'),
+        licences: await q('select count(*)::int as n from software_licences l join contracts c on c.id = l.contract_id where c.customer_id <> l.customer_id'),
       };
     });
-    expect(mismatches).toEqual({ sites: 0, cis: 0, contracts: 0, rels: 0, assets: 0, slas: 0, visits: 0, contractDates: 0, surveys: 0, surveyTimes: 0 });
+    expect(mismatches).toEqual({ sites: 0, cis: 0, contracts: 0, rels: 0, assets: 0, slas: 0, visits: 0, contractDates: 0, surveys: 0, surveyTimes: 0, installs: 0, licences: 0 });
   });
 
   it('has coherent SLA rows', async () => {

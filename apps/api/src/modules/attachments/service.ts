@@ -17,7 +17,7 @@ import { isCustomerUser } from '@/core/authz';
  * it. This module is the most sensitive one for cross-customer leakage, so
  * the rules are explicit and fail closed.
  */
-export const ATTACHMENT_ENTITY_TYPES = ['ticket', 'customer', 'contract', 'asset', 'ci', 'field_visit', 'kb_article', 'pm_occurrence', 'report_run', 'user'] as const;
+export const ATTACHMENT_ENTITY_TYPES = ['ticket', 'customer', 'contract', 'asset', 'ci', 'field_visit', 'kb_article', 'pm_occurrence', 'report_run', 'user', 'software_licence'] as const;
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number];
 
 export const DOC_TYPES = ['agreement', 'sow', 'report', 'photo', 'signature', 'other'] as const;
@@ -168,6 +168,8 @@ const RULES: Record<Exclude<AttachmentEntityType, 'user'>, Rule> = {
   kb_article: { read: ['kb:read'], upload: ['kb:manage'], manage: ['kb:manage'], portalRead: 'portal:access' },
   pm_occurrence: { read: ['pm:read'], upload: ['pm:manage', 'field:execute'], manage: ['pm:manage'], portalRead: 'portal:access' },
   report_run: { read: ['reports:run'], upload: ['reports:run'], manage: ['reports:manage'], portalRead: 'portal:reports' },
+  // Proof of purchase (invoices, agreements, certificates) never reaches the portal: no portalRead.
+  software_licence: { read: ['software:read'], upload: ['software:manage'], manage: ['software:manage'] },
 };
 
 type Resolved = { customerId: string | null; label: string; extra?: Record<string, unknown> } | null;
@@ -213,6 +215,10 @@ async function resolveEntity(ctx: Ctx, entityType: AttachmentEntityType, entityI
     }
     case 'user': {
       const [r] = await tx.select({ id: schema.users.id, customerId: schema.users.customerId, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, entityId)).limit(1);
+      return r ? { customerId: r.customerId, label: r.name } : null;
+    }
+    case 'software_licence': {
+      const [r] = await tx.select({ id: schema.softwareLicences.id, customerId: schema.softwareLicences.customerId, name: schema.softwareLicences.name }).from(schema.softwareLicences).where(eq(schema.softwareLicences.id, entityId)).limit(1);
       return r ? { customerId: r.customerId, label: r.name } : null;
     }
     default:

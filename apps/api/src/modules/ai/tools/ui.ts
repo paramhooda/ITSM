@@ -3,7 +3,7 @@ import { matchRoute, pageAllowed, pageByKey, buildPath, type AppPage } from '@it
 import { ValidationError, ForbiddenError } from '@/core/errors';
 import type { Ctx } from '@/core/context';
 import { define } from './types';
-import { isCustomerUser, ticketLink, resolveTicket, resolveCustomerId, resolveContract, resolveAsset, resolveCi, resolveVisit, resolveArticle, resolveOption, resolveService, resolveSite } from '../helpers';
+import { isCustomerUser, ticketLink, resolveTicket, resolveCustomerId, resolveContract, resolveAsset, resolveCi, resolveVisit, resolveArticle, resolveOption, resolveService, resolveSite, resolveLicence } from '../helpers';
 
 /**
  * UI tools: they touch no data. Each returns a `uiAction` the web executes after
@@ -46,8 +46,8 @@ export const UI: ReturnType<typeof define>[] = [
   define({
     name: 'open_record',
     toolset: 'ui',
-    description: 'Open one record for the user by reference: a ticket (number), customer (name or code), contract (number), asset (tag), CI (name or hostname), field visit (number) or knowledge article (number or title).',
-    inputSchema: z.object({ kind: z.enum(['ticket', 'customer', 'contract', 'asset', 'ci', 'visit', 'article']), ref: z.string().min(1).max(200) }),
+    description: 'Open one record for the user by reference: a ticket (number), customer (name or code), contract (number), asset (tag), CI (name or hostname), field visit (number), knowledge article (number or title) or software licence (name).',
+    inputSchema: z.object({ kind: z.enum(['ticket', 'customer', 'contract', 'asset', 'ci', 'visit', 'article', 'licence']), ref: z.string().min(1).max(200) }),
     requires: [],
     portal: ['portal:access'],
     action: false,
@@ -98,6 +98,13 @@ export const UI: ReturnType<typeof define>[] = [
           const a = await resolveArticle(ctx, input.ref);
           to = `/knowledge/${a.id}`;
           label = a.number;
+          break;
+        }
+        case 'licence': {
+          if (portal && !ctx.can('portal:software', ctx.user.customerId)) throw new ForbiddenError('The software page is not part of your portal');
+          const l = await resolveLicence(ctx, input.ref, portal ? ctx.user.customerId ?? undefined : undefined);
+          to = portal ? '/portal/assets/software' : `/assets/software/licences/${l.id}`;
+          label = l.name;
           break;
         }
       }

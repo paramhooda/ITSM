@@ -7,6 +7,7 @@ import { ConflictError, NotFoundError, ValidationError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { searchFts, orderBy, limitOffset } from '@/core/query';
 import { parseCsv, headerIndex, rowValue, CSV_LIMITS } from './csv';
+import { installationsForHost } from '@/modules/software/service';
 import type { AssetCreateInput, AssetListQuery, AssetPatchInput } from './schemas';
 import { ASSET_IMPORT_COLUMNS } from './schemas';
 
@@ -235,10 +236,12 @@ export async function getAsset(ctx: Ctx, id: string) {
     .where(eq(fieldVisitParts.assetId, id))
     .orderBy(desc(fieldVisitParts.createdAt))
     .limit(50);
+  const software = ctx.can('software:read', a.customerId) ? await installationsForHost(ctx.tx, { assetId: id }) : [];
 
   return {
     ...a,
     ...meta,
+    software,
     warranty: coverageStatus(a.warrantyEnd),
     amc: coverageStatus(a.amcEnd ?? amcContract?.endDate ?? null),
     eol: coverageStatus(a.eolDate, 180),

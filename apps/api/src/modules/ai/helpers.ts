@@ -1,4 +1,4 @@
-import { eq, and, or, ilike, asc, desc, gte, inArray } from 'drizzle-orm';
+import { eq, and, or, ilike, asc, desc, gte, inArray, sql } from 'drizzle-orm';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { NotFoundError, ValidationError } from '@/core/errors';
@@ -181,6 +181,52 @@ export async function resolveAsset(ctx: Ctx, ref: string, customerId?: string) {
   if (pick.length === 1) return pick[0]!;
   if (!pick.length) throw new NotFoundError('Asset', `No asset matching "${r}" is visible to you`);
   throw new ValidationError(`Asset "${r}" is ambiguous: ${pick.map((a) => `${a.tag} ${a.name}`).join(', ')}. Ask the user which one.`);
+}
+
+/** Software title by id, catalogue key, name or "publisher name"; with `customerId`, only titles that customer has installations or licences for. */
+export async function resolveSoftwareProduct(ctx: Ctx, ref: string, customerId?: string) {
+  const r = ref.trim();
+  if (!r) throw new ValidationError('Software title is required (publisher and name, or id)');
+  const p = schema.softwareProducts;
+  const inUse = customerId ? sql`(EXISTS (SELECT 1 FROM software_installations i WHERE i.product_id = ${p.id} AND i.customer_id = ${customerId}::uuid) OR EXISTS (SELECT 1 FROM software_licences l WHERE l.product_id = ${p.id} AND l.customer_id = ${customerId}::uuid))` : undefined;
+  const cols = { id: p.id, key: p.key, publisher: p.publisher, name: p.name, versionFamily: p.versionFamily, licenceModel: p.licenceModel, isActive: p.isActive };
+  if (UUID_RE.test(r)) {
+    const [row] = await ctx.tx.select(cols).from(p).where(and(eq(p.id, r), inUse)).limit(1);
+    if (!row) throw new NotFoundError('Software title', `No software title matching "${r}" is visible to you`);
+    return row;
+  }
+  const pattern = like(r);
+  const rows = await ctx.tx
+    .select(cols)
+    .from(p)
+    .where(and(or(ilike(p.key, pattern), ilike(p.name, pattern), sql`(${p.publisher} || ' ' || ${p.name}) ILIKE ${pattern}`, sql`(${p.publisher} || ' ' || ${p.name} || ' ' || coalesce(${p.versionFamily}, '')) ILIKE ${pattern}`), inUse))
+    .orderBy(desc(p.isActive), asc(p.publisher), asc(p.name))
+    .limit(8);
+  const low = r.toLowerCase();
+  const exact = rows.filter((x) => x.key === low || x.name.toLowerCase() === low || `${x.publisher} ${x.name}`.toLowerCase() === low || `${x.publisher} ${x.name} ${x.versionFamily ?? ''}`.trim().toLowerCase() === low);
+  const pick = exact.length === 1 ? exact : rows;
+  if (pick.length === 1) return pick[0]!;
+  if (!pick.length) throw new NotFoundError('Software title', `No software title matching "${r}"${customerId ? ' is in use for this customer' : ''}`);
+  throw new ValidationError(`Software title "${r}" is ambiguous: ${pick.map((x) => `${x.publisher} ${x.name}${x.versionFamily ? ` (${x.versionFamily})` : ''}`).join(', ')}. Ask the user which one.`);
+}
+
+/** Software licence by id or name (optionally within one customer), within the caller's visibility; never redirected to another licence. */
+export async function resolveLicence(ctx: Ctx, ref: string, customerId?: string) {
+  const r = ref.trim();
+  if (!r) throw new ValidationError('Licence reference is required (name or id)');
+  const l = schema.softwareLicences;
+  const conds = [UUID_RE.test(r) ? eq(l.id, r) : ilike(l.name, like(r))];
+  if (customerId) conds.push(eq(l.customerId, customerId));
+  const rows = await ctx.tx.select({ id: l.id, name: l.name, customerId: l.customerId, productId: l.productId, quantity: l.quantity, metric: l.metric, endDate: l.endDate, isActive: l.isActive, successorId: l.successorId }).from(l).where(and(...conds)).orderBy(desc(l.isActive), asc(l.endDate)).limit(6);
+  const low = r.toLowerCase();
+  const exact = rows.filter((x) => x.name.toLowerCase() === low);
+  const pick = exact.length === 1 ? exact : rows;
+  if (pick.length === 1) {
+    ctx.requireCustomer(pick[0]!.customerId);
+    return pick[0]!;
+  }
+  if (!pick.length) throw new NotFoundError('Licence', `No licence matching "${r}" is visible to you`);
+  throw new ValidationError(`Licence "${r}" is ambiguous: ${pick.map((x) => `${x.name} (ends ${x.endDate ?? 'never'})`).join(', ')}. Ask the user which one.`);
 }
 
 /** Any active person (staff or customer user) by "me", id, email or name. */

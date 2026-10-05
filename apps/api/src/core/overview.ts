@@ -34,6 +34,9 @@ export const VISIT_STATUS_COLORS: Record<string, string> = { requested: 'slate',
 export const PM_STATUS_COLORS: Record<string, string> = { planned: 'slate', scheduled: 'blue', rescheduled: 'indigo', completed: 'green', missed: 'red', cancelled: 'gray' };
 export const KB_STATUS_COLORS: Record<string, string> = { draft: 'amber', review: 'blue', published: 'green', archived: 'slate' };
 export const KB_VISIBILITY_COLORS: Record<string, string> = { internal: 'slate', customer: 'violet', public: 'green' };
+/** Licence compliance position per title and customer (mirrors COMPLIANCE_COLORS on the web). */
+export const COMPLIANCE_COLORS: Record<string, string> = { compliant: 'green', under_deployed: 'amber', over_deployed: 'red', unlicensed: 'red', unlimited: 'blue' };
+export const INSTALL_SOURCE_COLORS: Record<string, string> = { manual: 'slate', csv: 'blue', discovery: 'indigo', agent: 'violet' };
 
 // ---------------------------------------------------------------- dates (civil, UTC)
 

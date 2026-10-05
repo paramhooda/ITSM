@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSET_LIFECYCLE } from '@itsm/shared';
+import { ASSET_LIFECYCLE, LICENCE_STATUSES } from '@itsm/shared';
 import { paginationSchema } from '@/core/pagination';
 import { boolQ } from '@/modules/tickets/schemas';
 import { answerBody } from '@/modules/surveys/schemas';
@@ -82,6 +82,12 @@ export const ciListQuery = paginationSchema.extend({
   order: z.enum(['asc', 'desc']).optional(),
 });
 export type CiListQuery = z.infer<typeof ciListQuery>;
+
+/** The organisation's software licences (never the cost, the key or the paperwork) and installations. */
+export const portalLicenceQuery = paginationSchema.extend({ customerId: uuid.optional(), q: z.string().max(200).optional(), status: z.enum(LICENCE_STATUSES).optional(), productId: uuid.optional() });
+export type PortalLicenceQuery = z.infer<typeof portalLicenceQuery>;
+export const portalInstallationQuery = paginationSchema.extend({ customerId: uuid.optional(), q: z.string().max(200).optional(), productId: uuid.optional() });
+export type PortalInstallationQuery = z.infer<typeof portalInstallationQuery>;
 
 /** Planned changes on the organisation's services: upcoming by default, or in progress, past (implemented or cancelled) or everything. */
 export const plannedChangesQuery = previewQuery.extend({ state: z.enum(['upcoming', 'in_progress', 'past', 'all']).default('upcoming'), serviceId: uuid.optional() });

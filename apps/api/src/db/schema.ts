@@ -25,3 +25,4 @@ export * from './schema/handover';
 export * from './schema/briefings';
 export * from './schema/surveys';
 export * from './schema/boards';
+export * from './schema/software';

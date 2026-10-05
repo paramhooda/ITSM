@@ -7,6 +7,7 @@
  *   GET /contracts/entitlements?…          → EntitlementRow list (paged)
  *   GET /field/overview?customerId         → FieldOverview
  *   GET /knowledge/overview                → KnowledgeOverview
+ *   GET /software/overview?customerId      → SoftwareOverview
  *   GET /portal/assets/overview            → PortalAssetsOverview
  *
  * Every count is a whole number; every breakdown is an array in display order.
@@ -147,4 +148,25 @@ export interface PortalAssetsOverview {
   warranty: CoverageBuckets;
   amc: CoverageBuckets;
   expiringSoon: { id: string; tag: string; name: string; siteName: string | null; kind: 'warranty' | 'amc'; endDate: string; daysLeft: number }[];
+}
+
+/** GET /software/overview: the software estate of every customer in scope, or of one customer. */
+export interface SoftwareOverview {
+  titlesInUse: number;
+  installations: number;
+  hosts: number;
+  unlinked: number;
+  stale: number;
+  licencesActive: number;
+  seatsLicensed: number;
+  spendYear: number | null;
+  /** COMPLIANCE_POSITIONS order with colours. */
+  positions: Bucket[];
+  byCategory: Bucket[];
+  bySource: Bucket[];
+  /** Empty when scoped to one customer. */
+  byCustomer: Bucket[];
+  renewals: CoverageBuckets;
+  topOverDeployed: { productId: string; customerId: string; customerName: string; title: string; installed: number; entitled: number }[];
+  renewingSoon: { id: string; name: string; customerId: string; customerName: string | null; title: string; endDate: string; renewalDate: string | null; daysLeft: number }[];
 }

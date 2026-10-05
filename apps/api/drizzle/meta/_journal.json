@@ -134,6 +134,13 @@
       "when": 1792500000000,
       "tag": "0018_task_boards",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "0019_software_assets",
+      "breakpoints": true
     }
   ]
 }

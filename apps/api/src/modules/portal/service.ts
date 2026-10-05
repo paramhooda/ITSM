@@ -20,6 +20,9 @@ import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 import { listAssetsFull } from '@/modules/assets/service';
 import { assetsOverviewCore } from '@/modules/assets/overview';
 import { listCisFull } from '@/modules/cmdb/service';
+import { complianceFor, licenceStatus, licenceStatusCond, loadSoftwareSettings } from '@/modules/software/service';
+import { searchFts } from '@/core/query';
+import { todayStr as civilToday, addDays as addCivilDays, daysBetween } from '@/core/overview';
 import { slaCompliance } from '@/modules/sla/policies';
 import * as iam from '@/modules/iam/service';
 import { acknowledgeVisit } from '@/modules/field/service';
@@ -30,7 +33,7 @@ import type { PortalKnownError } from '@/modules/known-errors/service';
 import { surveyRowFor, surveyView } from '@/modules/surveys/service';
 import { effectivePolicy, voluntaryRatingOpen } from '@/modules/surveys/policy';
 import { pendingSurveyCount } from '@/modules/surveys/figures';
-import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalRoleKey, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
+import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalInstallationQuery, type PortalLicenceQuery, type PortalRoleKey, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
 
 /**
  * Customer portal: a thin, customer-safe facade over the module services.
@@ -42,7 +45,7 @@ import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiLis
  * activities, hidden attachments, MSP user e-mails) never leaves the MSP side.
  */
 
-const PORTAL_PERMISSIONS: Permission[] = ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'portal:status', 'portal:kedb'];
+const PORTAL_PERMISSIONS: Permission[] = ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'portal:status', 'portal:kedb', 'portal:software'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_CATEGORIES = ['new', 'open', 'pending'];
 const AWAITING_STATUS_KEY = 'pending_customer';
@@ -653,6 +656,115 @@ export async function portalCis(ctx: Ctx, q: CiListQuery) {
     page: res.page,
     pageSize: res.pageSize,
   };
+}
+
+// ---------------------------------------------------------------- software and licences (customer administrators)
+
+export interface PortalPosition {
+  productId: string;
+  publisher: string;
+  name: string;
+  versionFamily: string | null;
+  categoryLabel: string | null;
+  metric: string;
+  installed: number;
+  entitled: number | null;
+  unused: number | null;
+  utilisationPct: number | null;
+  position: string;
+  nextEndDate: string | null;
+}
+
+/**
+ * The organisation's titles and their licence position. Pinned to the
+ * caller's customer and built from `complianceFor` with plain selects: never
+ * through the staff lists, which need software:read, and never with cost,
+ * keys, paperwork, owners, notes or another customer's rows.
+ */
+export async function portalSoftware(ctx: Ctx, requested?: string | null) {
+  const scope = resolvePortalCustomer(ctx, 'portal:software', requested);
+  const cid = scope.customerId;
+  const today = civilToday();
+  const rows = await complianceFor(ctx, { customerId: cid });
+  const positions: PortalPosition[] = rows.map((r) => ({ productId: r.productId, publisher: r.publisher, name: r.name, versionFamily: r.versionFamily, categoryLabel: r.categoryLabel, metric: r.metric, installed: r.installed, entitled: r.entitled, unused: r.unused, utilisationPct: r.utilisationPct, position: r.position, nextEndDate: r.nextEndDate }));
+  const [installs] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(schema.softwareInstallations).where(eq(schema.softwareInstallations.customerId, cid));
+  const l = schema.softwareLicences;
+  const [expiring] = await ctx.tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(l)
+    .where(and(eq(l.customerId, cid), eq(l.isActive, true), sql`${l.successorId} IS NULL`, sql`${l.endDate} >= ${today}::date`, sql`${l.endDate} <= ${addCivilDays(today, 90)}::date`));
+  return {
+    totals: {
+      titles: positions.length,
+      installations: installs?.n ?? 0,
+      overDeployed: positions.filter((p) => p.position === 'over_deployed').length,
+      unlicensed: positions.filter((p) => p.position === 'unlicensed').length,
+      expiring90: expiring?.n ?? 0,
+    },
+    positions,
+    preview: scope.preview,
+  };
+}
+
+export async function portalSoftwareLicences(ctx: Ctx, q: PortalLicenceQuery) {
+  const scope = resolvePortalCustomer(ctx, 'portal:software', q.customerId);
+  const cid = scope.customerId;
+  const settings = await loadSoftwareSettings(ctx.tx);
+  const today = civilToday();
+  const l = schema.softwareLicences;
+  const p = schema.softwareProducts;
+  const conds: SQL[] = [eq(l.customerId, cid)];
+  if (q.productId) conds.push(eq(l.productId, q.productId));
+  if (q.status) conds.push(licenceStatusCond(q.status, today, Math.max(0, ...settings.noticeDays)));
+  if (q.q) conds.push(or(sql`${l.name} ILIKE ${`%${q.q.replace(/[%_]/g, (m) => `\\${m}`)}%`}`, searchFts(q.q, p.searchVector, p.name, p.publisher)!)!);
+  const where = and(...conds);
+  const [{ count }] = await ctx.tx.select({ count: sql<number>`count(*)::int` }).from(l).innerJoin(p, eq(p.id, l.productId)).where(where);
+  const rows = await ctx.tx
+    .select({ id: l.id, name: l.name, productId: l.productId, publisher: p.publisher, product: p.name, versionFamily: p.versionFamily, metric: l.metric, term: l.term, quantity: l.quantity, startDate: l.startDate, endDate: l.endDate, renewalDate: l.renewalDate, autoRenew: l.autoRenew, isActive: l.isActive, successorId: l.successorId, contractNumber: schema.contracts.number })
+    .from(l)
+    .innerJoin(p, eq(p.id, l.productId))
+    .leftJoin(schema.contracts, eq(schema.contracts.id, l.contractId))
+    .where(where)
+    .orderBy(sql`${l.endDate} ASC NULLS LAST`, asc(l.name))
+    .limit(q.pageSize)
+    .offset((q.page - 1) * q.pageSize);
+  const positions = rows.length ? await complianceFor(ctx, { customerId: cid }) : [];
+  const posOf = new Map(positions.map((x) => [x.productId, x]));
+  return {
+    items: rows.map((r) => ({
+      id: r.id, name: r.name, productId: r.productId, publisher: r.publisher, product: r.product, versionFamily: r.versionFamily, metric: r.metric, term: r.term, quantity: Number(r.quantity),
+      startDate: r.startDate, endDate: r.endDate, renewalDate: r.renewalDate, autoRenew: r.autoRenew,
+      status: licenceStatus(r, settings.noticeDays, today), daysLeft: r.endDate ? daysBetween(today, r.endDate) : null,
+      installed: posOf.get(r.productId)?.installed ?? 0, contractNumber: r.contractNumber,
+    })),
+    total: count,
+    page: q.page,
+    pageSize: q.pageSize,
+    preview: scope.preview,
+  };
+}
+
+export async function portalSoftwareInstallations(ctx: Ctx, q: PortalInstallationQuery) {
+  const scope = resolvePortalCustomer(ctx, 'portal:software', q.customerId);
+  const cid = scope.customerId;
+  const i = schema.softwareInstallations;
+  const p = schema.softwareProducts;
+  const conds: SQL[] = [eq(i.customerId, cid)];
+  if (q.productId) conds.push(eq(i.productId, q.productId));
+  if (q.q) conds.push(searchFts(q.q, p.searchVector, p.name, i.hostName, i.assignedUser)!);
+  const where = and(...conds);
+  const [{ count }] = await ctx.tx.select({ count: sql<number>`count(*)::int` }).from(i).innerJoin(p, eq(p.id, i.productId)).where(where);
+  const rows = await ctx.tx
+    .select({ id: i.id, productId: i.productId, publisher: p.publisher, product: p.name, versionFamily: p.versionFamily, version: i.version, edition: i.edition, host: sql<string | null>`coalesce(${schema.cis.name}, ${schema.assets.tag}, ${i.hostName})`, assignedUser: i.assignedUser, source: i.source, lastSeenAt: i.lastSeenAt })
+    .from(i)
+    .innerJoin(p, eq(p.id, i.productId))
+    .leftJoin(schema.cis, eq(schema.cis.id, i.ciId))
+    .leftJoin(schema.assets, eq(schema.assets.id, i.assetId))
+    .where(where)
+    .orderBy(asc(p.publisher), asc(p.name), sql`coalesce(${schema.cis.name}, ${schema.assets.tag}, ${i.hostName}, ${i.assignedUser}) ASC`)
+    .limit(q.pageSize)
+    .offset((q.page - 1) * q.pageSize);
+  return { items: rows, total: count, page: q.page, pageSize: q.pageSize, preview: scope.preview };
 }
 
 // ---------------------------------------------------------------- planned changes

@@ -56,6 +56,11 @@ export const SURVEY_STATUS_COLORS: Record<string, string> = { pending: 'amber', 
 export const TASK_STATUS_COLORS: Record<string, string> = { open: 'blue', in_progress: 'indigo', done: 'green', cancelled: 'gray' };
 export const BOARD_NOTE_COLORS: Record<string, string> = { amber: 'amber', blue: 'blue', green: 'green', rose: 'rose', slate: 'slate' };
 
+/** Licence compliance position per title and customer, and the live status of a licence term. */
+export const COMPLIANCE_COLORS: Record<string, string> = { compliant: 'green', under_deployed: 'amber', over_deployed: 'red', unlicensed: 'red', unlimited: 'blue' };
+export const LICENCE_STATUS_COLORS: Record<string, string> = { active: 'green', expiring: 'amber', expired: 'red', future: 'sky', renewed: 'blue', inactive: 'slate' };
+export const INSTALL_SOURCE_COLORS: Record<string, string> = { manual: 'slate', csv: 'blue', discovery: 'indigo', agent: 'violet' };
+
 /** Identity colours for service domains / team types (categorical, not status). */
 export const DOMAIN_COLORS: Record<string, string> = { noc: 'blue', soc: 'red', amc: 'amber', field: 'amber', service_desk: 'teal', infrastructure: 'indigo', network: 'sky', security: 'rose', cloud: 'violet', general: 'slate' };
 

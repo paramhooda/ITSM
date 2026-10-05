@@ -35,6 +35,7 @@ const INVALIDATION: Record<string, string[][]> = {
   kedb: [['known-errors'], ['tickets'], ['knowledge'], ['portal']],
   surveys: [['surveys'], ['dashboards'], ['tickets'], ['portal']],
   boards: [['boards'], ['tickets']],
+  software: [['software'], ['assets'], ['overview'], ['portal']],
 };
 
 const STORAGE_KEY = 'grady.conversation';

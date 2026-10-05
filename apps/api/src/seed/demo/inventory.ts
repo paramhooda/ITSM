@@ -354,7 +354,7 @@ export async function seedInventory(state: DemoState, tx: Tx) {
       allRelRows.push({ customerId: cust.id, sourceCiId: s, targetCiId: d, typeId: refs.relType(type), description: description ?? null, source: rng.chance(0.3) ? 'discovery' : 'manual' });
     }
 
-    // Stand-alone assets without CIs: spares in stock, staff laptops, a licence and a retired device.
+    // Stand-alone assets without CIs: spares in stock, staff laptops and a retired device (software licences live in the software module).
     const main = cust.sites[0]!;
     const extras: (typeof schema.assets.$inferInsert)[] = [];
     const extra = (name: string, categoryKey: string, manufacturer: string, model: string, cost: number, lifecycle: string, statusKey: string, opts: Partial<typeof schema.assets.$inferInsert> = {}) => {
@@ -371,7 +371,6 @@ export async function seedInventory(state: DemoState, tx: Tx) {
     if (cust.sites.length > 3) extra('Spare access switch (cold standby)', 'network_switch', 'Cisco', 'Catalyst 9200L-24P-4G', 190000, 'in_stock', 'in_stock');
     if (cust.index % 4 === 0) extra('Retired core switch (replaced)', 'network_switch', 'Cisco', 'Catalyst 3850-48P', 450000, 'retired', 'retired', { warrantyEnd: isoDate(addDays(now, -900)), eolDate: isoDate(addDays(now, -400)) });
     if (cust.index % 3 === 0) extra('Access point under RMA', 'wireless', 'Aruba', 'AP-515', 62000, 'in_repair', 'under_repair', { notes: 'RMA case open with Aruba TAC; replacement expected within 10 working days.' });
-    if (cust.key === 'meridian' || cust.key === 'abc') extra('Microsoft 365 E3 licences (250)', 'software_license', 'Microsoft', 'Microsoft 365 E3 (annual)', 750000, 'deployed', 'in_use', { warrantyEnd: isoDate(addDays(now, rng.int(20, 200))), serialNumber: null, location: null, notes: 'Subscription renewal date tracked as warranty end.' });
     if (extras.length) {
       const rows = await tx.insert(schema.assets).values(extras).returning({ id: schema.assets.id, tag: schema.assets.tag, name: schema.assets.name });
       rows.forEach((r, i) => cust.assets.push({ id: r.id, tag: r.tag, name: r.name, customerKey: cust.key, siteKey: main.key, categoryKey: String(extras[i]!.tags?.[0] ?? 'other'), ciId: null }));

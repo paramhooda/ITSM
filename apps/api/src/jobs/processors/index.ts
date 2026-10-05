@@ -21,3 +21,4 @@ import './changes';
 import './briefings';
 import './surveys';
 import './boards';
+import './software';

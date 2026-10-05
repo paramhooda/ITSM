@@ -67,6 +67,11 @@ export default async function routes(app: FastifyInstance) {
   r.get('/portal/assets', { preHandler: read, schema: { tags, querystring: S.assetListQuery } }, h((ctx, req) => svc.portalAssets(ctx, req.query as S.AssetListQuery)));
   r.get('/portal/cis', { preHandler: read, schema: { tags, querystring: S.ciListQuery } }, h((ctx, req) => svc.portalCis(ctx, req.query as S.CiListQuery)));
 
+  // ---- software (customer administrators: titles and their licence position, licences without commercial terms, installations)
+  r.get('/portal/software', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => svc.portalSoftware(ctx, q(req).customerId)));
+  r.get('/portal/software/licences', { preHandler: read, schema: { tags, querystring: S.portalLicenceQuery } }, h((ctx, req) => svc.portalSoftwareLicences(ctx, req.query as S.PortalLicenceQuery)));
+  r.get('/portal/software/installations', { preHandler: read, schema: { tags, querystring: S.portalInstallationQuery } }, h((ctx, req) => svc.portalSoftwareInstallations(ctx, req.query as S.PortalInstallationQuery)));
+
   // ---- planned changes (the organisation's own; plans, risk, CAB and conflicts never leave the MSP side)
   r.get('/portal/changes', { preHandler: read, schema: { tags, querystring: S.plannedChangesQuery } }, h((ctx, req) => svc.portalPlannedChanges(ctx, req.query as S.PlannedChangesQuery)));
 

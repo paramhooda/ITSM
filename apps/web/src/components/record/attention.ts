@@ -255,6 +255,49 @@ export function visitAttention(v: VisitDetail, now: Clock, act: VisitAttentionAc
   return items;
 }
 
+// ---------------------------------------------------------------- software licence
+
+/** The slice of the licence detail payload the rules read (the page's `SoftwareLicenceDetail` satisfies it structurally). */
+export interface LicenceAttentionInput {
+  status: string;
+  daysLeft: number | null;
+  endDate: string | null;
+  successor: { id: string; name: string } | null;
+  compliance: { position: string; installed: number; entitled: number | null } | null;
+}
+
+export interface LicenceAttentionActions {
+  /** Opens the renew dialog; omit when the viewer cannot renew or a successor exists. */
+  onRenew?: () => void;
+  /** Number of proof-of-purchase files; omit while loading. */
+  attachments?: number | null;
+  /** Link to the compliance list filtered to this customer and title. */
+  complianceTo?: string;
+}
+
+/**
+ * Flags for a licence: expired or ending within 30 days (unless a successor already continues it),
+ * a title that is over-deployed or unlicensed, the renewal lineage, and a missing proof of purchase.
+ */
+export function licenceAttention(l: LicenceAttentionInput, now: Clock, act: LicenceAttentionActions = {}): AttentionItem[] {
+  const items: AttentionItem[] = [];
+  const renew = call('Renew', act.onRenew);
+  const days = l.daysLeft ?? (l.endDate ? Math.round((new Date(`${l.endDate}T00:00:00`).getTime() - ms(now)) / DAY) : null);
+
+  if (l.successor) items.push({ key: 'renewed', tone: 'info', text: `Renewed as ${l.successor.name}`, action: { label: 'Open', to: `/assets/software/licences/${l.successor.id}` } });
+  else if (l.status === 'expired' && days !== null) items.push({ key: 'expired', tone: 'bad', text: `Expired ${Math.abs(days)}d ago`, action: renew });
+  else if ((l.status === 'expiring' || l.status === 'active') && days !== null && days <= 30) items.push({ key: 'expiring', tone: 'warn', text: days === 0 ? 'Ends today' : `Ends in ${days}d`, action: renew });
+
+  const pos = l.compliance;
+  if (pos && (pos.position === 'over_deployed' || pos.position === 'unlicensed')) {
+    const text = pos.position === 'unlicensed' ? `Unlicensed: ${plural(pos.installed, 'installation')} and no licence in term` : `Over-deployed: ${pos.installed} installed against ${pos.entitled ?? 0} licensed`;
+    items.push({ key: 'position', tone: 'bad', text, action: act.complianceTo ? { label: 'Compliance', to: act.complianceTo } : undefined });
+  }
+  if (act.attachments === 0) items.push({ key: 'no-proof', tone: 'info', text: 'No proof of purchase on file', action: { label: 'Documents', to: '?tab=documents' } });
+
+  return items;
+}
+
 // ---------------------------------------------------------------- contract
 
 export function contractAttention(c: ContractDetail, act: { onRenew?: () => void; onEdit?: () => void } = {}): AttentionItem[] {

@@ -57,6 +57,7 @@ export const OPTION_TYPES = [
   'service_status',
   'asset_category',
   'asset_status',
+  'software_category',
   'field_visit_type',
   'field_visit_status',
   'pm_frequency',
@@ -101,6 +102,23 @@ export type SurveyChannel = (typeof SURVEY_CHANNELS)[number];
 export const KNOWN_ERROR_STATUSES = ['open', 'fix_in_progress', 'resolved', 'retired'] as const;
 export type KnownErrorStatus = (typeof KNOWN_ERROR_STATUSES)[number];
 export const KNOWN_ERROR_STATUS_LABELS: Record<KnownErrorStatus, string> = { open: 'Open known error', fix_in_progress: 'Fix in progress', resolved: 'Resolved', retired: 'Retired' };
+/** How a publisher sells a software title (the default metric and term of its licences follow from it). */
+export const LICENCE_MODELS = ['per_device', 'per_user', 'per_core', 'subscription', 'perpetual'] as const;
+export type LicenceModel = (typeof LICENCE_MODELS)[number];
+/** What a licence counts: devices, named users, processor cores, or a site licence (unlimited). */
+export const LICENCE_METRICS = ['per_device', 'per_user', 'per_core', 'site'] as const;
+export type LicenceMetric = (typeof LICENCE_METRICS)[number];
+export const LICENCE_TERMS = ['subscription', 'perpetual'] as const;
+export type LicenceTerm = (typeof LICENCE_TERMS)[number];
+/** How a software installation was recorded. */
+export const INSTALL_SOURCES = ['manual', 'csv', 'discovery', 'agent'] as const;
+export type InstallSource = (typeof INSTALL_SOURCES)[number];
+/** The licence position of one title at one customer: installed against entitled. */
+export const COMPLIANCE_POSITIONS = ['compliant', 'under_deployed', 'over_deployed', 'unlicensed', 'unlimited'] as const;
+export type CompliancePosition = (typeof COMPLIANCE_POSITIONS)[number];
+/** The live state of a licence term, computed from its dates (never stored). */
+export const LICENCE_STATUSES = ['active', 'expiring', 'expired', 'future', 'renewed', 'inactive'] as const;
+export type LicenceStatus = (typeof LICENCE_STATUSES)[number];
 export const NOTIFICATION_EVENTS = [
   'ticket.created', 'ticket.assigned', 'ticket.status_changed', 'ticket.customer_comment', 'ticket.engineer_comment',
   'ticket.resolved', 'ticket.closed', 'ticket.escalated', 'sla.warning', 'sla.breached',
@@ -120,6 +138,9 @@ export const NOTIFICATION_EVENTS = [
   'known_error.published',
   'ticket.survey_requested',
   'ticket.survey_low_rating',
+  'licence.expiring',
+  'licence.expired',
+  'software.over_deployed',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

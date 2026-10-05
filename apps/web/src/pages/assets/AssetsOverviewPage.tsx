@@ -5,12 +5,13 @@ import { Boxes, Unlink, ShieldCheck, FileSignature, PackagePlus } from 'lucide-r
 import { PageHeader, ModuleNav, Select, ErrorBlock, Badge } from '@/components/ui';
 import { ASSET_MODULES } from '@/layouts/modules';
 import { KpiGrid } from '@/components/dashboards/KpiGrid';
-import { Panel, RowList, KpiSkeleton, Skeleton } from '@/components/dashboards/Panel';
+import { Panel, RowList, KpiSkeleton, Skeleton, Stat } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { useForwardListParams } from '@/hooks/useForwardListParams';
 import { useCustomersLookup } from '@/hooks/useLookups';
+import { useAuthStore } from '@/stores/auth';
 import { fmtDate, fmtNumber, titleCase } from '@/lib/format';
-import { LIFECYCLE_COLORS } from '@/lib/statusColors';
+import { LIFECYCLE_COLORS, COMPLIANCE_COLORS } from '@/lib/statusColors';
 import { ASSET_LIFECYCLE } from '@itsm/shared';
 import { overviewApi, ovKeys, isUuid, withQuery } from '@/components/overview/api';
 import { coverageItems, COVER_LABEL } from '@/components/overview/coverage';
@@ -20,11 +21,16 @@ export default function AssetsOverviewPage() {
   const forwarding = useForwardListParams('/assets/inventory');
   const navigate = useNavigate();
   const customers = useCustomersLookup();
+  const can = useAuthStore((s) => s.can);
+  const canSoftware = can('software:read');
   // Local, not in the URL: a query-bearing URL on the overview is forwarded to the list.
   const [customer, setCustomer] = useState<string>('');
   const customerId = customer || undefined;
   const q = useQuery({ queryKey: ovKeys.assets(customerId), queryFn: () => overviewApi.assets(customerId), refetchInterval: 60_000, placeholderData: (p) => p, enabled: !forwarding });
+  const sw = useQuery({ queryKey: ovKeys.software(customerId), queryFn: () => overviewApi.software(customerId), refetchInterval: 60_000, placeholderData: (p) => p, enabled: !forwarding && canSoftware });
   const d = q.data;
+  const s = sw.data;
+  const software = (path: string, params: Record<string, string | undefined> = {}) => withQuery(path, { ...params, customerId });
   if (forwarding) return null;
   const inventory = (params: Record<string, string | undefined> = {}) => withQuery('/assets/inventory', { ...params, customerId });
   const coverage = (kind: 'warranty' | 'amc') => withQuery('/assets/coverage', { kind, customerId });
@@ -101,6 +107,28 @@ export default function AssetsOverviewPage() {
             <Skeleton rows={6} />
           )}
         </Panel>
+        {canSoftware && (
+          <Panel title="Software and licences" subtitle="Titles in use and how their licences hold up" className="lg:col-span-3" to={software('/assets/software')} toLabel="Software">
+            {s ? (
+              <div className="grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-8 gap-y-4">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                  <Stat label="Titles in use" value={fmtNumber(s.titlesInUse)} />
+                  <Stat label="Installations" value={fmtNumber(s.installations)} />
+                  <Stat label="Over-deployed" value={fmtNumber(s.positions.find((b) => b.key === 'over_deployed')?.count ?? 0)} tone={s.positions.find((b) => b.key === 'over_deployed')?.count ? 'bad' : 'good'} />
+                  <Stat label="Licences ending · 90d" value={fmtNumber(s.renewals.d30 + s.renewals.d90)} tone={s.renewals.d30 + s.renewals.d90 ? 'warn' : 'good'} />
+                </div>
+                <div>
+                  <div className="text-[12px] font-medium text-muted mb-1.5">Compliance positions</div>
+                  <BreakdownBar dense items={s.positions.map((b) => ({ label: b.label, value: b.count, color: b.color ?? COMPLIANCE_COLORS[b.key] ?? 'slate', href: software('/assets/software/compliance', { position: b.key }) }))} emptyText="No software recorded yet" />
+                </div>
+              </div>
+            ) : sw.isError ? (
+              <div className="text-[12.5px] text-subtle">Software figures are not available.</div>
+            ) : (
+              <Skeleton rows={4} />
+            )}
+          </Panel>
+        )}
       </div>
     </div>
   );

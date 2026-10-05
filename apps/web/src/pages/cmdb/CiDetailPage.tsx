@@ -24,6 +24,7 @@ import { LazyBlock } from '@/components/cmdb/LazyBlock';
 import { errorMessage } from '@/components/cmdb/hooks';
 import { discoveryApi, discoveryKeys, DIFF_COLORS, FINDING_STATUS_COLORS } from '@/components/cmdb/api';
 import type { AuditEntry } from '@/components/audit/AuditTrail';
+import { SoftwareTable, type HostSoftware } from '@/components/software/SoftwareTable';
 
 const AttachmentList = lazy(() => import('@/components/attachments/AttachmentList').then((m) => ({ default: m.AttachmentList ?? m.default })));
 
@@ -44,6 +45,8 @@ interface CiDetail extends CiRecord {
   relationshipCount: number;
   openTickets: TicketRow[];
   recentChanges: TicketRow[];
+  /** Software installations recorded on this item (software:read holders; empty otherwise). */
+  software?: HostSoftware[];
   createdAt: string;
   updatedAt: string;
 }
@@ -250,6 +253,7 @@ export default function CiDetailPage() {
         </div>
       ),
     },
+    { key: 'software', label: 'Software', count: ci.software?.length ?? 0, hidden: !can('software:read'), content: <div className="card overflow-hidden"><SoftwareTable rows={ci.software ?? []} customerId={ci.customerId} />{(ci.software?.length ?? 0) > 0 && <div className="px-4 py-2 text-[12px] text-muted border-t border-default"><Link to={`/assets/software/installations?ciId=${ci.id}&customerId=${ci.customerId}`} className="text-brand-700 hover:underline">Open in Software</Link></div>}</div> },
     { key: 'attachments', label: 'Attachments', content: <div className="card p-4"><LazyBlock fallback={<div className="text-[13px] text-muted">Attachments are not available.</div>}><AttachmentList entityType="ci" entityId={ci.id} customerId={ci.customerId} canUpload={canManage} canDelete={canManage} showVisibility /></LazyBlock></div> },
   ];
 

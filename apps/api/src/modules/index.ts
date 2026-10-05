@@ -16,6 +16,7 @@ export async function registerModules(app: FastifyInstance) {
     import('./tickets/routes'),
     import('./catalog/routes'),
     import('./assets/routes'),
+    import('./software/routes'),
     import('./cmdb/routes'),
     import('./discovery/routes'),
     import('./integrations/routes'),
