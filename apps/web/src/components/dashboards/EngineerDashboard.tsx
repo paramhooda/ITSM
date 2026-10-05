@@ -87,7 +87,7 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
             </div>
           )}
         </Panel>
-        <Panel title="Today" subtitle="Visits, maintenance and deadlines">
+        <Panel title="Today" subtitle="Visits, maintenance and deadlines" to="/tickets/boards?board=tasks&scope=mine" toLabel="My board">
           <RowList items={todayItems.slice(0, 8)} empty="Nothing scheduled for today" dense />
         </Panel>
       </div>

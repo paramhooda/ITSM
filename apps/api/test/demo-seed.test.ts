@@ -63,6 +63,13 @@ describe('demo dataset', () => {
     expect(await count('ticket_surveys', 'where status = \'answered\' and rating <= 2 and low_rating_alerted_at is not null')).toBeGreaterThan(0);
     expect(await count('tickets', 'where csat_rating is not null')).toBeGreaterThanOrEqual(60);
     expect(await count('survey_configs')).toBeGreaterThanOrEqual(3);
+    // Task boards: the shift handovers the board panel shows (one acknowledged), personal sticky notes, open tasks for the NOC engineers.
+    expect(await count('shift_handovers', "where status in ('final', 'acknowledged')")).toBeGreaterThanOrEqual(2);
+    expect(await count('shift_handovers', "where status = 'acknowledged'")).toBeGreaterThanOrEqual(1);
+    expect(await count('board_notes')).toBeGreaterThanOrEqual(9);
+    expect(await count('board_notes', 'where pinned')).toBeGreaterThanOrEqual(2);
+    expect(await count('ticket_tasks', "where status in ('open', 'in_progress') and due_at < now()")).toBeGreaterThanOrEqual(2);
+    expect(await count('ticket_tasks', "where status = 'in_progress'")).toBeGreaterThanOrEqual(3);
   });
 
   it('keeps every customer-scoped row inside its parent customer', async () => {

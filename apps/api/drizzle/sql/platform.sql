@@ -132,6 +132,14 @@ CREATE POLICY tenant_isolation ON cab_meetings
   USING (app_all_customers() OR app_is_msp())
   WITH CHECK (app_all_customers() OR app_is_msp());
 
+-- board notes are one person's sticky notes: readable and writable by them (and the system).
+ALTER TABLE board_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE board_notes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON board_notes;
+CREATE POLICY tenant_isolation ON board_notes
+  USING (app_all_customers() OR user_id = app_user_id())
+  WITH CHECK (app_all_customers() OR user_id = app_user_id());
+
 -- ---------------------------------------------------------------------------
 -- Partitioned high-volume tables
 -- ---------------------------------------------------------------------------

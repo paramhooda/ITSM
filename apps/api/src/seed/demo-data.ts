@@ -16,6 +16,7 @@ import { seedFieldService } from './demo/field';
 import { seedKnowledge } from './demo/knowledge';
 import { seedKnownErrors } from './demo/known-errors';
 import { seedSurveys } from './demo/surveys';
+import { seedBoards } from './demo/boards';
 import { seedIntegrationRows, seedIntegrationEvents } from './demo/integrations';
 import { seedExtras, cleanupNotifications } from './demo/extras';
 
@@ -98,6 +99,7 @@ export async function loadDemoData() {
   await phase('knowledge', () => withSystem((tx) => seedKnowledge(state, tx)));
   await phase('known errors', () => withSystem((tx) => seedKnownErrors(state, tx)));
   await phase('surveys', () => withSystem((tx) => seedSurveys(state, tx)));
+  await phase('boards (handovers, sticky notes)', () => withSystem((tx) => seedBoards(state, tx)));
   await phase('integration events, discovery', () => withSystem((tx) => seedIntegrationEvents(state, tx)));
   await phase('reports, notifications, saved views', () =>
     withSystem(async (tx) => {

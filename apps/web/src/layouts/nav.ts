@@ -75,7 +75,7 @@ export const MSP_NAV: NavItem[] = [
       { to: '/tickets?type=problem', label: 'Problems' },
       { to: '/tickets?type=change', label: 'Changes' },
       { to: '/tickets/approvals', label: 'My approvals', perm: ['requests:approve', 'changes:approve'] },
-      // slot #3: { to: '/tickets/boards', label: 'Task boards' }
+      { to: '/tickets/boards', label: 'Task boards' },
       { to: '/tickets/new', label: 'Create new', perm: ['tickets:create'] },
     ],
   },

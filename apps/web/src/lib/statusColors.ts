@@ -52,6 +52,10 @@ export const KNOWN_ERROR_STATUS_COLORS: Record<string, string> = { open: 'orange
 export const CSAT_RATING_COLORS: Record<number, string> = { 1: 'red', 2: 'orange', 3: 'amber', 4: 'green', 5: 'emerald' };
 export const SURVEY_STATUS_COLORS: Record<string, string> = { pending: 'amber', answered: 'green', expired: 'slate', cancelled: 'gray', none: 'gray' };
 
+/** Ticket task lanes and the sticky-note palette on the task boards. */
+export const TASK_STATUS_COLORS: Record<string, string> = { open: 'blue', in_progress: 'indigo', done: 'green', cancelled: 'gray' };
+export const BOARD_NOTE_COLORS: Record<string, string> = { amber: 'amber', blue: 'blue', green: 'green', rose: 'rose', slate: 'slate' };
+
 /** Identity colours for service domains / team types (categorical, not status). */
 export const DOMAIN_COLORS: Record<string, string> = { noc: 'blue', soc: 'red', amc: 'amber', field: 'amber', service_desk: 'teal', infrastructure: 'indigo', network: 'sky', security: 'rose', cloud: 'violet', general: 'slate' };
 

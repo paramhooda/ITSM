@@ -19,8 +19,8 @@ const pr = alias(schema.configOptions, 'pr');
 const cat = alias(schema.configOptions, 'cat');
 const assignee = alias(schema.users, 'assignee');
 
-/** Visibility conditions shared by list/stats: customer users via RLS; SOC tickets need soc:read. */
-function visibilityConds(ctx: Ctx): SQL[] {
+/** Visibility conditions shared by list/stats (and the task boards): customer users via RLS; SOC tickets need soc:read. */
+export function visibilityConds(ctx: Ctx): SQL[] {
   const conds: SQL[] = [];
   if (isCustomerUser(ctx)) {
     if (!ctx.can('portal:tickets')) throw new ForbiddenError('Missing permission: portal:tickets');
@@ -43,7 +43,8 @@ interface WhereOpts {
 }
 const whereOpts = async (ctx: Ctx, q: StatsQuery): Promise<WhereOpts> => (q.csat === 'low' ? { lowThreshold: (await loadSurveyDefaults(ctx.tx)).lowRatingThreshold } : {});
 
-function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL | undefined {
+/** The list predicates for one filter set; exported so the task boards count lanes over exactly what the list shows. */
+export function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL | undefined {
   const conds: SQL[] = visibilityConds(ctx);
   if (q.type) conds.push(eq(T.type, q.type));
   if (q.customerId) {

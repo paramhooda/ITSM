@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Sparkles, Send, Save, CheckCheck, Trash2, Clock, AlertTriangle, Siren, CalendarClock, Users, Inbox, Eye, Pencil } from 'lucide-react';
 import { PageHeader, ListShell, Button, Badge, Card, DataTable, Drawer, EmptyState, ErrorBlock, LoadingBlock, Select, Textarea, Field, ConfirmDialog, Avatar, type Column } from '@/components/ui';
 import { KpiGrid } from '@/components/dashboards/KpiGrid';
@@ -14,18 +12,11 @@ import { useAuthStore } from '@/stores/auth';
 import { fmtDateTime, relativeTime } from '@/lib/format';
 import { HANDOVER_STATUS_COLORS, BREACH_RISK_COLORS } from '@/lib/statusColors';
 import { handoverApi, handoverKeys, type Handover, type HandoverFacts, type HandoverTeam } from '@/components/handover/api';
+import { Markdown } from '@/components/handover/Markdown';
 
 const STATUS_LABEL: Record<string, string> = { draft: 'Draft', final: 'Published', acknowledged: 'Acknowledged' };
 const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const describeDays = (days: number[]) => (days.length === 7 ? 'every day' : days.length === 5 && !days.includes(6) && !days.includes(7) ? 'weekdays' : days.map((d) => WEEKDAY[d - 1]).join(', '));
-
-function Markdown({ body }: { body: string }) {
-  return (
-    <div className="prose-sm text-[13.5px] leading-relaxed [&_h2]:text-[12px] [&_h2]:uppercase [&_h2]:tracking-wide [&_h2]:text-subtle [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-1.5 [&_ul]:pl-4 [&_ul]:list-disc [&_li]:my-0.5 [&_p]:my-1">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
-    </div>
-  );
-}
 
 /** The digest lists: the tickets the incoming shift should look at, with a link each. */
 function DigestLists({ facts }: { facts: HandoverFacts }) {

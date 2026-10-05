@@ -16,6 +16,7 @@ Vercel and shadcn inspired: neutral zinc surfaces, 1px borders, Geist type, blac
 | Module overview | Customers, Contracts, Assets, CMDB, Field, Knowledge, Discovery, portal Assets; Operations, Changes and Reports carry the same strip on their pages | `PageHeader` + `ModuleNav` + KPI row + panels. Tiles and panel rows are links into the module's list. |
 | List | the `ListShell` pages, the service catalog, the change catalog (cards instead of a table), the portal planned changes and Known errors (staff and portal) included | `PageHeader` + optional `ModuleNav` + filter bar + quick views + count line + `InsightBand` + results card. Tiles and breakdown rows are quick filters on the same page. |
 | Record | the `RecordLayout` pages (a ticket, a CI, a customer, a contract, an asset, a visit, an article, a known error) | `RecordHeader` (two primary actions, an overflow menu), ribbon, form sections, related tabs, activity rail. |
+| Board | the task boards | `PageHeader` + filter bar + quick views (board, scope, lanes) + count line + a horizontal strip of lanes; cards are records that open their record page, lanes are drop targets; a drop the record refuses snaps back with the server's message in a toast; the card menu's Move to… is the keyboard and touch path; below `md` one lane at a time. |
 
 Administration screens use `SectionHeader`, which renders the same `PageHeader` as everywhere else, inside `AdminLayout`.
 
@@ -40,6 +41,7 @@ A click always shows the matching records. On a list page the tile toggles its f
 - `DataTable` with `dense` on lists, clickable rows open the record, identifiers in mono, the tinted header, pagination in the card footer.
 - Loading uses `LoadingBlock` / `KpiSkeleton`, empty uses `EmptyState` with an icon and one next step, errors use `ErrorBlock` with retry.
 - Enter animations run once when a page mounts, never when a filter changes.
+- Boards use the browser's native drag and drop; no drag library. A lane the card may not land in is greyed while it is dragged, the WIP figure in a lane header turns amber at the limit and red over it, and nothing is ever blocked by an indicator.
 - Customer-facing wording is edited in a `Dialog` with a Write-with-Grady helper and a notify checkbox; the record never shows internal fields to customer users.
 - Ratings use `RatingStars` (five buttons in a radio group, 44 px targets on phones and the public page, colours from `CSAT_RATING_COLORS`) and `RatingBadge` in lists; the survey prompt is one `SurveyCard` shared by the portal ticket and the public page. The public survey and status pages render `PageHeader` under their own wordmark header, outside both shells.
 - The assistant panel (`components/grady/`) never opens a dialog: a proposal is a card inside the thread (preview, change lines, record count, tier, expiry, Confirm primary and Cancel outline, bound to the server's action id), progress is one quiet line per tool, feedback is two thumbs under the reply with a one-line note in place, and navigation the assistant performs is announced with a toast. The window stays mounted while minimised.

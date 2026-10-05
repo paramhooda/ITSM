@@ -296,7 +296,8 @@ async function incomingRecipients(tx: Tx, teamId: string, authorId: string | nul
   return { recipients: users.map((u) => ({ userId: u.id, name: u.name, email: u.email, phone: u.phone, whatsappOptIn: u.whatsappOptIn })), via: onCall.length ? ('oncall' as const) : ('team' as const) };
 }
 
-const excerpt = (body: string) => {
+/** The "Watch first" section of a handover (the whole note when it has none), capped at 600 characters; the notification and the board panel share it. */
+export const excerpt = (body: string) => {
   const m = /## Watch first\s*\n([\s\S]*?)(?:\n## |$)/.exec(body);
   const text = (m ? m[1] : body).trim();
   return text.length > 600 ? `${text.slice(0, 597)}…` : text;

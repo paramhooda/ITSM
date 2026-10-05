@@ -127,6 +127,13 @@
       "when": 1792400000000,
       "tag": "0017_ticket_surveys",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792500000000,
+      "tag": "0018_task_boards",
+      "breakpoints": true
     }
   ]
 }

@@ -63,6 +63,7 @@ Customer ─┬─ Sites ─┬─ Assets ──── CIs ──┬── CI Re
 * **Assets vs CIs**: assets hold the financial/lifecycle view (purchase, warranty, AMC, location, ownership); CIs hold the operational/relationship view. They may link 1:1 but either can exist alone.
 * **Changes**: `change_details` extends a change ticket (window, plans, risk answers and score, template, CAB meeting); `change_templates` (standard changes), `change_risk_questions`, `change_blackout_windows` (global or per customer) and `cab_meetings` / `cab_meeting_items` are the change-management tables; conflicts are computed, never stored (an activity records them); `change-window-reminder` runs hourly on the `sla` queue. The three definition tables carry no customer column and are fenced to staff by an explicit row-level policy; the portal reads planned changes from `tickets` and `change_details` only.
 * **Satisfaction surveys**: one `ticket_surveys` row per ticket (the recipient, the hashed and encrypted token behind the email links, the rating, the comment, the channel and a snapshot of the engineer and team at the time), `survey_configs` overrides per customer or contract over the `surveys.*` settings; `tickets.csat_rating` denormalises the answer for lists and filters. CSAT figures are computed live from the surveys table.
+* **Task boards** are views over tickets and `ticket_tasks` (lanes by status or assignee, scoped by person, team or engineer); every move runs the ticket's own status, assignment and task transitions. Only `board_notes` (one person's sticky notes, per-user row-level security) is new; board layout lives in `users.preferences`.
 
 ## 5. Scale and reliability
 
@@ -71,6 +72,7 @@ Customer ─┬─ Sites ─┬─ Assets ──── CIs ──┬── CI Re
 * **Dashboards** read from `metric_rollups_daily` (computed nightly per customer) plus live counts for "today", keeping management views fast regardless of history size.
 * **Transactions per request** keep multi-table changes atomic; the audit record is part of the same transaction.
 * **Outbox pattern** for notifications: emails are written to `notification_outbox` inside the business transaction and delivered by the worker with retries. Nothing is sent for a rolled-back operation. The `survey-sweep` job (`notifications` queue, hourly) sends the one reminder for unanswered satisfaction surveys and marks the expired ones.
+* **Task boards** read `ticket_tasks` through the `(assignee_id, status)` and `(team_id, status)` indexes and cap the cards at `boards.card_limit` with exact lane counts from one grouped query; the nightly `board-notes-purge` job (`maintenance` queue) removes done sticky notes past `boards.note_retention_days`.
 * **Idempotent jobs** with Redis-backed schedulers; API replicas can start concurrently (migrations use an advisory lock).
 * **Health endpoint** `/api/health`, structured JSON logs, request IDs, graceful shutdown.
 * Backups: PostgreSQL base backups + WAL (see `OPERATIONS.md`); attachments volume snapshot; Redis is reconstructible (jobs are re-derived from the database on worker start).

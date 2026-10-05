@@ -189,7 +189,12 @@ export const ticketTasks = pgTable('ticket_tasks', {
   completedAt: timestamp('completed_at', { withTimezone: true }),
   sortOrder: integer('sort_order').notNull().default(0),
   ...timestamps,
-}, (t) => [index('ticket_tasks_ticket_idx').on(t.ticketId)]);
+}, (t) => [
+  index('ticket_tasks_ticket_idx').on(t.ticketId),
+  // The task boards list a person's or a team's open tasks across tickets.
+  index('ticket_tasks_assignee_status_idx').on(t.assigneeId, t.status),
+  index('ticket_tasks_team_status_idx').on(t.teamId, t.status),
+]);
 
 export const timeEntries = pgTable('time_entries', {
   id: id(),

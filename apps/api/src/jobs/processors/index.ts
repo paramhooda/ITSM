@@ -20,3 +20,4 @@ import './status';
 import './changes';
 import './briefings';
 import './surveys';
+import './boards';
