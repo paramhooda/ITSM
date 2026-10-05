@@ -4,9 +4,9 @@ import { withSystem, schema } from '@/db/client';
 import { enqueue } from '@/jobs/queues';
 import { logger } from '@/core/logger';
 import { writeAudit } from '@/core/audit';
-import { systemCtx } from '@/modules/tickets/common';
+import { systemCtx, SYSTEM_PRINCIPAL } from '@/modules/tickets/common';
 import { resolveReport } from '@/modules/reports/registry';
-import { executeReport, queueReportEmail } from '@/modules/reports/service';
+import { executeReport, queueReportEmail, reportSteps, type ExecutionOutcome } from '@/modules/reports/service';
 import { advanceSchedule, scheduleFormats, type ScheduleRow } from '@/modules/reports/schedules';
 import type { Tx } from '@/db/client';
 
@@ -77,16 +77,17 @@ export async function executeSchedule(scheduleId: string, opts: ExecuteOptions =
   const failures: { customerId: string | null; error: string }[] = [];
   let runs = 0;
   let emails = 0;
+  // each format runs as its own report (two transactions with the narrative call in between), so a format that fails after another succeeded leaves the earlier run committed
+  const steps = reportSteps(SYSTEM_PRINCIPAL, { requestId: `schedule:${schedule.id}`, source: 'system' });
   for (const customerId of targets) {
     try {
-      await withSystem(async (tx) => {
-        const ctx = systemCtx(tx, `schedule:${schedule.id}`);
-        const outcomes = [];
-        for (const format of formats) {
-          outcomes.push(await executeReport(ctx, { reportKey: schedule.reportKey, parameters: { ...filters, customerId, dateRange: schedule.dateRange }, format, scheduleId: schedule.id, portalVisible: portal, requestedBy: opts.requestedBy ?? schedule.createdBy ?? null, timezone: schedule.timezone }));
-        }
-        runs += outcomes.length;
-        if (email) {
+      const outcomes: ExecutionOutcome[] = [];
+      for (const format of formats) {
+        outcomes.push(await executeReport(steps, { reportKey: schedule.reportKey, parameters: { ...filters, customerId, dateRange: schedule.dateRange }, format, scheduleId: schedule.id, portalVisible: portal, requestedBy: opts.requestedBy ?? schedule.createdBy ?? null, timezone: schedule.timezone }));
+      }
+      runs += outcomes.length;
+      if (email) {
+        await withSystem(async (tx) => {
           const recipients = await scheduleRecipients(tx, schedule, customerId);
           const first = outcomes[0]!;
           emails += await queueReportEmail(tx, {
@@ -100,8 +101,8 @@ export async function executeSchedule(scheduleId: string, opts: ExecuteOptions =
             scheduleName: schedule.name,
           });
           if (!recipients.length) logger.warn({ scheduleId: schedule.id, customerId }, 'report schedule has no recipients');
-        }
-      });
+        });
+      }
     } catch (err) {
       const message = String((err as Error).message ?? err).slice(0, 2000);
       failures.push({ customerId, error: message });

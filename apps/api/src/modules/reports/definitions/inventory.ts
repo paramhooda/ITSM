@@ -1,6 +1,9 @@
 import { sql } from 'drizzle-orm';
 import { registerReport, type ReportResult } from '../registry';
-import { rows, customerCond, limitSql, num, col, numParam, listParam, strParam, inUuids, customerParam } from './helpers';
+import { rows, customerCond, limitSql, num, col, totals, numParam, listParam, strParam, inUuids, customerParam } from './helpers';
+
+/** Cover status slices in a fixed order (the status colours come from the series map). */
+const COVER_ORDER = ['none', 'active', 'expiring', 'expired'] as const;
 
 const groupCount = (list: Record<string, unknown>[], key: string, fallback = 'Unspecified') => {
   const m = new Map<string, number>();
@@ -36,14 +39,16 @@ registerReport({
       rows: list,
       summary: [
         { label: 'Assets', value: list.length },
-        { label: `Warranty expiring (${days}d)`, value: list.filter((r) => r.warranty_status === 'expiring').length },
-        { label: 'Warranty expired', value: list.filter((r) => r.warranty_status === 'expired').length },
-        { label: `AMC expiring (${days}d)`, value: list.filter((r) => r.amc_status === 'expiring').length },
+        { label: `Warranty expiring (${days}d)`, value: list.filter((r) => r.warranty_status === 'expiring').length, tone: list.some((r) => r.warranty_status === 'expiring') ? 'warn' : undefined },
+        { label: 'Warranty expired', value: list.filter((r) => r.warranty_status === 'expired').length, tone: list.some((r) => r.warranty_status === 'expired') ? 'bad' : undefined },
+        { label: `AMC expiring (${days}d)`, value: list.filter((r) => r.amc_status === 'expiring').length, tone: list.some((r) => r.amc_status === 'expiring') ? 'warn' : undefined },
         { label: 'No AMC', value: list.filter((r) => r.amc_status === 'none').length },
       ],
       charts: [
         { type: 'bar', title: 'Assets by category', data: groupCount(list, 'category').slice(0, 12), x: 'label', y: 'count' },
-        { type: 'bar', title: 'Warranty status', data: groupCount(list, 'warranty_status'), x: 'label', y: 'count' },
+        { type: 'donut', title: 'Warranty status', data: COVER_ORDER.map((k) => ({ label: k, count: list.filter((r) => r.warranty_status === k).length })).filter((d) => d.count > 0), x: 'label', y: 'count', statusSeries: true, insight: 'none' },
+        { type: 'donut', title: 'AMC status', data: COVER_ORDER.map((k) => ({ label: k, count: list.filter((r) => r.amc_status === k).length })).filter((d) => d.count > 0), x: 'label', y: 'count', statusSeries: true, insight: 'none' },
+        { type: 'bar', title: 'Assets by lifecycle stage', data: groupCount(list, 'lifecycle_stage'), x: 'label', y: 'count', horizontal: true, insight: 'none' },
       ],
     };
   },
@@ -77,15 +82,17 @@ registerReport({
         { label: 'Configuration items', value: list.length },
         { label: 'Active', value: list.filter((r) => r.status === 'active').length },
         { label: 'Critical', value: list.filter((r) => r.criticality === 'critical').length },
-        { label: `Stale (> ${stale}d)`, value: list.filter((r) => r.stale).length },
+        { label: `Stale (> ${stale}d)`, value: list.filter((r) => r.stale).length, tone: list.length && list.filter((r) => r.stale).length > list.length / 10 ? 'bad' : undefined, hint: 'not seen by discovery or monitoring' },
         { label: 'Monitored', value: list.filter((r) => r.monitored).length },
         { label: 'With incidents (90d)', value: list.filter((r) => num(r.tickets_90d) > 0).length },
       ],
       charts: [
-        { type: 'bar', title: 'CIs by type', data: groupCount(list, 'type').slice(0, 12), x: 'label', y: 'count' },
-        { type: 'bar', title: 'CIs by status', data: groupCount(list, 'status'), x: 'label', y: 'count' },
+        { type: 'bar', title: 'CIs by type', data: groupCount(list, 'type').slice(0, 12), x: 'label', y: 'count', horizontal: true },
+        { type: 'donut', title: 'CIs by status', data: groupCount(list, 'status'), x: 'label', y: 'count', insight: 'none' },
+        { type: 'bar', title: 'CIs by criticality', data: ['critical', 'high', 'medium', 'low'].map((k) => ({ label: k, count: list.filter((r) => r.criticality === k).length })), x: 'label', y: 'count', emphasis: 'critical', insight: 'none' },
+        { type: 'donut', title: 'Monitored vs not monitored', data: [{ label: 'Monitored', count: list.filter((r) => r.monitored).length }, { label: 'Not monitored', count: list.filter((r) => !r.monitored).length }].filter((d) => d.count > 0), x: 'label', y: 'count', insight: 'none' },
       ],
-      sections: [{ title: 'By site', columns: [col('label', 'Site'), col('count', 'CIs', 'number')], rows: groupCount(list, 'site', 'No site').slice(0, 50) }],
+      sections: [{ title: 'By site', columns: totals([col('label', 'Site'), col('count', 'CIs', 'number')], ['count']), totals: true, rows: groupCount(list, 'site', 'No site').slice(0, 50) }],
     };
   },
 });

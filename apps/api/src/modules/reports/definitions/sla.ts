@@ -3,9 +3,11 @@ import { registerReport, type ReportResult } from '../registry';
 import { slaCompliance } from '@/modules/sla/policies';
 import { csatFigures, hidesSoc } from '@/modules/surveys/figures';
 import { loadSurveyDefaults } from '@/modules/surveys/policy';
-import { rows, customerCond, rangeCond, socCond, limitSql, pct, num, round1, col, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
+import { rows, customerCond, rangeCond, socCond, limitSql, pct, num, round1, col, totals, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
 
 const METRIC_LABEL: Record<string, string> = { acknowledgement: 'Acknowledgement', response: 'Response', restoration: 'Restoration', resolution: 'Resolution' };
+const SLA_TARGET = 95;
+const toneFor = (v: number | null, target = SLA_TARGET): 'good' | 'warn' | 'bad' | undefined => (v === null ? undefined : v >= target ? 'good' : v >= target - 5 ? 'warn' : 'bad');
 
 // ---------------------------------------------------------------- sla_performance
 registerReport({
@@ -17,6 +19,12 @@ registerReport({
   portal: true,
   parameters: [customerParam, dateRangeParam, { key: 'ticketType', label: 'Ticket type', type: 'select', options: [{ value: 'incident', label: 'Incidents' }, { value: 'request', label: 'Requests' }, { value: 'problem', label: 'Problems' }, { value: 'change', label: 'Changes' }] }],
   defaultDateRange: 'last_7_days',
+  glossary: [
+    { term: 'Acknowledgement', meaning: 'Time from creation until an engineer takes the ticket' },
+    { term: 'Response', meaning: 'Time from creation until the first reply to the requester' },
+    { term: 'Restoration', meaning: 'Time until service is restored, before the full fix' },
+    { term: 'Resolution', meaning: 'Time from creation until the ticket is resolved' },
+  ],
   async run(ctx, p): Promise<ReportResult> {
     const type = typeof p.ticketType === 'string' && p.ticketType ? (p.ticketType as 'incident' | 'request' | 'problem' | 'change') : undefined;
     const list = await rows<Record<string, unknown>>(ctx, sql`
@@ -42,21 +50,25 @@ registerReport({
       return { label: priority, compliance: pct(t.met, t.met + t.breached) ?? 0, breached: t.breached };
     });
     const byMetric = Object.keys(METRIC_LABEL).map((m) => ({ label: METRIC_LABEL[m], met: tot(m).met, breached: tot(m).breached })).filter((r) => r.met + r.breached > 0);
+    const overall = pct(all.met, all.met + all.breached);
+    const resolution = pct(res.met, res.met + res.breached);
+    const response = pct(resp.met, resp.met + resp.breached);
     return {
-      columns: [col('priority', 'Priority'), col('metric', 'Metric'), col('met', 'Met', 'number'), col('breached', 'Breached', 'number'), col('running', 'Running', 'number'), col('completed', 'Completed', 'number'), col('compliance_pct', 'Compliance', 'pct'), col('avg_elapsed_minutes', 'Avg elapsed', 'minutes'), col('avg_target_minutes', 'Avg target', 'minutes')],
+      columns: totals([col('priority', 'Priority'), col('metric', 'Metric'), col('met', 'Met', 'number'), col('breached', 'Breached', 'number'), col('running', 'Running', 'number'), col('completed', 'Completed', 'number'), col('compliance_pct', 'Compliance', 'pct'), col('avg_elapsed_minutes', 'Avg elapsed', 'minutes'), col('avg_target_minutes', 'Avg target', 'minutes')], ['met', 'breached', 'running', 'completed']),
       rows: table.map(({ metric_key: _m, ...r }) => r as Record<string, unknown>),
       summary: [
-        { label: 'Overall compliance', value: pct(all.met, all.met + all.breached) ?? 'n/a', hint: `${all.met} met / ${all.breached} breached` },
-        { label: 'Resolution compliance', value: pct(res.met, res.met + res.breached) ?? 'n/a' },
-        { label: 'Response compliance', value: pct(resp.met, resp.met + resp.breached) ?? 'n/a' },
-        { label: 'Breaches', value: all.breached },
+        { label: 'Overall compliance', value: overall ?? 'n/a', hint: `${all.met} met / ${all.breached} breached`, unit: 'pct', target: SLA_TARGET, tone: toneFor(overall) },
+        { label: 'Resolution compliance', value: resolution ?? 'n/a', unit: 'pct', target: SLA_TARGET, tone: toneFor(resolution) },
+        { label: 'Response compliance', value: response ?? 'n/a', unit: 'pct', target: SLA_TARGET, tone: toneFor(response) },
+        { label: 'Breaches', value: all.breached, tone: all.breached ? 'bad' : 'good' },
         { label: 'Breached tickets', value: new Set(breachedList.map((r) => r.id)).size },
       ],
       charts: [
-        { type: 'bar', title: 'Compliance % by priority', data: byPriority, x: 'label', y: 'compliance', labels: { compliance: 'Compliance %' } },
-        { type: 'bar', title: 'Met vs breached by metric', data: byMetric, x: 'label', y: ['met', 'breached'], labels: { met: 'Met', breached: 'Breached' } },
+        { type: 'bar', title: 'Compliance % by priority', subtitle: 'Clocks met over clocks completed, every metric', data: byPriority, x: 'label', y: 'compliance', labels: { compliance: 'Compliance %' }, unit: 'pct', target: SLA_TARGET, insight: ['extremes'] },
+        { type: 'stacked_bar', title: 'Met vs breached by metric', data: byMetric, x: 'label', y: ['met', 'breached'], labels: { met: 'Met', breached: 'Breached' }, statusSeries: true, insight: 'none' },
+        { type: 'gauge', title: 'Overall SLA compliance', subtitle: `Target ${SLA_TARGET}%`, data: overall === null ? [] : [{ label: 'Overall', value: overall }], x: 'label', y: 'value', unit: 'pct', target: SLA_TARGET, insight: 'none' },
       ],
-      sections: [{ title: 'Breached tickets', columns: [col('number', 'Number'), col('title', 'Title'), col('customer', 'Customer'), col('priority', 'Priority'), col('metric', 'Metric'), col('status', 'Status'), col('assignee', 'Assignee'), col('target_minutes', 'Target', 'minutes'), col('elapsed_minutes', 'Elapsed', 'minutes'), col('breached_at', 'Breached at', 'datetime')], rows: breachedList.map((r) => ({ ...r, metric: METRIC_LABEL[String(r.metric)] ?? r.metric })) }],
+      sections: [{ title: 'Breached tickets', intro: 'Every clock that passed its target in the period, latest first.', printLimit: 50, columns: [col('number', 'Number'), col('title', 'Title'), col('customer', 'Customer'), col('priority', 'Priority'), col('metric', 'Metric'), col('status', 'Status'), col('assignee', 'Assignee'), col('target_minutes', 'Target', 'minutes'), col('elapsed_minutes', 'Elapsed', 'minutes'), col('breached_at', 'Breached at', 'datetime')], rows: breachedList.map((r) => ({ ...r, metric: METRIC_LABEL[String(r.metric)] ?? r.metric })) }],
     };
   },
 });
@@ -102,26 +114,29 @@ registerReport({
     const compliance = await slaCompliance(ctx, { customerId: p.customerId ?? undefined, from: `${p.from}T00:00:00Z`, to: `${p.to}T23:59:59Z`, groupBy: 'priority' });
     const thresholds = await loadSurveyDefaults(ctx.tx);
     const csat = await csatFigures(ctx.tx, { customerId: p.customerId, from: new Date(`${p.from}T00:00:00Z`), to: new Date(`${p.to}T23:59:59Z`), excludeSoc: hidesSoc(ctx), satisfiedThreshold: thresholds.satisfiedThreshold, lowThreshold: thresholds.lowRatingThreshold });
+    const mix = [{ label: 'Incidents', count: sum('incidents') }, { label: 'Requests', count: sum('requests') }, { label: 'Changes', count: sum('changes') }, { label: 'Problems', count: sum('problems') }].filter((m) => m.count > 0);
+    const overall = compliance.totals.compliancePct ?? null;
     return {
-      columns: [col('service', 'Service'), col('tickets', 'Tickets', 'number'), col('incidents', 'Incidents', 'number'), col('requests', 'Requests', 'number'), col('changes', 'Changes', 'number'), col('problems', 'Problems', 'number'), col('resolved', 'Resolved', 'number'), col('mttr_minutes', 'MTTR', 'minutes'), col('compliance_pct', 'SLA compliance', 'pct'), col('sla_breached', 'Breaches', 'number'), col('out_of_scope', 'Out of scope', 'number'), col('major', 'Major', 'number'), col('visits', 'Visits', 'number'), col('visit_minutes', 'On-site', 'minutes'), col('engineering_minutes', 'Engineering', 'minutes')],
+      columns: totals([col('service', 'Service'), col('tickets', 'Tickets', 'number'), col('incidents', 'Incidents', 'number'), col('requests', 'Requests', 'number'), col('changes', 'Changes', 'number'), col('problems', 'Problems', 'number'), col('resolved', 'Resolved', 'number'), col('mttr_minutes', 'MTTR', 'minutes'), col('compliance_pct', 'SLA compliance', 'pct'), col('sla_breached', 'Breaches', 'number'), col('out_of_scope', 'Out of scope', 'number'), col('major', 'Major', 'number'), col('visits', 'Visits', 'number'), col('visit_minutes', 'On-site', 'minutes'), col('engineering_minutes', 'Engineering', 'minutes')], ['tickets', 'incidents', 'requests', 'changes', 'problems', 'resolved', 'sla_breached', 'out_of_scope', 'major', 'visits', 'visit_minutes', 'engineering_minutes'], ['mttr_minutes']),
       rows: table,
       summary: [
         { label: 'Tickets', value: sum('tickets'), hint: `${sum('incidents')} incidents / ${sum('requests')} requests` },
         { label: 'Resolved', value: sum('resolved') },
-        { label: 'SLA compliance', value: compliance.totals.compliancePct ?? 'n/a', hint: `${compliance.totals.breached} breaches` },
+        { label: 'SLA compliance', value: overall ?? 'n/a', hint: `${compliance.totals.breached} breaches`, unit: 'pct', target: SLA_TARGET, tone: toneFor(overall) },
         { label: 'Out of scope', value: sum('out_of_scope') },
-        { label: 'Major incidents', value: sum('major') },
+        { label: 'Major incidents', value: sum('major'), tone: sum('major') ? 'bad' : 'good' },
         { label: 'Site visits', value: sum('visits'), hint: `${Math.round(sum('visit_minutes') / 60)} h on site` },
         { label: 'Preventive maintenance', value: `${pm[0]?.completed ?? 0}/${pm[0]?.planned ?? 0}`, hint: `${pm[0]?.missed ?? 0} missed` },
-        { label: 'Engineering hours', value: Math.round(sum('engineering_minutes') / 60) },
+        { label: 'Engineering hours', value: Math.round(sum('engineering_minutes') / 60), unit: 'hours' },
         { label: 'Customer satisfaction', value: csat.avg === null ? 'n/a' : `${csat.avg}/5`, hint: `${csat.responses} responses` },
       ],
       charts: [
-        { type: 'bar', title: 'Tickets by service', data: table.slice(0, 12).map((r) => ({ label: r.service, count: r.tickets })), x: 'label', y: 'count' },
         { type: 'line', title: 'Opened vs resolved per week', data: weekly, x: 'week', y: ['opened', 'resolved'], labels: { opened: 'Opened', resolved: 'Resolved' } },
-        { type: 'bar', title: 'SLA compliance by priority', data: compliance.groups.map((g) => ({ label: g.label, compliance: g.compliancePct ?? 0 })), x: 'label', y: 'compliance', labels: { compliance: 'Compliance %' } },
+        { type: 'bar', title: 'SLA compliance by priority', data: compliance.groups.map((g) => ({ label: g.label, compliance: g.compliancePct ?? 0 })), x: 'label', y: 'compliance', labels: { compliance: 'Compliance %' }, unit: 'pct', target: SLA_TARGET, insight: ['extremes'] },
+        { type: 'bar', title: 'Tickets by service', data: table.slice(0, 12).map((r) => ({ label: r.service, count: r.tickets })), x: 'label', y: 'count', horizontal: true },
+        { type: 'donut', title: 'Ticket mix', subtitle: 'Tickets opened in the period by type', data: mix, x: 'label', y: 'count', insight: 'none' },
       ],
-      sections: [{ title: 'SLA by priority', columns: [col('label', 'Priority'), col('met', 'Met', 'number'), col('breached', 'Breached', 'number'), col('running', 'Running', 'number'), col('compliancePct', 'Compliance', 'pct'), col('avgElapsedMinutes', 'Avg elapsed', 'minutes')], rows: compliance.groups.map((g) => ({ label: g.label, met: g.met, breached: g.breached, running: g.running, compliancePct: g.compliancePct, avgElapsedMinutes: g.avgElapsedMinutes })) }],
+      sections: [{ title: 'SLA by priority', columns: totals([col('label', 'Priority'), col('met', 'Met', 'number'), col('breached', 'Breached', 'number'), col('running', 'Running', 'number'), col('compliancePct', 'Compliance', 'pct'), col('avgElapsedMinutes', 'Avg elapsed', 'minutes')], ['met', 'breached', 'running']), totals: true, rows: compliance.groups.map((g) => ({ label: g.label, met: g.met, breached: g.breached, running: g.running, compliancePct: g.compliancePct, avgElapsedMinutes: g.avgElapsedMinutes })) }],
     };
   },
 });

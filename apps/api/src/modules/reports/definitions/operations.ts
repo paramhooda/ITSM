@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { registerReport, type ReportResult } from '../registry';
-import { rows, customerCond, rangeCond, socCond, openCond, limitSql, pct, num, round1, col, boolParam, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
+import { rows, customerCond, rangeCond, socCond, openCond, limitSql, pct, num, round1, col, totals, countsOf, STATUS_CATEGORY_LABEL, boolParam, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
 
 const groupCount = (list: Record<string, unknown>[], key: string, fallback = 'Unspecified') => {
   const m = new Map<string, number>();
@@ -49,16 +49,17 @@ registerReport({
       summary: [
         { label: 'Occurrences planned', value: list.length },
         { label: 'Completed', value: completed.length },
-        { label: 'On-time %', value: pct(onTime, completed.length) ?? 'n/a' },
-        { label: 'Missed', value: list.filter((r) => r.status === 'missed').length },
+        { label: 'On-time %', value: pct(onTime, completed.length) ?? 'n/a', unit: 'pct', target: 90 },
+        { label: 'Missed', value: list.filter((r) => r.status === 'missed').length, tone: list.some((r) => r.status === 'missed') ? 'bad' : 'good' },
         { label: 'Scheduled / planned', value: list.filter((r) => r.status === 'scheduled' || r.status === 'planned').length },
         { label: 'Active programs', value: programs.length },
       ],
       charts: [
-        { type: 'bar', title: 'Occurrences by status', data: groupCount(list, 'status'), x: 'label', y: 'count' },
-        { type: 'bar', title: 'Planned vs completed per month', data: [...months].sort().map(([label, m]) => ({ label, ...m })), x: 'label', y: ['planned', 'completed', 'missed'], labels: { planned: 'Planned', completed: 'Completed', missed: 'Missed' } },
+        { type: 'bar', title: 'Occurrences by status', data: groupCount(list, 'status'), x: 'label', y: 'count', insight: 'none' },
+        // planned is the month's total and completed and missed are subsets of it, so the stack is completed + missed + what is still outstanding
+        { type: 'stacked_bar', title: 'Planned vs completed per month', subtitle: 'Every planned occurrence by its outcome', data: [...months].sort().map(([label, m]) => ({ label, completed: m.completed, missed: m.missed, outstanding: Math.max(0, m.planned - m.completed - m.missed) })), x: 'label', y: ['completed', 'missed', 'outstanding'], labels: { completed: 'Completed', missed: 'Missed', outstanding: 'Scheduled / planned' }, statusSeries: true },
       ],
-      sections: [{ title: 'Programs', columns: [col('program', 'Program'), col('customer', 'Customer'), col('frequency', 'Frequency'), col('start_date', 'Start', 'date'), col('end_date', 'End', 'date'), col('planned', 'Planned', 'number'), col('completed', 'Completed', 'number'), col('missed', 'Missed', 'number')], rows: programs }],
+      sections: [{ title: 'Programs', columns: totals([col('program', 'Program'), col('customer', 'Customer'), col('frequency', 'Frequency'), col('start_date', 'Start', 'date'), col('end_date', 'End', 'date'), col('planned', 'Planned', 'number'), col('completed', 'Completed', 'number'), col('missed', 'Missed', 'number')], ['planned', 'completed', 'missed']), totals: true, rows: programs }],
     };
   },
 });
@@ -91,13 +92,14 @@ registerReport({
         { label: 'Visits', value: list.length },
         { label: 'Completed', value: completed.length },
         { label: 'Cancelled', value: list.filter((r) => r.status === 'cancelled').length },
-        { label: 'Work hours', value: Math.round(work / 6) / 10 },
-        { label: 'Acknowledged %', value: pct(completed.filter((r) => r.acknowledged).length, completed.length) ?? 'n/a' },
-        { label: 'Avg rating', value: rated.length ? Math.round((rated.reduce((s, r) => s + num(r.customer_rating), 0) / rated.length) * 10) / 10 : 'n/a' },
+        { label: 'Work hours', value: Math.round(work / 6) / 10, unit: 'hours' },
+        { label: 'Acknowledged %', value: pct(completed.filter((r) => r.acknowledged).length, completed.length) ?? 'n/a', unit: 'pct' },
+        { label: 'Avg rating', value: rated.length ? Math.round((rated.reduce((s, r) => s + num(r.customer_rating), 0) / rated.length) * 10) / 10 : 'n/a', unit: 'rating', target: 4 },
       ],
       charts: [
-        { type: 'bar', title: 'Visits by status', data: groupCount(list, 'status'), x: 'label', y: 'count' },
-        { type: 'bar', title: 'Visits by engineer', data: groupCount(list, 'engineer', 'Unassigned').slice(0, 12), x: 'label', y: 'count' },
+        { type: 'bar', title: 'Visits by status', data: groupCount(list, 'status'), x: 'label', y: 'count', insight: 'none' },
+        { type: 'bar', title: 'Visits by engineer', data: groupCount(list, 'engineer', 'Unassigned').slice(0, 12), x: 'label', y: 'count', horizontal: true },
+        { type: 'donut', title: 'Visits by type', data: groupCount(list, 'type', 'Unspecified'), x: 'label', y: 'count', insight: 'none' },
       ],
     };
   },
@@ -128,14 +130,15 @@ registerReport({
       summary: [
         { label: 'Security incidents', value: list.length },
         { label: 'Open', value: list.filter((r) => ['new', 'open', 'pending'].includes(String(r.status_category))).length },
-        { label: 'Critical / high', value: list.filter((r) => num(r.severity_level) > 0 && num(r.severity_level) <= 2).length },
-        { label: 'MTTR (min)', value: resolved.length ? Math.round(resolved.reduce((s, r) => s + num(r.mttr_minutes), 0) / resolved.length) : null },
+        { label: 'Critical / high', value: list.filter((r) => num(r.severity_level) > 0 && num(r.severity_level) <= 2).length, tone: list.some((r) => num(r.severity_level) > 0 && num(r.severity_level) <= 2) ? 'bad' : 'good' },
+        { label: 'MTTR (min)', value: resolved.length ? Math.round(resolved.reduce((s, r) => s + num(r.mttr_minutes), 0) / resolved.length) : null, unit: 'minutes' },
         { label: 'Escalated', value: list.filter((r) => num(r.escalation_level) > 0).length },
-        { label: 'SLA breached', value: list.filter((r) => r.breached).length },
+        { label: 'SLA breached', value: list.filter((r) => r.breached).length, tone: list.some((r) => r.breached) ? 'bad' : 'good' },
       ],
       charts: [
-        { type: 'bar', title: 'By severity', data: groupCount(list, 'severity'), x: 'label', y: 'count' },
+        { type: 'bar', title: 'By severity', data: groupCount(list, 'severity'), x: 'label', y: 'count', emphasis: list.map((r) => r.severity).filter(Boolean).map(String)[0], insight: ['concentration'] },
         { type: 'bar', title: 'By category', data: groupCount(list, 'category').slice(0, 12), x: 'label', y: 'count' },
+        { type: 'donut', title: 'Open vs resolved', data: countsOf(list, 'status_category', 'open', STATUS_CATEGORY_LABEL), x: 'label', y: 'count', insight: 'none' },
       ],
     };
   },
@@ -176,20 +179,20 @@ registerReport({
       return den ? Math.round(table.reduce((s, r) => s + (r[k] === null ? 0 : num(r[k]) * num(r[w])), 0) / den) : null;
     };
     return {
-      columns: [col('category', 'Category'), col('tickets', 'Tickets', 'number'), col('incidents', 'Incidents', 'number'), col('p1_p2', 'P1/P2', 'number'), col('resolved', 'Resolved', 'number'), col('avg_response_minutes', 'Avg response', 'minutes'), col('avg_resolution_minutes', 'Avg resolution', 'minutes'), col('breached', 'SLA breaches', 'number'), col('monitoring_generated', 'From monitoring', 'number')],
+      columns: totals([col('category', 'Category'), col('tickets', 'Tickets', 'number'), col('incidents', 'Incidents', 'number'), col('p1_p2', 'P1/P2', 'number'), col('resolved', 'Resolved', 'number'), col('avg_response_minutes', 'Avg response', 'minutes'), col('avg_resolution_minutes', 'Avg resolution', 'minutes'), col('breached', 'SLA breaches', 'number'), col('monitoring_generated', 'From monitoring', 'number')], ['tickets', 'incidents', 'p1_p2', 'resolved', 'breached', 'monitoring_generated']),
       rows: table,
       summary: [
         { label: 'Tickets', value: total },
-        { label: 'From monitoring', value: pct(monitoring, total) ?? 0, hint: `${monitoring} tickets; ${events[0]?.total ?? 0} PRTG events, ${events[0]?.ticketed ?? 0} ticketed` },
-        { label: 'Avg response (min)', value: wAvg('avg_response_minutes', 'tickets') },
-        { label: 'Avg resolution (min)', value: wAvg('avg_resolution_minutes', 'resolved') },
-        { label: 'SLA breaches', value: table.reduce((s, r) => s + num(r.breached), 0) },
+        { label: 'From monitoring', value: pct(monitoring, total) ?? 0, unit: 'pct', hint: `${monitoring} tickets; ${events[0]?.total ?? 0} PRTG events, ${events[0]?.ticketed ?? 0} ticketed` },
+        { label: 'Avg response (min)', value: wAvg('avg_response_minutes', 'tickets'), unit: 'minutes' },
+        { label: 'Avg resolution (min)', value: wAvg('avg_resolution_minutes', 'resolved'), unit: 'minutes' },
+        { label: 'SLA breaches', value: table.reduce((s, r) => s + num(r.breached), 0), tone: table.some((r) => num(r.breached) > 0) ? 'bad' : 'good' },
       ],
       charts: [
         { type: 'bar', title: 'Tickets by category', data: table.slice(0, 12).map((r) => ({ label: r.category, count: r.tickets })), x: 'label', y: 'count' },
-        { type: 'bar', title: 'Engineer workload', data: workload.slice(0, 12).map((r) => ({ label: r.engineer, tickets: r.tickets, resolved: r.resolved })), x: 'label', y: ['tickets', 'resolved'], labels: { tickets: 'Assigned', resolved: 'Resolved' } },
+        { type: 'bar', title: 'Engineer workload', data: workload.slice(0, 12).map((r) => ({ label: r.engineer, tickets: r.tickets, resolved: r.resolved })), x: 'label', y: ['tickets', 'resolved'], labels: { tickets: 'Assigned', resolved: 'Resolved' }, horizontal: true },
       ],
-      sections: [{ title: 'Engineer workload', columns: [col('engineer', 'Engineer'), col('tickets', 'Assigned in period', 'number'), col('resolved', 'Resolved', 'number'), col('open_now', 'Open now', 'number'), col('avg_resolution_minutes', 'Avg resolution', 'minutes'), col('logged_minutes', 'Time logged', 'minutes')], rows: workload.map((r) => ({ ...r, avg_resolution_minutes: round1(r.avg_resolution_minutes) })) }],
+      sections: [{ title: 'Engineer workload', columns: totals([col('engineer', 'Engineer'), col('tickets', 'Assigned in period', 'number'), col('resolved', 'Resolved', 'number'), col('open_now', 'Open now', 'number'), col('avg_resolution_minutes', 'Avg resolution', 'minutes'), col('logged_minutes', 'Time logged', 'minutes')], ['tickets', 'resolved', 'open_now', 'logged_minutes']), totals: true, rows: workload.map((r) => ({ ...r, avg_resolution_minutes: round1(r.avg_resolution_minutes) })) }],
     };
   },
 });
@@ -230,15 +233,16 @@ registerReport({
       summary: [
         { label: 'Out of scope', value: oos.length },
         { label: 'Unknown scope', value: list.length - oos.length },
-        { label: 'Time spent (h)', value: Math.round(list.reduce((s, r) => s + num(r.minutes_spent), 0) / 6) / 10 },
+        { label: 'Time spent (h)', value: Math.round(list.reduce((s, r) => s + num(r.minutes_spent), 0) / 6) / 10, unit: 'hours' },
         { label: 'Site visits', value: list.reduce((s, r) => s + num(r.visits), 0) },
         { label: 'Customers affected', value: new Set(list.map((r) => r.customer)).size },
       ],
       charts: [
-        { type: 'bar', title: 'By customer (top 10)', data: sumBy('customer').slice(0, 10), x: 'label', y: ['count', 'minutes'], labels: { count: 'Tickets', minutes: 'Minutes' } },
-        { type: 'bar', title: 'By service', data: sumBy('service').slice(0, 10).map((r) => ({ label: r.label, count: r.count })), x: 'label', y: 'count' },
+        { type: 'bar', title: 'Out-of-scope tickets by customer', subtitle: 'Top 10', data: sumBy('customer').slice(0, 10).map((r) => ({ label: r.label, count: r.count })), x: 'label', y: 'count', horizontal: true },
+        { type: 'bar', title: 'Time spent by customer', subtitle: 'Top 10, minutes logged', data: sumBy('customer').slice(0, 10).map((r) => ({ label: r.label, minutes: r.minutes })), x: 'label', y: 'minutes', labels: { minutes: 'Minutes' }, unit: 'minutes', horizontal: true, insight: 'none' },
+        { type: 'bar', title: 'By service', data: sumBy('service').slice(0, 10).map((r) => ({ label: r.label, count: r.count })), x: 'label', y: 'count', horizontal: true },
       ],
-      sections: [{ title: 'By customer', columns: [col('label', 'Customer'), col('count', 'Tickets', 'number'), col('minutes', 'Time spent', 'minutes')], rows: sumBy('customer') }],
+      sections: [{ title: 'By customer', columns: totals([col('label', 'Customer'), col('count', 'Tickets', 'number'), col('minutes', 'Time spent', 'minutes')], ['count', 'minutes']), totals: true, rows: sumBy('customer') }],
     };
   },
 });

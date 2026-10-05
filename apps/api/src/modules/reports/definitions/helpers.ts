@@ -30,6 +30,29 @@ export const round1 = (v: unknown) => (v === null || v === undefined ? null : Ma
 
 export const col = (key: string, label: string, type?: ReportColumn['type']): ReportColumn => ({ key, label, type });
 
+/** The same columns with a summed totals row declared on `keys` (printed in HTML and PDF; never inferred). */
+export const totals = (cols: ReportColumn[], keys: string[], avgKeys: string[] = []): ReportColumn[] => cols.map((c) => (keys.includes(c.key) ? { ...c, total: 'sum' as const } : avgKeys.includes(c.key) ? { ...c, total: 'avg' as const } : c));
+
+/** Fixed row and column order of the arrival heatmap (weekdays by hour of day). */
+export const weekdayHours = { rows: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], cols: Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0')) };
+
+/** Age buckets of the backlog ageing chart, oldest last. */
+export const AGE_ORDER = ['< 1 day', '1-3 days', '3-7 days', '7-30 days', '> 30 days'];
+
+/** Status-category keys as the words a reader expects. */
+export const STATUS_CATEGORY_LABEL: Record<string, string> = { new: 'New', open: 'Open', pending: 'Pending', resolved: 'Resolved', closed: 'Closed', cancelled: 'Cancelled' };
+
+/** A category-count list as donut or bar data. */
+export const countsOf = (list: Record<string, unknown>[], key: string, fallback = 'Unspecified', labels?: Record<string, string>) => {
+  const m = new Map<string, number>();
+  for (const r of list) {
+    const raw = String(r[key] ?? fallback);
+    const label = labels?.[raw] ?? raw;
+    m.set(label, (m.get(label) ?? 0) + 1);
+  }
+  return [...m].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+};
+
 /** Reads a string[] parameter (multiselect) tolerating CSV strings. */
 export function listParam(params: ReportParams, key: string): string[] {
   const v = params[key];

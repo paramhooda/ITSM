@@ -113,21 +113,30 @@ export const REPORTS: ReturnType<typeof define>[] = [
   define({
     name: 'run_report',
     toolset: 'reports',
-    description: 'Run a report and read its summary figures, charts and first rows. Date range presets: last_7_days, last_30_days, last_90_days, month_to_date, last_month, quarter_to_date, last_quarter, year_to_date, or custom with from/to. Works for custom reports too (name or custom:<id> key).',
+    description: 'Run a report and read its summary figures, charts and first rows. Date range presets: last_7_days, last_30_days, last_90_days, month_to_date, last_month, quarter_to_date, last_quarter, year_to_date, or custom with from/to. Works for custom reports too (name or custom:<id> key). The answer includes the report\'s derived insights (trends against the previous period, best and worst, concentrations) and next steps.',
     inputSchema: z.object({ report: z.string().max(100).describe('Report key or name'), customer: z.string().max(200).optional(), dateRange: z.enum(DATE_RANGE_PRESETS).optional(), from: z.string().max(10).optional(), to: z.string().max(10).optional(), parameters: z.record(z.string().max(60), z.union([z.string().max(200), z.number(), z.boolean()])).optional(), rows: z.number().int().min(0).max(50).optional().describe('How many rows to read (default 20)') }),
     requires: ['reports:run'],
     portal: ['portal:reports'],
     action: false,
     run: async (ctx, input) => {
       const def = await reportByRef(ctx, input.report);
-      const res = (await runReport(ctx, { reportKey: def.key, parameters: await reportParams(ctx, input), format: 'json' })) as unknown as { report: { key: string; name: string }; period: { from: string; to: string; label?: string }; result: { columns: { key: string; label: string }[]; rows: Record<string, unknown>[]; summary?: { label: string; value: unknown; hint?: string }[]; charts?: { title: string; x: string; y: string | string[]; data: Record<string, unknown>[] }[]; sections?: { title: string; rows: Record<string, unknown>[] }[]; rowCount: number; truncated: boolean } };
+      const res = (await runReport(ctx, { reportKey: def.key, parameters: await reportParams(ctx, input), format: 'json' })) as unknown as { report: { key: string; name: string }; period: { from: string; to: string; label?: string }; result: { columns: { key: string; label: string }[]; rows: Record<string, unknown>[]; summary?: { label: string; value: unknown; hint?: string; delta?: { previous: number | null; change: number | null } }[]; charts?: { title: string; x: string; y: string | string[]; data: Record<string, unknown>[] }[]; sections?: { title: string; rows: Record<string, unknown>[] }[]; insights?: { kind: string; text: string }[]; narrative?: { summary: string; nextSteps: string[] }; comparison?: { label: string }; rowCount: number; truncated: boolean } };
       const max = input.rows ?? 20;
       const cols = res.result.columns.map((c) => c.key);
+      const insights = (res.result.insights ?? []).slice(0, 6);
       return {
         report: res.report.name,
         key: res.report.key,
         period: res.period,
-        facts: (res.result.summary ?? []).map((s) => `${s.label}: ${s.value ?? '—'}${s.hint ? ` (${s.hint})` : ''}`).concat([`${res.result.rowCount} row(s) in the report for ${res.period.label ?? `${res.period.from} to ${res.period.to}`}`]),
+        comparison: res.result.comparison?.label ?? null,
+        facts: [
+          ...(res.result.narrative?.summary ? [res.result.narrative.summary] : []),
+          ...(res.result.summary ?? []).map((s) => `${s.label}: ${s.value ?? '—'}${s.hint ? ` (${s.hint})` : ''}${s.delta && s.delta.previous !== null && s.delta.previous !== undefined ? ` [previous ${s.delta.previous}]` : ''}`),
+          ...insights.map((i) => i.text),
+          `${res.result.rowCount} row(s) in the report for ${res.period.label ?? `${res.period.from} to ${res.period.to}`}`,
+        ],
+        insights: insights.map(({ kind, text }) => ({ kind, text })),
+        nextSteps: res.result.narrative?.nextSteps ?? [],
         summary: res.result.summary ?? [],
         charts: (res.result.charts ?? []).slice(0, 3).map((c) => ({ title: c.title, x: c.x, y: c.y, points: c.data.slice(0, 12) })),
         columns: res.result.columns.map((c) => c.label),
@@ -206,19 +215,20 @@ export const REPORTS: ReturnType<typeof define>[] = [
   define({
     name: 'export_report',
     toolset: 'reports',
-    description: 'Run a report and store it as a CSV file the user can download from the Reports page.',
-    inputSchema: z.object({ report: z.string().max(100), customer: z.string().max(200).optional(), dateRange: z.enum(DATE_RANGE_PRESETS).optional(), from: z.string().max(10).optional(), to: z.string().max(10).optional(), parameters: z.record(z.string().max(60), z.union([z.string().max(200), z.number(), z.boolean()])).optional() }),
+    description: 'Run a report and store it as a file the user can download from the Reports page: csv by default, xlsx, html, or pdf for the branded document with the rules\' insights and next steps.',
+    inputSchema: z.object({ report: z.string().max(100), customer: z.string().max(200).optional(), dateRange: z.enum(DATE_RANGE_PRESETS).optional(), from: z.string().max(10).optional(), to: z.string().max(10).optional(), parameters: z.record(z.string().max(60), z.union([z.string().max(200), z.number(), z.boolean()])).optional(), format: z.enum(['csv', 'xlsx', 'html', 'pdf']).optional().describe('File format (default csv); pdf is the branded document') }),
     requires: ['reports:run'],
     portal: ['portal:reports'],
     action: true,
     tier: 'write_low',
     run: async (ctx, input) => {
       const def = await reportByRef(ctx, input.report);
-      const run = (await runReport(ctx, { reportKey: def.key, parameters: await reportParams(ctx, input), format: 'csv' })) as unknown as { id: string; name: string; status: string; rowCount: number | null; attachmentId: string | null };
-      return { runId: run.id, name: run.name, status: run.status, rows: run.rowCount, download: run.attachmentId ? `/api/attachments/${run.attachmentId}/download` : null, link: '/reports' };
+      const format = input.format ?? 'csv';
+      const run = (await runReport(ctx, { reportKey: def.key, parameters: await reportParams(ctx, input), format })) as unknown as { id: string; name: string; status: string; format: string; rowCount: number | null; attachmentId: string | null };
+      return { runId: run.id, name: run.name, status: run.status, format: run.format, rows: run.rowCount, download: run.attachmentId ? `/api/attachments/${run.attachmentId}/download` : null, link: '/reports?tab=history' };
     },
-    summary: (_i, result) => `Exported "${(result as { name: string }).name}" as CSV (${(result as { rows: number }).rows ?? 0} rows)`,
-    preview: async (ctx, input) => `Run "${(await reportByRef(ctx, input.report)).name}"${input.customer ? ` for ${input.customer}` : ''} (${input.dateRange ?? 'default period'}) and store it as a CSV file on the Reports page`,
+    summary: (input, result) => `Exported "${(result as { name: string }).name}" as ${(input.format ?? 'csv').toUpperCase()} (${(result as { rows: number }).rows ?? 0} rows)`,
+    preview: async (ctx, input) => `Run "${(await reportByRef(ctx, input.report)).name}"${input.customer ? ` for ${input.customer}` : ''} (${input.dateRange ?? 'default period'}) and store it as ${input.format === 'pdf' ? 'the branded PDF document' : `a ${(input.format ?? 'csv').toUpperCase()} file`} on the Reports page`,
   }),
 
   define({

@@ -1,7 +1,10 @@
 import { sql } from 'drizzle-orm';
 import { KNOWN_ERROR_STATUS_LABELS } from '@itsm/shared';
 import { registerReport, type ReportResult } from '../registry';
-import { rows, customerCond, rangeCond, socCond, openCond, limitSql, pct, num, round1, col, listParam, strParam, boolParam, inUuids, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
+import { arrivalHeatmap, changeOutcomes, scopeTimezone } from '../analytics';
+import { rows, customerCond, rangeCond, socCond, openCond, limitSql, pct, num, round1, col, totals, countsOf, weekdayHours, STATUS_CATEGORY_LABEL, listParam, strParam, boolParam, inUuids, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
+
+const TYPE_LABEL: Record<string, string> = { incident: 'Incidents', request: 'Requests', problem: 'Problems', change: 'Changes' };
 
 const AGE_BUCKET = sql`CASE WHEN now() - t.created_at < interval '4 hours' THEN '< 4h' WHEN now() - t.created_at < interval '24 hours' THEN '4-24h' WHEN now() - t.created_at < interval '3 days' THEN '1-3d' ELSE '> 3d' END`;
 const WORST_SLA = sql`(SELECT CASE WHEN bool_or(s.state = 'breached' OR (s.state = 'running' AND s.due_at < now())) THEN 'breached' WHEN bool_or(s.state = 'running' AND s.warned_at IS NOT NULL) THEN 'at_risk' WHEN bool_or(s.state IN ('running','paused')) THEN 'ok' ELSE NULL END FROM ticket_slas s WHERE s.ticket_id = t.id)`;
@@ -47,14 +50,16 @@ registerReport({
       rows: list,
       summary: [
         { label: 'Open tickets', value: list.length },
-        { label: 'SLA breached', value: breached },
-        { label: 'SLA at risk', value: atRisk },
+        { label: 'SLA breached', value: breached, tone: breached > 0 ? 'bad' : 'good' },
+        { label: 'SLA at risk', value: atRisk, tone: atRisk > 0 ? 'warn' : undefined },
         { label: 'Unassigned', value: unassigned },
-        { label: 'Average age (h)', value: list.length ? Math.round((ageSum / list.length) * 10) / 10 : 0 },
+        { label: 'Average age (h)', value: list.length ? Math.round((ageSum / list.length) * 10) / 10 : 0, unit: 'hours' },
       ],
       charts: [
         { type: 'bar', title: 'Open tickets by priority', data: [...byPriority].map(([label, count]) => ({ label, count })), x: 'label', y: 'count' },
-        { type: 'bar', title: 'Open tickets by age', data: [...byAge].map(([label, count]) => ({ label, count })), x: 'label', y: 'count' },
+        { type: 'bar', title: 'Open tickets by age', subtitle: 'Time since the ticket was raised', data: [...byAge].map(([label, count]) => ({ label, count })), x: 'label', y: 'count', emphasis: '> 3d', insight: 'none' },
+        { type: 'donut', title: 'Open by type', data: countsOf(list, 'type', 'Unspecified', TYPE_LABEL), x: 'label', y: 'count', insight: 'none' },
+        { type: 'bar', title: 'Open by team', data: countsOf(list, 'team', 'No team').slice(0, 10), x: 'label', y: 'count', horizontal: true },
       ],
     };
   },
@@ -95,20 +100,27 @@ registerReport({
     for (const r of closed) Object.assign(get(key(r.period)), { closed: r.closed });
     const list = [...periods.values()].sort((a, b) => String(a.period).localeCompare(String(b.period)));
     const sum = (k: string) => list.reduce((s, r) => s + num(r[k]), 0);
+    const timezone = await scopeTimezone(ctx, p.customerId);
+    const heat = await arrivalHeatmap(ctx, { customerId: p.customerId, from: p.from, to: p.to, timezone });
+    const resolvedRows = list.filter((r) => r.mttr_minutes !== null && num(r.resolved) > 0);
+    const mttr = resolvedRows.length ? Math.round(resolvedRows.reduce((s, r) => s + num(r.mttr_minutes) * num(r.resolved), 0) / resolvedRows.reduce((s, r) => s + num(r.resolved), 0)) : null;
     return {
-      columns: [col('period', unit === 'day' ? 'Day' : unit === 'week' ? 'Week of' : 'Month', 'date'), col('opened', 'Opened', 'number'), col('incidents', 'Incidents', 'number'), col('requests', 'Requests', 'number'), col('problems', 'Problems', 'number'), col('changes', 'Changes', 'number'), col('p1', 'P1', 'number'), col('p2', 'P2', 'number'), col('p3', 'P3', 'number'), col('p4_plus', 'P4+', 'number'), col('out_of_scope', 'Out of scope', 'number'), col('resolved', 'Resolved', 'number'), col('closed', 'Closed', 'number'), col('mttr_minutes', 'MTTR', 'minutes')],
+      columns: totals([col('period', unit === 'day' ? 'Day' : unit === 'week' ? 'Week of' : 'Month', 'date'), col('opened', 'Opened', 'number'), col('incidents', 'Incidents', 'number'), col('requests', 'Requests', 'number'), col('problems', 'Problems', 'number'), col('changes', 'Changes', 'number'), col('p1', 'P1', 'number'), col('p2', 'P2', 'number'), col('p3', 'P3', 'number'), col('p4_plus', 'P4+', 'number'), col('out_of_scope', 'Out of scope', 'number'), col('resolved', 'Resolved', 'number'), col('closed', 'Closed', 'number'), col('mttr_minutes', 'MTTR', 'minutes')], ['opened', 'incidents', 'requests', 'problems', 'changes', 'p1', 'p2', 'p3', 'p4_plus', 'out_of_scope', 'resolved', 'closed'], ['mttr_minutes']),
       rows: list,
       summary: [
-        { label: 'Opened', value: sum('opened') },
-        { label: 'Resolved', value: sum('resolved') },
+        { label: 'Opened', value: sum('opened'), spark: list.slice(-12).map((r) => num(r.opened)) },
+        { label: 'Resolved', value: sum('resolved'), spark: list.slice(-12).map((r) => num(r.resolved)) },
         { label: 'Closed', value: sum('closed') },
         { label: 'Incidents', value: sum('incidents') },
         { label: 'Requests', value: sum('requests') },
         { label: 'Out of scope', value: sum('out_of_scope') },
+        { label: 'MTTR (min)', value: mttr, unit: 'minutes', hint: 'weighted by tickets resolved' },
       ],
       charts: [
         { type: 'line', title: 'Opened vs resolved', data: list.map((r) => ({ period: r.period, opened: r.opened, resolved: r.resolved })), x: 'period', y: ['opened', 'resolved'], labels: { opened: 'Opened', resolved: 'Resolved' } },
-        { type: 'bar', title: 'Opened by type', data: list.map((r) => ({ period: r.period, incidents: r.incidents, requests: r.requests, problems: r.problems, changes: r.changes })), x: 'period', y: ['incidents', 'requests', 'problems', 'changes'], labels: { incidents: 'Incidents', requests: 'Requests', problems: 'Problems', changes: 'Changes' } },
+        { type: 'stacked_bar', title: 'Opened by type', data: list.map((r) => ({ period: r.period, incidents: r.incidents, requests: r.requests, problems: r.problems, changes: r.changes })), x: 'period', y: ['incidents', 'requests', 'problems', 'changes'], labels: { incidents: 'Incidents', requests: 'Requests', problems: 'Problems', changes: 'Changes' } },
+        { type: 'stacked_bar', title: 'Opened by priority', data: list.map((r) => ({ period: r.period, p1: r.p1, p2: r.p2, p3: r.p3, p4_plus: r.p4_plus })), x: 'period', y: ['p1', 'p2', 'p3', 'p4_plus'], labels: { p1: 'P1', p2: 'P2', p3: 'P3', p4_plus: 'P4+' } },
+        { type: 'heatmap', title: 'Arrivals by weekday and hour', subtitle: `Tickets opened per hour of the day, ${timezone}`, data: heat, x: 'col', y: 'value', rows: weekdayHours.rows, cols: weekdayHours.cols, width: 'full', insight: 'none' },
       ],
     };
   },
@@ -147,18 +159,20 @@ registerReport({
       summary: [
         { label: 'Incidents', value: list.length },
         { label: 'Resolved', value: resolved.length },
-        { label: 'MTTR (min)', value: mttr },
-        { label: 'Major incidents', value: list.filter((r) => r.is_major).length },
-        { label: 'SLA breached', value: list.filter((r) => r.breached).length },
+        { label: 'MTTR (min)', value: mttr, unit: 'minutes' },
+        { label: 'Major incidents', value: list.filter((r) => r.is_major).length, tone: list.some((r) => r.is_major) ? 'bad' : 'good' },
+        { label: 'SLA breached', value: list.filter((r) => r.breached).length, tone: list.some((r) => r.breached) ? 'bad' : 'good' },
         { label: 'From monitoring', value: list.filter((r) => r.monitoring_generated).length },
       ],
       charts: [
         { type: 'bar', title: 'Incidents by category', data: group('category').slice(0, 12), x: 'label', y: 'count' },
-        { type: 'bar', title: 'Incidents by priority', data: group('priority'), x: 'label', y: 'count' },
+        { type: 'bar', title: 'Incidents by priority', data: group('priority'), x: 'label', y: 'count', emphasis: group('priority').find((g) => /^P1\b/i.test(g.label))?.label, insight: ['concentration'] },
+        { type: 'donut', title: 'Incidents by status', subtitle: 'Where the period\'s incidents stand today', data: countsOf(list, 'status_category', 'open', STATUS_CATEGORY_LABEL), x: 'label', y: 'count', insight: 'none' },
+        { type: 'bar', title: 'Incidents by site', data: group('site').slice(0, 10), x: 'label', y: 'count', horizontal: true, insight: 'none' },
       ],
       sections: [
-        { title: 'Top recurring configuration items', columns: [col('label', 'CI'), col('count', 'Incidents', 'number')], rows: recurring },
-        { title: 'Incidents by site', columns: [col('label', 'Site'), col('count', 'Incidents', 'number')], rows: group('site').slice(0, 20) },
+        { title: 'Top recurring configuration items', intro: 'Configuration items behind more than one incident in the period.', printLimit: 15, columns: [col('label', 'CI'), col('count', 'Incidents', 'number')], rows: recurring },
+        { title: 'Incidents by site', columns: totals([col('label', 'Site'), col('count', 'Incidents', 'number')], ['count']), totals: true, rows: group('site').slice(0, 20) },
       ],
     };
   },
@@ -182,14 +196,19 @@ registerReport({
         LEFT JOIN change_templates tpl ON tpl.id = cd.template_id LEFT JOIN cab_meetings cm ON cm.id = cd.cab_meeting_id LEFT JOIN cab_meeting_items ci ON ci.meeting_id = cm.id AND ci.ticket_id = t.id ${ticketJoins}
       WHERE t.type = 'change' ${rangeCond(sql`coalesce(cd.scheduled_start, t.created_at)`, p.from, p.to)} ${customerCond(p.customerId)} ${socCond(ctx)}
       ORDER BY cd.scheduled_start NULLS LAST, t.created_at ${limitSql()}`);
-    const weeks = new Map<string, number>();
+    const weeks = new Map<string, { standard: number; normal: number; emergency: number }>();
     for (const r of list) {
       const d = r.scheduled_start ? new Date(r.scheduled_start as string) : null;
       if (!d) continue;
       const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7)));
       const k = monday.toISOString().slice(0, 10);
-      weeks.set(k, (weeks.get(k) ?? 0) + 1);
+      const w = weeks.get(k) ?? { standard: 0, normal: 0, emergency: 0 };
+      const type = r.change_type === 'standard' || r.change_type === 'emergency' ? r.change_type : 'normal';
+      w[type]++;
+      weeks.set(k, w);
     }
+    const outcomes = await changeOutcomes(ctx, { customerId: p.customerId, from: p.from, to: p.to });
+    const implemented = list.filter((r) => r.status_category === 'resolved' || r.status_category === 'closed').length;
     return {
       columns: [col('number', 'Number'), col('title', 'Title'), col('customer', 'Customer'), col('change_type', 'Type'), col('risk', 'Risk'), col('status', 'Status'), col('approval_status', 'Approval'), col('scheduled_start', 'Scheduled start', 'datetime'), col('scheduled_end', 'Scheduled end', 'datetime'), col('downtime_expected_minutes', 'Downtime', 'minutes'), col('assignee', 'Assignee'), col('service', 'Service'), col('risk_level', 'Risk level'), col('risk_score', 'Risk score', 'number'), col('template', 'Template'), col('cab_meeting', 'CAB meeting'), col('cab_decision', 'CAB decision')],
       rows: list,
@@ -197,12 +216,17 @@ registerReport({
         { label: 'Changes', value: list.length },
         { label: 'Emergency', value: list.filter((r) => r.change_type === 'emergency').length },
         { label: 'Standard', value: list.filter((r) => r.change_type === 'standard').length },
-        { label: 'Implemented', value: list.filter((r) => r.status_category === 'resolved' || r.status_category === 'closed').length },
+        { label: 'Implemented', value: implemented },
         { label: 'Awaiting approval', value: list.filter((r) => r.approval_status === 'pending').length },
         { label: 'High risk', value: list.filter((r) => r.risk_level === 'high').length },
         { label: 'From a template', value: list.filter((r) => r.template != null).length },
+        { label: 'Success rate', value: outcomes.successPct ?? 'n/a', unit: 'pct', target: 95, hint: `${outcomes.failed} failed, ${outcomes.backedOut} backed out`, tone: outcomes.successPct === null ? undefined : outcomes.successPct >= 95 ? 'good' : outcomes.successPct >= 85 ? 'warn' : 'bad' },
       ],
-      charts: [{ type: 'bar', title: 'Scheduled changes per week', data: [...weeks].sort().map(([label, count]) => ({ label, count })), x: 'label', y: 'count' }],
+      charts: [
+        { type: 'stacked_bar', title: 'Changes per week by type', subtitle: 'By scheduled start', data: [...weeks].sort().map(([label, w]) => ({ label, ...w })), x: 'label', y: ['standard', 'normal', 'emergency'], labels: { standard: 'Standard', normal: 'Normal', emergency: 'Emergency' } },
+        { type: 'donut', title: 'Changes by status', data: countsOf(list, 'status_category', 'open', STATUS_CATEGORY_LABEL), x: 'label', y: 'count', insight: 'none' },
+      ],
+      sections: [{ title: 'Failed or backed out', intro: 'Changes that ended in the period without a successful implementation.', columns: [col('number', 'Number'), col('title', 'Title'), col('changeType', 'Type'), col('outcome', 'Outcome'), col('scheduledStart', 'Scheduled start', 'datetime'), col('assignee', 'Assignee')], rows: outcomes.failedList.map((r) => ({ ...r })) }],
     };
   },
 });
@@ -282,7 +306,10 @@ registerReport({
         { label: 'Linked incidents', value: list.reduce((s, r) => s + num(r.linked_incidents), 0) },
         { label: 'Published to portal', value: list.filter((r) => r.portal_visible).length },
       ],
-      charts: [{ type: 'bar', title: 'Problems by status', data: Object.entries(list.reduce<Record<string, number>>((m, r) => ((m[String(r.status)] = (m[String(r.status)] ?? 0) + 1), m), {})).map(([label, count]) => ({ label, count })), x: 'label', y: 'count' }],
+      charts: [
+        { type: 'donut', title: 'Problems by status', data: countsOf(list, 'status'), x: 'label', y: 'count', insight: 'none' },
+        { type: 'bar', title: 'Known error status', subtitle: 'Problems flagged as known errors', data: countsOf(list.filter((r) => r.is_known_error), 'ke_status', 'Open', Object.fromEntries(Object.entries(KNOWN_ERROR_STATUS_LABELS))), x: 'label', y: 'count', insight: 'none' },
+      ],
     };
   },
 });

@@ -11,7 +11,7 @@
  * Run with the dev environment sourced: npx vitest run test/software.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { eq, and, inArray, like } from 'drizzle-orm';
+import { eq, and, inArray, like, asc } from 'drizzle-orm';
 import { withSystem, closeDb, schema, type Tx } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
@@ -424,7 +424,8 @@ describe('daily job', () => {
     } finally {
       await asAdmin((ctx) => svc.updateLicence(ctx, ending.id, { endDate: day(25) }));
     }
-    const [row] = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.event, 'licence.expiring'), eq(schema.notificationOutbox.entityId, ending.id))).limit(1));
+    // the first notice (the 25-day one): without an order the row the database hands back first is arbitrary under load
+    const [row] = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.event, 'licence.expiring'), eq(schema.notificationOutbox.entityId, ending.id))).orderBy(asc(schema.notificationOutbox.createdAt)).limit(1));
     expect(row?.subject).toContain(`Ending seats ${S}`);
     expect(row?.subject).toContain('ends in 25 days');
   });

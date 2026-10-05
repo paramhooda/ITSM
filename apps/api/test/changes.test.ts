@@ -768,7 +768,7 @@ describe('gap closure (database)', () => {
     if (!('result' in cal)) throw new Error('expected a preview');
     expect(cal.result.columns.map((c) => c.key)).toEqual(expect.arrayContaining(['risk_level', 'risk_score', 'template', 'cab_meeting', 'cab_decision']));
     expect(cal.result.rows.find((r) => r.id === enrichedId)).toMatchObject({ template: `Catalog template ${S}`, cab_meeting: `Enrich CAB ${S}`, cab_decision: 'pending' });
-    expect(cal.result.summary?.map((s) => s.label)).toEqual(['Changes', 'Emergency', 'Standard', 'Implemented', 'Awaiting approval', 'High risk', 'From a template']);
+    expect(cal.result.summary?.map((s) => s.label)).toEqual(['Changes', 'Emergency', 'Standard', 'Implemented', 'Awaiting approval', 'High risk', 'From a template', 'Success rate']);
     expect(Number(cal.result.summary?.find((s) => s.label === 'From a template')?.value)).toBeGreaterThanOrEqual(3);
     expect(Number(cal.result.summary?.find((s) => s.label === 'High risk')?.value)).toBeGreaterThanOrEqual(1);
   });

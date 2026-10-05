@@ -49,7 +49,7 @@ const FEATURE_LABELS: Record<string, string> = {
   problem_clusters: 'Problem clusters',
   triage: 'Triage on arrival (classify, owner, duplicates)',
   sentiment: 'Customer sentiment on comments',
-  recommendations: 'Service review recommendations',
+  recommendations: 'Report insights and recommendations',
   handover: 'Drafted shift handovers',
   briefing: 'Daily briefings',
   kedb_draft: 'Drafted customer wording for known errors',

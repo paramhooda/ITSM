@@ -2,14 +2,48 @@ export type ParameterType = 'customer' | 'daterange' | 'select' | 'multiselect' 
 export interface ReportParameter { key: string; label: string; type: ParameterType; options?: { value: string; label: string }[]; optionType?: string; required?: boolean; default?: unknown; help?: string }
 /** What a custom (builder) definition carries beyond a built-in one; ownerName and visibility are null for portal users. */
 export interface CustomInfo { id: string; entity: string; ownerName: string | null; visibility: string | null; /** Names of the roles and teams a shared report reaches; null for portal users. */ sharedWith: string[] | null; portalVisible: boolean; canEdit: boolean; isActive: boolean; scopeCustomerId: string | null; summaryLines: string[] }
-export interface ReportDefinition { key: string; name: string; description: string; category: string; permissions: string[]; portal: boolean; parameters: ReportParameter[]; defaultDateRange: string; cover?: boolean; custom?: CustomInfo }
+export interface ReportDefinition { key: string; name: string; description: string; category: string; permissions: string[]; portal: boolean; parameters: ReportParameter[]; defaultDateRange: string; cover?: boolean; /** 'pack' documents title the detail table Scorecard and cap their tables. */ kind?: 'report' | 'pack'; /** Compared with the previous period of the same length. */ compare?: boolean; custom?: CustomInfo }
 /** File outputs of a run (json is the on-screen preview). */
 export type FileFormat = 'csv' | 'html' | 'pdf' | 'xlsx';
 export const SCHEDULE_FORMATS = (pdf: boolean) => [{ value: 'html', label: 'HTML (printable)' }, { value: 'csv', label: 'CSV' }, { value: 'xlsx', label: 'Excel' }, { value: 'pdf', label: pdf ? 'PDF' : 'PDF (needs Chromium on the server)' }, { value: 'both', label: 'HTML + CSV' }, { value: 'pack', label: pdf ? 'PDF + Excel (review pack)' : 'PDF + Excel (needs Chromium on the server)' }];
-export interface ReportColumn { key: string; label: string; type?: 'date' | 'datetime' | 'number' | 'pct' | 'minutes' | 'text' | 'boolean' }
-export interface ReportChart { type: 'bar' | 'line'; title: string; data: Record<string, unknown>[]; x: string; y: string | string[]; labels?: Record<string, string> }
-export interface ReportSection { title: string; columns: ReportColumn[]; rows: Record<string, unknown>[] }
-export interface ReportResult { columns: ReportColumn[]; rows: Record<string, unknown>[]; summary?: { label: string; value: string | number | null; hint?: string }[]; charts?: ReportChart[]; sections?: ReportSection[]; truncated?: boolean; rowCount: number }
+export interface ReportColumn { key: string; label: string; type?: 'date' | 'datetime' | 'number' | 'pct' | 'minutes' | 'text' | 'boolean'; /** Printed totals row in the documents. */ total?: 'sum' | 'avg' }
+export type ChartType = 'bar' | 'line' | 'stacked_bar' | 'donut' | 'heatmap' | 'gauge';
+export type ValueUnit = 'count' | 'pct' | 'minutes' | 'hours' | 'rating';
+export interface ReportChart { type: ChartType; title: string; subtitle?: string; data: Record<string, unknown>[]; x: string; y: string | string[]; labels?: Record<string, string>; unit?: ValueUnit; horizontal?: boolean; emphasis?: string; target?: number; /** heatmap: data rows are { row, col, value }. */ rows?: string[]; cols?: string[]; width?: 'half' | 'full'; statusSeries?: boolean }
+export interface TileDelta { previous: number | null; change: number | null; deltaPct: number | null; lowerIsBetter?: boolean; unit?: ValueUnit; /** Neither good nor bad (demand, record counts). */ neutral?: boolean }
+export interface SummaryTile { label: string; value: string | number | null; hint?: string; unit?: ValueUnit; delta?: TileDelta; spark?: (number | null)[]; target?: number; tone?: 'good' | 'warn' | 'bad' }
+export interface Insight { kind: 'good' | 'attention' | 'info'; area: string; text: string; evidence?: string; weight: number }
+export interface Recommendation { area: string; recommendation: string; evidence: string }
+export interface Narrative { summary: string; wentWell: string[]; needsAttention: string[]; nextSteps: string[]; source: 'rules' | 'model' }
+export interface Glossary { term: string; meaning: string }
+export interface ReportSection { title: string; columns: ReportColumn[]; rows: Record<string, unknown>[]; /** Chapter: consecutive sections sharing a group print under one heading. */ group?: string; intro?: string; totals?: boolean; printLimit?: number; charts?: ReportChart[]; callouts?: Insight[] }
+export interface ReportResult { columns: ReportColumn[]; rows: Record<string, unknown>[]; summary?: SummaryTile[]; charts?: ReportChart[]; sections?: ReportSection[]; truncated?: boolean; rowCount: number; insights?: Insight[]; recommendations?: Recommendation[]; narrative?: Narrative; glossary?: Glossary[]; notes?: string[]; comparison?: { from: string; to: string; label: string } }
+
+/** A tile value with its unit: 96.4 and pct give "96.4%", 42 and minutes "42 min", 4.2 and rating "4.2/5", 7.5 and hours "7.5 h" (the API rule); a label that already names the unit, such as "MTTR (min)", prints the bare number. */
+export function fmtTileValue(t: Pick<SummaryTile, 'value' | 'unit'> & { label?: string }): string {
+  if (t.value === null || t.value === undefined || t.value === '') return '—';
+  if (typeof t.value !== 'number') return String(t.value);
+  const v = t.value;
+  if (t.label && /\((min|h|%)\)$/.test(t.label)) return Number.isInteger(v) ? v.toLocaleString('en-US') : (Math.round(v * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 });
+  const r1 = Math.round(v * 10) / 10;
+  switch (t.unit) {
+    case 'pct': return `${r1.toLocaleString('en-US')}%`;
+    case 'minutes': return `${Math.round(v).toLocaleString('en-US')} min`;
+    case 'hours': return `${r1.toLocaleString('en-US')} h`;
+    case 'rating': return `${r1}/5`;
+    default: return Number.isInteger(v) ? v.toLocaleString('en-US') : r1.toLocaleString('en-US', { maximumFractionDigits: 1 });
+  }
+}
+
+/** "+4.3 pts" for percentage tiles, "+12%" otherwise, the absolute change when the previous value was zero (the API rule). */
+export function fmtDelta(d?: TileDelta | null): string {
+  if (!d || typeof d.change !== 'number' || !Number.isFinite(d.change)) return '—';
+  const sign = d.change > 0 ? '+' : d.change < 0 ? '−' : '±';
+  const abs = Math.abs(d.change);
+  if (d.unit === 'pct') return `${sign}${Math.round(abs * 10) / 10} pts`;
+  if (typeof d.deltaPct !== 'number' || !Number.isFinite(d.deltaPct)) return `${sign}${fmtTileValue({ value: abs, unit: d.unit })}`;
+  return `${sign}${Math.round(Math.abs(d.deltaPct) * 10) / 10}%`;
+}
 export interface RunPreview { report: ReportDefinition; parameters: Record<string, unknown>; period: { from: string; to: string; preset: string; label: string }; result: ReportResult }
 export interface ReportRun {
   id: string; scheduleId: string | null; scheduleName: string | null; reportKey: string; customerId: string | null; customerName: string | null; name: string; parameters: Record<string, unknown>; format: string; status: string;

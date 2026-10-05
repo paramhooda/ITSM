@@ -314,8 +314,9 @@ async function seedCatalogItems(tx: Tx) {
 async function seedSystemSettings(tx: Tx) {
   const defaults: Record<string, { value: unknown; description: string }> = {
     'platform.name': { value: 'Progression', description: 'Product name shown in the UI and emails' },
-    'platform.logo_url': { value: '', description: 'Logo on report covers and PDF headers: an https URL or an inline data:image URI (empty shows the platform name)' },
-    'platform.brand_color': { value: '#0f172a', description: 'Hex colour for report headers, Excel header rows and PDF covers' },
+    'platform.logo_url': { value: '', description: 'Logo on report covers and headers: an https URL or an inline data:image URI; empty uses the bundled Progression wordmark' },
+    'platform.brand_color': { value: '#292345', description: 'Hex colour for report headings, the cover title, Excel header rows and PDF section rules (the Progression navy by default)' },
+    'platform.brand_accent': { value: '#ee3137', description: 'Hex accent for the cover stripe and section markers on reports (the Progression red by default); never used for text' },
     'tickets.auto_close_days': { value: 5, description: 'Days after resolution before a ticket is automatically closed' },
     'tickets.reopen_window_days': { value: 14, description: 'Days after closure a customer may reopen a ticket' },
     'tickets.default_sla_policy_fallback': { value: true, description: 'Apply the default SLA policy when no contract policy applies' },
@@ -331,6 +332,9 @@ async function seedSystemSettings(tx: Tx) {
     'reports.builder.max_rows': { value: 10000, description: 'Most rows a custom report may return in a file or schedule run (1 to 50000; the preview is capped separately)' },
     'reports.builder.preview_rows': { value: 500, description: 'Rows shown in the report builder preview (50 to 5000)' },
     'reports.builder.statement_timeout_ms': { value: 20000, description: 'Database time limit for one custom report query in milliseconds (1000 to 120000); a slower query fails with a clear message' },
+    'reports.confidentiality_line': { value: 'Confidential: prepared for {customer} by {platform}. Not for onward distribution.', description: 'Footer line on every page of HTML and PDF reports; {customer} and {platform} are replaced (a report without a customer prints "{platform} internal")' },
+    'reports.narrative': { value: true, description: 'Let the assistant rephrase the insights and next steps of HTML and PDF reports when a provider is configured (the figures always come from the rules)' },
+    'reports.print_rows': { value: 50, description: 'Rows printed per table in PDF documents of review packs (10-500); the Excel workbook always holds every row' },
     'portal.allow_self_registration': { value: false, description: 'Allow customer contacts to self-register in the portal' },
     'security.password_min_length': { value: 10, description: 'Minimum password length' },
     'security.lockout_attempts': { value: 5, description: 'Failed logins before temporary lockout' },

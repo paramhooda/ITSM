@@ -12,6 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/migrate.ts",
     "db:seed": "tsx src/seed.ts",
+    "assets:reports": "node scripts/embed-report-assets.mjs",
     "start": "node dist/index.js",
     "start:worker": "node dist/worker.js"
   },

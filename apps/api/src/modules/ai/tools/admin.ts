@@ -64,6 +64,11 @@ function validateSetting(key: string, value: unknown) {
     case 'reports.builder.max_rows': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 50_000, 'must be between 1 and 50000 rows');
     case 'reports.builder.preview_rows': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 5000, 'must be between 50 and 5000 rows');
     case 'reports.builder.statement_timeout_ms': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1000 && value <= 120_000, 'must be between 1000 and 120000 milliseconds');
+    case 'reports.confidentiality_line': return expect(typeof value === 'string' && value.length <= 300, 'must be text of at most 300 characters');
+    case 'reports.narrative': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'reports.print_rows': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 10 && value <= 500, 'must be between 10 and 500 rows');
+    case 'platform.brand_color':
+    case 'platform.brand_accent': return expect(typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim()), 'must be a six-digit hex colour such as #292345');
     case 'ai.triage.auto_apply_confidence': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 100, 'must be between 50 and 100');
     case 'ai.triage.storm_window_minutes': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 5 && value <= 1440, 'must be between 5 and 1440 minutes');
     case 'ai.triage.storm_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 50, 'must be between 2 and 50');

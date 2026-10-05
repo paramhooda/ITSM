@@ -26,17 +26,24 @@ const steps = (req: FastifyRequest) => {
   if (!req.principal) throw new UnauthorizedError();
   return stepsFor(req.principal, { requestId: req.id, ip: req.ip, userAgent: req.headers['user-agent'] as string | undefined });
 };
+/** A report run phrases its narrative through the model between two transactions, with the caller's own audit source. */
+const reportSteps = (req: FastifyRequest) => {
+  if (!req.principal) throw new UnauthorizedError();
+  const p = req.principal;
+  return svc.reportSteps(p, { requestId: req.id, ip: req.ip, userAgent: req.headers['user-agent'] as string | undefined, source: p.apiKeyId ? 'integration' : 'ui' });
+};
 
 export default async function routes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
   r.get('/reports/definitions', { preHandler: app.auth('reports:run', 'portal:reports'), schema: { tags } }, h((ctx) => svc.listDefinitions(ctx)));
 
-  r.post('/reports/run', { preHandler: app.auth('reports:run', 'portal:reports'), schema: { tags, body: runBody } }, h((ctx, req) => {
+  r.post('/reports/run', { preHandler: app.auth('reports:run', 'portal:reports'), config: { rateLimit: { max: 30, timeWindow: '1 minute' } }, schema: { tags, body: runBody } }, async (req) => {
     const b = req.body as z.infer<typeof runBody>;
+    const p = req.principal!;
     // Portal users may only create portal-visible runs; the service pins their customer.
-    return svc.runReport(ctx, { reportKey: b.reportKey, parameters: b.parameters, format: b.format, portalVisible: ctx.user.userType === 'customer' ? true : b.portalVisible });
-  }));
+    return svc.runReport(reportSteps(req), { reportKey: b.reportKey, parameters: b.parameters, format: b.format, portalVisible: p.userType === 'customer' ? true : b.portalVisible });
+  });
 
   r.get('/reports/runs', { preHandler: app.auth('reports:run', 'portal:reports'), schema: { tags, querystring: runsQuery } }, h((ctx, req) => svc.listRuns(ctx, req.query as z.infer<typeof runsQuery>)));
   r.get('/reports/runs/:id', { preHandler: app.auth('reports:run', 'portal:reports'), schema: { tags, params: idParam } }, h((ctx, req) => svc.getRun(ctx, (req.params as { id: string }).id)));

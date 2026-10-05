@@ -771,7 +771,8 @@ describe('customer satisfaction surveys', () => {
 
     const pack = await asAdmin((ctx) => runReport(ctx, { reportKey: 'service_review_pack', parameters: { customerId: ids.a, dateRange: 'last_7_days', recommendations: false } }));
     const packResult = (pack as { result: { summary?: { label: string; value: unknown }[]; rows: Record<string, unknown>[]; sections?: { title: string }[] } }).result;
-    expect(packResult.summary?.find((s) => s.label === 'Customer satisfaction')?.value).toBe(`${live.figures.avg}/5`);
+    // the pack's tile is numeric (unit rating, target 4, delta) so the document can judge and compare it; the label is frozen
+    expect(packResult.summary?.find((s) => s.label === 'Customer satisfaction')?.value).toBe(live.figures.avg);
     expect(packResult.rows.some((r) => r.metric === 'Customer satisfaction' && r.area === 'Satisfaction')).toBe(true);
     expect(packResult.sections?.map((s) => s.title)).toEqual(expect.arrayContaining(['Customer satisfaction by service', 'Lowest-rated tickets']));
     const service = await asAdmin((ctx) => findReport('service_report')!.run(ctx, { customerId: ids.a, from: yesterday(), to: today() }));

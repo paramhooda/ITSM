@@ -10,6 +10,8 @@ registerReport({
   permissions: ['reports:run', 'admin:audit'],
   portal: false,
   parameters: [customerParam, dateRangeParam, { key: 'entityType', label: 'Entity type', type: 'text' }, { key: 'action', label: 'Action', type: 'text' }, { key: 'userEmail', label: 'User email', type: 'text' }],
+  // audit volume compared with the previous period is noise
+  compare: false,
   defaultDateRange: 'last_7_days',
   async run(ctx, p): Promise<ReportResult> {
     const entityType = strParam(p, 'entityType');
@@ -39,7 +41,8 @@ registerReport({
       ],
       charts: [
         { type: 'line', title: 'Audit entries per day', data: byDay, x: 'day', y: 'count', labels: { count: 'Entries' } },
-        { type: 'bar', title: 'By entity type', data: group('entity_type').slice(0, 12), x: 'label', y: 'count' },
+        { type: 'bar', title: 'By entity type', data: group('entity_type').slice(0, 12), x: 'label', y: 'count', horizontal: true },
+        { type: 'bar', title: 'By action', data: group('action').slice(0, 10), x: 'label', y: 'count', horizontal: true, insight: 'none' },
       ],
       sections: [{ title: 'Most active users', columns: [col('label', 'User'), col('count', 'Entries', 'number')], rows: group('user_name').slice(0, 20) }],
     };

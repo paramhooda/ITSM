@@ -4,9 +4,13 @@
  * The PDF cases run only when a Chromium binary is found (see lib/pdf.ts).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
+import { existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import ExcelJS from 'exceljs';
-import { withSystem, schema, closeDb, type Tx } from '@/db/client';
+import { withSystem, schema, closeDb, pool, type Tx } from '@/db/client';
 import { runAs, type Ctx } from '@/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '@/core/principal';
 import { storage } from '@/lib/storage';
@@ -17,7 +21,11 @@ import * as schedules from '@/modules/reports/schedules';
 import { scheduleFormats } from '@/modules/reports/schedules';
 import { executeSchedule } from '@/jobs/processors/reports';
 import { renderXlsx, renderHtml, brandColor, logoUrl } from '@/modules/reports/render';
-import { findReport } from '@/modules/reports/registry';
+import { findReport, registerReport } from '@/modules/reports/registry';
+import { col, dateRangeParam } from '@/modules/reports/definitions/helpers';
+import { addDays } from '@/modules/reports/dates';
+import * as ai from '@/modules/ai/service';
+import type { AiProvider, ChatOptions, ChatResponse } from '@/lib/ai';
 
 const suffix = Math.random().toString(36).slice(2, 8);
 const ids = { adminUser: '', customer: '', service: '', contract: '', entitlement: '', p1: '', p3: '', customerUser: '', asset: '', schedule: '' };
@@ -91,11 +99,18 @@ afterAll(async () => {
     if (ids.customerUser) await tx.delete(schema.users).where(eq(schema.users.id, ids.customerUser));
     if (ids.customer) await tx.delete(schema.customers).where(eq(schema.customers.id, ids.customer));
     if (ids.service) await tx.delete(schema.services).where(eq(schema.services.id, ids.service));
-    await tx.update(schema.systemSettings).set({ value: '#0f172a' }).where(eq(schema.systemSettings.key, 'platform.brand_color'));
+    await tx.update(schema.systemSettings).set({ value: '#292345' }).where(eq(schema.systemSettings.key, 'platform.brand_color'));
     await tx.update(schema.systemSettings).set({ value: '' }).where(eq(schema.systemSettings.key, 'platform.logo_url'));
+    await tx.update(schema.systemSettings).set({ value: true }).where(eq(schema.systemSettings.key, 'reports.narrative'));
   });
+  ai.setProviderForTests(null);
   await closeDb();
 });
+
+async function storedFile(attachmentId: string) {
+  const [att] = await withSystem((tx) => tx.select().from(schema.attachments).where(eq(schema.attachments.id, attachmentId)).limit(1));
+  return { att, buffer: await storage.get(att.storageKey) };
+}
 
 async function openWorkbook(attachmentId: string) {
   const [att] = await withSystem((tx) => tx.select().from(schema.attachments).where(eq(schema.attachments.id, attachmentId)).limit(1));
@@ -132,6 +147,24 @@ describe('service review pack', () => {
     expect(r.sections?.some((s) => s.title === 'Customer satisfaction by service')).toBe(true);
     expect(r.sections?.some((s) => s.title === 'Lowest-rated tickets')).toBe(true);
     expect(r.charts?.length).toBeGreaterThan(0);
+    // the monthly review: chapters by group, every frozen title kept, recommendations last
+    const groups = new Set(r.sections!.map((s) => s.group ?? s.title));
+    expect([...groups]).toEqual(expect.arrayContaining(['Service levels', 'Demand and workload', 'Responsiveness', 'Major incidents', 'Problems and known errors', 'Changes', 'Customer satisfaction', 'Contracts and entitlements', 'Assets and software', 'Field service and maintenance', 'Out-of-scope work', 'Recommendations']));
+    expect(titles).toEqual(expect.arrayContaining(['Breached tickets', 'By site', 'Responsiveness by priority', 'Resolution by engineer', 'Known errors', 'Changes in the period', 'Failed or backed out', 'CAB decisions', 'Consumption detail', 'Software positions', 'Preventive maintenance', 'Field visits']));
+    expect(titles[titles.length - 1]).toBe('Recommendations');
+    const volume = r.sections!.find((s) => s.title === 'Ticket volume by week')!;
+    expect(volume.group).toBe('Demand and workload');
+    expect(volume.charts?.some((c) => c.type === 'heatmap' && c.width === 'full')).toBe(true);
+    expect(volume.charts?.some((c) => c.type === 'donut')).toBe(true);
+    // the scorecard and the tiles grew with the analytics, every tile with a previous-period twin carries a delta
+    expect(r.rows.map((x) => x.metric)).toEqual(expect.arrayContaining(['MTTA', 'MTTR', 'First-contact resolution', 'Reopen rate', 'Backlog at period end', 'Change success rate', 'Open known errors', 'Licence position', 'PM on time']));
+    expect(r.summary!.map((s) => s.label)).toEqual(expect.arrayContaining(['SLA compliance', 'MTTR (min)', 'First-contact resolution', 'Backlog', 'Change success rate', 'Recommendations']));
+    expect(typeof r.summary!.find((s) => s.label === 'Tickets opened')!.delta?.previous).toBe('number');
+    expect(r.summary!.find((s) => s.label === 'First-contact resolution')).toMatchObject({ unit: 'pct', target: 70 });
+    expect(r.comparison).toMatchObject({ from: expect.any(String), to: expect.any(String), label: expect.any(String) });
+    expect(r.insights!.length).toBeGreaterThanOrEqual(3);
+    expect(r.narrative?.source).toBe('rules');
+    expect(r.narrative?.nextSteps.length).toBeGreaterThanOrEqual(1);
   });
 
   it('needs a customer and skips the recommendations on request', async () => {
@@ -149,6 +182,18 @@ describe('service review pack', () => {
     expect(out.result.sections?.some((s) => s.title === 'Out-of-scope work')).toBe(false);
     expect(out.result.rows.some((x) => x.metric === 'Out-of-scope requests')).toBe(false);
     expect(out.result.rows.find((x) => x.metric === 'Major incidents')?.value).toBe(1);
+    // no engineer breakdown, no CAB section and no staff name column anywhere in a customer's pack
+    const sections = out.result.sections ?? [];
+    expect(sections.some((s) => ['Resolution by engineer', 'CAB decisions'].includes(s.title))).toBe(false);
+    const staffKeys = ['assignee', 'engineer', 'owner', 'recorded_by', 'decided_by', 'chair'];
+    expect(sections.every((s) => !s.columns.some((c) => staffKeys.includes(c.key)))).toBe(true);
+    // the row objects of the preview carry only the printed columns: no staff name hides behind a dropped column
+    expect(sections.every((s) => s.rows.every((row) => !Object.keys(row).some((k) => staffKeys.includes(k))))).toBe(true);
+    expect(sections.find((s) => s.title === 'Major incidents')!.rows.length).toBeGreaterThan(0);
+    expect(sections.every((s) => s.rows.every((row) => Object.keys(row).every((k) => s.columns.some((c) => c.key === k))))).toBe(true);
+    expect(sections.some((s) => s.title === 'Responsiveness by priority')).toBe(true);
+    expect(sections.some((s) => s.title === 'Known errors')).toBe(true);
+    expect(out.result.summary?.some((s) => s.label === 'Out of scope')).toBe(false);
   });
 });
 
@@ -162,7 +207,8 @@ describe('Excel output', () => {
     expect(run.contentType).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     const { wb } = await openWorkbook(run.attachmentId!);
     const names = wb.worksheets.map((w) => w.name);
-    expect(names.slice(0, 3)).toEqual(['Summary', 'Detail', 'Recommendations']);
+    expect(names.slice(0, 2)).toEqual(['Summary', 'Detail']);
+    expect(names).toContain('Recommendations');
     expect(names).toEqual(expect.arrayContaining(['Major incidents', 'Entitlement utilisation', 'Out-of-scope work', 'Charts']));
     expect(names.every((n) => n.length <= 31 && !/[\\/?*[\]:]/.test(n))).toBe(true);
     const detail = wb.getWorksheet('Detail')!;
@@ -172,6 +218,12 @@ describe('Excel output', () => {
     const summary = wb.getWorksheet('Summary')!;
     expect(String(summary.getRow(1).getCell(1).value)).toBe('Service review pack');
     expect(String(summary.getRow(2).getCell(1).value)).toContain(`Pack Customer ${suffix}`);
+    // the insights and the recommendations travel with the workbook
+    const firstCells: string[] = [];
+    summary.eachRow((row) => firstCells.push(String(row.getCell(1).value ?? '')));
+    expect(firstCells).toContain('Insights');
+    expect(firstCells).toContain('Recommendations');
+    expect(firstCells).toContain('Next step');
     // numbers stay numbers and dates become dates in the typed sheets
     const amc = wb.getWorksheet('Entitlement utilisation')!;
     const header = amc.getRow(1).values as unknown[];
@@ -181,6 +233,14 @@ describe('Excel output', () => {
     const assets = wb.getWorksheet('Expiring asset cover')!;
     const wCol = (assets.getRow(1).values as unknown[]).indexOf('Warranty end');
     expect(assets.getRow(2).getCell(wCol).value).toBeInstanceOf(Date);
+    // the heatmap travels as row, col, value triples on the Charts sheet
+    const charts = wb.getWorksheet('Charts')!;
+    const lines: string[][] = [];
+    charts.eachRow((row) => lines.push((row.values as unknown[]).slice(1).map((v) => String(v ?? ''))));
+    const at = lines.findIndex((l) => l[0] === 'Arrivals by weekday and hour');
+    expect(at).toBeGreaterThan(-1);
+    expect(lines[at + 1]).toEqual(['row', 'col', 'value']);
+    expect(lines[at + 2]!.slice(0, 2)).toEqual(['Mon', '00']);
   });
 
   it('renders a plain report with typed columns and keeps sheet names unique', async () => {
@@ -218,8 +278,8 @@ describe('branding, cover page and PDF', () => {
     // a plain report has no cover unless asked
     const plain = renderHtml({ columns: [{ key: 'a', label: 'A' }], rows: [] }, { reportName: 'Plain', platformName: 'P', period: 'x', generatedAt: new Date() });
     expect(plain).not.toContain('class="cover"');
-    // unsafe values fall back
-    expect(brandColor('red')).toBe('#0f172a');
+    // unsafe values fall back to the Progression navy
+    expect(brandColor('red')).toBe('#292345');
     expect(brandColor('#ABCDEF')).toBe('#abcdef');
     expect(logoUrl('javascript:alert(1)')).toBeNull();
     expect(logoUrl('http://insecure.example/logo.png')).toBeNull();
@@ -241,8 +301,21 @@ describe('branding, cover page and PDF', () => {
     const [att] = await withSystem((tx) => tx.select().from(schema.attachments).where(eq(schema.attachments.id, run.attachmentId!)).limit(1));
     const buffer = await storage.get(att.storageKey);
     expect(buffer.subarray(0, 5).toString('latin1')).toBe('%PDF-');
-    expect(buffer.length).toBeGreaterThan(10_000);
+    expect(buffer.length).toBeGreaterThan(60_000);
     expect(att.size).toBe(buffer.length);
+    // the printed text: running footer with page numbers, the executive summary, the three lists and the appendix
+    if (existsSync('/usr/bin/pdftotext')) {
+      const dir = mkdtempSync(join(tmpdir(), 'itsm-pdf-test-'));
+      try {
+        const file = join(dir, 'pack.pdf');
+        writeFileSync(file, buffer);
+        const text = spawnSync('/usr/bin/pdftotext', [file, '-'], { encoding: 'utf8' }).stdout;
+        for (const needle of ['Page 2 of', 'Executive summary', 'What went well', 'Next steps', 'Appendix', `Pack Customer ${suffix}`]) expect(text).toContain(needle);
+        for (const bad of ['undefined', 'NaN', '[object']) expect(text).not.toContain(bad);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
   }, 90_000);
 
   it('a schedule in pack format delivers the PDF and the workbook together', async () => {
@@ -269,9 +342,138 @@ describe('branding, cover page and PDF', () => {
   it('the definition is listed as portal-visible with a cover and the pdf flag reflects the server', async () => {
     const defs = await asAdmin((ctx) => reports.listDefinitions(ctx));
     const def = defs.items.find((d) => d.key === 'service_review_pack');
-    expect(def).toMatchObject({ portal: true, cover: true, category: 'customers', defaultDateRange: 'last_month' });
+    expect(def).toMatchObject({ portal: true, cover: true, category: 'customers', defaultDateRange: 'last_month', kind: 'pack', compare: false });
+    expect(defs.items.find((d) => d.key === 'sla_performance')).toMatchObject({ kind: 'report', compare: true });
+    expect(defs.items.find((d) => d.key === 'open_tickets')).toMatchObject({ compare: false });
+    expect(defs.items.find((d) => d.key === 'audit_activity')).toMatchObject({ compare: false });
     expect(defs.formats).toEqual(['json', 'csv', 'html', 'pdf', 'xlsx']);
     expect(defs.pdf).toBe(pdfOn);
     expect(findReport('service_review_pack')?.permissions).toEqual(['reports:run', 'contracts:read', 'assets:read']);
   });
+});
+
+describe('comparison, insights and the narrative', () => {
+  it('a report with a period is compared with the previous period and carries insights; a snapshot report is not', async () => {
+    const out = await asAdmin((ctx) => reports.runReport(ctx, { reportKey: 'ticket_volume', parameters: { customerId: ids.customer, dateRange: 'last_7_days' } }));
+    if (!('result' in out)) throw new Error('expected preview');
+    expect(out.result.comparison).toMatchObject({ from: addDays(out.period.from, -7), to: addDays(out.period.from, -1) });
+    const opened = out.result.summary?.find((s) => s.label === 'Opened');
+    expect(opened?.delta).toMatchObject({ previous: expect.any(Number), lowerIsBetter: false });
+    expect(opened?.unit).toBe('count');
+    expect(Array.isArray(out.result.insights)).toBe(true);
+    expect(out.result.narrative?.source).toBe('rules');
+    expect(out.result.glossary).toBeDefined();
+    const snapshot = await asAdmin((ctx) => reports.runReport(ctx, { reportKey: 'open_tickets', parameters: { customerId: ids.customer } }));
+    if (!('result' in snapshot)) throw new Error('expected preview');
+    expect(snapshot.result.comparison).toBeUndefined();
+    expect(snapshot.result.summary?.every((s) => s.delta === undefined)).toBe(true);
+  });
+
+  it('the pack carries recommendations on the result and the rules narrative for a plain Ctx caller', async () => {
+    const out = await asAdmin((ctx) => reports.runReport(ctx, { reportKey: 'service_review_pack', parameters: { customerId: ids.customer, dateRange: 'last_7_days' } }));
+    if (!('result' in out)) throw new Error('expected preview');
+    expect(out.result.recommendations?.length).toBeGreaterThanOrEqual(3);
+    expect(out.result.narrative?.source).toBe('rules');
+    expect(out.result.narrative?.nextSteps.length).toBeGreaterThanOrEqual(1);
+    // the pack compares internally and names its own previous period (the executor ran no second pass)
+    expect(out.result.comparison).toMatchObject({ from: addDays(out.period.from, -7), to: addDays(out.period.from, -1) });
+    expect(out.result.summary?.find((s) => s.label === 'Backlog')?.delta?.lowerIsBetter).toBe(true);
+  });
+
+  it('a comparison that fails in SQL is contained by its savepoint and the file still ships', async () => {
+    let calls = 0;
+    registerReport({
+      key: `compare_fails_${suffix}`,
+      name: 'Comparison failure probe',
+      description: 'A definition whose previous-period run breaks in SQL; the main run must still produce the document.',
+      category: 'tickets',
+      permissions: [],
+      portal: false,
+      parameters: [dateRangeParam],
+      defaultDateRange: 'last_7_days',
+      async run(ctx) {
+        calls++;
+        // the second call is the comparison run: a real SQL error aborts the transaction unless it is under a savepoint
+        if (calls === 2) await ctx.tx.execute(sql`SELECT 1 / 0`);
+        return { columns: [col('n', 'N', 'number')], rows: [{ n: 1 }], summary: [{ label: 'Opened', value: 1 }] };
+      },
+    });
+    const run = await asAdmin((ctx) => reports.runReport(ctx, { reportKey: `compare_fails_${suffix}`, parameters: { dateRange: 'last_7_days' }, format: 'html' }));
+    if (!('status' in run)) throw new Error('expected run');
+    expect(calls).toBe(2);
+    expect(run.status).toBe('completed');
+    const { buffer } = await storedFile(run.attachmentId!);
+    expect(buffer.toString('utf8')).toContain('Comparison with the previous period unavailable');
+    const [row] = await withSystem((tx) => tx.select({ id: schema.reportRuns.id }).from(schema.reportRuns).where(eq(schema.reportRuns.id, run.id)).limit(1));
+    expect(row?.id).toBe(run.id);
+  });
+
+  it('a portal reader gets the confidentiality line with their organisation, never the internal one', async () => {
+    const run = await asPortal((ctx) => reports.runReport(ctx, { reportKey: 'service_review_pack', parameters: { dateRange: 'last_7_days' }, format: 'html' }));
+    if (!('status' in run)) throw new Error('expected run');
+    const { buffer } = await storedFile(run.attachmentId!);
+    const html = buffer.toString('utf8');
+    const footer = /@bottom-left\{content:"([^"]*)"/.exec(html)?.[1] ?? '';
+    expect(footer).toMatch(/prepared for Pack Customer/i);
+    expect(footer).not.toMatch(/internal/i);
+    expect(html).toContain(`Pack Customer ${suffix}`);
+  });
+
+  it('phrases the narrative through the model between the transactions, drops invented figures and honours the switch', async () => {
+    let calls = 0;
+    let busy = -1;
+    let idleInTx = -1;
+    let reply: (payload: { kpis: { label: string; value: unknown }[] }) => Record<string, unknown> = (payload) => {
+      const opened = payload.kpis.find((k) => k.label === 'Tickets opened')?.value;
+      return { summary: `Tickets opened was ${opened} this period.`, wentWell: [`Tickets opened was ${opened}.`], needsAttention: [], nextSteps: ['Keep the standing review.'] };
+    };
+    const provider: AiProvider = {
+      name: 'fake',
+      model: 'fake-1',
+      async chat(opts: ChatOptions): Promise<ChatResponse> {
+        calls++;
+        busy = pool.totalCount - pool.idleCount;
+        const res = await withSystem((tx) => tx.execute(sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND state = 'idle in transaction' AND pid <> pg_backend_pid()`));
+        idleInTx = Number((res.rows[0] as { n: number }).n);
+        const payload = JSON.parse(opts.messages[opts.messages.length - 1]!.content as string) as { kpis: { label: string; value: unknown }[] };
+        return { text: JSON.stringify(reply(payload)), toolCalls: [], stopReason: 'end', usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    };
+    ai.setProviderForTests(provider);
+    try {
+      const steps = reports.reportSteps(admin, { requestId: `test-pdf-narrative-${suffix}`, source: 'api' });
+      const out = await reports.executeReport(steps, { reportKey: 'service_review_pack', parameters: { customerId: ids.customer, dateRange: 'last_7_days' }, format: 'html' });
+      expect(calls).toBe(1);
+      expect(busy).toBe(0);
+      expect(idleInTx).toBe(0);
+      expect(out.result.narrative?.source).toBe('model');
+      expect(out.result.narrative?.summary).toMatch(/^Tickets opened was \d+ this period\.$/);
+      expect(out.result.narrative?.nextSteps).toEqual(['Keep the standing review.']);
+      const { buffer } = await storedFile(out.attachment!.id);
+      expect(buffer.toString('utf8')).toContain(out.result.narrative!.summary);
+      // an invented figure is dropped and the rules' sentence stands
+      reply = () => ({ summary: 'Compliance was 97% this week.', wentWell: ['Compliance was 97%.'], needsAttention: [], nextSteps: ['Call the customer about 97 tickets.'] });
+      const invented = await reports.executeReport(steps, { reportKey: 'service_review_pack', parameters: { customerId: ids.customer, dateRange: 'last_7_days' }, format: 'html' });
+      expect(calls).toBe(2);
+      expect(invented.result.narrative?.source).toBe('model');
+      expect(invented.result.narrative?.summary).not.toContain('97');
+      expect(invented.result.narrative?.wentWell.some((t) => t.includes('97'))).toBe(false);
+      expect(invented.result.narrative?.nextSteps.some((t) => t.includes('97'))).toBe(false);
+      // the switch: reports.narrative off means the model is never asked
+      await withSystem((tx) => tx.update(schema.systemSettings).set({ value: false }).where(eq(schema.systemSettings.key, 'reports.narrative')));
+      const off = await reports.executeReport(steps, { reportKey: 'service_review_pack', parameters: { customerId: ids.customer, dateRange: 'last_7_days' }, format: 'html' });
+      expect(calls).toBe(2);
+      expect(off.result.narrative?.source).toBe('rules');
+      await withSystem((tx) => tx.update(schema.systemSettings).set({ value: true }).where(eq(schema.systemSettings.key, 'reports.narrative')));
+      // a plain Ctx caller (a Grady tool) runs inside one transaction and never calls the model
+      const plain = await asAdmin((ctx) => reports.executeReport(ctx, { reportKey: 'service_review_pack', parameters: { customerId: ids.customer, dateRange: 'last_7_days' }, format: 'html' }));
+      expect(calls).toBe(2);
+      expect(plain.result.narrative?.source).toBe('rules');
+      // json previews never call the model either
+      await reports.executeReport(steps, { reportKey: 'service_review_pack', parameters: { customerId: ids.customer, dateRange: 'last_7_days' }, format: 'json' });
+      expect(calls).toBe(2);
+    } finally {
+      ai.setProviderForTests(null);
+    }
+  }, 60_000);
 });

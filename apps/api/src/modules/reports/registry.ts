@@ -25,35 +25,129 @@ export interface ReportColumn {
   key: string;
   label: string;
   type?: 'date' | 'datetime' | 'number' | 'pct' | 'minutes' | 'text' | 'boolean';
+  /** Printed totals row: sum or mean of this column (only when declared; never inferred). */
+  total?: 'sum' | 'avg';
 }
 
+export type ChartType = 'bar' | 'line' | 'stacked_bar' | 'donut' | 'heatmap' | 'gauge';
+export type ValueUnit = 'count' | 'pct' | 'minutes' | 'hours' | 'rating';
+export type InsightRule = 'concentration' | 'extremes' | 'outliers';
+
 export interface ReportChart {
-  type: 'bar' | 'line';
+  type: ChartType;
   title: string;
+  subtitle?: string;
   data: Record<string, unknown>[];
   x: string;
   /** One or more series keys. */
   y: string | string[];
   /** Optional display labels per series key. */
   labels?: Record<string, string>;
+  /** Value unit for axis ticks and direct labels. */
+  unit?: ValueUnit;
+  /** bar: horizontal when true (chosen automatically for long labels or more than 8 bars). */
+  horizontal?: boolean;
+  /** One category or series drawn in the first categorical hue while the rest go de-emphasis gray. */
+  emphasis?: string;
+  /** gauge: the target drawn as a tick; bar/line with unit pct: a solid hairline target. */
+  target?: number;
+  /** heatmap: data rows are { row, col, value }; rows/cols fix the order (weekdays, hours). */
+  rows?: string[];
+  cols?: string[];
+  /** Printed width; charts default to half (two per row). */
+  width?: 'half' | 'full';
+  /** Which insight rules may read this chart; 'none' switches them off. Defaults: bar: concentration and extremes; line: outliers. */
+  insight?: InsightRule[] | 'none';
+  /** Series keys met/completed/good wear the good status colour, breached/failed/missed/backed_out the critical one, warning the warning one, anything else the de-emphasis gray. */
+  statusSeries?: boolean;
+}
+
+export interface TileDelta {
+  previous: number | null;
+  change: number | null;
+  deltaPct: number | null;
+  lowerIsBetter?: boolean;
+  unit?: ValueUnit;
+  /** A move that is neither good nor bad (demand, record counts): printed in gray. */
+  neutral?: boolean;
+}
+
+export interface SummaryTile {
+  label: string;
+  value: string | number | null;
+  hint?: string;
+  /** How a numeric value is printed (96.4 as "96.4%", 42 as "42 min", 4.2 as "4.2/5"); inferred from the label by attachDeltas when absent. */
+  unit?: ValueUnit;
+  /** Previous period value and the signed change; `lowerIsBetter` decides the badge colour. */
+  delta?: TileDelta;
+  /** Twelve or fewer points for a sparkline. */
+  spark?: (number | null)[];
+  /** A target the value is judged against (SLA 95, CSAT 4). */
+  target?: number;
+  tone?: 'good' | 'warn' | 'bad';
+}
+
+export interface Insight {
+  kind: 'good' | 'attention' | 'info';
+  area: string;
+  text: string;
+  evidence?: string;
+  weight: number;
+}
+export interface Recommendation {
+  area: string;
+  recommendation: string;
+  evidence: string;
+}
+export interface Narrative {
+  summary: string;
+  wentWell: string[];
+  needsAttention: string[];
+  nextSteps: string[];
+  source: 'rules' | 'model';
+}
+export interface Glossary {
+  term: string;
+  meaning: string;
 }
 
 export interface ReportSection {
   title: string;
   columns: ReportColumn[];
   rows: Record<string, unknown>[];
+  /** Chapter heading: consecutive sections sharing a `group` print under one heading with the section title beneath; the cover contents list the groups. Excel and CSV ignore it. */
+  group?: string;
+  /** One line under the heading. */
+  intro?: string;
+  /** Print the totals row (uses the columns' `total`). */
+  totals?: boolean;
+  /** Rows printed in HTML and PDF before the "full list in Excel" note (default 50 for packs, 500 otherwise). */
+  printLimit?: number;
+  /** Charts that belong to this section (printed above its table). */
+  charts?: ReportChart[];
+  callouts?: Insight[];
 }
 
 export interface ReportResult {
   columns: ReportColumn[];
   rows: Record<string, unknown>[];
-  summary?: { label: string; value: string | number | null; hint?: string }[];
+  summary?: SummaryTile[];
   charts?: ReportChart[];
   /** Additional tables (breached list, consumption detail...). */
   sections?: ReportSection[];
   truncated?: boolean;
   /** The true number of matching rows when `rows` was capped (custom reports); absent when every row is present. */
   rowCount?: number;
+  /** Filled by executeReport (deriveInsights) unless the definition provides its own. */
+  insights?: Insight[];
+  recommendations?: Recommendation[];
+  /** Filled by executeReport: the rules' phrasing, or the model's rephrasing when it is on. */
+  narrative?: Narrative;
+  glossary?: Glossary[];
+  /** Free-text data notes printed in the appendix (the renderer adds the standard ones). */
+  notes?: string[];
+  /** Set by executeReport when a comparison against the previous period ran. */
+  comparison?: { from: string; to: string; label: string };
 }
 
 /** Normalized parameters every definition receives (plus its own keys). */
@@ -77,8 +171,16 @@ export interface ReportDefinition {
   defaultDateRange?: DateRangePreset;
   /** Open HTML and PDF output with a branded cover page (review packs). */
   cover?: boolean;
+  /** Run the definition a second time for the previous period of the same length and attach deltas to numeric tiles. Defaults to true when the definition has a `daterange` parameter. */
+  compare?: boolean;
+  /** 'pack' documents title the detail table Scorecard and cap section tables at the print row setting. */
+  kind?: 'report' | 'pack';
+  glossary?: Glossary[];
   run(ctx: Ctx, params: ReportParams): Promise<ReportResult>;
 }
+
+/** Whether a definition is compared against the previous period (its own flag, else whenever it takes a date range). */
+export const comparesPeriods = (d: ReportDefinition) => d.compare ?? d.parameters.some((p) => p.type === 'daterange');
 
 /** What a custom (builder) definition carries beyond a built-in one; set by the builder's toDefinition. */
 export interface CustomInfo {
@@ -192,5 +294,7 @@ export const describeReport = (d: ReportDefinition) => ({
   parameters: d.parameters,
   defaultDateRange: d.defaultDateRange ?? 'last_30_days',
   cover: d.cover === true,
+  kind: d.kind ?? 'report',
+  compare: comparesPeriods(d),
   ...(isCustomDefinition(d) ? { custom: d.custom } : {}),
 });
