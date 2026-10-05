@@ -11,6 +11,7 @@ import type { Sentiment } from '@/modules/ai/sentiment';
 import { TYPE_LABEL, csv, isCustomerUser, loadTicket, optionMap, toLabel } from './common';
 import type { ListQuery, StatsQuery } from './schemas';
 import { toDay, addDays, daysBetween } from '@/modules/reports/dates';
+import { loadSurveyDefaults } from '@/modules/surveys/policy';
 
 const T = schema.tickets;
 const st = alias(schema.configOptions, 'st');
@@ -36,7 +37,13 @@ const statusIdsOfCategories = (categories: string[]) =>
 
 const OPEN_CATEGORIES = ['new', 'open', 'pending'];
 
-function buildWhere(ctx: Ctx, q: StatsQuery): SQL | undefined {
+/** Options `buildWhere` cannot load itself (it is synchronous): the low-rating threshold for the `csat=low` filter. */
+interface WhereOpts {
+  lowThreshold?: number | null;
+}
+const whereOpts = async (ctx: Ctx, q: StatsQuery): Promise<WhereOpts> => (q.csat === 'low' ? { lowThreshold: (await loadSurveyDefaults(ctx.tx)).lowRatingThreshold } : {});
+
+function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL | undefined {
   const conds: SQL[] = visibilityConds(ctx);
   if (q.type) conds.push(eq(T.type, q.type));
   if (q.customerId) {
@@ -94,13 +101,18 @@ function buildWhere(ctx: Ctx, q: StatsQuery): SQL | undefined {
   }
   // Known error database: problems flagged as known errors (true) or not (false).
   if (q.knownError !== undefined) conds.push(q.knownError ? sql`EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error)` : sql`NOT EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error)`);
+  // Customer satisfaction: the denormalised rating on the ticket, or the pending survey row.
+  if (q.csat === 'rated') conds.push(isNotNull(T.csatRating));
+  else if (q.csat === 'low') conds.push(sql`${T.csatRating} <= ${opts.lowThreshold ?? 2}`);
+  else if (q.csat === 'pending') conds.push(sql`EXISTS (SELECT 1 FROM ticket_surveys s WHERE s.ticket_id = ${T.id} AND s.status = 'pending' AND s.expires_at > now())`);
+  else if (q.csat === 'unrated') conds.push(isNull(T.csatRating), statusIdsOfCategories(['resolved', 'closed']));
   const fts = searchFts(q.q, T.searchVector, T.number, T.title);
   if (fts) conds.push(fts);
   return conds.length ? and(...conds) : undefined;
 }
 
 export async function listTickets(ctx: Ctx, q: ListQuery) {
-  const where = buildWhere(ctx, q);
+  const where = buildWhere(ctx, q, await whereOpts(ctx, q));
   const total = await countRows(ctx.tx, sql`tickets`, where);
   const sortable: Record<string, { col: SQL; nullsLast?: boolean }> = {
     number: { col: sql`${T.number}` },
@@ -112,6 +124,7 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
     title: { col: sql`${T.title}` },
     status: { col: sql`${st.sortOrder}` },
     customer: { col: sql`${schema.customers.name}` },
+    csat: { col: sql`${T.csatRating}`, nullsLast: true },
   };
   const sortDef = sortable[q.sort ?? ''] ?? sortable.createdAt!;
   const order = sql`${sortDef.col} ${q.order === 'asc' ? sql`asc` : sql`desc`}${sortDef.nullsLast ? sql` NULLS LAST` : sql``}`;
@@ -164,8 +177,12 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
       lastSentiment: T.lastSentiment,
       lastSentimentAt: T.lastSentimentAt,
       isKnownError: sql<boolean>`EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error)`,
+      csatRating: T.csatRating,
+      surveyStatus: schema.ticketSurveys.status,
+      surveyExpiresAt: schema.ticketSurveys.expiresAt,
     })
     .from(T)
+    .leftJoin(schema.ticketSurveys, eq(schema.ticketSurveys.ticketId, T.id))
     .leftJoin(st, eq(st.id, T.statusId))
     .leftJoin(pr, eq(pr.id, T.priorityId))
     .leftJoin(cat, eq(cat.id, T.categoryId))
@@ -217,6 +234,9 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
     securitySeverityId: r.securitySeverityId,
     sla: worstSla(slas.get(r.id)),
     isKnownError: !!r.isKnownError,
+    // The customer's rating and the survey state (the portal "Rate" badge needs them too); a pending survey past its expiry reads as expired until the sweep marks it.
+    csatRating: r.csatRating ?? null,
+    surveyStatus: r.surveyStatus === 'pending' && r.surveyExpiresAt && r.surveyExpiresAt.getTime() <= Date.now() ? 'expired' : r.surveyStatus ?? null,
     // Staff only: the risk forecast and the customer's mood are internal signals.
     breachRisk: staff && r.breachRisk ? { level: r.breachRisk as RiskLevel, score: r.breachRiskScore ?? 0, reason: r.breachRiskReason ?? '' } : null,
     lastSentiment: staff && r.lastSentiment && r.lastSentiment !== 'n/a' ? { sentiment: r.lastSentiment as Sentiment, at: r.lastSentimentAt } : null,
@@ -252,19 +272,20 @@ function seriesWindow(q: StatsQuery): { from: string; to: string } {
  * other number is computed against the full filter set.
  */
 export async function ticketStats(ctx: Ctx, q: StatsQuery) {
-  const base = buildWhere(ctx, q);
+  const wo = await whereOpts(ctx, q);
+  const base = buildWhere(ctx, q, wo);
   const openCond = statusIdsOfCategories(OPEN_CATEGORIES);
   const count = sql<number>`count(*)::int`;
   const byCategory = await ctx.tx
     .select({ category: st.statusCategory, count })
     .from(T)
     .leftJoin(st, eq(st.id, T.statusId))
-    .where(buildWhere(ctx, { ...q, statusCategory: undefined, statusId: undefined, open: undefined }))
+    .where(buildWhere(ctx, { ...q, statusCategory: undefined, statusId: undefined, open: undefined }, wo))
     .groupBy(st.statusCategory);
   const byType = await ctx.tx
     .select({ type: T.type, count })
     .from(T)
-    .where(and(buildWhere(ctx, { ...q, type: undefined }), openCond))
+    .where(and(buildWhere(ctx, { ...q, type: undefined }, wo), openCond))
     .groupBy(T.type);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -414,7 +435,7 @@ export type GroupDimension = (typeof GROUP_DIMENSIONS)[number];
 
 /** One number: how many tickets match the filters. Same predicates as the list, so it never disagrees with it. */
 export async function countTickets(ctx: Ctx, q: StatsQuery): Promise<number> {
-  return countRows(ctx.tx, sql`tickets`, buildWhere(ctx, q));
+  return countRows(ctx.tx, sql`tickets`, buildWhere(ctx, q, await whereOpts(ctx, q)));
 }
 
 const GROUP_SQL: Record<Exclude<GroupDimension, 'slaState'>, { label: SQL; join: SQL; order: SQL }> = {
@@ -435,7 +456,7 @@ const GROUP_SQL: Record<Exclude<GroupDimension, 'slaState'>, { label: SQL; join:
  * always sum to the total (an `Other` row absorbs anything beyond `limit`).
  */
 export async function groupTickets(ctx: Ctx, q: StatsQuery, by: GroupDimension, limit = 12): Promise<{ total: number; groups: { label: string; count: number }[] }> {
-  const where = buildWhere(ctx, q) ?? sql`true`;
+  const where = buildWhere(ctx, q, await whereOpts(ctx, q)) ?? sql`true`;
   if (by === 'slaState') {
     const [row] = (await ctx.tx.execute(sql`
       select count(*)::int as total,

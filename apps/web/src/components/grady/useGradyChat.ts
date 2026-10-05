@@ -33,6 +33,7 @@ const INVALIDATION: Record<string, string[][]> = {
   announcements: [['announcements'], ['portal']],
   changes: [['changes'], ['cab'], ['tickets'], ['portal']],
   kedb: [['known-errors'], ['tickets'], ['knowledge'], ['portal']],
+  surveys: [['surveys'], ['dashboards'], ['tickets'], ['portal']],
 };
 
 const STORAGE_KEY = 'grady.conversation';

@@ -105,6 +105,20 @@ export async function seedChanges(state: DemoState, tx: Tx) {
         .innerJoin(schema.configOptions, eq(schema.configOptions.id, schema.tickets.statusId))
         .where(and(inArray(schema.tickets.id, changeIds)))
     : [];
+  // Each agenda is filled to five items from the other changes when fewer qualify by status, so the item count never depends on the hour the dataset was loaded.
+  const AGENDA_SIZE = 5;
+  const OPEN = ['new', 'open', 'pending'];
+  const byIndex = new Map(changeIds.map((id, i) => [id, i]));
+  const ordered = [...changeRows].sort((a, b) => (byIndex.get(a.id) ?? 0) - (byIndex.get(b.id) ?? 0));
+  const fillAgenda = <R extends { id: string; statusCategory: string | null }>(picked: R[], pool: R[], exclude: Set<string>, openOnly: boolean): R[] => {
+    for (const r of pool) {
+      if (picked.length >= AGENDA_SIZE) break;
+      if (exclude.has(r.id) || picked.some((p) => p.id === r.id)) continue;
+      if (openOnly && !OPEN.includes(r.statusCategory ?? '')) continue;
+      picked.push(r);
+    }
+    return picked;
+  };
   const backdate = async (meetingId: string, when: Date, closed: boolean) => {
     await tx.update(schema.cabMeetings).set({ createdAt: addDays(when, -3), updatedAt: closed ? addMinutes(when, 60) : addDays(when, -3), ...(closed ? { closedAt: addMinutes(when, 60) } : {}) }).where(eq(schema.cabMeetings.id, meetingId));
     await tx.update(schema.cabMeetingItems).set({ createdAt: addDays(when, -3), decidedAt: addMinutes(when, 30), updatedAt: addMinutes(when, 30) }).where(and(eq(schema.cabMeetingItems.meetingId, meetingId), inArray(schema.cabMeetingItems.decision, ['approved', 'rejected', 'deferred'])));
@@ -112,7 +126,7 @@ export async function seedChanges(state: DemoState, tx: Tx) {
 
   // Last week's CAB: the approved changes, each decided and the meeting closed with generated minutes.
   const lastWeek = atIst(addDays(now, -7), 10, 0);
-  const approved = changeRows.filter((r) => r.approvalStatus === 'approved').slice(0, 4);
+  const approved = fillAgenda(fillAgenda(ordered.filter((r) => r.approvalStatus === 'approved').slice(0, 4), ordered, new Set(), true), ordered, new Set(), false);
   const past = await changes.createMeeting(rajesh, { title: 'Weekly CAB', scheduledAt: lastWeek, chairUserId: user(state, 'rajesh').id, location, attendeeUserIds, ticketIds: approved.map((r) => r.id) });
   for (const item of past.items) await changes.decideItem(rajesh, past.id, item.id, { decision: 'approved', notes: 'Approved for the stated window.' });
   await changes.closeMeeting(rajesh, past.id, {});
@@ -122,7 +136,7 @@ export async function seedChanges(state: DemoState, tx: Tx) {
   const wd = istWeekday(now);
   const untilTuesday = (2 - wd + 7) % 7 || 7;
   const nextTuesday = atIst(addDays(now, untilTuesday), 10, 0);
-  const awaiting = changeRows.filter((r) => r.approvalStatus === 'pending' && ['new', 'open', 'pending'].includes(r.statusCategory ?? '')).slice(0, 5);
+  const awaiting = fillAgenda(ordered.filter((r) => r.approvalStatus === 'pending' && OPEN.includes(r.statusCategory ?? '')).slice(0, 5), ordered, new Set(approved.map((a) => a.id)), true);
   const next = await changes.createMeeting(rajesh, { title: 'Weekly CAB', scheduledAt: nextTuesday, chairUserId: user(state, 'rajesh').id, location, attendeeUserIds });
   for (const [i, r] of awaiting.entries()) await changes.addItem(rajesh, next.id, { ticketId: r.id, notes: i === 0 ? "Requested by the customer's IT lead" : null });
   await backdate(next.id, addDays(now, -1), false);

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone, Undo2, BellRing, Bug } from 'lucide-react';
+import { ChevronDown, Flame, AlertTriangle, CheckCircle2, RotateCcw, Ban, Eye, EyeOff, UserPlus, Pencil, Lock, ArrowUpRight, MessageSquare, Info, Sparkles, X, Mail, Phone, Undo2, BellRing, Bug, Send } from 'lucide-react';
 import { Button, Badge, LoadingBlock, ErrorBlock, Textarea, Select, Input, Avatar } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
 import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, RelatedTabs, ActivityStream, RailTabs, fromTimeline, type FormSection, type FieldDef } from '@/components/record';
@@ -38,6 +38,8 @@ import { aiApi, aiQk } from '@/components/ai/api';
 import { PagesPanel } from '@/components/oncall/PagesPanel';
 import { oncallApi, oncallKeys } from '@/components/oncall/api';
 import { LINK_TYPE_LABELS, type TicketDetail, type CatalogField, type LinkedTicket } from '@/components/tickets/types';
+import { surveysApi } from '@/components/surveys/api';
+import { SurveyPanel } from '@/components/surveys/SurveyPanel';
 
 /** In-place select for a form field (ServiceNow edits on the form, not in a dialog). */
 function FieldSelect({ value, options, onChange, disabled, placeholder = '—' }: { value: string | null | undefined; options: { value: string; label: string }[]; onChange: (v: string | null) => void; disabled?: boolean; placeholder?: string }) {
@@ -104,6 +106,7 @@ export default function TicketDetailPage() {
     qc.invalidateQueries({ queryKey: ['tickets', 'list'] });
     qc.invalidateQueries({ queryKey: ['tickets', 'stats'] });
     qc.invalidateQueries({ queryKey: ['major-incidents'] });
+    qc.invalidateQueries({ queryKey: ['surveys'] });
   };
   const act = <T,>(fn: (vars: T) => Promise<unknown>, okMsg?: string) =>
     useMutation({
@@ -127,6 +130,7 @@ export default function TicketDetailPage() {
   const declareMajor = act((v: { comment: string }) => ticketsApi.declareMajor(id, { reason: v.comment || null }), 'Declared a major incident');
   const demoteMajor = act((v: { comment: string }) => ticketsApi.demoteMajor(id, { reason: v.comment || null }), 'No longer a major incident');
   const watch = act((remove: boolean) => (remove ? ticketsApi.unwatch(id) : ticketsApi.watch(id)));
+  const sendSurvey = act(() => surveysApi.send(id), 'Survey sent');
   // A note with files: the files go up first and follow the note's audience (a reply is customer-visible, a work note is not).
   const comment = useMutation({
     mutationFn: (input: ComposerInput) =>
@@ -170,6 +174,8 @@ export default function TicketDetailPage() {
   const opt = (type: string) => options(type).map((o) => ({ value: o.id, label: o.label }));
   const primaryCi = ticket.cis.find((c) => c.id === ticket.primaryCiId) ?? ticket.cis[0] ?? null;
   const primaryAsset = ticket.assets.find((a) => a.id === ticket.primaryAssetId) ?? ticket.assets[0] ?? null;
+  // The satisfaction survey can be (re)sent by hand on an ended ticket that has no answer yet (bypasses sampling and fatigue).
+  const canSendSurvey = !!p.survey && !isCustomer && (isResolved || isClosed) && cat !== 'cancelled' && ticket.survey?.status !== 'answered';
 
   // ---- what needs attention (MSP staff only): breached clocks, no assignee, waiting on the customer…
   const attention = isCustomer
@@ -200,6 +206,7 @@ export default function TicketDetailPage() {
     ...(p.watch ? [{ label: ticket.isWatching ? 'Stop watching' : 'Watch this ticket', icon: ticket.isWatching ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />, onClick: () => watch.mutate(ticket.isWatching) }] : []),
     ...(p.update && !isCustomer ? [{ label: 'Classify scope…', icon: <Pencil className="h-4 w-4" />, onClick: () => setDialog('scope') }] : []),
     ...(ticket.type === 'problem' && ticket.problem?.isKnownError && !isCustomer && can('kedb:read') ? [{ label: 'Open in the known error database', icon: <Bug className="h-4 w-4" />, onClick: () => navigate(`/knowledge/known-errors/${ticket.id}`) }] : []),
+    ...(canSendSurvey ? [{ label: 'Send survey', icon: <Send className="h-4 w-4" />, onClick: () => sendSurvey.mutate(undefined) }] : []),
     ...(p.cancel && isOpen ? [{ label: 'Cancel ticket', icon: <Ban className="h-4 w-4" />, onClick: () => setDialog('cancel'), danger: true }] : []),
   ];
 
@@ -334,6 +341,7 @@ export default function TicketDetailPage() {
       { label: cat === 'cancelled' ? 'Cancelled' : 'Closed', value: ticket.closedAt ? fmtDateTime(ticket.closedAt) : null, hidden: !ticket.closedAt },
       { label: 'Reopened', value: ticket.reopenCount ? `${ticket.reopenCount}×` : 'never', hidden: isCustomer && !ticket.reopenCount },
       { label: 'Resolution notes', kind: 'prose', value: ticket.resolutionNotes ?? '', span: 2 },
+      { label: 'Customer rating', value: <SurveyPanel survey={ticket.survey} canSend={canSendSurvey} onSend={() => sendSurvey.mutate(undefined)} sending={sendSurvey.isPending} />, span: 2, hidden: isCustomer && ticket.survey?.status !== 'answered' },
     ],
   };
 
@@ -451,7 +459,7 @@ function glance(ticket: TicketDetail, staff: boolean): { label: string; value: s
   const breached = ticket.slas.filter((s) => s.state === 'breached').length;
   const met = ticket.slas.filter((s) => s.state === 'met').length;
   const next = running.length ? running.reduce((a, b) => (a.remainingMinutes < b.remainingMinutes ? a : b)) : null;
-  return [
+  const items: { label: string; value: string; tone?: 'good' | 'warn' | 'bad'; hint?: string }[] = [
     ...(staff ? [{ label: 'Assigned to', value: ticket.assignee?.name ?? 'Unassigned', tone: !ticket.assignee && !ended ? ('warn' as const) : undefined, hint: ticket.team ? `Team: ${ticket.team.name}` : undefined }] : []),
     { label: ended ? 'Time to resolve' : 'Age', value: fmtDuration(age) },
     { label: 'First response', value: firstResponse === null ? (ended ? '—' : 'pending') : fmtDuration(firstResponse), tone: firstResponse === null && !ended ? 'warn' : undefined },
@@ -461,4 +469,12 @@ function glance(ticket: TicketDetail, staff: boolean): { label: string; value: s
     { label: 'Due', value: ticket.dueAt ? relativeTime(ticket.dueAt) : '—', tone: ticket.dueAt && new Date(ticket.dueAt) < new Date() && !ended ? 'bad' : undefined },
     { label: 'Reopened', value: ticket.reopenCount ? `${ticket.reopenCount}×` : 'never', tone: ticket.reopenCount > 1 ? 'warn' : undefined },
   ];
+  // Once the customer has rated the ticket the rating takes the place of the reopen tile (still in Resolution information) unless it was reopened.
+  const rating = ticket.survey?.status === 'answered' ? ticket.survey.rating : null;
+  if (rating != null) {
+    const tile = { label: 'Customer rating', value: `${rating}/5`, tone: rating >= 4 ? ('good' as const) : rating <= 2 ? ('bad' as const) : ('warn' as const), hint: ticket.survey && 'answeredBy' in ticket.survey && ticket.survey.answeredBy ? `Rated by ${ticket.survey.answeredBy.name}` : undefined };
+    if (ticket.reopenCount) items.push(tile);
+    else items.splice(items.length - 1, 1, tile);
+  }
+  return items;
 }

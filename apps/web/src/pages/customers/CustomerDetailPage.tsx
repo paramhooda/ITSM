@@ -173,6 +173,7 @@ export default function CustomerDetailPage() {
         <RailRows
           rows={[
             { label: linkTo('Tickets', `/tickets?customerId=${id}`), value: <span className="tnum">{c.counts.openTickets} open · {c.counts.totalTickets} total</span> },
+            { label: can('surveys:read') ? linkTo('Satisfaction', `/reports/csat?customerId=${id}&days=90`) : 'Satisfaction', value: overview.data?.csat90d?.avg != null ? <span className="tnum">{overview.data.csat90d.avg.toFixed(1)}/5 · {overview.data.csat90d.responses} {overview.data.csat90d.responses === 1 ? 'response' : 'responses'} · 90 days</span> : <span className="text-subtle">No ratings yet</span> },
             { label: linkTo('Contracts', `/contracts?customerId=${id}`), value: <span className="tnum">{c.counts.activeContracts} active · {c.counts.contracts} total</span> },
             { label: linkTo('Assets', `/assets?customerId=${id}`), value: <span className="tnum">{c.counts.assets}</span> },
             { label: linkTo('CIs', `/cmdb?customerId=${id}`), value: <span className="tnum">{c.counts.cis}</span> },

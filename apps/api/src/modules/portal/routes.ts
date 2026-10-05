@@ -6,6 +6,7 @@ import * as svc from './service';
 import * as S from './schemas';
 import * as kedb from '@/modules/known-errors/service';
 import * as KE from '@/modules/known-errors/schemas';
+import * as surveysPortal from '@/modules/surveys/portal';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -45,6 +46,9 @@ export default async function routes(app: FastifyInstance) {
   }));
   r.post('/portal/tickets/:id/reopen', { preHandler: act, schema: { tags, params: idParam, body: S.reopenBody } }, h((ctx, req) => svc.reopenPortalTicket(ctx, (req.params as { id: string }).id, (req.body as { reason: string }).reason)));
   r.post('/portal/tickets/:id/close-confirm', { preHandler: act, schema: { tags, params: idParam, body: S.closeConfirmBody } }, h((ctx, req) => svc.confirmResolution(ctx, (req.params as { id: string }).id, (req.body as { comment?: string | null } | undefined)?.comment)));
+  // ---- satisfaction surveys: rate a resolved or closed ticket; the organisation's tickets still to rate
+  r.post('/portal/tickets/:id/survey', { preHandler: act, schema: { tags, params: idParam, body: S.surveyAnswerBody } }, h((ctx, req) => surveysPortal.answerPortalSurvey(ctx, (req.params as { id: string }).id, req.body as S.SurveyAnswerBody)));
+  r.get('/portal/surveys', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => surveysPortal.pendingForPortal(ctx, q(req).customerId)));
 
   // ---- approvals
   r.get('/portal/approvals', { preHandler: read, schema: { tags, querystring: S.previewQuery } }, h((ctx, req) => svc.listPortalApprovals(ctx, q(req).customerId)));

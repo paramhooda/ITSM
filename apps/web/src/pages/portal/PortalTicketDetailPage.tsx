@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CheckCircle2, RotateCcw, ShieldCheck, ShieldOff, ShieldQuestion, Check, X, MessageSquare, Info, ClipboardCheck, FileSignature, Flame } from 'lucide-react';
@@ -14,6 +14,8 @@ import { SlaCard } from '@/components/tickets/SlaCard';
 import { AttachmentsSection } from '@/components/tickets/AttachmentsSection';
 import { attachmentsQueryKey, commentWithAttachments } from '@/components/attachments/upload';
 import { portalApi, pk, type PortalTicket } from '@/components/portal/api';
+import { surveysApi } from '@/components/surveys/api';
+import { SurveyCard } from '@/components/surveys/SurveyCard';
 
 const minutesBetween = (a: string, b: string | Date) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60_000));
 
@@ -102,9 +104,25 @@ export default function PortalTicketDetailPage() {
     onSuccess: (_r, v) => { toast.success(v.decision === 'approved' ? 'Request approved' : 'Request rejected'); setApprovalComment(''); invalidate(); },
     onError: (e: Error) => toast.error(e.message),
   });
+  // The satisfaction rating: one answer per ticket; the dashboards and the "To rate" list change with it.
+  const rate = useMutation({
+    mutationFn: (b: { rating: number; comment: string | null }) => surveysApi.answer(id, b),
+    onSuccess: () => { toast.success('Thank you for the rating'); invalidate(); qc.invalidateQueries({ queryKey: ['dashboards'] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const [dialog, setDialog] = useState<null | 'reopen' | 'confirm'>(null);
   const [approvalComment, setApprovalComment] = useState('');
   const entries = useMemo(() => (ticket?.timeline ?? []).map(fromTimeline), [ticket?.timeline]);
+  // ?survey=1 (the notification and the email for signed-in users) lands on the rating card once per ticket, not after every refetch.
+  const [search] = useSearchParams();
+  const wantsSurvey = search.get('survey') === '1';
+  const ticketId = ticket?.id;
+  const scrolledTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (!wantsSurvey || !ticketId || scrolledTo.current === ticketId) return;
+    scrolledTo.current = ticketId;
+    document.getElementById('survey-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [wantsSurvey, ticketId]);
 
   if (ticketQ.isLoading) return <LoadingBlock label="Loading ticket…" />;
   if (ticketQ.isError || !ticket) return <ErrorBlock error={ticketQ.error} retry={() => ticketQ.refetch()} />;
@@ -114,6 +132,10 @@ export default function PortalTicketDetailPage() {
   const closedLike = cat === 'closed' || cat === 'cancelled';
   const ended = isResolved || closedLike;
   const a = ticket.actions;
+  // The rating card: shown while the customer may rate, and afterwards with the answer; a pending survey the customer can no longer answer reads as closed.
+  const sv = ticket.survey;
+  const surveyState = sv && sv.status !== 'none' ? { status: sv.status === 'pending' && !a.rate ? ('expired' as const) : sv.status, rating: sv.rating, comment: sv.comment, answeredAt: sv.answeredAt, expiresAt: sv.expiresAt } : { status: 'none' as const, rating: null, answeredAt: null };
+  const showSurvey = !!sv && sv.status !== 'cancelled' && (a.rate || sv.status === 'answered');
   const fmtValue = (v: unknown) => (v === true ? 'Yes' : v === false ? 'No' : v === null || v === undefined || v === '' ? null : Array.isArray(v) ? v.join(', ') : String(v));
   const who = ticket.assignee ? `${ticket.assignee.firstName ?? ticket.assignee.name}${ticket.team ? ` · ${ticket.team.name}` : ''}` : ticket.team?.name ?? null;
 
@@ -286,7 +308,12 @@ export default function PortalTicketDetailPage() {
           </RecordHeader>
         }
         main={
-          <RecordForm sections={sections} />
+          <>
+            {showSurvey && sv && (
+              <SurveyCard id="survey-card" compact question={sv.question} commentPrompt={sv.commentPrompt} state={surveyState} onRate={a.rate ? (r, c) => rate.mutateAsync({ rating: r, comment: c }) : undefined} busy={rate.isPending} />
+            )}
+            <RecordForm sections={sections} />
+          </>
         }
         aside={
           <RailTabs

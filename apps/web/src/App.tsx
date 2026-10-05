@@ -11,6 +11,7 @@ import { routes as appRoutes } from '@/routes';
 
 const ResetPasswordPage = lazy(() => import('@/pages/auth/ResetPasswordPage'));
 const PublicStatusPage = lazy(() => import('@/pages/public/PublicStatusPage'));
+const SurveyPage = lazy(() => import('@/pages/public/SurveyPage'));
 
 function Guard({ perm, children }: { perm?: Permission[]; children: ReactNode }) {
   const can = useAuthStore((s) => s.can);
@@ -49,6 +50,18 @@ export default function App() {
       <Suspense fallback={<LoadingBlock />}>
         <Routes>
           <Route path="/status/:token" element={<PublicStatusPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
+  // The satisfaction survey page is the same kind of link: one token from the email, no sign-in needed.
+  if (location.pathname.startsWith('/survey/')) {
+    return (
+      <Suspense fallback={<LoadingBlock />}>
+        <Routes>
+          <Route path="/survey/:token" element={<SurveyPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

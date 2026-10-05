@@ -21,6 +21,11 @@ export interface TrendChartProps {
   xFormatter?: (v: string) => string;
   /** Hide the legend for a single series (the title names it). */
   title?: string;
+  /** Fixed value scale (a 1-5 rating, a percentage) instead of the automatic one; `yTicks` pins the tick values. */
+  yDomain?: [number, number];
+  yTicks?: number[];
+  /** Axis tick labels when they must be shorter than the tooltip's `valueFormatter` (the axis is 44 px wide). */
+  yFormatter?: (v: number) => string;
 }
 
 const shortDay = (v: string) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.slice(5) : String(v));
@@ -46,7 +51,7 @@ function ChartTooltip({ active, payload, label, valueFormatter }: { active?: boo
 }
 
 /** One-axis time series / categorical chart (recharts): gradient areas, crosshair tooltip, quiet grid. */
-export function TrendChart({ data, x, series, kind = 'area', height = 220, stacked, valueFormatter, xFormatter = shortDay, title }: TrendChartProps) {
+export function TrendChart({ data, x, series, kind = 'area', height = 220, stacked, valueFormatter, xFormatter = shortDay, title, yDomain, yTicks, yFormatter }: TrendChartProps) {
   const t = useChartTheme();
   const uid = useId().replace(/:/g, '');
   const colored = useMemo(() => series.map((s, i) => ({ ...s, color: s.color ?? t.series[i % t.series.length] })), [series, t]);
@@ -57,7 +62,7 @@ export function TrendChart({ data, x, series, kind = 'area', height = 220, stack
   const legend = colored.length > 1 ? <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 12, color: t.text, paddingTop: 10 }} /> : null;
   const grid = <CartesianGrid stroke={t.grid} vertical={false} />;
   const xAxis = <XAxis dataKey={x} {...axisProps} tickFormatter={xFormatter} interval="preserveStartEnd" minTickGap={28} dy={6} />;
-  const yAxis = <YAxis {...axisProps} allowDecimals={false} width={44} tickFormatter={(v: number) => (valueFormatter ? valueFormatter(v) : String(v))} />;
+  const yAxis = <YAxis {...axisProps} allowDecimals={false} width={44} domain={yDomain} ticks={yTicks} tickFormatter={(v: number) => (yFormatter ? yFormatter(v) : valueFormatter ? valueFormatter(v) : String(v))} />;
   return (
     <div>
       {title && <div className="text-[12.5px] font-medium text-muted mb-1">{title}</div>}

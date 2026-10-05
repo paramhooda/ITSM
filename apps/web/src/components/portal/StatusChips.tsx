@@ -6,6 +6,7 @@ const CHIPS: { key: StatusChip; label: string }[] = [
   { key: 'awaiting', label: 'Awaiting your reply' },
   { key: 'resolved', label: 'Resolved' },
   { key: 'closed', label: 'Closed' },
+  { key: 'rate', label: 'To rate' },
   { key: 'all', label: 'All' },
 ];
 
@@ -16,7 +17,7 @@ export function StatusChips({ value, onChange, counts, className }: { value: Sta
       {CHIPS.map((c) => {
         const active = value === c.key;
         const n = counts?.[c.key];
-        const attention = c.key === 'awaiting' && (n ?? 0) > 0 && !active;
+        const attention = (c.key === 'awaiting' || c.key === 'rate') && (n ?? 0) > 0 && !active;
         return (
           <button
             key={c.key}

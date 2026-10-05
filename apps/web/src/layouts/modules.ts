@@ -80,7 +80,7 @@ export const KNOWLEDGE_MODULES: ModuleItem[] = [
 export const REPORT_MODULES: ModuleItem[] = [
   { to: '/reports', label: 'Catalogue', end: true },
   // slot #1: { to: '/reports/builder', label: 'Report builder', perm: ['reports:build'], match: (p) => p.startsWith('/reports/builder') }
-  // slot #6: { to: '/reports/csat', label: 'Customer satisfaction', perm: ['surveys:read'] }
+  { to: '/reports/csat', label: 'Customer satisfaction', perm: ['surveys:read'] },
 ];
 
 // ---- customer portal

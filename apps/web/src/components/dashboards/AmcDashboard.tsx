@@ -13,6 +13,7 @@ import { EntitlementAlerts, type EntitlementAlert } from './EntitlementAlerts';
 import { Panel, KpiSkeleton, Skeleton, Segmented, Stat, Updated, RowList } from './Panel';
 import type { TicketRow } from './types';
 import { VISIT_STATUS_COLORS, PM_STATUS_COLORS } from '@/lib/statusColors';
+import { fmtRating, ratingTone } from '@/components/surveys/api';
 
 interface Amc {
   generatedAt: string;
@@ -28,6 +29,8 @@ interface Amc {
   visitsByStatus: { status: string; count: number }[];
   pmByStatus: { status: string; count: number }[];
   sla30d: { met: number; breached: number; compliancePct: number | null };
+  /** Customer satisfaction on AMC tickets rated in the period. */
+  csat30d?: { avg: number | null; responses: number; satisfiedPct: number | null };
 }
 
 type Filter = 'all' | 'unassigned' | 'dueToday' | 'breached' | 'awaitingCustomer';
@@ -119,6 +122,8 @@ export function AmcDashboard({ days = 30, customerId = '' }: { days?: number; cu
           <div className="mt-5 pt-4 border-t border-default grid grid-cols-2 gap-x-4 gap-y-4">
             <Stat label="Resolved this week" value={fmtNumber(k.resolvedThisWeek)} />
             <Stat label="Awaiting customer" value={fmtNumber(k.awaitingCustomer)} tone={k.awaitingCustomer > 0 ? 'warn' : 'default'} />
+            <Stat label="Customer satisfaction" value={fmtRating(d.csat30d?.avg)} tone={ratingTone(d.csat30d?.avg)} />
+            <Stat label="Survey responses" value={fmtNumber(d.csat30d?.responses ?? 0)} />
           </div>
         </Panel>
       </div>

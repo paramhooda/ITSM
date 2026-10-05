@@ -9,8 +9,12 @@ import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
 import { TicketMiniTable } from './TicketMiniTable';
-import { Panel, KpiSkeleton, Skeleton, RowList, Segmented, type RowItem } from './Panel';
+import { Panel, KpiSkeleton, Skeleton, RowList, Segmented, Stat, type RowItem } from './Panel';
 import type { TicketRow } from './types';
+import { truncate } from '@/lib/utils';
+import { fmtPct } from '@/lib/format';
+import { fmtRating, ratingTone } from '@/components/surveys/api';
+import { RatingBadge } from '@/components/surveys/RatingBadge';
 
 interface Engineer {
   generatedAt: string;
@@ -29,6 +33,8 @@ interface Engineer {
   activity: { comments: number; minutes: number; resolved: number; breachedAssigned: number };
   knowledge: { id: string; number: string; title: string; article_type: string; published_at: string | null; service_name: string | null }[];
   watched: TicketRow[];
+  /** Ratings customers gave on tickets this engineer resolved in the period, with the latest comments. */
+  csat?: { avg: number | null; responses: number; satisfiedPct: number | null; recent: { ticketId: string; number: string; title: string; rating: number; comment: string | null; answeredAt: string | null; customerName: string | null }[] };
 }
 
 export function EngineerDashboard({ days = 30, customerId = '' }: { days?: number; customerId?: string }) {
@@ -116,6 +122,20 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
           </Panel>
         )}
       </div>
+      {d.csat && (
+        <Panel title="Customer feedback for you" subtitle={`Ratings on tickets you resolved, last ${days} days`} to="/tickets?mine=true&csat=rated" toLabel="Rated tickets">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-3 lg:grid-cols-1 gap-4 content-start">
+              <Stat label="Average rating" value={fmtRating(d.csat.avg)} tone={ratingTone(d.csat.avg)} />
+              <Stat label="Responses" value={fmtNumber(d.csat.responses)} />
+              <Stat label="Satisfied" value={fmtPct(d.csat.satisfiedPct)} />
+            </div>
+            <div className="lg:col-span-2">
+              <RowList dense empty="No ratings yet" items={d.csat.recent.map((r) => ({ key: r.ticketId, href: `/tickets/${r.ticketId}`, primary: `${r.number} · ${r.title}`, secondary: r.comment ? `${r.customerName ? `${r.customerName} · ` : ''}“${truncate(r.comment, 110)}”` : (r.customerName ?? 'No comment left'), right: <RatingBadge rating={r.rating} /> }))} />
+            </div>
+          </div>
+        </Panel>
+      )}
     </div>
   );
 }

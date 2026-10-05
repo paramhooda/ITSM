@@ -60,7 +60,7 @@ export const MSP_NAV: NavItem[] = [
     children: [
       { to: '/reports', label: 'Catalogue' },
       // slot #1: { to: '/reports/builder', label: 'Report builder', perm: ['reports:build'] }
-      // slot #6: { to: '/reports/csat', label: 'Customer satisfaction', perm: ['surveys:read'] }
+      { to: '/reports/csat', label: 'Customer satisfaction', perm: ['surveys:read'] },
     ],
   },
   // ---- Service desk

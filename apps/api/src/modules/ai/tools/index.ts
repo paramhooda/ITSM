@@ -20,6 +20,7 @@ import { ADMIN } from './admin';
 import { IAM } from './iam';
 import { CHANGES } from './changes';
 import { KNOWN_ERRORS } from './known-errors';
+import { SURVEYS } from './surveys';
 
 /**
  * The tool registry. Each tool wraps a service function and runs with the
@@ -32,7 +33,7 @@ export * from './types';
 export * from '../helpers';
 export { compactForTrace as stripSecrets } from '../redact';
 
-export const ALL_TOOLS: AiTool[] = [...CORE, ...UI, ...TICKETS, ...TRIAGE, ...INCIDENT, ...APPROVALS, ...CUSTOMERS, ...CONTRACTS, ...CMDB, ...ASSETS, ...FIELD, ...KNOWLEDGE, ...REPORTS, ...CONFIG, ...ADMIN, ...IAM, ...CHANGES, ...KNOWN_ERRORS];
+export const ALL_TOOLS: AiTool[] = [...CORE, ...UI, ...TICKETS, ...TRIAGE, ...INCIDENT, ...APPROVALS, ...CUSTOMERS, ...CONTRACTS, ...CMDB, ...ASSETS, ...FIELD, ...KNOWLEDGE, ...REPORTS, ...CONFIG, ...ADMIN, ...IAM, ...CHANGES, ...KNOWN_ERRORS, ...SURVEYS];
 export const READ_TOOLS: AiTool[] = ALL_TOOLS.filter((t) => !t.action);
 export const ACTION_TOOLS: AiTool[] = ALL_TOOLS.filter((t) => t.action);
 

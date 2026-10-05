@@ -188,9 +188,9 @@ describe('every portal-reachable tool answers for the user’s own organisation 
       checked.push(t.name);
     }
     // At least the self-service core answered (with Alpha's data); refusals are fine, leaks are not.
-    expect(checked, refused.join('\n')).toEqual(expect.arrayContaining(['search', 'knowledge_search', 'list_contracts', 'entitlement_usage', 'customer_scope', 'sla_compliance', 'list_visits', 'list_assets', 'pm_programs', 'list_services', 'list_catalog_items', 'planned_changes', 'known_errors']));
+    expect(checked, refused.join('\n')).toEqual(expect.arrayContaining(['search', 'knowledge_search', 'list_contracts', 'entitlement_usage', 'customer_scope', 'sla_compliance', 'list_visits', 'list_assets', 'pm_programs', 'list_services', 'list_catalog_items', 'planned_changes', 'known_errors', 'csat_summary', 'csat_low_ratings']));
     // Beta's site, ticket or article are refused by the resolvers rather than redirected to Alpha's records.
-    for (const name of ['query_tickets', 'reopen_ticket', 'add_comment', 'get_article', 'match_known_errors']) expect(refused.some((r) => r.startsWith(name)), `${name}\n${refused.join('\n')}`).toBe(true);
+    for (const name of ['query_tickets', 'reopen_ticket', 'add_comment', 'get_article', 'match_known_errors', 'rate_ticket']) expect(refused.some((r) => r.startsWith(name)), `${name}\n${refused.join('\n')}`).toBe(true);
     expect(checked.length + refused.length).toBe(offered.length - 1);
   });
 

@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm';
 import { registerReport, type ReportResult } from '../registry';
 import { slaCompliance } from '@/modules/sla/policies';
+import { csatFigures, hidesSoc } from '@/modules/surveys/figures';
+import { loadSurveyDefaults } from '@/modules/surveys/policy';
 import { rows, customerCond, rangeCond, socCond, limitSql, pct, num, round1, col, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
 
 const METRIC_LABEL: Record<string, string> = { acknowledgement: 'Acknowledgement', response: 'Response', restoration: 'Restoration', resolution: 'Resolution' };
@@ -98,6 +100,8 @@ registerReport({
       SELECT count(*) FILTER (WHERE o.status = 'completed')::int AS completed, count(*) FILTER (WHERE o.status = 'missed')::int AS missed, count(*)::int AS planned
       FROM pm_occurrences o WHERE o.planned_date >= ${p.from}::date AND o.planned_date <= ${p.to}::date ${customerCond(p.customerId, sql`o.customer_id`)}`);
     const compliance = await slaCompliance(ctx, { customerId: p.customerId ?? undefined, from: `${p.from}T00:00:00Z`, to: `${p.to}T23:59:59Z`, groupBy: 'priority' });
+    const thresholds = await loadSurveyDefaults(ctx.tx);
+    const csat = await csatFigures(ctx.tx, { customerId: p.customerId, from: new Date(`${p.from}T00:00:00Z`), to: new Date(`${p.to}T23:59:59Z`), excludeSoc: hidesSoc(ctx), satisfiedThreshold: thresholds.satisfiedThreshold, lowThreshold: thresholds.lowRatingThreshold });
     return {
       columns: [col('service', 'Service'), col('tickets', 'Tickets', 'number'), col('incidents', 'Incidents', 'number'), col('requests', 'Requests', 'number'), col('changes', 'Changes', 'number'), col('problems', 'Problems', 'number'), col('resolved', 'Resolved', 'number'), col('mttr_minutes', 'MTTR', 'minutes'), col('compliance_pct', 'SLA compliance', 'pct'), col('sla_breached', 'Breaches', 'number'), col('out_of_scope', 'Out of scope', 'number'), col('major', 'Major', 'number'), col('visits', 'Visits', 'number'), col('visit_minutes', 'On-site', 'minutes'), col('engineering_minutes', 'Engineering', 'minutes')],
       rows: table,
@@ -110,6 +114,7 @@ registerReport({
         { label: 'Site visits', value: sum('visits'), hint: `${Math.round(sum('visit_minutes') / 60)} h on site` },
         { label: 'Preventive maintenance', value: `${pm[0]?.completed ?? 0}/${pm[0]?.planned ?? 0}`, hint: `${pm[0]?.missed ?? 0} missed` },
         { label: 'Engineering hours', value: Math.round(sum('engineering_minutes') / 60) },
+        { label: 'Customer satisfaction', value: csat.avg === null ? 'n/a' : `${csat.avg}/5`, hint: `${csat.responses} responses` },
       ],
       charts: [
         { type: 'bar', title: 'Tickets by service', data: table.slice(0, 12).map((r) => ({ label: r.service, count: r.tickets })), x: 'label', y: 'count' },

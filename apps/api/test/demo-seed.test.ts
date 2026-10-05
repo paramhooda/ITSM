@@ -6,6 +6,8 @@ import { loadPrincipal, invalidatePrincipal } from '../src/core/principal';
 import { listTickets } from '../src/modules/tickets/list';
 import { listQuerySchema } from '../src/modules/tickets/schemas';
 import { loadDemoData } from '../src/seed/demo-data';
+import { listResponses } from '../src/modules/surveys/service';
+import { responsesQuery } from '../src/modules/surveys/schemas';
 
 /**
  * Loads the demonstration dataset into the test database when it is empty
@@ -55,6 +57,12 @@ describe('demo dataset', () => {
     expect(await count('problem_details', 'where is_known_error')).toBeGreaterThanOrEqual(10);
     expect(await count('problem_details', 'where portal_visible')).toBeGreaterThanOrEqual(5);
     expect(await count('problem_details', "where is_known_error and ke_status is not null and customer_workaround is not null")).toBeGreaterThanOrEqual(10);
+    // Customer satisfaction: a survey per resolved incident or request of the last ninety days, about half answered, three policy overrides.
+    expect(await count('ticket_surveys')).toBeGreaterThanOrEqual(150);
+    expect(await count('ticket_surveys', "where status = 'answered' and rating between 1 and 5")).toBeGreaterThanOrEqual(60);
+    expect(await count('ticket_surveys', 'where status = \'answered\' and rating <= 2 and low_rating_alerted_at is not null')).toBeGreaterThan(0);
+    expect(await count('tickets', 'where csat_rating is not null')).toBeGreaterThanOrEqual(60);
+    expect(await count('survey_configs')).toBeGreaterThanOrEqual(3);
   });
 
   it('keeps every customer-scoped row inside its parent customer', async () => {
@@ -69,9 +77,11 @@ describe('demo dataset', () => {
         slas: await q('select count(*)::int as n from ticket_slas s join tickets t on t.id = s.ticket_id where s.customer_id <> t.customer_id'),
         visits: await q('select count(*)::int as n from field_visits v join tickets t on t.id = v.ticket_id where v.customer_id <> t.customer_id'),
         contractDates: await q('select count(*)::int as n from contracts where end_date < start_date'),
+        surveys: await q('select count(*)::int as n from ticket_surveys s join tickets t on t.id = s.ticket_id where s.customer_id <> t.customer_id'),
+        surveyTimes: await q('select count(*)::int as n from ticket_surveys where (answered_at is not null and answered_at < requested_at) or expires_at <= requested_at'),
       };
     });
-    expect(mismatches).toEqual({ sites: 0, cis: 0, contracts: 0, rels: 0, assets: 0, slas: 0, visits: 0, contractDates: 0 });
+    expect(mismatches).toEqual({ sites: 0, cis: 0, contracts: 0, rels: 0, assets: 0, slas: 0, visits: 0, contractDates: 0, surveys: 0, surveyTimes: 0 });
   });
 
   it('has coherent SLA rows', async () => {
@@ -120,6 +130,11 @@ describe('demo dataset', () => {
     expect(page.total).toBe(abcTotal);
     expect(page.items.length).toBeGreaterThan(30);
     expect(page.items.every((t) => t.customerId === abc.id)).toBe(true);
+    // The survey responses are fenced the same way, without engineer or team names.
+    const responses = await runAs(principal!, { requestId: 'demo-seed-test', source: 'ui' }, (ctx) => listResponses(ctx, responsesQuery.parse({ page: 1, pageSize: 500, days: 365 })));
+    expect(responses.total).toBe(await count('ticket_surveys', `where customer_id = '${abc.id}' and status = 'answered' and answered_at >= now() - interval '365 days'`));
+    expect(responses.items.length).toBeGreaterThan(5);
+    expect(responses.items.every((r) => r.customerId === abc.id && !('assigneeName' in r) && !('teamName' in r) && !('recipientEmail' in r))).toBe(true);
   });
 
   it('gives a field engineer visibility limited to granted customers', async () => {

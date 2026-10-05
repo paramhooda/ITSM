@@ -62,6 +62,7 @@ Customer ─┬─ Sites ─┬─ Assets ──── CIs ──┬── CI Re
 * **SLA**: policies contain targets per ticket type × priority × metric (acknowledgement, response, restoration, resolution). Each ticket gets one `ticket_slas` row per applicable metric with the calendar snapshot used, `due_at`, pause accounting and an event trail. Policy selection order: catalog item → contract service override → contract → service default → platform default.
 * **Assets vs CIs**: assets hold the financial/lifecycle view (purchase, warranty, AMC, location, ownership); CIs hold the operational/relationship view. They may link 1:1 but either can exist alone.
 * **Changes**: `change_details` extends a change ticket (window, plans, risk answers and score, template, CAB meeting); `change_templates` (standard changes), `change_risk_questions`, `change_blackout_windows` (global or per customer) and `cab_meetings` / `cab_meeting_items` are the change-management tables; conflicts are computed, never stored (an activity records them); `change-window-reminder` runs hourly on the `sla` queue. The three definition tables carry no customer column and are fenced to staff by an explicit row-level policy; the portal reads planned changes from `tickets` and `change_details` only.
+* **Satisfaction surveys**: one `ticket_surveys` row per ticket (the recipient, the hashed and encrypted token behind the email links, the rating, the comment, the channel and a snapshot of the engineer and team at the time), `survey_configs` overrides per customer or contract over the `surveys.*` settings; `tickets.csat_rating` denormalises the answer for lists and filters. CSAT figures are computed live from the surveys table.
 
 ## 5. Scale and reliability
 
@@ -69,7 +70,7 @@ Customer ─┬─ Sites ─┬─ Assets ──── CIs ──┬── CI Re
 * **Partitioning** by month for `audit_log` and `integration_events`; a maintenance job creates partitions ahead and drops expired ones per retention settings. Tickets stay unpartitioned (indexes suffice into the tens of millions); the path to partition by `created_at` is documented in `OPERATIONS.md`.
 * **Dashboards** read from `metric_rollups_daily` (computed nightly per customer) plus live counts for "today", keeping management views fast regardless of history size.
 * **Transactions per request** keep multi-table changes atomic; the audit record is part of the same transaction.
-* **Outbox pattern** for notifications: emails are written to `notification_outbox` inside the business transaction and delivered by the worker with retries. Nothing is sent for a rolled-back operation.
+* **Outbox pattern** for notifications: emails are written to `notification_outbox` inside the business transaction and delivered by the worker with retries. Nothing is sent for a rolled-back operation. The `survey-sweep` job (`notifications` queue, hourly) sends the one reminder for unanswered satisfaction surveys and marks the expired ones.
 * **Idempotent jobs** with Redis-backed schedulers; API replicas can start concurrently (migrations use an advisory lock).
 * **Health endpoint** `/api/health`, structured JSON logs, request IDs, graceful shutdown.
 * Backups: PostgreSQL base backups + WAL (see `OPERATIONS.md`); attachments volume snapshot; Redis is reconstructible (jobs are re-derived from the database on worker start).

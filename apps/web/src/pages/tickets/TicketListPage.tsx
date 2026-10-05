@@ -22,6 +22,7 @@ import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { ScopeBadge } from '@/components/tickets/ScopeBadge';
 import { SlaIndicator, slaTone } from '@/components/tickets/SlaIndicator';
 import { RiskBadge, SentimentBadge, isUnhappy } from '@/components/tickets/RiskBadge';
+import { RatingBadge } from '@/components/surveys/RatingBadge';
 import type { TicketListRow, TicketType, SavedView } from '@/components/tickets/types';
 
 type Tab = 'all' | TicketType;
@@ -68,7 +69,14 @@ const ASSIGNEE_VIEWS = [
 ];
 const DOMAIN_LABELS: Record<string, string> = { general: 'General', noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk' };
 /** Every filter the page owns; sort/order live beside them in the URL but are not filters. */
-const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError'];
+const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat'];
+/** The customer's satisfaction rating after resolution: rated, low, awaiting a reply, never surveyed. */
+const CSAT_OPTIONS: { value: string; label: string; dot: string | null }[] = [
+  { value: 'rated', label: 'Rated', dot: 'green' },
+  { value: 'low', label: 'Low rating', dot: 'red' },
+  { value: 'pending', label: 'Awaiting reply', dot: 'amber' },
+  { value: 'unrated', label: 'Not surveyed', dot: null },
+];
 /** The Change group (shown on the Changes tab): type, questionnaire level and the scheduled window. */
 const CHANGE_TYPE_OPTIONS = [
   { value: 'standard', label: 'Standard' },
@@ -144,6 +152,7 @@ export default function TicketListPage() {
     for (const k of ['customerId', 'statusCategory', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo'] as const) if (state[k]) p[k] = state[k];
     if (state.isMajor === 'true') p.isMajor = 'true';
     if (state.knownError === 'true') p.knownError = 'true';
+    if (state.csat) p.csat = state.csat;
     if (assigneeFilter === 'me') p.mine = 'true';
     else if (assigneeFilter === 'unassigned') p.unassigned = 'true';
     else if (assigneeFilter === 'watching') p.watching = 'true';
@@ -270,12 +279,13 @@ export default function TicketListPage() {
     {
       key: 'risk',
       header: 'Risk',
-      width: '100px',
+      width: '110px',
       render: (r) => (
         <span className="inline-flex items-center gap-1.5">
           <RiskBadge risk={r.breachRisk} compact quiet />
           {isUnhappy(r.lastSentiment?.sentiment) && <SentimentBadge sentiment={r.lastSentiment?.sentiment} compact />}
-          {!r.breachRisk && !isUnhappy(r.lastSentiment?.sentiment) && <span className="text-subtle text-xs">—</span>}
+          {r.csatRating != null && <RatingBadge rating={r.csatRating} />}
+          {!r.breachRisk && !isUnhappy(r.lastSentiment?.sentiment) && r.csatRating == null && <span className="text-subtle text-xs">—</span>}
         </span>
       ),
     },
@@ -347,6 +357,7 @@ export default function TicketListPage() {
   if (state.slaState) addApplied('slaState', `SLA: ${SLA_OPTIONS.find((o) => o.value === state.slaState)?.label ?? state.slaState}`);
   if (state.breachRisk) addApplied('breachRisk', `Breach risk: ${RISK_OPTIONS.find((o) => o.value === state.breachRisk)?.label ?? state.breachRisk}`);
   if (state.sentiment) addApplied('sentiment', `Customer mood: ${SENTIMENT_OPTIONS.find((o) => o.value === state.sentiment)?.label ?? state.sentiment}`);
+  if (state.csat) addApplied('csat', `Rating: ${CSAT_OPTIONS.find((o) => o.value === state.csat)?.label ?? state.csat}`);
   if (state.createdFrom || state.createdTo) addApplied('created', `Created: ${dateRangeLabel(state.createdFrom, state.createdTo)}`, ['createdFrom', 'createdTo']);
   if (state.isMajor === 'true') addApplied('isMajor', 'Major incidents only');
   if (state.knownError === 'true') addApplied('knownError', 'Known errors only');
@@ -384,6 +395,9 @@ export default function TicketListPage() {
       </FilterGroup>
       <FilterGroup label="Customer mood" hint="From the customer's last comment" defaultOpen={!!state.sentiment}>
         <FilterOptions options={SENTIMENT_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(SENTIMENT_COLORS[o.value] ?? o.color) }))} value={state.sentiment} onChange={(v) => set({ sentiment: v as string | undefined })} />
+      </FilterGroup>
+      <FilterGroup label="Rating" hint="The satisfaction rating the customer gave after resolution" defaultOpen={!!state.csat}>
+        <FilterOptions options={CSAT_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: o.dot ? dotClass(o.dot) : null }))} value={state.csat} onChange={(v) => set({ csat: v as string | undefined })} />
       </FilterGroup>
       <FilterGroup label="Created">
         <FilterDateRange from={state.createdFrom} to={state.createdTo} onChange={(r) => set({ createdFrom: r.from, createdTo: r.to })} />

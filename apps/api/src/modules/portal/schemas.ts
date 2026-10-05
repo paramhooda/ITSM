@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ASSET_LIFECYCLE } from '@itsm/shared';
 import { paginationSchema } from '@/core/pagination';
 import { boolQ } from '@/modules/tickets/schemas';
+import { answerBody } from '@/modules/surveys/schemas';
 
 const uuid = z.string().uuid();
 const nullableUuid = uuid.nullable().optional();
@@ -9,7 +10,7 @@ const nullableUuid = uuid.nullable().optional();
 /** `?customerId=` is only honoured for MSP users previewing a customer's portal (see service `resolvePortalCustomer`). */
 export const previewQuery = z.object({ customerId: uuid.optional() });
 
-export const PORTAL_STATUS_CHIPS = ['open', 'awaiting', 'resolved', 'closed', 'all'] as const;
+export const PORTAL_STATUS_CHIPS = ['open', 'awaiting', 'resolved', 'closed', 'rate', 'all'] as const;
 export type PortalStatusChip = (typeof PORTAL_STATUS_CHIPS)[number];
 
 export const ticketListQuery = paginationSchema.extend({
@@ -46,6 +47,10 @@ export type CreateTicketBody = z.infer<typeof createTicketBody>;
 export const commentBody = z.object({ body: z.string().trim().min(1).max(50000) });
 export const reopenBody = z.object({ reason: z.string().trim().min(1).max(20000) });
 export const closeConfirmBody = z.object({ comment: z.string().trim().max(20000).nullable().optional() }).optional();
+
+/** The customer's rating of a resolved or closed ticket. */
+export const surveyAnswerBody = answerBody;
+export type SurveyAnswerBody = z.infer<typeof surveyAnswerBody>;
 
 export const decideBody = z.object({ decision: z.enum(['approved', 'rejected']), comment: z.string().max(5000).nullable().optional() });
 

@@ -3,6 +3,7 @@ import type { OptionLabel, SlaCompact, SlaMetricSummary, TimelineEntry, CatalogF
 import type { PortalAssetsOverview } from '@/components/overview/types';
 import type { Announcement } from '@/components/announcements/api';
 import type { PortalKnownError, PortalKnownErrorList } from '@/components/known-errors/api';
+import type { PortalSurvey } from '@/components/surveys/api';
 
 /** API shapes of the customer portal module (apps/api/src/modules/portal). */
 
@@ -23,11 +24,11 @@ export interface PortalMe {
     teams: { id: string; name: string; teamType: string }[];
   };
   permissions: string[];
-  counts: { open: number; awaiting: number; resolved: number; closed: number; all: number; pendingApprovals: number; upcomingVisits: number };
+  counts: { open: number; awaiting: number; resolved: number; closed: number; all: number; pendingApprovals: number; upcomingVisits: number; surveysPending: number };
   preview: boolean;
 }
 
-export type StatusChip = 'open' | 'awaiting' | 'resolved' | 'closed' | 'all';
+export type StatusChip = 'open' | 'awaiting' | 'resolved' | 'closed' | 'rate' | 'all';
 
 export interface PortalTicketRow {
   id: string;
@@ -55,10 +56,13 @@ export interface PortalTicketRow {
   updatedAt: string;
   lastActivityAt: string;
   sla: SlaCompact | null;
+  /** The customer's rating once given, and whether the satisfaction survey is still waiting for one. */
+  csatRating?: number | null;
+  surveyPending?: boolean;
 }
 
 export interface PortalTicketList extends Paginated<PortalTicketRow> {
-  counts: { open: number; awaiting: number; resolved: number; closed: number; all: number };
+  counts: { open: number; awaiting: number; resolved: number; closed: number; rate: number; all: number };
 }
 
 export interface PortalApproval {
@@ -144,11 +148,13 @@ export interface PortalTicket {
   lastActivityAt: string;
   timeline: TimelineEntry[];
   attachments: { items: PortalAttachment[]; canUpload: boolean };
-  actions: { comment: boolean; reopen: boolean; confirmClose: boolean; approve: boolean; reopenWindowDays: number };
+  actions: { comment: boolean; reopen: boolean; confirmClose: boolean; approve: boolean; rate: boolean; reopenWindowDays: number };
   /** The planned window of a change ticket; nothing else of the change reaches the portal. */
   change?: { changeType: string; scheduledStart: string | null; scheduledEnd: string | null; actualStart: string | null; actualEnd: string | null; downtimeExpectedMinutes: number | null } | null;
   /** The published known error the incident is linked to (customer wording only), or matches while nothing is linked; null without portal:kedb. */
   knownError?: { linked: PortalKnownError | null; suggestions: PortalKnownError[] } | null;
+  /** The satisfaction survey: the customer's own answer or the question to ask; never the recipient's email or the send history. */
+  survey?: PortalSurvey;
 }
 
 /** Customer-facing state of a planned change (never the internal workflow status). */

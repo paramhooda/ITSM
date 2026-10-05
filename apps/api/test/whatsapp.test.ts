@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { withSystem, closeDb, schema } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
@@ -193,7 +193,11 @@ describe('fan-out and delivery', () => {
     expect(rows.some((r) => r.recipient === '+919876543211' && (r.subject ?? '').includes(S))).toBe(false);
   });
 
+  /** The outbox job takes the oldest pending rows first; dating this test's rows back keeps them ahead of whatever other suites queued in parallel. */
+  const deliverFirst = () => withSystem((tx) => tx.update(schema.notificationOutbox).set({ scheduledAt: new Date(Date.now() - 3_600_000) }).where(and(eq(schema.notificationOutbox.recipient, '+919876543210'), eq(schema.notificationOutbox.status, 'pending'))));
+
   it('delivers through the Cloud API and records the provider message id', async () => {
+    await deliverFirst();
     const calls: { url: string; body: Record<string, unknown> }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { body?: string }) => {
       calls.push({ url: String(url), body: JSON.parse(init?.body ?? '{}') });
@@ -227,6 +231,7 @@ describe('fan-out and delivery', () => {
       queueNotification(tx, { event: 'ticket.closed', recipients: [{ userId: ids.optedIn, phone: '+919876543210', whatsappOptIn: true }], data: ticketData, customerId: ids.customer, channels: ['whatsapp'] }),
     );
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { message: 'Template name does not exist', code: 132001 } }), { status: 400, headers: { 'Content-Type': 'application/json' } })));
+    await deliverFirst();
     await deliverOutbox(200);
     const rows = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(eq(schema.notificationOutbox.event, 'ticket.closed')));
     const mine = rows.find((r) => r.recipient === '+919876543210' && (r.subject ?? '').includes(S));

@@ -10,6 +10,8 @@ import { contractStatusOptions, statusDisplay, daysToExpiry, optionLabels, userN
 import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 import { customerEntitlements } from '@/modules/contracts/entitlements';
 import { slaStateFilterSql } from '@/modules/sla/engine';
+import { csatFigures, hidesSoc } from '@/modules/surveys/figures';
+import { loadSurveyDefaults } from '@/modules/surveys/policy';
 import type { CustomerCreate, CustomerPatch, CustomerListQuery, CustomerSummaryQuery } from './schemas';
 
 const cu = schema.customers;
@@ -348,6 +350,8 @@ export async function customerOverview(ctx: Ctx, id: string) {
   const breached = sla[0]?.breached ?? 0;
   const nextVisit = visits[0] ?? null;
   const nextPm = pm[0] ?? null;
+  const thresholds = await loadSurveyDefaults(ctx.tx);
+  const csat = await csatFigures(ctx.tx, { customerId: id, from: new Date(now.getTime() - 90 * 86_400_000), to: now, excludeSoc: hidesSoc(ctx), satisfiedThreshold: thresholds.satisfiedThreshold, lowThreshold: thresholds.lowRatingThreshold });
   return {
     customer: { id: customer.id, code: customer.code, name: customer.name },
     counts,
@@ -357,6 +361,7 @@ export async function customerOverview(ctx: Ctx, id: string) {
     contracts: contracts.map((k) => ({ ...k, ...statusDisplay(k.status, statusMap), typeLabel: k.typeId ? typeLabels.get(k.typeId)?.label ?? null : null, daysToExpiry: daysToExpiry(k.endDate, now), covering: (COVERING_STATUSES as string[]).includes(k.status) })),
     entitlements,
     sla30d: { met, breached, compliancePct: met + breached > 0 ? Math.round((met / (met + breached)) * 1000) / 10 : null },
+    csat90d: { avg: csat.avg, responses: csat.responses, satisfiedPct: csat.satisfiedPct },
     recentActivity: activity,
     upcomingVisits: visits,
     upcomingPm: pm,

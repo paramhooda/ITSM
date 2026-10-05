@@ -126,6 +126,11 @@ describe('service review pack', () => {
     // the customer column is dropped from every part: the pack is about one organisation
     expect(r.sections!.find((s) => s.title === 'Entitlement utilisation')!.columns.some((c) => c.key === 'customer')).toBe(false);
     expect(r.summary?.find((s) => s.label === 'Major incidents')?.value).toBe(1);
+    // Customer satisfaction travels with the pack: a tile, a scorecard line and its two sections (no responses yet in this fixture).
+    expect(r.summary?.find((s) => s.label === 'Customer satisfaction')?.value).toBe('n/a');
+    expect(r.rows.some((row) => row.metric === 'Customer satisfaction')).toBe(true);
+    expect(r.sections?.some((s) => s.title === 'Customer satisfaction by service')).toBe(true);
+    expect(r.sections?.some((s) => s.title === 'Lowest-rated tickets')).toBe(true);
     expect(r.charts?.length).toBeGreaterThan(0);
   });
 

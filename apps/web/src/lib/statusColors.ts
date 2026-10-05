@@ -48,6 +48,10 @@ export const KB_VISIBILITY_COLORS: Record<string, string> = { internal: 'slate',
 /** Known-error lifecycle on problem records (open → fix in progress → resolved; retired leaves the portal). */
 export const KNOWN_ERROR_STATUS_COLORS: Record<string, string> = { open: 'orange', fix_in_progress: 'blue', resolved: 'green', retired: 'slate' };
 
+/** Customer satisfaction: the rating 1-5 and the survey lifecycle. */
+export const CSAT_RATING_COLORS: Record<number, string> = { 1: 'red', 2: 'orange', 3: 'amber', 4: 'green', 5: 'emerald' };
+export const SURVEY_STATUS_COLORS: Record<string, string> = { pending: 'amber', answered: 'green', expired: 'slate', cancelled: 'gray', none: 'gray' };
+
 /** Identity colours for service domains / team types (categorical, not status). */
 export const DOMAIN_COLORS: Record<string, string> = { noc: 'blue', soc: 'red', amc: 'amber', field: 'amber', service_desk: 'teal', infrastructure: 'indigo', network: 'sky', security: 'rose', cloud: 'violet', general: 'slate' };
 

@@ -23,3 +23,4 @@ export * from './schema-ext/audit';
 export * from './schema-ext/events';
 export * from './schema/handover';
 export * from './schema/briefings';
+export * from './schema/surveys';

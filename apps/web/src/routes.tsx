@@ -92,6 +92,7 @@ export const routes: AppRoute[] = [
   { path: '/knowledge/:id', component: page(() => import('@/pages/knowledge/KnowledgeArticlePage')), perm: ['kb:read', 'portal:access'], shared: true, portal: true },
   // Reports
   { path: '/reports', component: page(() => import('@/pages/reports/ReportsPage')), perm: ['reports:run', 'portal:reports'], shared: true, portal: true },
+  { path: '/reports/csat', component: page(() => import('@/pages/reports/CsatPage')), perm: ['surveys:read'] },
   // Admin
   { path: '/admin/*', component: page(() => import('@/pages/admin/AdminPage')), perm: ['admin:config', 'admin:users', 'admin:audit', 'admin:system', 'integrations:manage', 'integrations:events'] },
   // Profile / settings

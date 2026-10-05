@@ -117,6 +117,8 @@ export interface CustomerOverview {
   contracts: { id: string; number: string; name: string; status: string; statusLabel: string; statusColor: string; typeLabel: string | null; startDate: string; endDate: string; renewalDate: string | null; daysToExpiry: number; covering: boolean }[];
   entitlements: import('@/components/contracts/types').Entitlement[];
   sla30d: { met: number; breached: number; compliancePct: number | null };
+  /** Customer satisfaction over the last 90 days (null average until a rating exists). */
+  csat90d?: { avg: number | null; responses: number; satisfiedPct: number | null };
   recentActivity: { id: string; occurredAt: string; userName: string | null; entityType: string; entityId: string | null; entityLabel: string | null; action: string }[];
   upcomingVisits: { id: string; number: string; title: string; status: string; scheduledStart: string | null; scheduledEnd: string | null; engineerName: string | null; siteName: string | null }[];
   upcomingPm: { id: string; programId: string; programName: string; plannedDate: string; scheduledDate: string | null; status: string; siteName: string | null }[];

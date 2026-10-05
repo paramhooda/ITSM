@@ -270,6 +270,8 @@ export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   scheduledTo: z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date').optional(),
   /** Problems flagged as known errors (true) or not (false). */
   knownError: boolQ,
+  /** Customer satisfaction: rated, low (at or below the low-rating threshold), pending (survey awaiting an answer), unrated (ended without a rating). */
+  csat: z.enum(['rated', 'low', 'pending', 'unrated']).optional(),
   fields: z.enum(['min', 'full']).optional(),
 });
 export type ListQuery = z.infer<typeof listQuerySchema>;

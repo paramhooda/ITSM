@@ -91,6 +91,12 @@ export const IMPACT_DIRECTIONS = ['downstream', 'upstream', 'none'] as const;
 export type ImpactDirection = (typeof IMPACT_DIRECTIONS)[number];
 export const ASSET_LIFECYCLE = ['ordered', 'in_stock', 'deployed', 'in_repair', 'retired', 'disposed'] as const;
 export const KB_VISIBILITY = ['internal', 'customer', 'public'] as const;
+/** When the satisfaction survey goes out: on resolution (the customer may still reopen) or on closure. */
+export const SURVEY_SEND_ON = ['resolved', 'closed'] as const;
+export type SurveySendOn = (typeof SURVEY_SEND_ON)[number];
+/** How a survey answer reached us: the one-click email link, the portal card or the assistant. */
+export const SURVEY_CHANNELS = ['email', 'portal', 'assistant'] as const;
+export type SurveyChannel = (typeof SURVEY_CHANNELS)[number];
 /** Known error lifecycle carried on a problem record flagged as a known error. */
 export const KNOWN_ERROR_STATUSES = ['open', 'fix_in_progress', 'resolved', 'retired'] as const;
 export type KnownErrorStatus = (typeof KNOWN_ERROR_STATUSES)[number];
@@ -112,6 +118,8 @@ export const NOTIFICATION_EVENTS = [
   'briefing.daily',
   'change.cab_scheduled',
   'known_error.published',
+  'ticket.survey_requested',
+  'ticket.survey_low_rating',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

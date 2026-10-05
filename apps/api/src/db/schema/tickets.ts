@@ -97,11 +97,15 @@ export const tickets = pgTable('tickets', {
   /** Sentiment of the latest customer comment: positive | neutral | negative | angry. */
   lastSentiment: text('last_sentiment'),
   lastSentimentAt: timestamp('last_sentiment_at', { withTimezone: true }),
+  /** Denormalised from ticket_surveys when the customer answers: the rating and when, for list columns, filters and sorting. */
+  csatRating: integer('csat_rating'),
+  csatAt: timestamp('csat_at', { withTimezone: true }),
   searchVector: tsvector('search_vector').generatedAlwaysAs(searchExpr('number', 'title', 'description', 'external_ref')),
   ...timestamps,
 }, (t) => [
   uniqueIndex('tickets_number_idx').on(t.number),
   index('tickets_breach_risk_idx').on(t.breachRisk).where(sql`${t.breachRisk} IS NOT NULL`),
+  index('tickets_csat_idx').on(t.csatRating).where(sql`${t.csatRating} IS NOT NULL`),
   index('tickets_customer_created_idx').on(t.customerId, t.createdAt),
   index('tickets_status_idx').on(t.statusId),
   index('tickets_assignee_idx').on(t.assigneeId),

@@ -49,7 +49,7 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       { to: '/admin/assignment-rules', label: 'Assignment rules', perm: CONFIG },
       { to: '/admin/escalation-rules', label: 'Escalation rules', perm: CONFIG },
       { to: '/admin/approvals', label: 'Approval workflows', perm: CONFIG },
-      // slot #6: { to: '/admin/surveys', label: 'Satisfaction surveys', perm: ['surveys:manage', 'admin:config'] }
+      { to: '/admin/surveys', label: 'Satisfaction surveys', perm: ['surveys:manage', 'admin:config'] },
     ],
   },
   {

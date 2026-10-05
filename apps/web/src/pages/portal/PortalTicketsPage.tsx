@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Ticket } from 'lucide-react';
-import { PageHeader, Button, DataTable, Pagination, EmptyState, ErrorBlock, ListShell, FilterGroup, FilterOptions, FilterDateRange, FilterToggle, type Column, type AppliedFilter } from '@/components/ui';
+import { PageHeader, Button, Badge, DataTable, Pagination, EmptyState, ErrorBlock, ListShell, FilterGroup, FilterOptions, FilterDateRange, FilterToggle, type Column, type AppliedFilter } from '@/components/ui';
 import { useListState } from '@/hooks/useListState';
 import { useLookups } from '@/hooks/useLookups';
 import { fmtDate, fmtDateTime, fmtNumber, relativeTime } from '@/lib/format';
@@ -13,6 +13,7 @@ import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { StatusChips } from '@/components/portal/StatusChips';
 import { TicketCard, TicketSla } from '@/components/portal/TicketCard';
 import { portalApi, pk, type PortalTicketRow, type StatusChip } from '@/components/portal/api';
+import { RatingBadge } from '@/components/surveys/RatingBadge';
 
 const TYPE_OPTIONS = [
   { value: 'incident', label: 'Issues' },
@@ -62,6 +63,8 @@ export default function PortalTicketsPage() {
           <TypeBadge type={r.type} short className="px-1 py-0 text-[10px]" />
           {r.requesterName && <span>{r.isMine ? 'Raised by you' : `Raised by ${r.requesterName}`}</span>}
           {r.assigneeName && <span>· Engineer: {r.assigneeName}</span>}
+          {r.surveyPending && <Badge color="amber">Rate</Badge>}
+          {r.csatRating != null && <RatingBadge rating={r.csatRating} />}
         </div>
       </div>
     ) },
@@ -76,8 +79,8 @@ export default function PortalTicketsPage() {
   const empty = (
     <EmptyState
       icon={<Ticket className="h-5 w-5" />}
-      title={status === 'awaiting' ? 'Nothing is waiting on you' : status === 'open' ? 'No open tickets' : 'No tickets here'}
-      description={status === 'open' && activeCount === 0 ? 'Everything is in hand. Raise a ticket if something needs our attention.' : 'Try another filter or clear the search.'}
+      title={status === 'awaiting' ? 'Nothing is waiting on you' : status === 'rate' ? 'Nothing to rate' : status === 'open' ? 'No open tickets' : 'No tickets here'}
+      description={status === 'open' && activeCount === 0 ? 'Everything is in hand. Raise a ticket if something needs our attention.' : status === 'rate' && activeCount === 0 ? 'Resolved tickets waiting for your rating appear here; you can also rate from the email we send when a ticket is resolved.' : 'Try another filter or clear the search.'}
       action={status === 'open' && activeCount === 0 ? <Button icon={<Plus className="h-4 w-4" />} onClick={() => navigate('/portal/tickets/new')}>Raise a ticket</Button> : undefined}
     />
   );

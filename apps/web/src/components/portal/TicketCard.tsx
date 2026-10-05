@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
-import { MapPin, UserRound, MessageSquareWarning } from 'lucide-react';
+import { MapPin, UserRound, MessageSquareWarning, Star } from 'lucide-react';
+import { RatingBadge } from '@/components/surveys/RatingBadge';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { fmtDateTime, relativeTime } from '@/lib/format';
@@ -41,6 +42,12 @@ export function TicketCard({ row }: { row: PortalTicketRow }) {
             <MessageSquareWarning className="h-3.5 w-3.5" /> Needs your reply
           </span>
         )}
+        {row.surveyPending && (
+          <span className="inline-flex items-center gap-1 text-[11.5px] text-amber-700">
+            <Star className="h-3.5 w-3.5" /> Rate this ticket
+          </span>
+        )}
+        {row.csatRating != null && <RatingBadge rating={row.csatRating} />}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted">
         {row.siteName && (

@@ -27,6 +27,9 @@ import { getSetting } from '@/modules/config/service';
 import { plannedChangeState } from '@/modules/changes/service';
 import { windowOf } from '@/modules/changes/conflicts';
 import type { PortalKnownError } from '@/modules/known-errors/service';
+import { surveyRowFor, surveyView } from '@/modules/surveys/service';
+import { effectivePolicy, voluntaryRatingOpen } from '@/modules/surveys/policy';
+import { pendingSurveyCount } from '@/modules/surveys/figures';
 import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalRoleKey, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
 
 /**
@@ -112,6 +115,7 @@ export async function me(ctx: Ctx, requested?: string | null) {
     .from(schema.fieldVisits)
     .where(and(eq(schema.fieldVisits.customerId, cid), inArray(schema.fieldVisits.status, ['requested', 'scheduled', 'in_progress']), sql`${schema.fieldVisits.scheduledStart} >= now()`, sql`${schema.fieldVisits.scheduledStart} <= ${horizon}`));
   const permissions = scope.preview ? PORTAL_PERMISSIONS : PORTAL_PERMISSIONS.filter((p) => ctx.can(p, cid));
+  const surveysPending = await pendingSurveyCount(ctx.tx, cid);
 
   return {
     user: { id: ctx.user.id, name: ctx.user.name, email: ctx.user.email, phone: ctx.user.phone, timezone: ctx.user.timezone, roles: ctx.user.roles.filter((r) => !r.customerId || r.customerId === cid).map((r) => ({ key: r.key, name: r.name })) },
@@ -123,7 +127,7 @@ export async function me(ctx: Ctx, requested?: string | null) {
       teams: assignedTeams.map((t) => ({ id: t.id, name: t.name, teamType: t.teamType })),
     },
     permissions,
-    counts: { ...counts, pendingApprovals, upcomingVisits: visits?.count ?? 0 },
+    counts: { ...counts, pendingApprovals, upcomingVisits: visits?.count ?? 0, surveysPending },
     preview: scope.preview,
   };
 }
@@ -143,12 +147,13 @@ async function ticketCounts(ctx: Ctx, customerId: string, f: { type?: 'incident'
       awaiting: sql<number>`count(*) filter (where ${st.key} = ${AWAITING_STATUS_KEY})::int`,
       resolved: sql<number>`count(*) filter (where ${st.statusCategory} = 'resolved')::int`,
       closed: sql<number>`count(*) filter (where ${st.statusCategory} in ('closed','cancelled'))::int`,
+      rate: sql<number>`count(*) filter (where ${st.statusCategory} in ('resolved','closed') and exists (select 1 from ticket_surveys s where s.ticket_id = ${T.id} and s.status = 'pending' and s.expires_at > now()))::int`,
       all: sql<number>`count(*)::int`,
     })
     .from(T)
     .innerJoin(st, eq(st.id, T.statusId))
     .where(and(...conds));
-  return { open: row?.open ?? 0, awaiting: row?.awaiting ?? 0, resolved: row?.resolved ?? 0, closed: row?.closed ?? 0, all: row?.all ?? 0 };
+  return { open: row?.open ?? 0, awaiting: row?.awaiting ?? 0, resolved: row?.resolved ?? 0, closed: row?.closed ?? 0, rate: row?.rate ?? 0, all: row?.all ?? 0 };
 }
 
 export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
@@ -159,6 +164,7 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
   if (q.status === 'open') statusCategory = OPEN_CATEGORIES.join(',');
   else if (q.status === 'resolved') statusCategory = 'resolved';
   else if (q.status === 'closed') statusCategory = 'closed,cancelled';
+  else if (q.status === 'rate') statusCategory = 'resolved,closed';
   else if (q.status === 'awaiting') {
     const awaiting = await optionByKey(ctx.tx, 'ticket_status', AWAITING_STATUS_KEY);
     if (awaiting) statusId = awaiting.id;
@@ -191,6 +197,7 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     isMajor: undefined,
     open: undefined,
     knownError: undefined,
+    csat: q.status === 'rate' ? 'pending' : undefined,
   });
   const requesterNames = await userNamesOnly(ctx, res.items.map((r) => r.requesterUserId));
   const items = res.items.map((r) => ({
@@ -219,6 +226,8 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     updatedAt: r.updatedAt,
     lastActivityAt: r.lastActivityAt,
     sla: r.sla,
+    csatRating: r.csatRating,
+    surveyPending: r.surveyStatus === 'pending',
   }));
   const counts = await ticketCounts(ctx, cid, { type: q.type, mine: q.mine });
   return { items, total: res.total, page: res.page, pageSize: res.pageSize, counts };
@@ -272,6 +281,8 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
   const ref = t.closedAt ?? t.resolvedAt;
   const withinWindow = !ref || Date.now() - new Date(ref).getTime() <= windowDays * 86_400_000;
   const canAct = !scope.preview && ctx.can('portal:tickets', t.customerId);
+  const policy = await effectivePolicy(ctx.tx, { customerId: t.customerId, contractId: t.contractId });
+  const survey = await surveyView(ctx, await surveyRowFor(ctx.tx, t.id));
   const scopeContract = t.scopeContract ?? (t.contract ? { id: t.contract.id, number: t.contract.number, name: t.contract.name } : null);
   const formSchema = (t.catalogItem?.formSchema ?? []) as { key: string; label?: string; type?: string }[];
   const form = t.catalogItem
@@ -325,6 +336,8 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
     change: t.change ? { changeType: t.change.changeType, scheduledStart: t.change.scheduledStart, scheduledEnd: t.change.scheduledEnd, actualStart: t.change.actualStart, actualEnd: t.change.actualEnd, downtimeExpectedMinutes: t.change.downtimeExpectedMinutes } : null,
     // The published known error this incident is linked to (customer wording only) or published matches; never the internal workaround.
     knownError: await portalKnownErrorOf(ctx, t, scope),
+    // The satisfaction survey: the customer's own answer or the prompt; never the recipient's email or the internal send history.
+    survey: survey ? { id: survey.id, status: survey.status, question: survey.question, commentPrompt: survey.commentPrompt, rating: survey.rating, comment: survey.comment, answeredAt: survey.answeredAt, answeredBy: survey.answeredBy, channel: survey.channel, requestedAt: survey.requestedAt, expiresAt: survey.expiresAt, canAnswer: survey.canAnswer } : { status: 'none' as const, question: policy.question, commentPrompt: policy.commentPrompt || null },
     timeline: timelineItems,
     attachments: { items: attachments, canUpload: canAct },
     actions: {
@@ -333,6 +346,7 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
       confirmClose: canAct && cat === 'resolved',
       approve: !scope.preview && ctx.can('portal:approve', t.customerId) && latestApprovals.some((a) => a.status === 'pending' && a.canDecide),
       reopenWindowDays: windowDays,
+      rate: canAct && (cat === 'resolved' || cat === 'closed') && (survey ? survey.canAnswer : voluntaryRatingOpen(policy, t)),
     },
   };
 }

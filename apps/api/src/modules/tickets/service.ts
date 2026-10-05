@@ -38,6 +38,7 @@ import {
 } from './common';
 import type { CreateTicketInput, UpdateTicketInput, ChangeDetailsInput, ProblemDetailsInput } from './schemas';
 import { loadTemplate, recordConflicts, detectConflicts, assertWindowAllowed, canAssessRisk, type TemplateRow as ChangeTemplateRow } from '@/modules/changes/service';
+import { ticketSurveyEmbed } from '@/modules/surveys/service';
 
 // ---------------------------------------------------------------- helpers
 
@@ -383,6 +384,8 @@ export async function getTicket(ctx: Ctx, id: string) {
     problem: problem ?? null,
     // Incidents: the known error they are linked to, or the best matches (customer users get the portal shape; roles without the key get null).
     knownError: t.type === 'incident' ? await (await import('@/modules/known-errors/service')).matchForIncident(ctx, t) : null,
+    // The satisfaction survey of the ticket (staff learn why none was sent; customers see their own answer or the prompt).
+    survey: await ticketSurveyEmbed(ctx, t),
     change: change ? { ...change, risk: toLabel(riskOpt), ...(customer ? {} : await enrichChange(ctx, t, change, statuses.find((s) => s.id === t.statusId)?.statusCategory ?? 'open')) } : null,
     major: majorRow ? { status: majorRow.status, declaredAt: majorRow.declaredAt, resolvedAt: majorRow.resolvedAt, lastUpdateAt: majorRow.lastUpdateAt, nextUpdateDueAt: majorRow.nextUpdateDueAt, updateIntervalMinutes: majorRow.updateIntervalMinutes, commanderUserId: majorRow.commanderUserId, commsLeadUserId: majorRow.commsLeadUserId, bridgeUrl: majorRow.bridgeUrl, portalBanner: majorRow.portalBanner, pirCompletedAt: majorRow.pirCompletedAt } : null,
     escalations,
@@ -427,7 +430,7 @@ export function permissionsFor(ctx: Ctx, t: TicketRow) {
   const c = t.customerId;
   if (isCustomerUser(ctx)) {
     const portal = ctx.can('portal:tickets', c);
-    return { update: false, assign: false, resolve: false, close: false, reopen: portal, cancel: false, comment: portal, workNote: false, time: false, scope: false, escalate: false, problem: false, change: false, assessRisk: false, approve: ctx.can('portal:approve', c), tasks: false, links: false, watch: portal, major: false, publish: false };
+    return { update: false, assign: false, resolve: false, close: false, reopen: portal, cancel: false, comment: portal, workNote: false, time: false, scope: false, escalate: false, problem: false, change: false, assessRisk: false, approve: ctx.can('portal:approve', c), tasks: false, links: false, watch: portal, major: false, publish: false, survey: false };
   }
   return {
     update: ctx.can('tickets:update', c),
@@ -452,6 +455,8 @@ export function permissionsFor(ctx: Ctx, t: TicketRow) {
     major: t.type === 'incident' && ctx.can('tickets:major', c),
     /** Publish a known error (a flagged problem) to the customer portal. */
     publish: ctx.can('kedb:publish', c),
+    /** Send (or re-send) the satisfaction survey by hand. */
+    survey: ctx.can('surveys:manage', c),
   };
 }
 

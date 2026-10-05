@@ -105,12 +105,21 @@ describe('staff navigator', () => {
     expect(itemOf(noc, 'Configuration (CMDB)').children?.map((c) => c.label)).toContain('Monitoring & SIEM');
     const am = visibleNav(MSP_NAV, roleCan('account_manager'), roleAreas('account_manager'));
     expect(am.find((i) => i.label === 'Configuration (CMDB)')).toBeUndefined();
-    // Reports has one module (Catalogue) until the report builder or customer satisfaction land; this assertion retires itself then.
+    // Reports lists its modules once Customer satisfaction (surveys:read) sits next to the catalogue; before that it has none.
+    const reportsFor = (role: string) => visibleNav(MSP_NAV, roleCan(role), roleAreas(role)).find((i) => i.label === 'Reports');
     if (strips.REPORT_MODULES.length === 1) {
       for (const role of Object.keys(SYSTEM_ROLES)) {
-        const reports = visibleNav(MSP_NAV, roleCan(role), roleAreas(role)).find((i) => i.label === 'Reports');
+        const reports = reportsFor(role);
         if (reports) expect(reports.children, `${role}: Reports has no modules while only the catalogue exists`).toBeUndefined();
       }
+    } else {
+      const csat = strips.REPORT_MODULES.find((m) => m.to === '/reports/csat');
+      expect(csat?.perm).toEqual(['surveys:read']);
+      const manager = reportsFor('service_manager');
+      expect(manager?.children?.map((c) => c.label)).toContain('Customer satisfaction');
+      expect(manager?.children?.map((c) => c.label)).toContain('Catalogue');
+      // engineers run reports but hold no surveys:read, so the catalogue stands alone and no module list is shown
+      expect(reportsFor('engineer')?.children).toBeUndefined();
     }
   });
 
@@ -199,7 +208,7 @@ describe('administration rail', () => {
     for (const to of railPaths) expect(routes.has(to), `${to} is a page`).toBe(true);
     expect(new Set(railPaths).size).toBe(railPaths.length);
     const adminPages = APP_PAGES.filter((p) => p.app === 'admin' && !p.hidden && !/[:*]/.test(p.route) && p.route !== '/admin');
-    expect(adminPages).toHaveLength(28);
+    expect(adminPages).toHaveLength(29);
     for (const p of adminPages) expect(railPaths, `${p.key} (${p.route}) is in the rail`).toContain(p.route);
     expect(railPaths).toContain('/admin');
   });

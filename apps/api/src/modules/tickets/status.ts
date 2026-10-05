@@ -8,6 +8,7 @@ import { ValidationError } from '@/core/errors';
 import { onStatusChange } from '@/modules/sla/engine';
 import { type TicketRow, type OptionRow, actorOf, addActivity, optionById, optionByKey, optionsOfType, reloadTicket, requireOption, statusApplies, userIdOf } from './common';
 import { notifyTicketEvent } from './notify';
+import { onTicketEnded, onTicketReopened } from '@/modules/surveys/service';
 
 export interface StatusChangeOptions {
   resolutionCodeId?: string | null;
@@ -140,6 +141,9 @@ export async function changeStatusCore(ctx: Ctx, ticket: TicketRow, to: OptionRo
     else if (toCat === 'closed') await notifyTicketEvent(ctx, 'ticket.closed', updated, { previousStatus: from?.label ?? null });
     else await notifyTicketEvent(ctx, 'ticket.status_changed', updated, { previousStatus: from?.label ?? null, comment: opts.comment ?? null });
   }
+  // Satisfaction survey: issued when the ticket ends, withdrawn when it is reopened or cancelled (never fails the transition).
+  if (toCat === 'resolved' || toCat === 'closed') await onTicketEnded(ctx, updated, { category: toCat, from: fromCat, action });
+  else if (reopened || toCat === 'cancelled') await onTicketReopened(ctx, updated, toCat === 'cancelled' ? 'cancelled' : 'reopened');
   return reloadTicket(ctx.tx, ticket.id);
 }
 

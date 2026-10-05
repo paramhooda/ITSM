@@ -6,6 +6,9 @@ import { Inbox, ShieldCheck, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { get } from '@/api/client';
 import { useCustomersLookup } from '@/hooks/useLookups';
 import { fmtDuration, fmtNumber, fmtPct } from '@/lib/format';
+import { truncate } from '@/lib/utils';
+import { fmtRating, ratingTone } from '@/components/surveys/api';
+import { RatingBadge } from '@/components/surveys/RatingBadge';
 import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
@@ -26,6 +29,19 @@ interface Management {
   expiringContracts: ExpiringContract[];
   expiringContractsTotal: number;
   trends: Record<string, Delta>;
+  /** Customer satisfaction in the period: the figures, the weekly average and the lowest-rated tickets. */
+  csat?: {
+    avg: number | null;
+    satisfiedPct: number | null;
+    responseRate: number | null;
+    responses: number;
+    sent: number;
+    low: number;
+    series: { week: string; responses: number; avg: number | null }[];
+    lowest: { ticketId: string; number: string; title: string; customerName: string | null; rating: number; comment: string | null; answeredAt: string; assigneeName: string | null }[];
+    previous: { avg: number | null; responses: number };
+    trendAvg: Delta | null;
+  };
 }
 
 const tail = <T,>(arr: T[], n: number) => arr.slice(Math.max(0, arr.length - n));
@@ -117,6 +133,8 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             <Stat label="PM on time" value={fmtPct(k.pmOnTimePct)} tone={(k.pmMissed ?? 0) > 0 ? 'warn' : 'default'} />
             <Stat label="Known errors open" value={fmtNumber(k.knownErrorsOpen)} tone={(k.knownErrorsOpen ?? 0) > 0 ? 'warn' : 'default'} />
             <Stat label="Known errors published" value={fmtNumber(k.knownErrorsPublished)} />
+            <Stat label="Customer satisfaction" value={fmtRating(k.csatAvg)} tone={ratingTone(k.csatAvg)} />
+            <Stat label="Survey response rate" value={fmtPct(k.csatResponseRate)} />
           </div>
         </Panel>
       </div>
@@ -148,6 +166,18 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
         <Panel className="rise-in rise-in-4" title="Entitlements near limit" subtitle="AMC visits and hours over their warning threshold" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report">
           <EntitlementAlerts items={d.entitlementAlerts.slice(0, 5)} />
         </Panel>
+        {d.csat && (
+          <Panel className="rise-in rise-in-4 xl:col-span-2" title="Customer satisfaction" subtitle={`Average rating per week and the lowest-rated tickets · ${fmtNumber(d.csat.responses)} ${d.csat.responses === 1 ? 'response' : 'responses'} from ${fmtNumber(d.csat.sent)} surveys, ${fmtPct(d.csat.satisfiedPct)} satisfied`} to="/reports/csat" toLabel="Customer satisfaction">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <TrendChart data={d.csat.series.some((p) => p.responses) ? d.csat.series : []} x="week" kind="line" series={[{ key: 'avg', label: 'Average rating', color: '#0f9d6f' }]} height={200} yDomain={[1, 5]} yTicks={[1, 2, 3, 4, 5]} yFormatter={(v) => String(v)} valueFormatter={(v) => `${v.toFixed(1)}/5`} />
+              <RowList
+                dense
+                empty="No ratings in this period"
+                items={d.csat.lowest.map((l) => ({ key: l.ticketId, href: `/tickets/${l.ticketId}`, primary: `${l.number} · ${l.title}`, secondary: `${l.customerName ?? ''}${l.assigneeName ? ` · ${l.assigneeName}` : ''}${l.comment ? ` · “${truncate(l.comment, 90)}”` : ''}`, right: <RatingBadge rating={l.rating} /> }))}
+              />
+            </div>
+          </Panel>
+        )}
       </div>
       <div className="text-[12px] text-subtle">
         Looking for more? <Link to="/reports" className="text-default font-medium hover:underline">Reports</Link> cover incidents, SLA, AMC utilization, out-of-scope activity and more.

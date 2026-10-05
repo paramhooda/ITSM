@@ -29,6 +29,7 @@ const ChangeTemplatesPage = page(() => import('./ChangeTemplatesPage'));
 const ChangeRiskQuestionsPage = page(() => import('./ChangeRiskQuestionsPage'));
 const ChangeBlackoutsPage = page(() => import('./ChangeBlackoutsPage'));
 const CatalogPage = page(() => import('./CatalogPage'));
+const SurveysPage = page(() => import('./SurveysPage'));
 const CiTypesPage = page(() => import('./CiTypesPage'));
 const RelationshipTypesPage = page(() => import('./RelationshipTypesPage'));
 const UsersPage = page(() => import('./UsersPage'));
@@ -75,6 +76,7 @@ export default function AdminPage() {
           <Route path="change-risk-questions" element={<Guarded perm={CONFIG}><ChangeRiskQuestionsPage /></Guarded>} />
           <Route path="change-blackouts" element={<Guarded perm={CONFIG}><ChangeBlackoutsPage /></Guarded>} />
           <Route path="catalog" element={<Guarded perm={CONFIG}><CatalogPage /></Guarded>} />
+          <Route path="surveys" element={<Guarded perm={['surveys:manage', 'admin:config']}><SurveysPage /></Guarded>} />
           <Route path="ci-types" element={<Guarded perm={CONFIG}><CiTypesPage /></Guarded>} />
           <Route path="relationship-types" element={<Guarded perm={CONFIG}><RelationshipTypesPage /></Guarded>} />
           <Route path="users" element={<Guarded perm={USERS}><UsersPage /></Guarded>} />

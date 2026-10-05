@@ -7,6 +7,8 @@ import { entitlementSummary, customerEntitlements } from '@/modules/contracts/en
 import { expiringContracts } from '@/modules/contracts/service';
 import { parseDay } from '@/modules/reports/dates';
 import { onCallSummary } from '@/modules/oncall/service';
+import { csatFigures, csatLowest, hidesSoc, pendingSurveyCount, pendingSurveyItems, type CsatFilter } from '@/modules/surveys/figures';
+import { loadSurveyDefaults } from '@/modules/surveys/policy';
 import { q, one, num, pct, isCustomerUser, openCond, custCond, socCond, BREACHED, AT_RISK, AGE_BUCKET, TICKET_LIST_COLS, TICKET_LIST_COLS_STAFF, TICKET_LIST_JOINS, EMPTY, dailySeries, ticketFlowSeries, sumOf, weightedOf, delta, toDay, addDays, daysBetween, METRIC_KEYS, type MetricKey } from './common';
 
 type Row = Record<string, unknown>;
@@ -22,6 +24,12 @@ async function onCallFor(ctx: Ctx, teamTypes: string[]) {
   if (!ctx.can('oncall:read')) return [];
   const typed = await onCallSummary(ctx.tx, teamTypes);
   return typed.length ? typed : onCallSummary(ctx.tx, null, new Date(), 4);
+}
+
+/** The CSAT window and thresholds every dashboard shares (`from`/`to` are YYYY-MM-DD days, inclusive); staff without soc:read never see security tickets' surveys. */
+async function csatWindow(ctx: Ctx, from: string, to: string, extra: Partial<CsatFilter> = {}): Promise<CsatFilter> {
+  const t = await loadSurveyDefaults(ctx.tx);
+  return { from: new Date(`${from}T00:00:00.000Z`), to: new Date(`${to}T23:59:59.999Z`), excludeSoc: hidesSoc(ctx), satisfiedThreshold: t.satisfiedThreshold, lowThreshold: t.lowRatingThreshold, ...extra };
 }
 
 // ---------------------------------------------------------------- management
@@ -93,6 +101,10 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
   const resBreached = sumOf(series, 'resolutionBreached');
   const pResMet = sumOf(previous, 'resolutionMet');
   const pResBreached = sumOf(previous, 'resolutionBreached');
+  const csatFilter = await csatWindow(ctx, from, today, { customerId });
+  const csat = await csatFigures(ctx.tx, csatFilter);
+  const csatPrevious = await csatFigures(ctx.tx, { ...csatFilter, from: new Date(`${prevFrom}T00:00:00.000Z`), to: new Date(`${prevTo}T23:59:59.999Z`) });
+  const csatLowestRows = await csatLowest(ctx.tx, csatFilter, 5);
   const kpis = {
     customersActive: num(counts.customers_active),
     contractsActive: num(counts.contracts_active),
@@ -125,6 +137,9 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
     engineeringHours: Math.round(sumOf(series, 'engineeringMinutes') / 6) / 10,
     knownErrorsOpen: num(knownErrors.ke_open),
     knownErrorsPublished: num(knownErrors.ke_published),
+    csatAvg: csat.avg,
+    csatSatisfiedPct: csat.satisfiedPct,
+    csatResponseRate: csat.responseRate,
   };
   return {
     period: { days, from, to: today, previousFrom: prevFrom, previousTo: prevTo },
@@ -145,6 +160,19 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
       mttrMinutes: delta(kpis.mttrMinutes, weightedOf(previous, 'mttrMinutes', 'resolved')),
       outOfScope: delta(kpis.outOfScopeCount, sumOf(previous, 'outOfScope')),
       majorIncidents: delta(kpis.majorIncidents, sumOf(previous, 'major')),
+    },
+    /** Customer satisfaction over the period: the figures, the weekly series, the lowest-rated tickets and the previous period. */
+    csat: {
+      avg: csat.avg,
+      satisfiedPct: csat.satisfiedPct,
+      responseRate: csat.responseRate,
+      responses: csat.responses,
+      sent: csat.sent,
+      low: csat.low,
+      series: csat.series,
+      lowest: csatLowestRows.map((l) => ({ ticketId: l.ticketId, number: l.number, title: l.title, customerName: l.customerName, rating: l.rating, comment: l.comment, answeredAt: l.answeredAt, assigneeName: l.assigneeName })),
+      previous: { avg: csatPrevious.avg, responses: csatPrevious.responses },
+      trendAvg: delta(csat.avg, csatPrevious.avg),
     },
   };
 }
@@ -338,6 +366,11 @@ export async function engineer(ctx: Ctx, opts: { days?: number; customerId?: str
   const today = toDay(new Date());
   const from14 = addDays(today, -(days - 1));
   const flow = await ticketFlowSeries(ctx, from14, today, sql`AND t.assignee_id = ${me}::uuid ${soc} ${cust}`);
+  const csatFilter = await csatWindow(ctx, from14, today, { customerId, assigneeId: me });
+  const csat = await csatFigures(ctx.tx, csatFilter);
+  const recent = await q<Row>(ctx, sql`
+    SELECT s.ticket_id, t.number, t.title, s.rating, s.comment, s.answered_at, cu.name AS customer_name FROM ticket_surveys s JOIN tickets t ON t.id = s.ticket_id LEFT JOIN customers cu ON cu.id = s.customer_id
+    WHERE s.assignee_id = ${me}::uuid AND s.status = 'answered' AND s.answered_at >= ${csatFilter.from} ${soc} ${custCond(customerId, sql`s.customer_id`)} ORDER BY s.answered_at DESC LIMIT 5`);
   return {
     generatedAt: new Date(),
     period: { days, from: from14, to: today },
@@ -350,6 +383,8 @@ export async function engineer(ctx: Ctx, opts: { days?: number; customerId?: str
     activity: { comments: num(activity.comments), minutes: num(activity.minutes), resolved: num(activity.resolved), breachedAssigned: num(activity.breached) },
     knowledge,
     watched,
+    /** Customer ratings on tickets I handled over the period. */
+    csat: { avg: csat.avg, responses: csat.responses, satisfiedPct: csat.satisfiedPct, recent: recent.map((r) => ({ ticketId: String(r.ticket_id), number: String(r.number), title: String(r.title), rating: num(r.rating), comment: (r.comment as string | null) ?? null, answeredAt: r.answered_at ?? null, customerName: (r.customer_name as string | null) ?? null })) },
   };
 }
 
@@ -412,6 +447,10 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
     ? await q<Row>(ctx, sql`SELECT t.id, t.number, t.title, coalesce(pd.ke_status, 'open') AS ke_status, pd.published_at FROM problem_details pd JOIN tickets t ON t.id = pd.ticket_id WHERE ${keConds} AND coalesce(pd.ke_status, 'open') IN ('open', 'fix_in_progress') ORDER BY pd.published_at DESC NULLS LAST LIMIT 5`)
     : [];
   const openTotal = num(counts.open);
+  const csatFilter = await csatWindow(ctx, from30, today, { customerId });
+  const csat = await csatFigures(ctx.tx, csatFilter);
+  const pendingCount = await pendingSurveyCount(ctx.tx, customerId);
+  const pendingItems = isCustomerUser(ctx) ? await pendingSurveyItems(ctx.tx, customerId, null, 5) : [];
   return {
     generatedAt: now,
     customer: info ? { id: info.id, name: info.name, code: info.code, timezone: info.timezone } : { id: customerId, name: '', code: '', timezone: 'UTC' },
@@ -441,6 +480,8 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
       teams,
     },
     knownErrors: { published: num(kePublished.n), items: keItems.map((r) => ({ id: String(r.id), number: String(r.number), title: String(r.title), keStatus: String(r.ke_status), publishedAt: r.published_at ?? null })) },
+    /** The organisation's satisfaction over the period and the tickets still to rate (items for portal users only). */
+    csat: { avg: csat.avg, responses: csat.responses, satisfiedPct: csat.satisfiedPct, pending: { count: pendingCount, items: pendingItems } },
   };
 }
 
@@ -519,6 +560,7 @@ export async function amc(ctx: Ctx, opts: { days?: number; customerId?: string |
   const sla = await one<Row>(ctx, sql`
     SELECT count(*) FILTER (WHERE s.state = 'met')::int AS met, count(*) FILTER (WHERE s.state = 'breached')::int AS breached
     FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.metric = 'resolution' AND ${base} ${cust} AND t.created_at >= ${from30}::date`);
+  const csat = await csatFigures(ctx.tx, await csatWindow(ctx, from30, today, { customerId, domain: 'amc' }));
   return {
     generatedAt: new Date(),
     period: { days, from: from30, to: today },
@@ -552,5 +594,7 @@ export async function amc(ctx: Ctx, opts: { days?: number; customerId?: string |
     visits,
     maintenance,
     entitlements,
+    /** Customer satisfaction on AMC tickets over the period. */
+    csat30d: { avg: csat.avg, responses: csat.responses, satisfiedPct: csat.satisfiedPct },
   };
 }

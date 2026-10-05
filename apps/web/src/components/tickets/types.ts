@@ -1,3 +1,4 @@
+import type { SurveyEmbed } from '@/components/surveys/api';
 import type { KnownErrorRow } from '@/components/known-errors/api';
 import { TICKET_TYPE_COLORS } from '@/lib/statusColors';
 import type { Conflict } from '@/components/changes/api';
@@ -98,6 +99,9 @@ export interface TicketListRow {
   lastSentiment: SentimentFlag | null;
   /** A problem flagged as a known error. */
   isKnownError?: boolean;
+  /** The customer's satisfaction rating once answered, and the state of the ticket's survey. */
+  csatRating?: number | null;
+  surveyStatus?: string | null;
 }
 
 export interface TicketStats {
@@ -260,6 +264,8 @@ export interface TicketPermissions {
   major: boolean;
   /** Publish the problem's customer wording to the portal (kedb:publish). */
   publish?: boolean;
+  /** Send or re-send the satisfaction survey by hand (surveys:manage). */
+  survey?: boolean;
 }
 
 export type MajorStatus = 'active' | 'resolved' | 'review_done' | 'demoted';
@@ -476,6 +482,8 @@ export interface TicketDetail {
   major?: MajorSummary | null;
   /** Incidents only: the linked known error, or the best matches while nothing is linked; null without kedb:read. */
   knownError?: { linked: KnownErrorRow | null; suggestions: KnownErrorRow[] } | null;
+  /** The satisfaction survey of the ticket (staff see the recipient and the send history), or why none was sent. */
+  survey?: SurveyEmbed | null;
 }
 
 export interface TimelineEntry {

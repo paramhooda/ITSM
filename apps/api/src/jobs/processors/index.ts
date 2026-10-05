@@ -19,3 +19,4 @@ import './risk';
 import './status';
 import './changes';
 import './briefings';
+import './surveys';

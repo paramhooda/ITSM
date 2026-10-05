@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getTableColumns } from 'drizzle-orm';
+import { TICKET_TYPES } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { ValidationError, NotFoundError } from '@/core/errors';
 import { listOptions, createOption, updateOption, listConfig, createConfig, updateConfig, updateSettings, getSetting, CONFIG_TABLES } from '@/modules/config/service';
@@ -16,7 +17,7 @@ import { RULE_KINDS, SECRET_SETTING_KEY, settingVisible, type RuleKind } from '.
  */
 
 /** Settings the assistant may change, by prefix; anything else is read-only or hidden. */
-export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.', 'known_errors.'];
+export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.', 'known_errors.', 'surveys.'];
 const settingValue = z.union([z.string().max(2000), z.number(), z.boolean(), z.null(), z.array(z.string().max(100)).max(50)]);
 
 /** Validation for the settings whose shape the platform depends on. */
@@ -40,6 +41,18 @@ function validateSetting(key: string, value: unknown) {
     case 'known_errors.notify_customers': return expect(typeof value === 'boolean', 'must be true or false');
     case 'known_errors.resolve_on_fix': return expect(typeof value === 'boolean', 'must be true or false');
     case 'known_errors.suggest_limit': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10, 'must be between 1 and 10');
+    case 'surveys.enabled': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'surveys.resend_on_close': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'surveys.send_on': return expect(value === 'resolved' || value === 'closed', 'must be resolved or closed');
+    case 'surveys.sampling_pct': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100, 'must be between 0 and 100');
+    case 'surveys.question': return expect(typeof value === 'string' && value.trim().length >= 5 && value.length <= 300, 'must be 5 to 300 characters');
+    case 'surveys.comment_prompt': return expect(typeof value === 'string' && value.length <= 300, 'must be at most 300 characters');
+    case 'surveys.reminder_days': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 60, 'must be between 0 and 60 days');
+    case 'surveys.expiry_days': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 90, 'must be between 1 and 90 days');
+    case 'surveys.fatigue_days': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 365, 'must be between 0 and 365 days');
+    case 'surveys.low_rating_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 4, 'must be between 1 and 4');
+    case 'surveys.satisfied_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 5, 'must be between 2 and 5');
+    case 'surveys.ticket_types': return expect(Array.isArray(value) && value.length > 0 && value.every((v) => (TICKET_TYPES as readonly string[]).includes(String(v))), `must be a list of: ${TICKET_TYPES.join(', ')}`);
     case 'ai.triage.auto_apply_confidence': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 100, 'must be between 50 and 100');
     case 'ai.triage.storm_window_minutes': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 5 && value <= 1440, 'must be between 5 and 1440 minutes');
     case 'ai.triage.storm_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 50, 'must be between 2 and 50');
