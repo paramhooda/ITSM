@@ -64,6 +64,9 @@ export const INSTALL_SOURCE_COLORS: Record<string, string> = { manual: 'slate', 
 /** Identity colours for service domains / team types (categorical, not status). */
 export const DOMAIN_COLORS: Record<string, string> = { noc: 'blue', soc: 'red', amc: 'amber', field: 'amber', service_desk: 'teal', infrastructure: 'indigo', network: 'sky', security: 'rose', cloud: 'violet', general: 'slate' };
 
+/** Who a custom report reaches: only its owner, the roles and teams it is shared with, or the customer portal too. */
+export const REPORT_VISIBILITY_COLORS: Record<string, string> = { private: 'slate', shared: 'blue', portal: 'green' };
+
 /** Hex equivalents for charts (bars/dots), matching the badge tints. */
 export const COLOR_HEX: Record<string, string> = {
   red: '#dc2626', orange: '#ea580c', amber: '#d97706', yellow: '#ca8a04', green: '#16a34a', emerald: '#16a34a', teal: '#0d9488', cyan: '#0891b2', sky: '#0284c7',

@@ -122,7 +122,8 @@ export function Card({ className, children, title, actions, padded = true, ...pr
 export function PageHeader({ title, subtitle, actions, breadcrumb }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; breadcrumb?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
-      <div className="flex-1 min-w-0">
+      {/* the title keeps at least 12rem, so a wide action group wraps under it on a phone instead of crushing it */}
+      <div className="flex-1 min-w-[12rem]">
         {breadcrumb && <div className="text-[12.5px] text-subtle mb-1.5">{breadcrumb}</div>}
         <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.025em] truncate">{title}</h1>
         {subtitle && <div className="text-[13.5px] text-muted mt-1">{subtitle}</div>}

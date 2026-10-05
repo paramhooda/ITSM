@@ -17,7 +17,7 @@ import { RULE_KINDS, SECRET_SETTING_KEY, settingVisible, type RuleKind } from '.
  */
 
 /** Settings the assistant may change, by prefix; anything else is read-only or hidden. */
-export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.', 'known_errors.', 'surveys.', 'boards.', 'software.'];
+export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.', 'known_errors.', 'surveys.', 'boards.', 'software.', 'reports.'];
 const settingValue = z.union([z.string().max(2000), z.number(), z.boolean(), z.null(), z.array(z.string().max(100)).max(50)]);
 
 /** Validation for the settings whose shape the platform depends on. */
@@ -61,6 +61,9 @@ function validateSetting(key: string, value: unknown) {
     case 'software.stale_install_days': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 365, 'must be between 1 and 365 days');
     case 'software.unused_seat_pct': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100, 'must be between 0 and 100');
     case 'software.import_creates_products': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'reports.builder.max_rows': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 50_000, 'must be between 1 and 50000 rows');
+    case 'reports.builder.preview_rows': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 5000, 'must be between 50 and 5000 rows');
+    case 'reports.builder.statement_timeout_ms': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1000 && value <= 120_000, 'must be between 1000 and 120000 milliseconds');
     case 'ai.triage.auto_apply_confidence': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 50 && value <= 100, 'must be between 50 and 100');
     case 'ai.triage.storm_window_minutes': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 5 && value <= 1440, 'must be between 5 and 1440 minutes');
     case 'ai.triage.storm_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 50, 'must be between 2 and 50');

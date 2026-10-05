@@ -8,7 +8,7 @@ import { NotFoundError, ValidationError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { enqueue } from '@/jobs/queues';
 import { pdfAvailable } from '@/lib/pdf';
-import { findReport, requireReport, isCustomerUser } from './registry';
+import { findReport, resolveReport, requireReport, isCustomerUser, isCustomKey, isCustomDefinition } from './registry';
 import { DATE_RANGE_PRESETS, isValidTimezone } from './dates';
 
 export const FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'cron'] as const;
@@ -78,11 +78,19 @@ export function computeNextRun(s: { frequency: string; cronExpression?: string |
 async function validate(ctx: Ctx, input: Partial<ScheduleInput>, existing?: ScheduleRow) {
   const reportKey = input.reportKey ?? existing?.reportKey;
   if (!reportKey) throw new ValidationError('reportKey is required');
-  const def = findReport(reportKey);
+  const def = await resolveReport(ctx, reportKey);
   if (!def) throw new ValidationError(`Unknown report: ${reportKey}`);
   const customerId = input.customerId === undefined ? existing?.customerId ?? null : input.customerId;
   if (customerId) ctx.requireCustomer(customerId);
-  requireReport(ctx, reportKey, customerId);
+  await requireReport(ctx, reportKey, customerId);
+  // a custom report fixed to one customer cannot be scheduled for another, nor fanned out per customer
+  if (isCustomDefinition(def) && def.custom.scopeCustomerId) {
+    const filters = (input.filters ?? existing?.filters ?? {}) as Record<string, unknown>;
+    if ((customerId && customerId !== def.custom.scopeCustomerId) || filters.perCustomer === true) {
+      const [c] = await ctx.tx.select({ name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, def.custom.scopeCustomerId)).limit(1);
+      throw new ValidationError(`This report is fixed to ${c?.name ?? 'one customer'}`);
+    }
+  }
   const frequency = input.frequency ?? existing?.frequency ?? 'weekly';
   const cronExpression = input.cronExpression === undefined ? existing?.cronExpression ?? null : input.cronExpression;
   if (frequency === 'cron') {
@@ -99,10 +107,19 @@ async function validate(ctx: Ctx, input: Partial<ScheduleInput>, existing?: Sche
   return { def, customerId, frequency, cronExpression, timezone };
 }
 
-const view = <T extends ScheduleRow>(s: T) => ({ ...s, reportName: findReport(s.reportKey)?.name ?? s.reportKey });
+const view = <T extends ScheduleRow>(s: T, names: Map<string, string>) => ({ ...s, reportName: names.get(s.reportKey) ?? findReport(s.reportKey)?.name ?? s.reportKey });
+
+/** Names of the custom definitions the schedules point at (retired ones included: the schedule still shows its report). */
+async function customNames(tx: Tx, keys: string[]): Promise<Map<string, string>> {
+  const ids = keys.filter(isCustomKey).map((k) => k.slice('custom:'.length)).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  if (!ids.length) return new Map();
+  const rows = await tx.select({ id: schema.reportDefinitions.id, name: schema.reportDefinitions.name }).from(schema.reportDefinitions).where(inArray(schema.reportDefinitions.id, ids));
+  return new Map(rows.map((r) => [`custom:${r.id}`, r.name]));
+}
 
 async function decorate(tx: Tx, list: ScheduleRow[]) {
   if (!list.length) return [];
+  const names = await customNames(tx, list.map((s) => s.reportKey));
   const customerIds = [...new Set(list.map((s) => s.customerId).filter((x): x is string => !!x))];
   const userIds = [...new Set([...list.flatMap((s) => s.recipientUserIds), ...list.map((s) => s.createdBy).filter((x): x is string => !!x)])];
   // one client per transaction: run the lookups sequentially
@@ -112,7 +129,7 @@ async function decorate(tx: Tx, list: ScheduleRow[]) {
   const cmap = new Map(customers.map((c) => [c.id, c.name]));
   const umap = new Map(users.map((u) => [u.id, u]));
   const lmap = new Map((lastRuns.rows as { schedule_id: string; status: string; error: string | null }[]).map((r) => [r.schedule_id, r]));
-  return list.map((s) => view({ ...s, customerName: s.customerId ? cmap.get(s.customerId) ?? null : null, createdByName: s.createdBy ? umap.get(s.createdBy)?.name ?? null : null, recipientUsers: s.recipientUserIds.map((id) => umap.get(id)).filter((u): u is { id: string; name: string; email: string } => !!u), lastRunStatus: lmap.get(s.id)?.status ?? null, lastRunError: lmap.get(s.id)?.error ?? null }));
+  return list.map((s) => view({ ...s, customerName: s.customerId ? cmap.get(s.customerId) ?? null : null, createdByName: s.createdBy ? umap.get(s.createdBy)?.name ?? null : null, recipientUsers: s.recipientUserIds.map((id) => umap.get(id)).filter((u): u is { id: string; name: string; email: string } => !!u), lastRunStatus: lmap.get(s.id)?.status ?? null, lastRunError: lmap.get(s.id)?.error ?? null }, names));
 }
 
 export async function listSchedules(ctx: Ctx, q: { customerId?: string; reportKey?: string; isActive?: boolean } = {}) {

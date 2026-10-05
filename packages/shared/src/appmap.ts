@@ -18,7 +18,7 @@ export interface AppEntry {
   portal?: boolean;
 }
 
-export type PageEntity = 'ticket' | 'customer' | 'contract' | 'asset' | 'ci' | 'field_visit' | 'kb_article' | 'sla_policy' | 'discovery_source' | 'discovery_run' | 'discovery_finding' | 'cab_meeting' | 'known_error' | 'software_product' | 'software_licence';
+export type PageEntity = 'ticket' | 'customer' | 'contract' | 'asset' | 'ci' | 'field_visit' | 'kb_article' | 'sla_policy' | 'discovery_source' | 'discovery_run' | 'discovery_finding' | 'cab_meeting' | 'known_error' | 'software_product' | 'software_licence' | 'report_definition';
 
 export interface AppPage {
   /** Stable key such as `tickets.list`. */
@@ -48,7 +48,7 @@ export interface AppPage {
 
 export const APPLICATIONS: AppEntry[] = [
   { key: 'dashboards', label: 'Dashboards', description: 'Home dashboards: management overview, NOC, SOC, AMC and my work, with a period and customer scope.' },
-  { key: 'reports', label: 'Reports', description: 'Operational and contractual reports, customer satisfaction (CSAT), CSV, HTML, PDF and Excel output, and scheduled deliveries.', perm: ['reports:run', 'portal:reports'], portal: true },
+  { key: 'reports', label: 'Reports', description: 'Operational and contractual reports, custom reports built in the browser, customer satisfaction (CSAT), CSV, HTML, PDF and Excel output, and scheduled deliveries.', perm: ['reports:run', 'portal:reports'], portal: true },
   { key: 'tickets', label: 'Tickets', description: 'Incidents, service requests, problems and changes with SLA clocks, approvals, comments and work notes, and task boards.', perm: ['tickets:read'] },
   { key: 'knowledge', label: 'Knowledge', description: 'Knowledge articles (SOPs, runbooks, troubleshooting) and the known error database with workarounds, for staff and for customers.', perm: ['kb:read', 'portal:access'], portal: true },
   { key: 'operations', label: 'Operations', description: 'Major incidents (bridge, commander, stakeholder updates, post-incident review), on-call (rotas, cover, escalation policies, paging), announcements and shift handover.', perm: ['tickets:read'] },
@@ -156,8 +156,10 @@ export const APP_PAGES: AppPage[] = [
   p({ key: 'knowledge.article', app: 'knowledge', label: 'Knowledge article', route: '/knowledge/:id', purpose: 'One article with its versions and feedback.', perm: ['kb:read', 'portal:access'], portal: true, entity: 'kb_article', toolsets: ['knowledge'] }),
 
   // ---- reports (shared)
-  p({ key: 'reports', app: 'reports', label: 'Reports', route: '/reports', purpose: 'Run a report (open tickets, volume, SLA performance, service report, AMC utilisation, contract expiry, maintenance, visits, security incidents, assets, CMDB, audit) with parameters, download CSV or HTML, and manage schedules.', perm: ['reports:run', 'portal:reports'], portal: true, filters: ['key', 'customerId', 'dateRange'], toolsets: ['reports'], howTo: ['Pick a report, set the customer and date range, then Run; CSV and HTML downloads are kept under Runs.', 'Schedules (reports:manage) deliver a report by email on a cadence.'] }),
+  p({ key: 'reports', app: 'reports', label: 'Reports', route: '/reports', purpose: 'Run a report (open tickets, volume, SLA performance, service report, AMC utilisation, contract expiry, maintenance, visits, security incidents, assets, CMDB, audit) and custom reports built in the report builder, with parameters, download CSV or HTML, and manage schedules.', perm: ['reports:run', 'portal:reports'], portal: true, filters: ['key', 'customerId', 'dateRange', 'tab', 'report'], toolsets: ['reports'], howTo: ['Pick a report, set the customer and date range, then Run; CSV and HTML downloads are kept under Runs.', 'Schedules (reports:manage) deliver a report by email on a cadence.', 'Custom reports appear under Custom reports in the picker; the pencil opens them in the builder.'] }),
   p({ key: 'reports.csat', app: 'reports', label: 'Customer satisfaction', route: '/reports/csat', purpose: 'Customer satisfaction (CSAT) from the surveys sent when tickets end: average rating, share satisfied, response rate, trend, breakdown by customer, engineer, team or service, and every response with its comment.', perm: ['surveys:read'], filters: ['customerId', 'days', 'assigneeId', 'teamId', 'serviceId', 'rating', 'channel', 'groupBy'], toolsets: ['reports'], howTo: ['Pick the period and a customer; switch the breakdown between customer, engineer, team and service.', 'Click a response to open the ticket; low ratings are highlighted.', 'Survey policies live under Administration → Satisfaction surveys.'] }),
+  p({ key: 'reports.builder', app: 'reports', label: 'Report builder', route: '/reports/builder', purpose: 'Build a custom report: pick an entity, columns, filters, grouping with aggregates, sort, period and sharing; preview it live, then save it into the report catalogue.', perm: ['reports:build'], filters: ['entity'], toolsets: ['reports'], howTo: ['Choose the entity, tick the columns, add filters, then Preview.', 'Switch on Group and aggregate for a breakdown with a chart.', 'Save, then run or schedule it from the Reports catalogue; share it with roles or teams, or publish it to the customer portal.'] }),
+  p({ key: 'reports.builderEdit', app: 'reports', label: 'Edit custom report', route: '/reports/builder/:id', purpose: 'Edit one saved custom report: its columns, filters, grouping, sharing and portal visibility.', perm: ['reports:build', 'reports:manage'], entity: 'report_definition', toolsets: ['reports'] }),
 
   // ---- administration
   p({ key: 'admin.overview', app: 'admin', label: 'Administration', route: '/admin', purpose: 'Administration home with attention items.', perm: ['admin:config', 'admin:users', 'admin:audit', 'admin:system', 'integrations:manage', 'integrations:events'], toolsets: ['config', 'admin'] }),

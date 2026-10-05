@@ -59,7 +59,7 @@ export const MSP_NAV: NavItem[] = [
     to: '/reports', label: 'Reports', icon: BarChart3, tint: 'text-teal-600', perm: ['reports:run'], area: 'reports', section: S.insight,
     children: [
       { to: '/reports', label: 'Catalogue' },
-      // slot #1: { to: '/reports/builder', label: 'Report builder', perm: ['reports:build'] }
+      { to: '/reports/builder', label: 'Report builder', perm: ['reports:build'] },
       { to: '/reports/csat', label: 'Customer satisfaction', perm: ['surveys:read'] },
     ],
   },

@@ -20,6 +20,7 @@ import { seedSurveys } from './demo/surveys';
 import { seedBoards } from './demo/boards';
 import { seedIntegrationRows, seedIntegrationEvents } from './demo/integrations';
 import { seedExtras, cleanupNotifications } from './demo/extras';
+import { seedCustomReports } from './demo/reports';
 
 /**
  * Realistic demonstration dataset for the MSP platform. Loaded once on first
@@ -107,6 +108,7 @@ export async function loadDemoData() {
     withSystem(async (tx) => {
       await cleanupNotifications(state, tx);
       await seedExtras(state, tx);
+      await seedCustomReports(state, tx);
     }),
   );
   await phase('metric rollups', async () => {

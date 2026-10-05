@@ -1,9 +1,14 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { h } from '@/core/context';
+import { UnauthorizedError } from '@/core/errors';
+import { stepsFor } from '@/modules/ai/service';
 import * as svc from './service';
 import * as sch from './schedules';
+import * as builder from './builder/service';
+import { suggest } from './builder/suggest';
+import { definitionInput, definitionPatch, previewBody, listQuery, suggestBody } from './builder/schemas';
 import { scheduleInput, schedulePatch } from './schedules';
 import { REPORT_FORMATS } from './service';
 
@@ -16,6 +21,11 @@ const runBody = z.object({ reportKey: z.string().min(1).max(100), parameters: z.
 const runsQuery = z.object({ reportKey: z.string().max(100).optional(), customerId: uuid.optional(), scheduleId: uuid.optional(), status: z.string().max(20).optional(), page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) });
 const schedulesQuery = z.object({ customerId: uuid.optional(), reportKey: z.string().max(100).optional(), isActive: boolQuery.optional() });
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/** The suggestion calls the model, so it runs as separate short transactions rather than inside h(). */
+const steps = (req: FastifyRequest) => {
+  if (!req.principal) throw new UnauthorizedError();
+  return stepsFor(req.principal, { requestId: req.id, ip: req.ip, userAgent: req.headers['user-agent'] as string | undefined });
+};
 
 export default async function routes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -32,6 +42,25 @@ export default async function routes(app: FastifyInstance) {
   r.get('/reports/runs/:id', { preHandler: app.auth('reports:run', 'portal:reports'), schema: { tags, params: idParam } }, h((ctx, req) => svc.getRun(ctx, (req.params as { id: string }).id)));
   r.patch('/reports/runs/:id', { preHandler: app.auth('reports:manage'), schema: { tags, params: idParam, body: z.object({ portalVisible: z.boolean() }) } }, h((ctx, req) => svc.updateRun(ctx, (req.params as { id: string }).id, req.body as { portalVisible: boolean })));
   r.delete('/reports/runs/:id', { preHandler: app.auth('reports:manage'), schema: { tags, params: idParam } }, h((ctx, req) => svc.deleteRun(ctx, (req.params as { id: string }).id)));
+
+  // ---- the report builder (reports:build; report managers may also read the catalogue and preview, so they can edit anyone's report) and the custom definitions it saves
+  r.get('/reports/builder/catalog', { preHandler: app.auth('reports:build', 'reports:manage'), schema: { tags } }, h((ctx) => builder.catalog(ctx)));
+  r.post('/reports/builder/preview', { preHandler: app.auth('reports:build', 'reports:manage'), schema: { tags, body: previewBody } }, h((ctx, req) => builder.preview(ctx, req.body as z.infer<typeof previewBody>)));
+  r.post('/reports/builder/suggest', { preHandler: app.auth('reports:build', 'reports:manage'), config: { rateLimit: { max: 20, timeWindow: '1 minute' } }, schema: { tags, body: suggestBody } }, async (req) => suggest(steps(req), req.body as z.infer<typeof suggestBody>));
+  r.get('/reports/custom', { preHandler: app.auth('reports:run', 'portal:reports'), schema: { tags, querystring: listQuery } }, h((ctx, req) => builder.listDefinitions(ctx, req.query as z.infer<typeof listQuery>)));
+  r.post('/reports/custom', { preHandler: app.auth('reports:build'), schema: { tags, body: definitionInput } }, h(async (ctx, req, reply) => {
+    const row = await builder.createDefinition(ctx, req.body as z.infer<typeof definitionInput>);
+    reply.code(201);
+    return row;
+  }));
+  r.get('/reports/custom/:id', { preHandler: app.auth('reports:run', 'portal:reports'), schema: { tags, params: idParam } }, h((ctx, req) => builder.getDefinition(ctx, (req.params as { id: string }).id)));
+  r.patch('/reports/custom/:id', { preHandler: app.auth('reports:build', 'reports:manage'), schema: { tags, params: idParam, body: definitionPatch } }, h((ctx, req) => builder.updateDefinition(ctx, (req.params as { id: string }).id, req.body as z.infer<typeof definitionPatch>)));
+  r.delete('/reports/custom/:id', { preHandler: app.auth('reports:build', 'reports:manage'), schema: { tags, params: idParam } }, h((ctx, req) => builder.deleteDefinition(ctx, (req.params as { id: string }).id)));
+  r.post('/reports/custom/:id/duplicate', { preHandler: app.auth('reports:build'), schema: { tags, params: idParam } }, h(async (ctx, req, reply) => {
+    const row = await builder.duplicateDefinition(ctx, (req.params as { id: string }).id);
+    reply.code(201);
+    return row;
+  }));
 
   // ---- schedules (reports:manage)
   r.get('/reports/schedules', { preHandler: app.auth('reports:manage'), schema: { tags, querystring: schedulesQuery } }, h((ctx, req) => sch.listSchedules(ctx, req.query as z.infer<typeof schedulesQuery>)));

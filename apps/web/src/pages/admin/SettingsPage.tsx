@@ -17,8 +17,8 @@ interface Setting {
   updatedAt: string;
 }
 
-const GROUP_LABELS: Record<string, string> = { platform: 'Platform', tickets: 'Tickets', changes: 'Change management', known_errors: 'Known errors', boards: 'Task boards', surveys: 'Customer satisfaction', contracts: 'Contracts', entitlements: 'Entitlements', software: 'Software assets', portal: 'Customer portal', security: 'Security', audit: 'Audit retention', events: 'Integration events retention', ai: 'AI', smtp: 'Email delivery', notifications: 'Notifications', whatsapp: 'WhatsApp' };
-const GROUP_ORDER = ['platform', 'tickets', 'changes', 'known_errors', 'boards', 'surveys', 'contracts', 'entitlements', 'software', 'portal', 'security', 'audit', 'events', 'ai', 'smtp', 'notifications', 'whatsapp'];
+const GROUP_LABELS: Record<string, string> = { platform: 'Platform', tickets: 'Tickets', changes: 'Change management', known_errors: 'Known errors', boards: 'Task boards', surveys: 'Customer satisfaction', reports: 'Reports', contracts: 'Contracts', entitlements: 'Entitlements', software: 'Software assets', portal: 'Customer portal', security: 'Security', audit: 'Audit retention', events: 'Integration events retention', ai: 'AI', smtp: 'Email delivery', notifications: 'Notifications', whatsapp: 'WhatsApp' };
+const GROUP_ORDER = ['platform', 'tickets', 'changes', 'known_errors', 'boards', 'surveys', 'reports', 'contracts', 'entitlements', 'software', 'portal', 'security', 'audit', 'events', 'ai', 'smtp', 'notifications', 'whatsapp'];
 
 type Kind = 'boolean' | 'number' | 'number[]' | 'string[]' | 'string' | 'secret' | 'json';
 function kindOf(key: string, value: unknown): Kind {

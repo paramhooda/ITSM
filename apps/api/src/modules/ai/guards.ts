@@ -11,7 +11,7 @@ import { AppError, ServiceUnavailableError, TooManyRequestsError } from '@/core/
  * conservative default.
  */
 
-export const AI_FEATURES = ['assistant', 'summarize', 'classify', 'assign', 'similar', 'suggest_kb', 'resolution', 'draft', 'duplicates', 'change_impact', 'problem_clusters', 'triage', 'sentiment', 'recommendations', 'handover', 'briefing', 'kedb_draft'] as const;
+export const AI_FEATURES = ['assistant', 'summarize', 'classify', 'assign', 'similar', 'suggest_kb', 'resolution', 'draft', 'duplicates', 'change_impact', 'problem_clusters', 'triage', 'sentiment', 'recommendations', 'handover', 'briefing', 'kedb_draft', 'report_builder'] as const;
 export type AiFeature = (typeof AI_FEATURES)[number];
 export type Autonomy = 'confirm_all' | 'auto_low';
 export type Effort = 'low' | 'medium' | 'high';

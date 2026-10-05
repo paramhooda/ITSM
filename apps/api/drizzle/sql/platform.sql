@@ -140,6 +140,18 @@ CREATE POLICY tenant_isolation ON board_notes
   USING (app_all_customers() OR user_id = app_user_id())
   WITH CHECK (app_all_customers() OR user_id = app_user_id());
 
+-- custom report definitions are MSP artefacts: staff read and write them; portal users
+-- read only the ones published to the portal for their organisation (or for every customer).
+ALTER TABLE report_definitions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE report_definitions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON report_definitions;
+CREATE POLICY tenant_isolation ON report_definitions
+  USING (
+    app_all_customers() OR app_is_msp()
+    OR (portal_visible AND is_active AND (scope_customer_id IS NULL OR scope_customer_id = ANY (app_customer_ids())))
+  )
+  WITH CHECK (app_all_customers() OR app_is_msp());
+
 -- ---------------------------------------------------------------------------
 -- Partitioned high-volume tables
 -- ---------------------------------------------------------------------------

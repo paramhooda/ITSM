@@ -105,7 +105,7 @@ describe('staff navigator', () => {
     expect(itemOf(noc, 'Configuration (CMDB)').children?.map((c) => c.label)).toContain('Monitoring & SIEM');
     const am = visibleNav(MSP_NAV, roleCan('account_manager'), roleAreas('account_manager'));
     expect(am.find((i) => i.label === 'Configuration (CMDB)')).toBeUndefined();
-    // Reports lists its modules once Customer satisfaction (surveys:read) sits next to the catalogue; before that it has none.
+    // Reports lists its modules once the report builder (reports:build) and Customer satisfaction (surveys:read) sit next to the catalogue.
     const reportsFor = (role: string) => visibleNav(MSP_NAV, roleCan(role), roleAreas(role)).find((i) => i.label === 'Reports');
     if (strips.REPORT_MODULES.length === 1) {
       for (const role of Object.keys(SYSTEM_ROLES)) {
@@ -113,12 +113,13 @@ describe('staff navigator', () => {
         if (reports) expect(reports.children, `${role}: Reports has no modules while only the catalogue exists`).toBeUndefined();
       }
     } else {
-      const csat = strips.REPORT_MODULES.find((m) => m.to === '/reports/csat');
-      expect(csat?.perm).toEqual(['surveys:read']);
-      const manager = reportsFor('service_manager');
-      expect(manager?.children?.map((c) => c.label)).toContain('Customer satisfaction');
-      expect(manager?.children?.map((c) => c.label)).toContain('Catalogue');
-      // engineers run reports but hold no surveys:read, so the catalogue stands alone and no module list is shown
+      expect(strips.REPORT_MODULES.find((m) => m.to === '/reports/csat')?.perm).toEqual(['surveys:read']);
+      expect(strips.REPORT_MODULES.find((m) => m.to === '/reports/builder')?.perm).toEqual(['reports:build']);
+      // a service manager holds reports:build and surveys:read, so all three modules show in this order
+      expect(reportsFor('service_manager')?.children?.map((c) => c.label)).toEqual(['Catalogue', 'Report builder', 'Customer satisfaction']);
+      // management holds both as well; a contract administrator builds reports and reads CSAT too
+      expect(reportsFor('management')?.children?.map((c) => c.label)).toEqual(['Catalogue', 'Report builder', 'Customer satisfaction']);
+      // engineers run reports but neither build them nor hold surveys:read, so the catalogue stands alone and no module list is shown
       expect(reportsFor('engineer')?.children).toBeUndefined();
     }
   });

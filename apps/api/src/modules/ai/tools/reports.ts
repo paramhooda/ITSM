@@ -1,12 +1,19 @@
 import { z } from 'zod';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '@/core/context';
+import { schema } from '@/db/client';
 import { ForbiddenError, ValidationError } from '@/core/errors';
 import { listDefinitions, runReport } from '@/modules/reports/service';
 import { listSchedules, createSchedule, FREQUENCIES, FORMATS } from '@/modules/reports/schedules';
 import { DATE_RANGE_PRESETS } from '@/modules/reports/dates';
+import { ENTITIES, ENTITY_KEYS, OPERATORS, catalogFor } from '@/modules/reports/builder/catalog';
+import { aggregateAlias, validateSpec } from '@/modules/reports/builder/compile';
+import { createDefinition, preview as previewSpec } from '@/modules/reports/builder/service';
+import { definitionInput, filterSchema, aggregateSchema, type DefinitionInput } from '@/modules/reports/builder/schemas';
+import { loadBuilderLimits } from '@/modules/reports/builder/limits';
 import * as dashboards from '@/modules/dashboards/service';
-import { define } from './types';
-import { isCustomerUser, iso, dayStr, resolveCustomerId, customerName } from '../helpers';
+import { define, type PreviewDetail } from './types';
+import { isCustomerUser, iso, dayStr, resolveCustomerId, resolveTeam, customerName } from '../helpers';
 
 /** Reports and analysis tools: the report catalogue, running and exporting reports, dashboards, trends and scheduled deliveries. */
 
@@ -52,11 +59,45 @@ async function reportParams(ctx: Ctx, input: { customer?: string; dateRange?: st
   return { ...(input.parameters ?? {}), customerId, dateRange: input.dateRange, from: input.from, to: input.to };
 }
 
+type BuildInput = { name: string; description?: string; entity: (typeof ENTITY_KEYS)[number]; columns?: string[]; filters?: { field: string; op: string; value?: unknown }[]; match?: 'all' | 'any'; groupBy?: string[]; aggregates?: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max'; field?: string; label?: string }[]; sort?: { key: string; order: 'asc' | 'desc' }; dateField?: string | null; dateRange?: (typeof DATE_RANGE_PRESETS)[number]; chart?: 'bar' | 'line'; customer?: string; share?: 'private' | 'shared'; shareWithRoles?: string[]; shareWithTeams?: string[] };
+
+/** The tool's input as a validated definition, with the names the preview shows and a small sample run. */
+async function buildDraft(ctx: Ctx, input: BuildInput) {
+  const entity = ENTITIES[input.entity];
+  const customerId = input.customer ? await resolveCustomerId(ctx, input.customer) : undefined;
+  const teams: { id: string; name: string }[] = [];
+  for (const ref of input.shareWithTeams ?? []) {
+    const t = await resolveTeam(ctx, ref);
+    if (t) teams.push(t);
+  }
+  const roles = [...new Set(input.shareWithRoles ?? [])];
+  // the proposal names only roles that exist, so a confirmed proposal cannot fail on a misspelt role
+  if (roles.length) {
+    const found = await ctx.tx.select({ key: schema.roles.key }).from(schema.roles).where(and(inArray(schema.roles.key, roles), eq(schema.roles.userType, 'msp')));
+    const missing = roles.filter((k) => !found.some((r) => r.key === k));
+    if (missing.length) throw new ValidationError(`Unknown staff role(s): ${missing.join(', ')}; use the role keys, such as management or service_manager`);
+  }
+  const visibility = input.share ?? (roles.length || teams.length ? 'shared' : 'private');
+  const groupBy = input.groupBy ?? [];
+  const aggregates = groupBy.length && !input.aggregates?.length ? [{ fn: 'count' as const, label: 'Count' }] : input.aggregates ?? [];
+  const columns = !groupBy.length && !input.columns?.length ? [...entity.defaultColumns] : input.columns ?? [];
+  const spec = { columns, filters: input.filters ?? [], match: input.match ?? 'all', groupBy, aggregates, sort: input.sort ?? null, dateField: input.dateField === undefined ? entity.defaultDateField : input.dateField || null, rowLimit: null, chart: input.chart && groupBy.length ? { type: input.chart, y: aggregates.map(aggregateAlias).slice(0, 4) } : null };
+  const limits = await loadBuilderLimits(ctx.tx);
+  const validated = validateSpec(entity, spec, { portal: false, maxRows: limits.maxRows });
+  const def: DefinitionInput = definitionInput.parse({ name: input.name, description: input.description ?? null, category: 'custom', entity: input.entity, spec: validated, defaultDateRange: input.dateRange ?? 'last_30_days', scopeCustomerId: customerId ?? null, visibility, sharedRoleKeys: visibility === 'shared' ? roles : [], sharedTeamIds: visibility === 'shared' ? teams.map((t) => t.id) : [], portalVisible: false, cover: false, isActive: true });
+  const customerLabel = customerId ? await customerName(ctx, customerId) : null;
+  const shareLabel = visibility === 'private' ? 'private' : `shared with ${[...roles, ...teams.map((t) => t.name)].join(', ') || 'report managers only'}`;
+  const res = await previewSpec(ctx, { entity: input.entity, spec: def.spec, parameters: { customerId: customerId ?? undefined, dateRange: def.defaultDateRange }, portal: false }, { limit: 20 });
+  const keys = res.columns.map((c) => c.key);
+  const sample = res.rows.slice(0, 5).map((r) => keys.map((k) => `${k}=${r[k] === null || r[k] === undefined ? '' : String(r[k] instanceof Date ? (r[k] as Date).toISOString().slice(0, 16) : r[k])}`).join(', ').slice(0, 120));
+  return { def, entity, customerLabel, shareLabel, summaryLines: res.summaryLines, rows: { rowCount: res.rowCount, sample } };
+}
+
 export const REPORTS: ReturnType<typeof define>[] = [
   define({
     name: 'list_reports',
     toolset: 'reports',
-    description: 'The reports the user may run, with their parameters.',
+    description: 'The reports the user may run, with their parameters. Custom reports built in the report builder are included and marked custom.',
     inputSchema: z.object({ category: z.string().max(40).optional() }),
     requires: ['reports:run'],
     portal: ['portal:reports'],
@@ -64,7 +105,7 @@ export const REPORTS: ReturnType<typeof define>[] = [
     run: async (ctx, input) => {
       const res = await listDefinitions(ctx);
       const items = res.items.filter((d) => !input.category || d.category === input.category);
-      return { items: items.map((d) => ({ key: d.key, name: d.name, description: d.description, category: d.category, defaultDateRange: d.defaultDateRange, parameters: d.parameters.map((p) => ({ key: p.key, label: p.label, type: p.type, required: !!p.required, options: p.options?.slice(0, 12).map((o) => o.value) })) })), link: '/reports' };
+      return { items: items.map((d) => ({ key: d.key, name: d.name, description: d.description, category: d.category, defaultDateRange: d.defaultDateRange, custom: !!d.custom, ...(d.custom?.canEdit ? { builderLink: `/reports/builder/${d.custom.id}` } : {}), parameters: d.parameters.map((p) => ({ key: p.key, label: p.label, type: p.type, required: !!p.required, options: p.options?.slice(0, 12).map((o) => o.value) })) })), link: '/reports' };
     },
     summary: (_i, result) => `Listed ${(result as { items: unknown[] }).items.length} reports`,
   }),
@@ -72,7 +113,7 @@ export const REPORTS: ReturnType<typeof define>[] = [
   define({
     name: 'run_report',
     toolset: 'reports',
-    description: 'Run a report and read its summary figures, charts and first rows. Date range presets: last_7_days, last_30_days, last_90_days, month_to_date, last_month, quarter_to_date, last_quarter, year_to_date, or custom with from/to.',
+    description: 'Run a report and read its summary figures, charts and first rows. Date range presets: last_7_days, last_30_days, last_90_days, month_to_date, last_month, quarter_to_date, last_quarter, year_to_date, or custom with from/to. Works for custom reports too (name or custom:<id> key).',
     inputSchema: z.object({ report: z.string().max(100).describe('Report key or name'), customer: z.string().max(200).optional(), dateRange: z.enum(DATE_RANGE_PRESETS).optional(), from: z.string().max(10).optional(), to: z.string().max(10).optional(), parameters: z.record(z.string().max(60), z.union([z.string().max(200), z.number(), z.boolean()])).optional(), rows: z.number().int().min(0).max(50).optional().describe('How many rows to read (default 20)') }),
     requires: ['reports:run'],
     portal: ['portal:reports'],
@@ -201,5 +242,96 @@ export const REPORTS: ReturnType<typeof define>[] = [
       const customerId = await resolveCustomerId(ctx, input.customer);
       return `Schedule "${input.name}": email the ${def.name} report${customerId ? ` for ${await customerName(ctx, customerId)}` : ''} ${input.frequency} as ${input.format ?? 'html'} (${input.dateRange ?? 'last_7_days'}) to ${input.recipients.join(', ')}`;
     },
+  }),
+
+  define({
+    name: 'report_catalog',
+    toolset: 'reports',
+    description: "The entities and fields a custom report can use (tickets, changes, problems, SLA clocks, time entries, field visits, assets, configuration items, contracts, entitlements, surveys, software): field keys, types, which are groupable or aggregatable, the filter operators per type and the date fields. Read it before proposing a report with build_report; answers 'what can I report on' and 'which fields exist for visits'.",
+    inputSchema: z.object({ entity: z.enum(ENTITY_KEYS).optional().describe('One entity for its full field list; omit for every entity with field counts') }),
+    requires: ['reports:build'],
+    portal: null,
+    action: false,
+    run: async (ctx, input) => {
+      const all = catalogFor(ctx, { portal: false }).entities;
+      const entities = all.filter((e) => !input.entity || e.key === input.entity);
+      const permitted = entities.filter((e) => e.permissionsOk);
+      const fieldCount = permitted.reduce((s, e) => s + e.fields.length, 0);
+      return {
+        entities: entities.map((e) => ({
+          key: e.key,
+          label: e.label,
+          description: e.description,
+          permissionsOk: e.permissionsOk,
+          needs: e.permissionsOk ? undefined : e.permissions,
+          dateFields: e.dateFields,
+          // one entity: its defaults and every field, compact (label only when it is not the key itself, no checklist group, flags only when set, value lists cut); the full listing carries field counts only, so either result stays under the tool-result cap
+          ...(input.entity
+            ? { defaultDateField: e.defaultDateField, defaultColumns: e.defaultColumns, fields: e.fields.map((f) => ({ key: f.key, ...(f.label.toLowerCase() === f.key.replace(/_/g, ' ') ? {} : { label: f.label }), type: f.type, ...(f.groupable ? { groupable: true } : {}), ...(f.aggregatable ? { aggregatable: true } : {}), ...(f.options?.values ? { values: f.options.values.slice(0, 8).map((v) => v.value) } : {}) })) }
+            : { fieldCount: e.fields.length }),
+        })),
+        operators: OPERATORS,
+        // the period presets are listed in build_report's own input; they only ride along with the full listing
+        ...(input.entity ? {} : { presets: DATE_RANGE_PRESETS.filter((p) => p !== 'custom') }),
+        facts: [`${permitted.length} entit${permitted.length === 1 ? 'y' : 'ies'} and ${fieldCount} field(s) available to you${input.entity ? ` for ${entities[0]?.label ?? input.entity}` : ''}`],
+        link: '/reports/builder',
+      };
+    },
+    summary: (_i, result) => `Listed the report catalogue (${(result as { entities: unknown[] }).entities.length} entities)`,
+  }),
+
+  define({
+    name: 'build_report',
+    toolset: 'reports',
+    description: "Build and save a custom report from a specification: entity, columns, filters, optional grouping with aggregates, sort, period field and sharing. Use report_catalog first for the exact field keys. The preview shows the compiled definition and a sample of rows before anything is saved; answers 'build me a report of …' and 'save this as a report'.",
+    inputSchema: z.object({
+      name: z.string().min(3).max(160),
+      description: z.string().max(1000).optional(),
+      entity: z.enum(ENTITY_KEYS),
+      columns: z.array(z.string().max(60)).max(40).optional().describe('Detail report columns (field keys); defaults to the entity\'s default columns'),
+      filters: z.array(filterSchema).max(30).optional(),
+      match: z.enum(['all', 'any']).optional(),
+      groupBy: z.array(z.string().max(60)).max(2).optional().describe('Group fields for a breakdown (one or two groupable field keys)'),
+      aggregates: z.array(aggregateSchema).max(6).optional().describe('With groupBy: count, or sum/avg/min/max of an aggregatable field'),
+      sort: z.object({ key: z.string().max(80), order: z.enum(['asc', 'desc']) }).optional().describe('A column, a group field or an aggregate alias (count, sum_<field>, avg_<field>)'),
+      dateField: z.string().max(60).nullable().optional().describe('The period field (one of the entity\'s date fields); omit for the entity\'s default, null or an empty string for no period (every row, whatever the date)'),
+      dateRange: z.enum(DATE_RANGE_PRESETS).optional(),
+      chart: z.enum(['bar', 'line']).optional().describe('With groupBy: chart the aggregates by the first group field'),
+      customer: z.string().max(200).optional().describe('Fix the report to one customer (name or code); omit to choose at run time'),
+      share: z.enum(['private', 'shared']).optional(),
+      shareWithRoles: z.array(z.string().max(60)).max(10).optional().describe('Staff role keys, such as management or service_manager'),
+      shareWithTeams: z.array(z.string().max(100)).max(10).optional().describe('Team names or keys'),
+    }),
+    requires: ['reports:build'],
+    portal: null,
+    action: true,
+    tier: 'write',
+    invalidates: ['reports'],
+    preview: async (ctx, input) => {
+      const { def, entity, customerLabel, shareLabel, summaryLines, rows } = await buildDraft(ctx, input);
+      const grouped = def.spec.groupBy.length > 0;
+      const shape = grouped ? `grouped by ${def.spec.groupBy.join(' and ')} with ${def.spec.aggregates.map(aggregateAlias).join(', ')}` : `${def.spec.columns.length} column(s)`;
+      const period = def.spec.dateField ? `period ${def.defaultDateRange} over ${def.spec.dateField}` : 'no period';
+      return {
+        text: `Save custom report "${def.name}" on ${entity.label.toLowerCase()}: ${shape}, ${def.spec.filters.length} filter(s), ${period}, ${shareLabel}${customerLabel ? `, fixed to ${customerLabel}` : ''}. Sample: ${rows.rowCount} row(s).`,
+        lines: [...summaryLines, ...rows.sample],
+        count: rows.rowCount,
+      } satisfies PreviewDetail;
+    },
+    run: async (ctx, input) => {
+      const { def, entity, rows } = await buildDraft(ctx, input);
+      const saved = await createDefinition(ctx, def);
+      return {
+        id: saved.id,
+        key: saved.key,
+        name: saved.name,
+        entity: entity.key,
+        rowCount: rows.rowCount,
+        facts: [`Saved custom report "${saved.name}" (${entity.label.toLowerCase()}, ${def.spec.groupBy.length ? `${def.spec.groupBy.length} group field(s) and ${def.spec.aggregates.length} aggregate(s)` : `${def.spec.columns.length} column(s)`}, ${def.spec.filters.length} filter(s)); ${rows.rowCount} row(s) in the sample run`],
+        link: `/reports/builder/${saved.id}`,
+        runLink: `/reports?tab=run&report=${saved.key}`,
+      };
+    },
+    summary: (input, result) => `Saved custom report "${(result as { name?: string }).name ?? input.name}" (${input.entity})`,
   }),
 ];

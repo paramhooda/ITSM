@@ -102,6 +102,8 @@ export const routes: AppRoute[] = [
   // Reports
   { path: '/reports', component: page(() => import('@/pages/reports/ReportsPage')), perm: ['reports:run', 'portal:reports'], shared: true, portal: true },
   { path: '/reports/csat', component: page(() => import('@/pages/reports/CsatPage')), perm: ['surveys:read'] },
+  { path: '/reports/builder', component: page(() => import('@/pages/reports/ReportBuilderPage')), perm: ['reports:build'] },
+  { path: '/reports/builder/:id', component: page(() => import('@/pages/reports/ReportBuilderPage')), perm: ['reports:build', 'reports:manage'] },
   // Admin
   { path: '/admin/*', component: page(() => import('@/pages/admin/AdminPage')), perm: ['admin:config', 'admin:users', 'admin:audit', 'admin:system', 'integrations:manage', 'integrations:events'] },
   // Profile / settings

@@ -26,3 +26,4 @@ export * from './schema/briefings';
 export * from './schema/surveys';
 export * from './schema/boards';
 export * from './schema/software';
+export * from './schema/report-definitions';

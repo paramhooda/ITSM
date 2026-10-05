@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Play, Download, FileText, FileSpreadsheet, Printer, CalendarClock, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,20 +10,24 @@ import { useAuthStore } from '@/stores/auth';
 import { useListState } from '@/hooks/useListState';
 import { useCustomersLookup } from '@/hooks/useLookups';
 import { fmtDateTime, relativeTime } from '@/lib/format';
+import { REPORT_VISIBILITY_COLORS } from '@/lib/statusColors';
+import { SpecSummary } from '@/components/reports/builder/SpecSummary';
 import { ReportPicker } from '@/components/reports/ReportPicker';
 import { ParameterForm, type ParamValues } from '@/components/reports/ParameterForm';
 import { ReportPreview } from '@/components/reports/ReportPreview';
 import { ScheduleForm, type SchedulePayload } from '@/components/reports/ScheduleForm';
 import { RunsTable } from '@/components/reports/RunsTable';
-import { FREQUENCIES, type ReportDefinition, type RunPreview, type ReportRun, type Schedule, type Paginated, type FileFormat } from '@/components/reports/types';
+import { FREQUENCIES, VISIBILITY_LABELS, visibilityOf, type ReportDefinition, type RunPreview, type ReportRun, type Schedule, type Paginated, type FileFormat } from '@/components/reports/types';
 
 type Tab = 'run' | 'schedules' | 'history';
 
 export default function ReportsPage() {
   const user = useAuthStore((s) => s.user);
   const can = useAuthStore((s) => s.can);
+  const navigate = useNavigate();
   const isCustomer = user?.userType === 'customer';
   const canManage = !isCustomer && can('reports:manage');
+  const canBuild = !isCustomer && can('reports:build');
   const { state, set, page, pageSize, setPage } = useListState({ tab: 'run' });
   const tab = (['run', 'schedules', 'history'].includes(state.tab) ? state.tab : 'run') as Tab;
   const defs = useQuery({ queryKey: ['reports', 'definitions'], queryFn: () => get<{ items: ReportDefinition[]; customerId: string | null; canManage: boolean; pdf: boolean }>('/reports/definitions'), staleTime: 5 * 60_000 });
@@ -30,7 +35,7 @@ export default function ReportsPage() {
   const [scheduleDraft, setScheduleDraft] = useState<Partial<Schedule> | null>(null);
   return (
     <div>
-      <PageHeader title="Reports" subtitle={isCustomer ? 'Service reports for your organization' : 'Ad-hoc reporting, scheduled customer reports and history'} />
+      <PageHeader title="Reports" subtitle={isCustomer ? 'Service reports for your organization' : 'Ad-hoc reporting, custom reports, scheduled customer reports and history'} actions={canBuild ? <Button icon={<Plus className="h-4 w-4" />} onClick={() => navigate('/reports/builder')}>New custom report</Button> : undefined} />
       <ModuleNav items={REPORT_MODULES} />
       <Tabs tabs={tabs} value={tab} onChange={(t) => set({ tab: t }, false)} className="mb-4" />
       {defs.isPending && <LoadingBlock />}
@@ -45,6 +50,7 @@ export default function ReportsPage() {
 
 function RunTab({ definitions, isCustomer, canManage, pdf, initialKey, onSaveAsSchedule }: { definitions: ReportDefinition[]; isCustomer: boolean; canManage: boolean; pdf: boolean; initialKey?: string; onSaveAsSchedule: (d: Partial<Schedule>) => void }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [key, setKey] = useState<string | null>(initialKey && definitions.some((d) => d.key === initialKey) ? initialKey : definitions[0]?.key ?? null);
   const [params, setParams] = useState<ParamValues>({});
   const [preview, setPreview] = useState<RunPreview | null>(null);
@@ -75,8 +81,21 @@ function RunTab({ definitions, isCustomer, canManage, pdf, initialKey, onSaveAsS
       </Card>
       <div className="flex flex-col gap-4 min-w-0">
         {def && (
-          <Card title={def.name} actions={<Badge color="slate">{def.category}</Badge>}>
-            <p className="text-[13px] text-muted mb-3">{def.description}</p>
+          <Card title={def.name} actions={<><Badge color="slate">{def.category}</Badge>{def.custom?.canEdit && <Button size="sm" variant="ghost" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => navigate(`/reports/builder/${def.custom!.id}`)}>Edit in builder</Button>}</>}>
+            {!(def.custom && def.description === def.custom.summaryLines.join('; ')) && <p className="text-[13px] text-muted mb-3">{def.description}</p>}
+            {def.custom && (
+              <div className="mb-3 flex flex-col gap-1.5" data-custom-info>
+                {def.custom.visibility !== null && (
+                  <div className="text-[12.5px] text-muted flex flex-wrap items-center gap-1.5">
+                    {def.custom.ownerName && <span>Built by {def.custom.ownerName}</span>}
+                    {def.custom.ownerName && <span className="text-subtle">·</span>}
+                    <Badge color={REPORT_VISIBILITY_COLORS[visibilityOf({ visibility: def.custom.visibility, portalVisible: def.custom.portalVisible })]}>{VISIBILITY_LABELS[visibilityOf({ visibility: def.custom.visibility, portalVisible: def.custom.portalVisible })]}</Badge>
+                    {def.custom.visibility === 'shared' && def.custom.sharedWith && def.custom.sharedWith.length > 0 && <span>shared with {def.custom.sharedWith.join(', ')}</span>}
+                  </div>
+                )}
+                <SpecSummary lines={def.custom.summaryLines} />
+              </div>
+            )}
             <ParameterForm definition={def} value={params} onChange={setParams} hide={isCustomer ? ['customer'] : []} />
             <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-default">
               <Button icon={<Play className="h-4 w-4" />} loading={run.isPending} onClick={() => run.mutate()}>Run</Button>

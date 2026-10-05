@@ -66,7 +66,8 @@ describe('demo dataset', () => {
     // Task boards: the shift handovers the board panel shows (one acknowledged), personal sticky notes, open tasks for the NOC engineers.
     expect(await count('shift_handovers', "where status in ('final', 'acknowledged')")).toBeGreaterThanOrEqual(2);
     expect(await count('shift_handovers', "where status = 'acknowledged'")).toBeGreaterThanOrEqual(1);
-    expect(await count('board_notes')).toBeGreaterThanOrEqual(9);
+    // the seed also writes one done note, which the retention purge (exercised by boards.test.ts in the same run) may remove at any time
+    expect(await count('board_notes', 'where not done')).toBeGreaterThanOrEqual(8);
     expect(await count('board_notes', 'where pinned')).toBeGreaterThanOrEqual(2);
     expect(await count('ticket_tasks', "where status in ('open', 'in_progress') and due_at < now()")).toBeGreaterThanOrEqual(2);
     expect(await count('ticket_tasks', "where status = 'in_progress'")).toBeGreaterThanOrEqual(3);
@@ -77,6 +78,10 @@ describe('demo dataset', () => {
     expect(await count('software_licences', 'where successor_id is not null')).toBeGreaterThanOrEqual(1);
     expect(await count('software_licences', 'where end_date < current_date and successor_id is null')).toBeGreaterThanOrEqual(1);
     expect(await count('assets', "a join config_options o on o.id = a.category_id where o.key = 'software_license'")).toBe(0);
+    // Custom reports: the four built in the report builder (one shared with roles, one with a team, one published to a portal, one private).
+    expect(await count('report_definitions')).toBeGreaterThanOrEqual(4);
+    expect(await count('report_definitions', 'where portal_visible and scope_customer_id is not null')).toBeGreaterThanOrEqual(1);
+    expect(await count('report_definitions', "where visibility = 'shared' and cardinality(shared_team_ids) > 0")).toBeGreaterThanOrEqual(1);
   });
 
   it('keeps every customer-scoped row inside its parent customer', async () => {

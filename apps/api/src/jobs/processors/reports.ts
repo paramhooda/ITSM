@@ -5,7 +5,7 @@ import { enqueue } from '@/jobs/queues';
 import { logger } from '@/core/logger';
 import { writeAudit } from '@/core/audit';
 import { systemCtx } from '@/modules/tickets/common';
-import { findReport } from '@/modules/reports/registry';
+import { resolveReport } from '@/modules/reports/registry';
 import { executeReport, queueReportEmail } from '@/modules/reports/service';
 import { advanceSchedule, scheduleFormats, type ScheduleRow } from '@/modules/reports/schedules';
 import type { Tx } from '@/db/client';
@@ -61,7 +61,7 @@ export async function executeSchedule(scheduleId: string, opts: ExecuteOptions =
     return { skipped: 'missing' as const };
   }
   if (!schedule.isActive && !opts.manual) return { skipped: 'inactive' as const };
-  const def = findReport(schedule.reportKey);
+  const def = await withSystem((tx) => resolveReport(systemCtx(tx, `schedule:${scheduleId}`), schedule.reportKey));
   if (!def) throw new Error(`Unknown report ${schedule.reportKey} on schedule ${schedule.name}`);
 
   const targets: (string | null)[] = schedule.customerId

@@ -9,7 +9,9 @@ import { config } from '@/config';
 import { enqueue } from '@/jobs/queues';
 import { logger } from '@/core/logger';
 import './definitions';
-import { requireReport, visibleReports, describeReport, isCustomerUser, MAX_REPORT_ROWS, type ReportDefinition, type ReportParams, type ReportResult } from './registry';
+import { requireReport, visibleReports, describeReport, isCustomerUser, resolveCustomerId, isCustomDefinition, MAX_REPORT_ROWS, type ReportDefinition, type ReportParams, type ReportResult } from './registry';
+// loading the builder wires the custom definitions into the registry (setCustomLoader / setCustomLister)
+import './builder/service';
 import { resolveDateRange, todayIn, type DateRange } from './dates';
 import { htmlToPdf, pdfAvailable } from '@/lib/pdf';
 import { renderCsv, renderHtml, renderXlsx, summaryHtml, brandColor, logoUrl } from './render';
@@ -36,23 +38,11 @@ export interface RunInput {
 
 export async function listDefinitions(ctx: Ctx) {
   if (isCustomerUser(ctx) && !ctx.can('portal:reports', ctx.user.customerId)) throw new ForbiddenError('Missing permission: portal:reports');
-  const items = visibleReports(ctx).map(describeReport);
+  const items = (await visibleReports(ctx)).map(describeReport);
   return { items, customerId: isCustomerUser(ctx) ? ctx.user.customerId : null, canManage: !isCustomerUser(ctx) && ctx.can('reports:manage'), formats: [...REPORT_FORMATS], pdf: await pdfAvailable() };
 }
 
 // ---------------------------------------------------------------- parameter normalization
-
-function resolveCustomerId(ctx: Ctx, raw: Record<string, unknown>): string | null {
-  if (isCustomerUser(ctx)) {
-    if (!ctx.user.customerId) throw new ForbiddenError('Customer context required');
-    return ctx.user.customerId;
-  }
-  const v = raw.customerId;
-  if (v === undefined || v === null || v === '') return null;
-  if (typeof v !== 'string' || !/^[0-9a-f-]{36}$/i.test(v)) throw new ValidationError('Invalid customerId');
-  ctx.requireCustomer(v);
-  return v;
-}
 
 export function normalizeParams(ctx: Ctx, def: ReportDefinition, raw: Record<string, unknown> = {}, timezone?: string): { params: ReportParams; range: DateRange } {
   const customerId = resolveCustomerId(ctx, raw);
@@ -141,8 +131,10 @@ export interface ExecutionOutcome {
 export async function executeReport(ctx: Ctx, input: RunInput): Promise<ExecutionOutcome> {
   const raw = input.parameters ?? {};
   const customerId = resolveCustomerId(ctx, raw);
-  const def = requireReport(ctx, input.reportKey, customerId);
-  const { params, range } = normalizeParams(ctx, def, raw, input.timezone);
+  const def = await requireReport(ctx, input.reportKey, customerId);
+  // a custom report fixed to one customer always runs for that customer (the run row and the file carry its name)
+  const scoped = isCustomDefinition(def) && def.custom.scopeCustomerId ? def.custom.scopeCustomerId : null;
+  const { params, range } = normalizeParams(ctx, def, scoped ? { ...raw, customerId: scoped } : raw, input.timezone);
   const format = input.format ?? 'json';
   if (!(REPORT_FORMATS as readonly string[]).includes(format)) throw new ValidationError(`format must be one of ${REPORT_FORMATS.join(', ')}`);
   if (format === 'pdf' && !(await pdfAvailable())) throw new ValidationError('PDF output is not available on this server: Chromium is not installed (see docs/OPERATIONS.md, Reports)');
@@ -182,7 +174,7 @@ export async function executeReport(ctx: Ctx, input: RunInput): Promise<Executio
 export async function runReport(ctx: Ctx, input: RunInput) {
   const out = await executeReport(ctx, input);
   if (!out.run) {
-    const total = out.result.rows.length;
+    const total = out.result.rowCount ?? out.result.rows.length;
     return {
       report: describeReport(out.def),
       parameters: out.params,
@@ -204,14 +196,15 @@ export interface RunsQuery {
   pageSize?: number;
 }
 
-function runVisibility(ctx: Ctx): SQL[] {
+async function runVisibility(ctx: Ctx): Promise<SQL[]> {
   const r = schema.reportRuns;
   if (isCustomerUser(ctx)) {
     if (!ctx.can('portal:reports', ctx.user.customerId)) throw new ForbiddenError('Missing permission: portal:reports');
     return [eq(r.customerId, ctx.user.customerId ?? '00000000-0000-0000-0000-000000000000'), eq(r.portalVisible, true), eq(r.status, 'completed')];
   }
   ctx.require('reports:run');
-  const keys = visibleReports(ctx).map((d) => d.key);
+  // retired custom reports stay listed so History keeps their past runs
+  const keys = (await visibleReports(ctx, { includeInactive: true })).map((d) => d.key);
   return [keys.length ? inArray(r.reportKey, keys) : sql`false`];
 }
 
@@ -253,7 +246,7 @@ function runsBase(ctx: Ctx) {
 
 export async function listRuns(ctx: Ctx, q: RunsQuery = {}) {
   const r = schema.reportRuns;
-  const conds = runVisibility(ctx);
+  const conds = await runVisibility(ctx);
   if (q.reportKey) conds.push(eq(r.reportKey, q.reportKey));
   if (q.customerId && !isCustomerUser(ctx)) {
     ctx.requireCustomer(q.customerId);
@@ -270,7 +263,7 @@ export async function listRuns(ctx: Ctx, q: RunsQuery = {}) {
 }
 
 export async function getRun(ctx: Ctx, id: string) {
-  const [row] = await runsBase(ctx).where(and(eq(schema.reportRuns.id, id), ...runVisibility(ctx))).limit(1);
+  const [row] = await runsBase(ctx).where(and(eq(schema.reportRuns.id, id), ...(await runVisibility(ctx)))).limit(1);
   if (!row) throw new NotFoundError('Report run');
   return row;
 }
