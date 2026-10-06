@@ -224,8 +224,13 @@ export default function PortalUsersPage() {
             <Field label="Mobile" hint={ed.whatsappOptIn && !ed.phone.trim() ? 'Needed for WhatsApp notifications' : undefined}>
               <Input value={ed.phone} onChange={(e) => setEd({ ...ed, phone: e.target.value })} placeholder="+91 …" />
             </Field>
-            <div className="sm:col-span-2">
+            <div className="sm:col-span-2 flex flex-col gap-1">
               <Checkbox label="WhatsApp notifications to this number" checked={ed.whatsappOptIn} onChange={(e) => setEd({ ...ed, whatsappOptIn: e.target.checked })} />
+              {edit.phone && (
+                <span className="text-[12px] text-subtle" data-testid="portal-user-verified">
+                  {edit.whatsappVerifiedAt ? `Number verified by ${edit.name.split(' ')[0]} on ${fmtDateTime(edit.whatsappVerifiedAt)}.` : 'Number not verified yet; the person verifies it with a code on their profile.'} Changing the number clears the verification; which categories reach them is their own choice under Profile & notifications.
+                </span>
+              )}
             </div>
             <Field label="Job title">
               <Input value={ed.title} onChange={(e) => setEd({ ...ed, title: e.target.value })} />

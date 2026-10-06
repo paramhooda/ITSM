@@ -216,6 +216,29 @@ describe('fan-out and delivery', () => {
     expect(rows.some((r) => r.recipient === '+919876543211' && (r.subject ?? '').includes(S))).toBe(false);
   });
 
+  it('skips WhatsApp for an opted-in person who switched the category off on their profile, and still writes the email', async () => {
+    await withSystem((tx) => tx.update(schema.users).set({ preferences: { notifications: { tickets: { whatsapp: false } } } }).where(eq(schema.users.id, ids.optedIn)));
+    try {
+      const queued = await withSystem((tx) =>
+        queueNotification(tx, {
+          event: 'ticket.created',
+          recipients: [{ userId: ids.optedIn, email: `wa-in-${S}@example.test`, name: 'Opted In', phone: '+919876543210', whatsappOptIn: true }],
+          data: { ...ticketData, ticket: { ...ticketData.ticket, number: `INC-${S}-veto` } },
+          customerId: ids.customer,
+          channels: ['email', 'whatsapp'],
+          link: '/portal/tickets/x',
+        }),
+      );
+      expect(queued).toBe(1); // the email only
+      const rows = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.recipient, '+919876543210'), eq(schema.notificationOutbox.channel, 'whatsapp'))));
+      expect(rows.some((r) => (r.subject ?? '').includes(`INC-${S}-veto`))).toBe(false);
+      const emails = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.recipient, `wa-in-${S}@example.test`), eq(schema.notificationOutbox.channel, 'email'))));
+      expect(emails.some((r) => (r.subject ?? '').includes(`INC-${S}-veto`))).toBe(true);
+    } finally {
+      await withSystem((tx) => tx.update(schema.users).set({ preferences: {} }).where(eq(schema.users.id, ids.optedIn)));
+    }
+  });
+
   /** The outbox job takes the oldest pending rows first; dating this test's rows back keeps them ahead of whatever other suites queued in parallel. */
   const deliverFirst = () => withSystem((tx) => tx.update(schema.notificationOutbox).set({ scheduledAt: new Date(Date.now() - 3_600_000) }).where(and(eq(schema.notificationOutbox.recipient, '+919876543210'), eq(schema.notificationOutbox.status, 'pending'))));
 

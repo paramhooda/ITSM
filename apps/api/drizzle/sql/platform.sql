@@ -152,6 +152,21 @@ CREATE POLICY tenant_isolation ON report_definitions
   )
   WITH CHECK (app_all_customers() OR app_is_msp());
 
+-- notification categories are shared defaults: readable by every signed-in person, written by staff only.
+ALTER TABLE notification_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_categories FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON notification_categories;
+CREATE POLICY tenant_isolation ON notification_categories
+  USING (true)
+  WITH CHECK (app_all_customers() OR app_is_msp());
+-- phone verification codes belong to one person.
+ALTER TABLE phone_verifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE phone_verifications FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON phone_verifications;
+CREATE POLICY tenant_isolation ON phone_verifications
+  USING (app_all_customers() OR user_id = app_user_id())
+  WITH CHECK (app_all_customers() OR user_id = app_user_id());
+
 -- ---------------------------------------------------------------------------
 -- Partitioned high-volume tables
 -- ---------------------------------------------------------------------------

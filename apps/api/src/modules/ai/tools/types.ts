@@ -14,7 +14,7 @@ export type Who = Pick<Ctx, 'user' | 'can'>;
 export type ToolTier = 'read' | 'write_low' | 'write' | 'outbound' | 'admin' | 'destructive';
 
 /** Toolsets group tools by module; the model sees the core set plus the sets that fit the page, the message and the skill. */
-export const TOOLSET_KEYS = ['core', 'ui', 'tickets', 'triage', 'incident', 'approvals', 'customers', 'contracts', 'cmdb', 'assets', 'field', 'knowledge', 'reports', 'config', 'admin', 'iam'] as const;
+export const TOOLSET_KEYS = ['core', 'ui', 'tickets', 'triage', 'incident', 'approvals', 'customers', 'contracts', 'cmdb', 'assets', 'field', 'knowledge', 'reports', 'config', 'admin', 'iam', 'profile'] as const;
 export type ToolsetKey = (typeof TOOLSET_KEYS)[number];
 
 /** What the user is shown before confirming: one sentence, optionally the exact changes and a count for bulk or destructive actions. */
@@ -44,7 +44,7 @@ export interface AiTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
   /** Kept for compatibility but no longer offered to the model (superseded by a better tool). */
   hidden?: boolean;
   /** Web query caches to refresh after this action ran. */
-  invalidates?: ('tickets' | 'approvals' | 'visits' | 'knowledge' | 'config' | 'cmdb' | 'assets' | 'contracts' | 'announcements' | 'changes' | 'kedb' | 'surveys' | 'boards' | 'software' | 'reports')[];
+  invalidates?: ('tickets' | 'approvals' | 'visits' | 'knowledge' | 'config' | 'cmdb' | 'assets' | 'contracts' | 'announcements' | 'changes' | 'kedb' | 'surveys' | 'boards' | 'software' | 'reports' | 'preferences')[];
   run(ctx: Ctx, input: z.infer<S>): Promise<unknown>;
   /** One-line description shown in the conversation ("Listed 5 open tickets for Sample Customer"). */
   summary(input: z.infer<S>, result: unknown): string;

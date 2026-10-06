@@ -175,8 +175,8 @@ describe('portal navigator', () => {
   });
 
   it('shows customer users their own items', () => {
-    expect(labels(visibleNav(PORTAL_NAV, roleCan('customer_user'), roleAreas('customer_user')))).toEqual(['Overview', 'Service status', 'My tickets', 'Knowledge', 'Services & contracts', 'Assets', 'Maintenance & visits']);
-    expect(labels(visibleNav(PORTAL_NAV, roleCan('customer_admin'), roleAreas('customer_admin')))).toEqual(['Overview', 'Service status', 'My tickets', 'Approvals', 'Knowledge', 'Services & contracts', 'Assets', 'Maintenance & visits', 'Reports', 'Users']);
+    expect(labels(visibleNav(PORTAL_NAV, roleCan('customer_user'), roleAreas('customer_user')))).toEqual(['Overview', 'Service status', 'My tickets', 'Knowledge', 'Services & contracts', 'Assets', 'Maintenance & visits', 'Profile & notifications']);
+    expect(labels(visibleNav(PORTAL_NAV, roleCan('customer_admin'), roleAreas('customer_admin')))).toEqual(['Overview', 'Service status', 'My tickets', 'Approvals', 'Knowledge', 'Services & contracts', 'Assets', 'Maintenance & visits', 'Reports', 'Users', 'Profile & notifications']);
   });
 });
 
@@ -209,7 +209,7 @@ describe('administration rail', () => {
     for (const to of railPaths) expect(routes.has(to), `${to} is a page`).toBe(true);
     expect(new Set(railPaths).size).toBe(railPaths.length);
     const adminPages = APP_PAGES.filter((p) => p.app === 'admin' && !p.hidden && !/[:*]/.test(p.route) && p.route !== '/admin');
-    expect(adminPages).toHaveLength(29);
+    expect(adminPages).toHaveLength(30);
     for (const p of adminPages) expect(railPaths, `${p.key} (${p.route}) is in the rail`).toContain(p.route);
     expect(railPaths).toContain('/admin');
   });

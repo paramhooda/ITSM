@@ -8,6 +8,8 @@ export interface Principal {
   name: string;
   phone: string | null;
   whatsappOptIn?: boolean;
+  /** When the person proved they control `phone` with a one-time code over WhatsApp; null until then and after a number change. */
+  whatsappVerifiedAt: Date | null;
   userType: 'msp' | 'customer';
   customerId: string | null;
   status: string;
@@ -111,6 +113,7 @@ export async function loadPrincipal(userId: string): Promise<Principal | null> {
     name: user.name,
     phone: user.phone,
     whatsappOptIn: user.whatsappOptIn,
+    whatsappVerifiedAt: user.whatsappVerifiedAt,
     userType: user.userType,
     customerId: user.customerId,
     status: user.status,
@@ -139,6 +142,7 @@ export async function loadApiKeyPrincipal(rawKey: string, sha256: (s: string) =>
     name: row.name,
     phone: null,
     whatsappOptIn: false,
+    whatsappVerifiedAt: null,
     userType: 'msp',
     customerId: row.customerId,
     status: 'active',
@@ -163,6 +167,7 @@ export function toPublicPrincipal(p: Principal) {
     name: p.name,
     phone: p.phone,
     whatsappOptIn: p.whatsappOptIn ?? false,
+    whatsappVerifiedAt: p.whatsappVerifiedAt ? p.whatsappVerifiedAt.toISOString() : null,
     userType: p.userType,
     customerId: p.customerId,
     permissions: [...all],

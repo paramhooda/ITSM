@@ -37,6 +37,7 @@ export const TOOLSETS: Record<ToolsetKey, Toolset> = {
   config: { key: 'config', label: 'Configuration (read)', description: 'option lists, teams, priority matrix, rules and workflows, the settings that are not protected', keywords: [/\b(options?|teams?|services?|catalog(ue)?|priority matrix|rules?|workflows?|templates?|settings?|configur)/i], portal: true },
   admin: { key: 'admin', label: 'Administration (change)', description: 'change settings, option lists, rules, workflows, templates, calendars and SLA policy attributes (always confirmed)', keywords: [/\b(settings?|configur|turn (on|off)|enable|disable|add (a|an|the) (option|rule|category|status)|rename|deactivate)\b/i], portal: false },
   iam: { key: 'iam', label: 'Users & audit (read)', description: 'users, roles, API keys, audit log search, notification delivery status', keywords: [/\b(users?|roles?|permissions?|api keys?|audit|who (did|changed)|login|outbox|deliver)/i], portal: false },
+  profile: { key: 'profile', label: 'Profile & notifications', description: 'the person\'s own notification preferences per category and channel, WhatsApp opt-in and number state', keywords: [/\b(notif|whatsapp|opt[ -]?(in|out)|preferenc|unsubscrib|mute|silence|stop (sending|emailing|messaging)|email me|message me|my (phone|mobile|number)|verif(y|ied) (my )?(number|phone))/i], portal: true },
 };
 
 export const BASE_SETS: ToolsetKey[] = ['core', 'ui'];

@@ -82,6 +82,10 @@ describe('demo dataset', () => {
     expect(await count('report_definitions')).toBeGreaterThanOrEqual(4);
     expect(await count('report_definitions', 'where portal_visible and scope_customer_id is not null')).toBeGreaterThanOrEqual(1);
     expect(await count('report_definitions', "where visibility = 'shared' and cardinality(shared_team_ids) > 0")).toBeGreaterThanOrEqual(1);
+    // Notification preferences: the fifteen seeded categories; six demo people opted in to WhatsApp with a verified number and a few categories switched off.
+    expect(await count('notification_categories')).toBeGreaterThanOrEqual(15);
+    expect(await count('users', 'where whatsapp_opt_in and whatsapp_verified_at is not null')).toBeGreaterThanOrEqual(6);
+    expect(await count('users', "where whatsapp_verified_at is not null and preferences -> 'notifications' <> '{}'::jsonb")).toBeGreaterThanOrEqual(6);
   });
 
   it('keeps every customer-scoped row inside its parent customer', async () => {

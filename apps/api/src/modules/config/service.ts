@@ -1,6 +1,7 @@
 import { resetWhatsAppSettingsCache, assertWebhookUrl } from '@/modules/notifications/channels';
+import { resetNotificationCategoryCache } from '@/modules/notifications/preferences';
 import { eq, and, or, asc, sql, inArray, lt, lte, gte, isNull, isNotNull } from 'drizzle-orm';
-import { OPTION_TYPES, OPTION_PARENT_TYPES, IMPACT_DIRECTIONS, type OptionType } from '@itsm/shared';
+import { OPTION_TYPES, OPTION_PARENT_TYPES, IMPACT_DIRECTIONS, NOTIFICATION_CATEGORIES, type OptionType } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { schema } from '@/db/client';
 import { NotFoundError, ValidationError, ForbiddenError } from '@/core/errors';
@@ -104,13 +105,14 @@ export async function setPriorityMatrix(ctx: Ctx, cells: { impactId: string; urg
 
 // ---------------------------------------------------------------- generic admin CRUD for config tables
 
-type Table = typeof schema.businessCalendars | typeof schema.holidayCalendars | typeof schema.notificationTemplates | typeof schema.notificationRules | typeof schema.assignmentRules | typeof schema.escalationRules | typeof schema.approvalWorkflows | typeof schema.customFieldDefinitions | typeof schema.ciTypes | typeof schema.ciRelationshipTypes;
+type Table = typeof schema.businessCalendars | typeof schema.holidayCalendars | typeof schema.notificationTemplates | typeof schema.notificationRules | typeof schema.notificationCategories | typeof schema.assignmentRules | typeof schema.escalationRules | typeof schema.approvalWorkflows | typeof schema.customFieldDefinitions | typeof schema.ciTypes | typeof schema.ciRelationshipTypes;
 
 export const CONFIG_TABLES: Record<string, { table: Table; label: string; orderBy?: string }> = {
   calendars: { table: schema.businessCalendars, label: 'business_calendar', orderBy: 'name' },
   'holiday-calendars': { table: schema.holidayCalendars, label: 'holiday_calendar', orderBy: 'name' },
   'notification-templates': { table: schema.notificationTemplates, label: 'notification_template', orderBy: 'event' },
   'notification-rules': { table: schema.notificationRules, label: 'notification_rule', orderBy: 'event' },
+  'notification-categories': { table: schema.notificationCategories, label: 'notification_category', orderBy: 'sortOrder' },
   'assignment-rules': { table: schema.assignmentRules, label: 'assignment_rule', orderBy: 'sortOrder' },
   'escalation-rules': { table: schema.escalationRules, label: 'escalation_rule', orderBy: 'sortOrder' },
   'approval-workflows': { table: schema.approvalWorkflows, label: 'approval_workflow', orderBy: 'name' },
@@ -125,10 +127,24 @@ function tableOf(kind: string) {
   return def;
 }
 
+const RULE_CHANNELS = ['email', 'in_app', 'whatsapp'] as const;
+const CATEGORY_SWITCHES = ['emailDefault', 'emailLocked', 'whatsappDefault', 'whatsappLocked'] as const;
+
 /** Field-level validation for config kinds whose columns carry enumerated values. */
 function validateConfigInput(kind: string, input: Record<string, unknown>) {
   if (kind === 'relationship-types' && input.impactDirection !== undefined && !(IMPACT_DIRECTIONS as readonly unknown[]).includes(input.impactDirection)) {
     throw new ValidationError(`impactDirection must be one of: ${IMPACT_DIRECTIONS.join(', ')}`);
+  }
+  if (kind === 'notification-rules' && input.channels !== undefined) {
+    if (!Array.isArray(input.channels)) throw new ValidationError(`channels must be a list of: ${RULE_CHANNELS.join(', ')}`);
+    const bad = input.channels.find((c) => !(RULE_CHANNELS as readonly unknown[]).includes(c));
+    if (bad !== undefined) throw new ValidationError(`channels: "${String(bad)}" is not a channel (use ${RULE_CHANNELS.join(', ')})`);
+  }
+  if (kind === 'notification-categories') {
+    if (input.key !== undefined || input.sortOrder !== undefined) throw new ValidationError('Categories are defined by the platform');
+    for (const field of CATEGORY_SWITCHES) {
+      if (input[field] !== undefined && typeof input[field] !== 'boolean') throw new ValidationError(`${field} must be true or false`);
+    }
   }
 }
 
@@ -141,6 +157,7 @@ export async function listConfig(ctx: Ctx, kind: string) {
 
 export async function createConfig(ctx: Ctx, kind: string, input: Record<string, unknown>) {
   const def = tableOf(kind);
+  if (kind === 'notification-categories') throw new ValidationError('Categories cannot be added');
   validateConfigInput(kind, input);
   const [row] = await ctx.tx.insert(def.table as typeof schema.businessCalendars).values(input as never).returning();
   await ctx.audit({ entityType: def.label, entityId: (row as { id: string }).id, entityLabel: String((row as { name?: string }).name ?? ''), action: 'create' });
@@ -154,9 +171,18 @@ export async function updateConfig(ctx: Ctx, kind: string, id: string, patch: Re
   if (!before) throw new NotFoundError(def.label);
   const { id: _id, createdAt: _c, isSystem: _s, ...rest } = patch;
   validateConfigInput(kind, rest);
+  if (kind === 'notification-categories') {
+    const row = before as unknown as typeof schema.notificationCategories.$inferSelect;
+    if (row.key === 'briefing') throw new ValidationError('The daily briefing is chosen by each person on their profile');
+    const def = NOTIFICATION_CATEGORIES.find((c) => c.key === row.key);
+    if (def && !def.whatsapp && (rest.whatsappDefault !== undefined || rest.whatsappLocked !== undefined)) throw new ValidationError(`${def.label} is not sent over WhatsApp`);
+    const merged = { ...row, ...rest } as typeof schema.notificationCategories.$inferSelect;
+    if ((merged.emailLocked && !merged.emailDefault) || (merged.whatsappLocked && !merged.whatsappDefault)) throw new ValidationError('A locked channel must be on by default');
+  }
   if (kind === 'calendars' && patch.isDefault) await ctx.tx.update(schema.businessCalendars).set({ isDefault: false });
   const [after] = await ctx.tx.update(t).set({ ...(rest as object), updatedAt: new Date() } as never).where(eq(t.id, id)).returning();
-  await ctx.audit({ entityType: def.label, entityId: id, entityLabel: String((after as { name?: string }).name ?? ''), action: 'update', changes: diffChanges(before as Record<string, unknown>, rest) });
+  if (kind === 'notification-categories') resetNotificationCategoryCache();
+  await ctx.audit({ entityType: def.label, entityId: id, entityLabel: String((after as { name?: string; key?: string }).name ?? (after as { key?: string }).key ?? ''), action: 'update', changes: diffChanges(before as Record<string, unknown>, rest) });
   return after;
 }
 

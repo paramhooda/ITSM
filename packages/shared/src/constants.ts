@@ -141,8 +141,59 @@ export const NOTIFICATION_EVENTS = [
   'licence.expiring',
   'licence.expired',
   'software.over_deployed',
+  'user.phone_verification',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
+
+/**
+ * Notification categories: the rows of a person's preference matrix and of the
+ * administrator's defaults page. Each event belongs to at most one category;
+ * the three account messages (welcome, password reset, verification code)
+ * belong to none and are always sent. Labels, audience and seed defaults live
+ * here so the web and the API share one list; the notification_categories
+ * table holds only what the administrator may change (defaults and locks).
+ */
+export type NotificationCategoryAudience = 'staff' | 'customer' | 'both';
+export interface NotificationCategoryDef {
+  key: string;
+  /** Row label for staff. */
+  label: string;
+  /** Row label for customer users (defaults to `label`). */
+  customerLabel?: string;
+  description: string;
+  /** Description for customer users when the staff one names events they never receive (defaults to `description`). */
+  customerDescription?: string;
+  audience: NotificationCategoryAudience;
+  events: NotificationEvent[];
+  /** Seed values of the notification_categories row; the administrator may change them afterwards. */
+  seed: { emailDefault: boolean; emailLocked: boolean; whatsappDefault: boolean; whatsappLocked: boolean };
+  /** WhatsApp cell offered at all (false: email-only category). */
+  whatsapp: boolean;
+}
+export const NOTIFICATION_CATEGORIES: NotificationCategoryDef[] = [
+  { key: 'tickets', label: 'Assignments and ticket updates', customerLabel: 'Ticket updates', description: 'A ticket is logged, assigned or changes status; a customer sounds unhappy.', customerDescription: 'Your ticket is logged, assigned or changes status.', audience: 'both', events: ['ticket.created', 'ticket.assigned', 'ticket.status_changed', 'ticket.sentiment_negative'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'replies', label: 'Comments and replies', customerLabel: 'Replies from the service desk', description: 'A customer comments on a ticket; the service desk replies.', customerDescription: 'The service desk replies on your ticket.', audience: 'both', events: ['ticket.customer_comment', 'ticket.engineer_comment'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'closure', label: 'Resolution and closure', description: 'A ticket is resolved or closed.', audience: 'both', events: ['ticket.resolved', 'ticket.closed'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'sla', label: 'SLA warnings and breaches', description: 'An SLA clock is about to run out or has run out.', audience: 'staff', events: ['sla.warning', 'sla.breached'], seed: { emailDefault: true, emailLocked: true, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'escalations', label: 'Escalations and major incidents', customerLabel: 'Major incident updates', description: 'A ticket is escalated; a major incident is declared, updated, resolved or its update is overdue.', customerDescription: 'A major incident affecting your services is updated or resolved.', audience: 'both', events: ['ticket.escalated', 'incident.major_declared', 'incident.major_update', 'incident.major_resolved', 'incident.major_update_due'], seed: { emailDefault: true, emailLocked: true, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'paging', label: 'On-call pages', description: 'You are paged, a page is acknowledged, a page expired unanswered.', audience: 'staff', events: ['page.sent', 'page.acknowledged', 'page.expired'], seed: { emailDefault: true, emailLocked: true, whatsappDefault: true, whatsappLocked: true }, whatsapp: true },
+  { key: 'approvals', label: 'Approval requests and decisions', customerLabel: 'Approvals', description: 'Your approval is requested; a request or change you raised is approved or rejected.', audience: 'both', events: ['change.approval_requested', 'request.approval_requested', 'change.approved', 'change.rejected', 'request.approved', 'request.rejected'], seed: { emailDefault: true, emailLocked: true, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'changes', label: 'Changes and CAB', customerLabel: 'Planned changes', description: 'A change window opens soon; a change is put on a CAB agenda or decided.', customerDescription: 'A planned change on your services is put on a CAB agenda or decided.', audience: 'both', events: ['change.window_reminder', 'change.cab_scheduled', 'change.cab_decision'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'field', label: 'Field visits and maintenance', customerLabel: 'Visits and maintenance', description: 'A site visit is scheduled or completed; preventive maintenance is scheduled, due or missed.', customerDescription: 'A site visit or preventive maintenance at your sites is scheduled or completed.', audience: 'both', events: ['field_visit.scheduled', 'field_visit.completed', 'pm.scheduled', 'pm.due', 'pm.missed'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'handover', label: 'Shift handover', description: 'The outgoing shift published its handover to you.', audience: 'staff', events: ['handover.published'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'briefing', label: 'Daily briefing', description: 'Your morning briefing (switched on and timed on the Daily briefing card).', audience: 'staff', events: ['briefing.daily'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: false, whatsappLocked: false }, whatsapp: false },
+  { key: 'contracts', label: 'Contracts and licences', description: 'Contracts ending or missing documents, entitlements running out, software licences ending, titles over-deployed.', audience: 'staff', events: ['contract.expiring', 'contract.expired', 'contract.renewal_due', 'contract.missing_documents', 'entitlement.threshold', 'entitlement.exhausted', 'licence.expiring', 'licence.expired', 'software.over_deployed'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'feedback', label: 'Customer feedback', customerLabel: 'Satisfaction surveys', description: 'A satisfaction survey for a ticket that ended; a poor rating on a ticket you handled.', customerDescription: 'A short satisfaction survey when your ticket is resolved or closed.', audience: 'both', events: ['ticket.survey_requested', 'ticket.survey_low_rating'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'knowledge', label: 'Known issues', description: 'A known issue with a workaround is published for your organisation.', audience: 'customer', events: ['known_error.published'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'reports', label: 'Scheduled reports', description: 'A scheduled report you are a recipient of is delivered.', audience: 'both', events: ['report.delivered'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: false, whatsappLocked: false }, whatsapp: false },
+];
+export const NOTIFICATION_CATEGORY_KEYS = NOTIFICATION_CATEGORIES.map((c) => c.key) as [string, ...string[]];
+export type NotificationCategoryKey = (typeof NOTIFICATION_CATEGORIES)[number]['key'];
+/** Account messages that never consult a preference. */
+export const ALWAYS_SENT_EVENTS: NotificationEvent[] = ['user.welcome', 'user.password_reset', 'user.phone_verification'];
+const CATEGORY_BY_EVENT = new Map(NOTIFICATION_CATEGORIES.flatMap((c) => c.events.map((e) => [e, c.key] as const)));
+/** The category an event belongs to, or null for the always-sent account messages. */
+export const notificationCategoryOf = (event: string): string | null => CATEGORY_BY_EVENT.get(event as NotificationEvent) ?? null;
 
 /**
  * Navigation areas of the MSP workspace. A role lists the areas its holders

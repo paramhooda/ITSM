@@ -469,6 +469,8 @@ export interface PortalUser {
   name: string;
   phone: string | null;
   whatsappOptIn: boolean;
+  /** Set when the person proved they control the number with a one-time code over WhatsApp (ISO string), or null. */
+  whatsappVerifiedAt: string | null;
   title: string | null;
   status: string;
   lastLoginAt: string | null;

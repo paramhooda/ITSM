@@ -8,6 +8,8 @@ export interface Principal {
   phone?: string | null;
   /** Opted in to WhatsApp notifications on the phone number. */
   whatsappOptIn?: boolean;
+  /** When the person proved they control the phone number with a one-time code over WhatsApp (ISO string), or null. */
+  whatsappVerifiedAt?: string | null;
   userType: 'msp' | 'customer';
   customerId: string | null;
   permissions: Permission[];

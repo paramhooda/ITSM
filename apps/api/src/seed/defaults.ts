@@ -1,5 +1,5 @@
 import { eq, and, sql, inArray } from 'drizzle-orm';
-import { ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_AREAS, OPTION_PARENT_TYPES, type OptionType } from '@itsm/shared';
+import { ALL_PERMISSIONS, SYSTEM_ROLES, SYSTEM_ROLE_AREAS, OPTION_PARENT_TYPES, NOTIFICATION_CATEGORIES, type OptionType } from '@itsm/shared';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { OPTION_SEEDS, PRIORITY_MATRIX, TEAM_SEEDS, CI_TYPE_SEEDS, RELATIONSHIP_TYPE_SEEDS, KB_CATEGORY_SEEDS } from './options';
@@ -18,6 +18,7 @@ export async function seedDefaults(tx: Tx) {
   await seedRelationshipTypes(tx);
   await seedKbCategories(tx);
   await seedNotificationTemplates(tx);
+  await seedNotificationCategories(tx);
   await seedNotificationRules(tx);
   await seedEscalationRules(tx);
   await seedApprovalWorkflows(tx);
@@ -220,6 +221,13 @@ async function seedKbCategories(tx: Tx) {
 
 async function seedNotificationTemplates(tx: Tx) {
   for (const t of NOTIFICATION_TEMPLATE_SEEDS_ALL) await tx.insert(schema.notificationTemplates).values({ ...t, isSystem: true }).onConflictDoNothing();
+}
+
+/** One row per notification category with the seed defaults and locks; an administrator's later edits survive restarts (insert only). */
+async function seedNotificationCategories(tx: Tx) {
+  for (const [i, def] of NOTIFICATION_CATEGORIES.entries()) {
+    await tx.insert(schema.notificationCategories).values({ key: def.key, ...def.seed, sortOrder: (i + 1) * 10, isSystem: true }).onConflictDoNothing();
+  }
 }
 
 async function seedNotificationRules(tx: Tx) {

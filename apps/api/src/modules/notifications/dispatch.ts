@@ -1,12 +1,14 @@
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
+import { notificationCategoryOf } from '@itsm/shared';
 import { config } from '@/config';
 import { render, emailLayout } from '@/lib/templates';
 import { enqueue } from '@/jobs/queues';
 import { logger } from '@/core/logger';
 import { normalizePhone } from '@/lib/channels';
 import { loadWhatsAppSettings, templateForEvent } from './channels';
+import { loadCategoryPolicies, notificationPrefsOf, channelAllowed } from './preferences';
 
 export type NotificationChannel = 'email' | 'in_app' | 'whatsapp';
 export const NOTIFICATION_CHANNELS: NotificationChannel[] = ['email', 'in_app', 'whatsapp'];
@@ -40,6 +42,13 @@ export interface NotificationInput {
  * Renders the event template and writes outbound messages to the outbox plus
  * in-app notifications. Runs inside the caller's transaction, so nothing is
  * sent unless the business operation commits. Delivery happens in the worker.
+ *
+ * For recipients with an account, the person's notification preferences and the
+ * administrator's defaults and locks for the event's category decide whether an
+ * email or WhatsApp row is written (in-app never consults them); recipients
+ * without a user id (contacts, rule addresses) and events outside every category
+ * (account messages) keep the caller's channels. A recipient whose resolver did
+ * not say gets the number and the WhatsApp opt-in from the user row.
  */
 export async function queueNotification(tx: Tx, input: NotificationInput) {
   const channels = input.channels ?? ['email', 'in_app'];
@@ -87,12 +96,26 @@ export async function queueNotification(tx: Tx, input: NotificationInput) {
       whatsapp = { settings, subject: waSubject, text, link };
     }
   }
+  const category = notificationCategoryOf(input.event);
+  const userIds = [...new Set(input.recipients.map((r) => r.userId).filter((x): x is string => !!x))];
+  const people = userIds.length
+    ? await tx.select({ id: schema.users.id, preferences: schema.users.preferences, phone: schema.users.phone, whatsappOptIn: schema.users.whatsappOptIn }).from(schema.users).where(inArray(schema.users.id, userIds))
+    : [];
+  const personOf = new Map(people.map((p) => [p.id, p]));
+  const policy = category ? (await loadCategoryPolicies(tx)).get(category) : undefined;
+  const allows = (rcpt: Recipient, channel: 'email' | 'whatsapp') => {
+    if (!category || !rcpt.userId) return true; // contacts, schedule addresses and account events keep today's behaviour
+    const person = personOf.get(rcpt.userId);
+    return person ? channelAllowed(policy, notificationPrefsOf(person.preferences), channel) : true;
+  };
   const seenEmails = new Set<string>();
   const seenUsers = new Set<string>();
   const seenPhones = new Set<string>();
   let queued = 0;
-  for (const rcpt of input.recipients) {
-    if (channels.includes('email') && rcpt.email && !seenEmails.has(rcpt.email.toLowerCase())) {
+  for (let rcpt of input.recipients) {
+    const person = rcpt.userId ? personOf.get(rcpt.userId) : undefined;
+    if (person && rcpt.phone === undefined && rcpt.whatsappOptIn === undefined) rcpt = { ...rcpt, phone: person.phone, whatsappOptIn: person.whatsappOptIn };
+    if (channels.includes('email') && rcpt.email && allows(rcpt, 'email') && !seenEmails.has(rcpt.email.toLowerCase())) {
       seenEmails.add(rcpt.email.toLowerCase());
       await tx.insert(schema.notificationOutbox).values({
         channel: 'email',
@@ -120,7 +143,7 @@ export async function queueNotification(tx: Tx, input: NotificationInput) {
         entityId: input.entityId,
       });
     }
-    if (whatsapp && rcpt.whatsappOptIn) {
+    if (whatsapp && rcpt.whatsappOptIn && allows(rcpt, 'whatsapp')) {
       const phone = normalizePhone(rcpt.phone, whatsapp.settings.defaultCountryCode);
       if (phone && !seenPhones.has(phone)) {
         seenPhones.add(phone);

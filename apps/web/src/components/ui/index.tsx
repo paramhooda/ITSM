@@ -464,10 +464,27 @@ export function ProgressBar({ pct, tone, className }: { pct: number; tone?: 'aut
   );
 }
 
-export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode }) {
+/** A switch; `disabled` keeps it visible but inert (announced as disabled, out of the tab order). Space or Enter flips it from the keyboard. */
+export function Toggle({ checked, onChange, label, disabled, title }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode; disabled?: boolean; title?: string }) {
+  const flip = () => {
+    if (!disabled) onChange(!checked);
+  };
   return (
-    <label className="inline-flex items-center gap-2 cursor-pointer select-none text-[13px]">
-      <span role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className={cn('relative inline-flex h-5 w-9 items-center rounded-full transition-colors', checked ? 'bg-brand-600' : 'bg-surface-3 border border-strong')}>
+    <label className={cn('inline-flex items-center gap-2 select-none text-[13px]', disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer')} title={title}>
+      <span
+        role="switch"
+        aria-checked={checked}
+        aria-disabled={disabled || undefined}
+        tabIndex={disabled ? -1 : 0}
+        onClick={flip}
+        onKeyDown={(e) => {
+          if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            flip();
+          }
+        }}
+        className={cn('relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40', checked ? 'bg-brand-600' : 'bg-surface-3 border border-strong')}
+      >
         <span className={cn('inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform', checked ? 'translate-x-4' : 'translate-x-0.5')} />
       </span>
       {label}

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -10,6 +10,8 @@ import { Badge, Button, Card, ConfirmDialog, DataTable, Field, Input, KeyValue, 
 import { fmtDateTime, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { briefingsApi, briefingKeys, BRIEFING_TIMES, type BriefingPrefs, type BriefingChannel } from '@/components/briefings/api';
+import { NotificationsCard } from '@/components/notifications/NotificationsCard';
+import { notificationPrefsKeys } from '@/components/notifications/api';
 
 const TIMEZONES = [
   'UTC',
@@ -71,13 +73,6 @@ function describeAgent(ua: string | null) {
   return os ? `${browser} on ${os}` : browser;
 }
 
-type NotificationPrefs = { email: boolean; inApp: boolean };
-
-function prefsOf(user: Principal): NotificationPrefs {
-  const n = (user.preferences?.notifications ?? {}) as Partial<NotificationPrefs>;
-  return { email: n.email ?? true, inApp: n.inApp ?? true };
-}
-
 export default function ProfilePage() {
   const user = useAuthStore((s) => s.user)!;
   const setUser = useAuthStore((s) => s.setUser);
@@ -85,16 +80,17 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  const profile = (user.preferences?.profile ?? {}) as { phone?: string };
   const [name, setName] = useState(user.name);
-  const [phone, setPhone] = useState(user.phone ?? profile.phone ?? '');
+  const [phone, setPhone] = useState(user.phone ?? '');
+  const knownPhone = useRef(user.phone ?? '');
+  knownPhone.current = user.phone ?? '';
   const [timezone, setTimezone] = useState(user.timezone || 'UTC');
-  const [prefs, setPrefs] = useState<NotificationPrefs>(() => prefsOf(user));
   const briefingToday = useQuery({ queryKey: briefingKeys.today, queryFn: briefingsApi.today, enabled: user.userType === 'msp', staleTime: 60_000 });
   const [briefing, setBriefing] = useState<BriefingPrefs | null>(null);
   const briefingPrefs: BriefingPrefs = briefing ?? briefingToday.data?.prefs ?? { enabled: false, time: '08:00', role: 'auto', channels: ['email', 'in_app'] };
   const saveBriefing = useMutation({
-    mutationFn: (next: BriefingPrefs) => patch<{ user: Principal }>('/auth/me', { preferences: { ...user.preferences, briefing: next } }),
+    // Only the briefing key travels: every other key of preferences has a server-side writer of its own.
+    mutationFn: (next: BriefingPrefs) => patch<{ user: Principal }>('/auth/me', { preferences: { briefing: next } }),
     onSuccess: (res, next) => {
       setUser(res.user);
       setBriefing(null);
@@ -111,37 +107,15 @@ export default function ProfilePage() {
   const tzOptions = (TIMEZONES.includes(timezone) ? TIMEZONES : [timezone, ...TIMEZONES]).map((t) => ({ value: t, label: t.replace(/_/g, ' ') }));
 
   const saveProfile = useMutation({
-    mutationFn: () =>
-      patch<{ user: Principal }>('/auth/me', {
-        name: name.trim(),
-        phone: phone.trim(),
-        timezone,
-        preferences: { ...user.preferences, profile: { ...profile, phone: phone.trim() } },
-      }),
+    mutationFn: () => patch<{ user: Principal }>('/auth/me', { name: name.trim(), phone: phone.trim(), timezone }),
     onSuccess: (res) => {
       setUser(res.user);
       setPhone(res.user.phone ?? '');
+      // A changed number clears the verification and gates the WhatsApp column; the card reads the fresh state.
+      void qc.invalidateQueries({ queryKey: notificationPrefsKeys.matrix });
       toast.success('Profile updated');
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not save profile'),
-  });
-
-  const savePrefs = useMutation({
-    mutationFn: (next: NotificationPrefs) => patch<{ user: Principal }>('/auth/me', { preferences: { ...user.preferences, notifications: next } }),
-    onSuccess: (res) => {
-      setUser(res.user);
-      toast.success('Notification preferences saved');
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not save preferences'),
-  });
-
-  const saveWhatsApp = useMutation({
-    mutationFn: (whatsappOptIn: boolean) => patch<{ user: Principal }>('/auth/me', { whatsappOptIn }),
-    onSuccess: (res) => {
-      setUser(res.user);
-      toast.success(res.user.whatsappOptIn ? 'WhatsApp notifications on' : 'WhatsApp notifications off');
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not update WhatsApp notifications'),
   });
 
   const changePassword = useMutation({
@@ -238,46 +212,13 @@ export default function ProfilePage() {
           </Card>
 
 
-          <Card title="Notifications">
-            <div className="flex flex-col gap-3">
-              <Toggle
-                checked={prefs.email}
-                onChange={(v) => {
-                  const next = { ...prefs, email: v };
-                  setPrefs(next);
-                  savePrefs.mutate(next);
-                }}
-                label={
-                  <span>
-                    Email notifications <span className="text-subtle">— ticket updates, SLA alerts, approvals, contract milestones</span>
-                  </span>
-                }
-              />
-              <Toggle
-                checked={prefs.inApp}
-                onChange={(v) => {
-                  const next = { ...prefs, inApp: v };
-                  setPrefs(next);
-                  savePrefs.mutate(next);
-                }}
-                label={
-                  <span>
-                    In-app notifications <span className="text-subtle">— bell icon and the notifications page</span>
-                  </span>
-                }
-              />
-              <Toggle
-                checked={!!user.whatsappOptIn}
-                onChange={(v) => saveWhatsApp.mutate(v)}
-                label={
-                  <span>
-                    WhatsApp notifications <span className="text-subtle">— ticket updates and alerts on {user.phone ? user.phone : 'your mobile number'}</span>
-                  </span>
-                }
-              />
-              {!user.phone && <div className="text-[12px] text-subtle -mt-1 pl-11">Save a mobile number in your profile first.</div>}
-            </div>
-          </Card>
+          <NotificationsCard
+            onUser={(u) => {
+              // Follow the server only when the number itself changed (Remove number); an opt-in toggle must not discard a half-typed number.
+              const next = u.phone ?? '';
+              if (next !== knownPhone.current) setPhone(next);
+            }}
+          />
 
           {user.userType === 'msp' && (
             <Card title="Daily briefing" actions={<Sparkles className="h-4 w-4 text-brand-600" />}>

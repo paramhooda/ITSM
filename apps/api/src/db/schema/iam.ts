@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { pgTable, text, boolean, timestamp, uuid, jsonb, index, uniqueIndex, primaryKey, integer, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { id, timestamps, userTypeEnum, userStatusEnum } from './_common';
 import { customers } from './customers';
@@ -12,6 +13,8 @@ export const users = pgTable('users', {
   /** The person asked for WhatsApp notifications on their phone number (Meta requires an opt-in). */
   whatsappOptIn: boolean('whatsapp_opt_in').notNull().default(false),
   whatsappOptedInAt: timestamp('whatsapp_opted_in_at', { withTimezone: true }),
+  /** Set when the person proved they control `phone` with a one-time code exchanged over WhatsApp; cleared whenever the number changes. */
+  whatsappVerifiedAt: timestamp('whatsapp_verified_at', { withTimezone: true }),
   title: text('title'),
   userType: userTypeEnum('user_type').notNull().default('msp'),
   status: userStatusEnum('status').notNull().default('active'),
@@ -31,6 +34,8 @@ export const users = pgTable('users', {
 }, (t) => [
   uniqueIndex('users_email_idx').on(t.email),
   index('users_customer_idx').on(t.customerId),
+  // at most one account per verified number; also the WhatsApp assistant's inbound lookup
+  uniqueIndex('users_whatsapp_verified_phone_idx').on(t.phone).where(sql`whatsapp_verified_at IS NOT NULL`),
 ]);
 
 export const roles = pgTable('roles', {

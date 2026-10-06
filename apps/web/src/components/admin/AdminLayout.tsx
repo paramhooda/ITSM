@@ -72,6 +72,7 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     items: [
       { to: '/admin/notifications/templates', label: 'Notification templates', perm: CONFIG },
       { to: '/admin/notifications/rules', label: 'Notification rules', perm: CONFIG },
+      { to: '/admin/notifications/defaults', label: 'Notification defaults', perm: CONFIG },
       { to: '/admin/whatsapp', label: 'WhatsApp', perm: SYSTEM },
       { to: '/admin/outbox', label: 'Notification outbox', perm: SYSTEM },
     ],

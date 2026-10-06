@@ -9,6 +9,7 @@ import { hashPassword, randomToken, sha256 } from '@/lib/crypto';
 import { invalidatePrincipal } from '@/core/principal';
 import { diffChanges } from '@/core/audit';
 import { queueNotification } from '@/modules/notifications/dispatch';
+import { onPhoneChanged, actorOf as auditActorOf } from '@/modules/notifications/phone';
 import { config } from '@/config';
 import type { Pagination } from '@/core/pagination';
 
@@ -40,6 +41,8 @@ const userColumns = {
   updatedAt: schema.users.updatedAt,
   mfaEnabled: schema.users.mfaEnabled,
   authProvider: schema.users.authProvider,
+  whatsappOptIn: schema.users.whatsappOptIn,
+  whatsappVerifiedAt: schema.users.whatsappVerifiedAt,
 };
 
 export async function listUsers(ctx: Ctx, f: UserFilters) {
@@ -197,6 +200,8 @@ export async function updateUser(ctx: Ctx, id: string, patch: Partial<Pick<Creat
   }
   const [after] = await ctx.tx.update(schema.users).set(values).where(eq(schema.users.id, id)).returning();
   if (patch.status === 'disabled') await ctx.tx.update(schema.sessions).set({ revokedAt: new Date() }).where(eq(schema.sessions.userId, id));
+  // A changed number is no longer the verified one.
+  if (values.phone !== undefined && normalizePhone(before.phone) !== normalizePhone(values.phone)) await onPhoneChanged(ctx.tx, id, before.phone, values.phone, auditActorOf(ctx));
   invalidatePrincipal(id);
   await ctx.audit({ entityType: 'user', entityId: id, entityLabel: after.email, action: 'update', customerId: after.customerId, changes: diffChanges(before as Record<string, unknown>, values as Record<string, unknown>) });
   return getUser(ctx, id);

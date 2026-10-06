@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { createCustomer } from '@/modules/customers/service';
@@ -312,6 +312,15 @@ export async function seedCustomers(state: DemoState, tx: Tx, passwordHash: stri
         await tx.insert(schema.userRoles).values({ userId, roleId: refs.role(c.portal), customerId: cust.id, createdBy: state.admin.id });
         await tx.update(schema.contacts).set({ userId }).where(eq(schema.contacts.id, row.id));
         cust.portalUsers.push({ id: userId, name: c.name, email, roleKey: c.portal, contactId: row.id });
+        // The ABC Manufacturing administrator opted in to WhatsApp and verified the number, with one category switched off.
+        if (seed.key === 'abc' && c.portal === 'customer_admin' && c.isPrimary) {
+          const thirtyDaysAgo = new Date(state.now.getTime() - 30 * 86_400_000);
+          await tx
+            .update(schema.users)
+            .set({ phone: '+919876501001', whatsappOptIn: true, whatsappOptedInAt: thirtyDaysAgo, whatsappVerifiedAt: thirtyDaysAgo, preferences: sql`${schema.users.preferences} || ${JSON.stringify({ notifications: { knowledge: { whatsapp: false } } })}::jsonb`, updatedAt: state.now })
+            .where(eq(schema.users.id, userId));
+          state.counts.whatsappVerified = (state.counts.whatsappVerified ?? 0) + 1;
+        }
       }
       cust.contacts.push({ id: row.id, name: c.name, email, title: c.title, isPrimary: !!c.isPrimary, escalationLevel: c.escalationLevel ?? null, userId });
     }

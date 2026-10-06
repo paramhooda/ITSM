@@ -52,7 +52,7 @@ const fakeCtx = (soc: boolean) => ({ user: { userType: 'msp', isSystem: false },
 const spec = (s: Partial<ReportSpec>): ReportSpec => ({ columns: [], filters: [], match: 'all', groupBy: [], aggregates: [], sort: null, dateField: null, rowLimit: null, chart: null, ...s });
 /** The service manager holds soc:read and reports:manage; this staff principal builds reports but holds neither. */
 const noSoc = (): Principal => throwaway(['tenant:all', 'reports:run', 'reports:build', 'tickets:read', 'ai:use', 'ai:act'], 'noc_engineer');
-const throwaway = (perms: string[], roleKey = 'engineer'): Principal => ({ id: '00000000-0000-0000-0000-00000000aaaa', email: `throwaway-${S}@example.test`, name: 'Throwaway', phone: null, userType: 'msp', customerId: null, status: 'active', timezone: 'UTC', preferences: {}, globalPermissions: new Set(perms as never[]), customerPermissions: new Map(), customerScope: 'all', roles: [{ id: 'r', key: roleKey, name: roleKey, customerId: null }], teams: [], areas: null });
+const throwaway = (perms: string[], roleKey = 'engineer'): Principal => ({ id: '00000000-0000-0000-0000-00000000aaaa', email: `throwaway-${S}@example.test`, name: 'Throwaway', phone: null, whatsappVerifiedAt: null, userType: 'msp', customerId: null, status: 'active', timezone: 'UTC', preferences: {}, globalPermissions: new Set(perms as never[]), customerPermissions: new Map(), customerScope: 'all', roles: [{ id: 'r', key: roleKey, name: roleKey, customerId: null }], teams: [], areas: null });
 
 async function roleId(tx: Tx, key: string) {
   const [row] = await tx.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, key)).limit(1);

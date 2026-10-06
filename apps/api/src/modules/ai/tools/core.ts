@@ -153,7 +153,7 @@ export const CORE: ReturnType<typeof define>[] = [
   define({
     name: 'enable_toolset',
     toolset: 'core',
-    description: 'Make another group of tools available for this conversation when none of the current tools fits: tickets (ticket actions, tasks, time, links, bulk, task boards), triage, incident (major incidents), approvals, customers, contracts (contracts, entitlements, SLA, service levels), cmdb (CIs, impact, discovery, monitoring events), assets (assets, software, licences), field (visits, maintenance), knowledge, reports (reports, dashboards, trends), config (option lists, teams, services, rules, settings), admin (change configuration), iam (users, roles, keys, audit).',
+    description: 'Make another group of tools available for this conversation when none of the current tools fits: tickets (ticket actions, tasks, time, links, bulk, task boards), triage, incident (major incidents), approvals, customers, contracts (contracts, entitlements, SLA, service levels), cmdb (CIs, impact, discovery, monitoring events), assets (assets, software, licences), field (visits, maintenance), knowledge, reports (reports, dashboards, trends), config (option lists, teams, services, rules, settings), admin (change configuration), iam (users, roles, keys, audit), profile (the person\'s own notification preferences and WhatsApp number).',
     inputSchema: z.object({ toolset: z.enum(TOOLSET_KEYS) }),
     requires: [],
     portal: ['portal:access'],

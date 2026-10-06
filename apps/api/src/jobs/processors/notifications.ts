@@ -87,6 +87,8 @@ registerProcessor({
       const [row] = await tx.select({ value: schema.systemSettings.value }).from(schema.systemSettings).where(eq(schema.systemSettings.key, 'notifications.outbox_retention_days')).limit(1);
       const days = Math.max(7, Number(row?.value ?? 90) || 90);
       const res = await tx.execute(sql`DELETE FROM notification_outbox WHERE status IN ('sent', 'failed', 'cancelled') AND created_at < now() - (${days} || ' days')::interval`);
+      // verification codes live ten minutes; the rows only serve the hourly counter
+      await tx.execute(sql`DELETE FROM phone_verifications WHERE created_at < now() - interval '1 day'`);
       logger.info({ days, deleted: res.rowCount ?? 0 }, 'outbox purged');
     });
   },

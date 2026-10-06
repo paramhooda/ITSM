@@ -18,6 +18,7 @@ export const SYSTEM_PRINCIPAL: Principal = {
   email: 'system@local',
   name: 'System',
   phone: null,
+  whatsappVerifiedAt: null,
   userType: 'msp',
   customerId: null,
   status: 'active',

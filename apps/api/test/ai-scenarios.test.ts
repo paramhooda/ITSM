@@ -159,6 +159,25 @@ describe('skills, one scripted conversation each', () => {
     expect((again as { error?: string }).error).toBe('stale_action');
   });
 
+  it('act: the person\'s own notification preference is proposed, confirmed and stored under their profile', async () => {
+    const [before] = await withSystem((tx) => tx.select({ preferences: schema.users.preferences }).from(schema.users).where(eq(schema.users.id, admin.id)));
+    const fake = new Scripted().script(tool('set_notification_preference', { category: 'sla', channel: 'whatsapp', enabled: false }), say('I will turn WhatsApp off for SLA warnings. Shall I proceed?'));
+    ai.setProviderForTests(fake);
+    try {
+      const res = await asAdmin((ctx) => ai.chat(ctx, { message: 'stop WhatsApp for SLA warnings' }));
+      expect(toolNames(fake.seen[0]!)).toContain('set_notification_preference');
+      expect(res.pendingAction?.tool).toBe('set_notification_preference');
+      const done = await asAdmin((ctx) => ai.chat(ctx, { conversationId: res.conversationId, confirm: { actionId: res.pendingAction!.id, decision: 'confirm' } }));
+      expect(done.message.content).toMatch(/^Done:/);
+      expect(done.message.toolCalls[0]).toMatchObject({ name: 'set_notification_preference', ok: true, action: true });
+      const [after] = await withSystem((tx) => tx.select({ preferences: schema.users.preferences }).from(schema.users).where(eq(schema.users.id, admin.id)));
+      expect((after!.preferences.notifications as { sla: { whatsapp: boolean } }).sla.whatsapp).toBe(false);
+    } finally {
+      await withSystem((tx) => tx.update(schema.users).set({ preferences: before!.preferences }).where(eq(schema.users.id, admin.id)));
+      invalidatePrincipal(admin.id);
+    }
+  });
+
   it('incident: the picture first, then a declaration proposed with its preview', async () => {
     const fake = new Scripted().script(tool('major_incidents', {}), tool('declare_major', { ticket: numbers.a1, reason: 'Site down', updateIntervalMinutes: 30 }), say('I will declare it. Shall I proceed?'));
     ai.setProviderForTests(fake);

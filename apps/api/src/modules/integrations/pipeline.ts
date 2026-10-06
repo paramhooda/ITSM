@@ -45,6 +45,7 @@ export function integrationPrincipal(integ: Pick<IntegrationRow, 'id' | 'name' |
     email: `integration:${integ.id}`,
     name: integ.name,
     phone: null,
+    whatsappVerifiedAt: null,
     userType: 'msp',
     customerId: integ.customerId,
     status: 'active',

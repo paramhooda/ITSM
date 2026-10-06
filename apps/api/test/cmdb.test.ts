@@ -138,6 +138,7 @@ describe.skipIf(!hasDb)('cmdb + assets + discovery (database)', () => {
         userType: 'msp',
         customerId: null,
         phone: null,
+        whatsappVerifiedAt: null,
         status: 'active',
         timezone: 'UTC',
         preferences: {},

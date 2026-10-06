@@ -28,6 +28,9 @@ interface UserRow {
   timezone: string;
   lastLoginAt: string | null;
   createdAt: string;
+  whatsappOptIn: boolean;
+  /** Set when the person proved they control the phone number with a one-time code over WhatsApp. */
+  whatsappVerifiedAt: string | null;
   roles: { roleId: string; key: string; name: string; customerId: string | null }[];
   teams: { id: string; key: string; name: string; isLead: boolean }[];
 }
@@ -191,6 +194,11 @@ export default function UsersPage() {
               <span>{u.email}</span>
               {u.userType === 'customer' ? <Badge color="teal">Customer · {u.customerName}</Badge> : <Badge color="blue">MSP staff</Badge>}
               <Badge color={STATUS_COLOR[u.status] ?? 'slate'} dot>{titleCase(u.status)}</Badge>
+              {u.phone && (
+                <Badge color={u.whatsappVerifiedAt ? 'green' : u.whatsappOptIn ? 'amber' : 'gray'} title={u.whatsappVerifiedAt ? `Number verified on ${fmtDateTime(u.whatsappVerifiedAt)}` : 'The person has not verified this number with a code over WhatsApp'}>
+                  {u.whatsappVerifiedAt ? 'WhatsApp verified' : u.whatsappOptIn ? 'WhatsApp on · not verified' : 'WhatsApp off'}
+                </Badge>
+              )}
               <span className="text-[12px] text-subtle">Created {fmtDateTime(u.createdAt)} · last sign-in {u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : 'never'}</span>
             </div>
           ) : undefined

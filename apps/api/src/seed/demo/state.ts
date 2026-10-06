@@ -200,6 +200,7 @@ export function integrationPrincipal(name: string, apiKeyId: string, customerId:
     email: `apikey:${name.toLowerCase().replace(/\s+/g, '-')}`,
     name,
     phone: null,
+    whatsappVerifiedAt: null,
     userType: 'msp',
     customerId,
     status: 'active',

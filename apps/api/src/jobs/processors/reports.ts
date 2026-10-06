@@ -8,6 +8,7 @@ import { systemCtx, SYSTEM_PRINCIPAL } from '@/modules/tickets/common';
 import { resolveReport } from '@/modules/reports/registry';
 import { executeReport, queueReportEmail, reportSteps, type ExecutionOutcome } from '@/modules/reports/service';
 import { advanceSchedule, scheduleFormats, type ScheduleRow } from '@/modules/reports/schedules';
+import { loadCategoryPolicies, notificationPrefsOf, channelAllowed } from '@/modules/notifications/preferences';
 import type { Tx } from '@/db/client';
 
 const SYSTEM_ACTOR = { userId: null, userName: 'system', source: 'system' };
@@ -31,12 +32,19 @@ export async function enqueueDueSchedules(now = new Date()) {
   return { due: due.length, queued };
 }
 
-/** Email addresses for a schedule run: explicit emails + users + (optionally) the customer's primary/escalation contacts. */
+/**
+ * Email addresses for a schedule run: explicit emails + users + (optionally) the
+ * customer's primary/escalation contacts. Users who switched the "Scheduled
+ * reports" category off for email on their profile are skipped (the delivery
+ * bypasses queueNotification, so the preference is honoured here); explicit
+ * addresses and contacts have no account and no preference.
+ */
 export async function scheduleRecipients(tx: Tx, s: ScheduleRow, customerId: string | null): Promise<string[]> {
   const emails = new Set<string>(s.recipients.map((e) => e.trim().toLowerCase()).filter(Boolean));
   if (s.recipientUserIds.length) {
-    const users = await tx.select({ email: schema.users.email, status: schema.users.status }).from(schema.users).where(inArray(schema.users.id, s.recipientUserIds));
-    for (const u of users) if (u.status === 'active' && u.email) emails.add(u.email.toLowerCase());
+    const users = await tx.select({ email: schema.users.email, status: schema.users.status, preferences: schema.users.preferences }).from(schema.users).where(inArray(schema.users.id, s.recipientUserIds));
+    const policy = (await loadCategoryPolicies(tx)).get('reports');
+    for (const u of users) if (u.status === 'active' && u.email && channelAllowed(policy, notificationPrefsOf(u.preferences), 'email')) emails.add(u.email.toLowerCase());
   }
   if (s.filters?.customerContacts === true && customerId) {
     const contacts = await tx

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import type { DemoState, DemoUser } from './state';
@@ -37,6 +37,20 @@ export const MSP_USERS: UserSeed[] = [
   { key: 'nikhil', name: 'Nikhil Bose', email: 'nikhil.bose@msp.local', roleKey: 'auditor', teamKeys: [], title: 'Internal Auditor', phone: '+91 98100 11018' },
 ];
 
+/**
+ * People who opted in to WhatsApp and verified their number (normalised, so the
+ * stored value is the E.164 form the channel uses), with a few categories switched
+ * off so the preference matrix is not uniform. Nobody is linked for the WhatsApp
+ * assistant: that flag stays absent.
+ */
+const WHATSAPP_DEMO: { key: string; phone: string; notifications: Record<string, { email?: boolean; whatsapp?: boolean }> }[] = [
+  { key: 'rajesh', phone: '+919810011003', notifications: { handover: { email: false }, feedback: { email: false } } },
+  { key: 'priya', phone: '+919810011004', notifications: { contracts: { email: false }, tickets: { whatsapp: false } } },
+  { key: 'ananya', phone: '+919810011001', notifications: { tickets: { email: false }, reports: { email: false } } },
+  { key: 'sneha', phone: '+919810011007', notifications: { contracts: { email: false, whatsapp: false } } },
+  { key: 'suresh', phone: '+919810011012', notifications: { closure: { whatsapp: false } } },
+];
+
 /** Team managers (team key → user key). */
 const TEAM_MANAGERS: Record<string, string> = { service_desk: 'ananya', noc: 'rajesh', network: 'rajesh', infra: 'rajesh', cloud: 'rajesh', soc: 'sneha', field: 'ananya' };
 
@@ -71,5 +85,13 @@ export async function seedUsers(state: DemoState, tx: Tx, passwordHash: string) 
   for (const [teamKey, userKey] of Object.entries(TEAM_MANAGERS)) {
     await tx.update(schema.teams).set({ managerUserId: state.users.get(userKey)!.id, updatedAt: state.now }).where(eq(schema.teams.id, refs.team(teamKey)));
   }
+  const thirtyDaysAgo = new Date(state.now.getTime() - 30 * 86_400_000);
+  for (const w of WHATSAPP_DEMO) {
+    await tx
+      .update(schema.users)
+      .set({ phone: w.phone, whatsappOptIn: true, whatsappOptedInAt: thirtyDaysAgo, whatsappVerifiedAt: thirtyDaysAgo, preferences: sql`${schema.users.preferences} || ${JSON.stringify({ notifications: w.notifications })}::jsonb`, updatedAt: state.now })
+      .where(eq(schema.users.id, state.users.get(w.key)!.id));
+  }
+  state.counts.whatsappVerified = (state.counts.whatsappVerified ?? 0) + WHATSAPP_DEMO.length;
   state.counts.users = (state.counts.users ?? 0) + rows.length;
 }

@@ -24,6 +24,7 @@ const AssignmentRulesPage = page(() => import('./AssignmentRulesPage'));
 const EscalationRulesPage = page(() => import('./EscalationRulesPage'));
 const NotificationTemplatesPage = page(() => import('./NotificationTemplatesPage'));
 const NotificationRulesPage = page(() => import('./NotificationRulesPage'));
+const NotificationDefaultsPage = page(() => import('./NotificationDefaultsPage'));
 const ApprovalsPage = page(() => import('./ApprovalsPage'));
 const ChangeTemplatesPage = page(() => import('./ChangeTemplatesPage'));
 const ChangeRiskQuestionsPage = page(() => import('./ChangeRiskQuestionsPage'));
@@ -71,6 +72,7 @@ export default function AdminPage() {
           <Route path="escalation-rules" element={<Guarded perm={CONFIG}><EscalationRulesPage /></Guarded>} />
           <Route path="notifications/templates" element={<Guarded perm={CONFIG}><NotificationTemplatesPage /></Guarded>} />
           <Route path="notifications/rules" element={<Guarded perm={CONFIG}><NotificationRulesPage /></Guarded>} />
+          <Route path="notifications/defaults" element={<Guarded perm={CONFIG}><NotificationDefaultsPage /></Guarded>} />
           <Route path="approvals" element={<Guarded perm={CONFIG}><ApprovalsPage /></Guarded>} />
           <Route path="change-templates" element={<Guarded perm={CONFIG}><ChangeTemplatesPage /></Guarded>} />
           <Route path="change-risk-questions" element={<Guarded perm={CONFIG}><ChangeRiskQuestionsPage /></Guarded>} />

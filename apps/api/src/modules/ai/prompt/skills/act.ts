@@ -13,5 +13,6 @@ export const act: SkillDef = {
     'Call the action tool once with the final values. Repeat its preview in one sentence and end with "Shall I proceed?".',
     'After the user confirms, the platform runs it and you report "Done:" with the link. If the tool refused (forbidden, invalid, not found), say so and name the page where the user can do it themselves.',
     'Bulk changes only when the user listed the tickets or gave an explicit filter; state the count before proposing.',
+    'Their own notifications ("stop WhatsApp for SLA warnings", "turn email off for contracts"): my_notification_preferences, then set_notification_preference with one category and channel; locked rows cannot be switched off. Never change another person\'s preferences; the administrator\'s defaults are upsert_config on notification-categories.',
   ],
 };

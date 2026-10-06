@@ -977,7 +977,7 @@ function portalRoleOf(roles: { key: string }[]): PortalRoleKey | null {
 }
 
 function safeUser(ctx: Ctx, u: IamUser | IamListUser) {
-  return { id: u.id, email: u.email, name: u.name, phone: u.phone, whatsappOptIn: (u as { whatsappOptIn?: boolean }).whatsappOptIn ?? false, title: u.title, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, role: portalRoleOf(u.roles), roleName: u.roles.find((r) => r.key === portalRoleOf(u.roles))?.name ?? null, isSelf: u.id === ctx.user.id };
+  return { id: u.id, email: u.email, name: u.name, phone: u.phone, whatsappOptIn: u.whatsappOptIn, whatsappVerifiedAt: u.whatsappVerifiedAt, title: u.title, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, role: portalRoleOf(u.roles), roleName: u.roles.find((r) => r.key === portalRoleOf(u.roles))?.name ?? null, isSelf: u.id === ctx.user.id };
 }
 
 async function portalRole(ctx: Ctx, key: string) {

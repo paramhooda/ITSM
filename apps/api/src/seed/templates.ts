@@ -107,6 +107,7 @@ const WHATSAPP_SEEDS = [
   { event: 'licence.expiring', name: 'Software licence ending (WhatsApp)', subject: '{{licence.name}} ends in {{daysLeft}} days', body: 'Licence {{licence.name}} for {{licence.customerName}} ends on {{licence.endDate}} ({{daysLeft}} days).' },
   { event: 'licence.expired', name: 'Software licence expired (WhatsApp)', subject: '{{licence.name}} has expired', body: 'Licence {{licence.name}} for {{licence.customerName}} expired on {{licence.endDate}}.' },
   { event: 'software.over_deployed', name: 'Software over-deployed (WhatsApp)', subject: '{{product.name}} at {{customer.name}}: {{compliance.positionLabel}}', body: '{{product.title}} at {{customer.name}} is {{compliance.positionLabel}}: {{compliance.installed}} installed, {{compliance.entitled}} licensed.' },
+  { event: 'user.phone_verification', name: 'Phone verification code (WhatsApp)', subject: 'Your {{platformName}} verification code', body: 'Your {{platformName}} verification code is {{code}}. It expires in {{minutes}} minutes. Ignore this message if you did not ask for it.' },
 ].map((t) => ({ ...t, channel: 'whatsapp' }));
 
 export const NOTIFICATION_TEMPLATE_SEEDS_ALL = [...NOTIFICATION_TEMPLATE_SEEDS, ...WHATSAPP_SEEDS];

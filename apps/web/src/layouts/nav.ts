@@ -1,6 +1,6 @@
 // Imported by apps/api/test/navigation.test.ts under the API tsconfig: no `@/` imports and no DOM types in this file.
 import type { Permission, NavArea } from '@itsm/shared';
-import { LayoutDashboard, Ticket, Building2, FileSignature, Boxes, Server, Wrench, CalendarCheck, BookOpen, BarChart3, Settings, Layers, ClipboardCheck, UsersRound, Siren, Activity, GitPullRequestArrow } from 'lucide-react';
+import { LayoutDashboard, Ticket, Building2, FileSignature, Boxes, Server, Wrench, CalendarCheck, BookOpen, BarChart3, Settings, Layers, ClipboardCheck, UsersRound, UserRound, Siren, Activity, GitPullRequestArrow } from 'lucide-react';
 
 /** A module inside an application (ServiceNow's navigator: Application → Modules). */
 export interface NavChild {
@@ -214,6 +214,7 @@ export const PORTAL_NAV: NavItem[] = [
   // ---- Account
   { to: '/reports', label: 'Reports', icon: BarChart3, tint: 'text-teal-600', perm: ['portal:reports'], section: P.account },
   { to: '/portal/users', label: 'Users', icon: UsersRound, tint: 'text-pink-600', perm: ['portal:manage_users'], section: P.account },
+  { to: '/profile', label: 'Profile & notifications', short: 'Profile', icon: UserRound, tint: 'text-zinc-500', perm: ['portal:access'], section: P.account },
 ];
 
 type Can = (...perms: Permission[]) => boolean;

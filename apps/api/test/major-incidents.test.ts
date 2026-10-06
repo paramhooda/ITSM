@@ -104,7 +104,10 @@ describe('declare and demote', () => {
     // The seeded rule notifies the assignee, the team, its manager, the account manager and the operations managers.
     const rows = await outboxFor('incident.major_declared', ids.major);
     expect(rows.map((r) => r.recipient)).toContain(`mi-eng-${S}@example.test`);
-    expect(rows.every((r) => r.channel === 'email')).toBe(true);
+    // The operations managers of the demo data are opted in to WhatsApp, so WhatsApp rows join the email rows whenever
+    // another test file has the channel switched on while this one runs; in-app never reaches the outbox.
+    expect(rows.every((r) => r.channel === 'email' || r.channel === 'whatsapp')).toBe(true);
+    expect(rows.filter((r) => r.channel === 'email').map((r) => r.recipient)).toContain(`mi-eng-${S}@example.test`);
     expect(rows.some((r) => r.subject?.includes('MAJOR INCIDENT'))).toBe(true);
   });
 

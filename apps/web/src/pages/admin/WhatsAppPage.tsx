@@ -54,6 +54,7 @@ const GROUPS: { key: string; label: string; hint: string }[] = [
   { key: 'page', label: 'On-call pages', hint: 'alerts to the engineer on call' },
   { key: 'handover', label: 'Shift handover', hint: 'handover published to the incoming shift' },
   { key: 'briefing', label: 'Daily briefing', hint: 'the morning digest' },
+  { key: 'user', label: 'Account messages', hint: 'the verification code sent to a person\'s own number (an authentication-category template fits)' },
 ];
 const PARAM_SOURCES = ['subject', 'text', 'link', 'event'];
 const STATUS_COLOR: Record<string, string> = { pending: 'amber', sending: 'blue', sent: 'green', failed: 'red', cancelled: 'gray' };

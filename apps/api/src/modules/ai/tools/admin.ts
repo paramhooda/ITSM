@@ -107,7 +107,7 @@ async function configTarget(ctx: Ctx, kind: string, ref?: string) {
   const rows = (await listConfig(ctx, kind)) as unknown as Record<string, unknown>[];
   if (!ref) return { existing: undefined, label: def.label.replace(/_/g, ' ') };
   const r = ref.toLowerCase();
-  const hit = rows.find((x) => x.id === ref) ?? rows.find((x) => String(x.name ?? '').toLowerCase() === r) ?? rows.find((x) => String(x.event ?? '').toLowerCase() === r);
+  const hit = rows.find((x) => x.id === ref) ?? rows.find((x) => String(x.name ?? '').toLowerCase() === r) ?? rows.find((x) => String(x.event ?? '').toLowerCase() === r) ?? rows.find((x) => String(x.key ?? '').toLowerCase() === r);
   if (!hit) throw new NotFoundError(def.label.replace(/_/g, ' '), `No ${def.label.replace(/_/g, ' ')} matching "${ref}"`);
   return { existing: hit, label: def.label.replace(/_/g, ' ') };
 }
@@ -187,7 +187,7 @@ export const ADMIN: ReturnType<typeof define>[] = [
   define({
     name: 'upsert_config',
     toolset: 'admin',
-    description: 'Create or change a configuration record: assignment-rules, escalation-rules, notification-rules, notification-templates, approval-workflows, calendars, holiday-calendars, custom-fields, ci-types, relationship-types, or the attributes of sla-policies (name, description, calendars, default, active). Fields are the record\'s columns; read list_rules first to copy the shape.',
+    description: 'Create or change a configuration record: assignment-rules, escalation-rules, notification-rules, notification-templates, notification-categories (the notification defaults and locks per channel, by category key such as approvals), approval-workflows, calendars, holiday-calendars, custom-fields, ci-types, relationship-types, or the attributes of sla-policies (name, description, calendars, default, active). Fields are the record\'s columns; read list_rules first to copy the shape.',
     inputSchema: z.object({ kind: z.enum(CONFIG_KIND_KEYS), record: z.string().max(200).optional().describe('Existing record name or id (omit to create)'), fields: z.record(z.string().max(60), z.unknown()).refine((f) => Object.keys(f).length > 0, 'At least one field') }),
     requires: ['admin:config'],
     portal: null,
@@ -203,14 +203,14 @@ export const ADMIN: ReturnType<typeof define>[] = [
         return { action: 'updated', kind: input.kind, name: p.name, fields: Object.keys(fields), link: `/admin/sla/${p.id}` };
       }
       const row = (existing ? await updateConfig(ctx, input.kind, String(existing.id), fields) : await createConfig(ctx, input.kind, fields)) as unknown as Record<string, unknown>;
-      return { action: existing ? 'updated' : 'created', kind: input.kind, name: row.name ?? row.event ?? null, id: row.id, fields: Object.keys(fields), label, link: `/admin/${input.kind === 'notification-rules' ? 'notifications/rules' : input.kind === 'notification-templates' ? 'notifications/templates' : input.kind === 'approval-workflows' ? 'approvals' : input.kind === 'holiday-calendars' ? 'holidays' : input.kind}` };
+      return { action: existing ? 'updated' : 'created', kind: input.kind, name: row.name ?? row.event ?? row.key ?? null, id: row.id, fields: Object.keys(fields), label, link: `/admin/${input.kind === 'notification-rules' ? 'notifications/rules' : input.kind === 'notification-templates' ? 'notifications/templates' : input.kind === 'notification-categories' ? 'notifications/defaults' : input.kind === 'approval-workflows' ? 'approvals' : input.kind === 'holiday-calendars' ? 'holidays' : input.kind}` };
     },
     summary: (input, result) => `${(result as { action: string }).action === 'created' ? 'Created' : 'Updated'} ${input.kind.replace(/-/g, ' ').replace(/s$/, '')} ${(result as { name?: string }).name ?? ''}`.trim(),
     preview: async (ctx, input): Promise<PreviewDetail> => {
       const { existing, label } = await configTarget(ctx, input.kind, input.record);
       const fields = allowedFields(input.kind, input.fields);
       const lines = Object.entries(fields).map(([k, v]) => `${k} → ${fmt(v)}${existing && existing[k] !== undefined ? ` (was ${fmt(existing[k])})` : ''}`);
-      return { text: existing ? `Update ${label} "${existing.name ?? existing.event ?? existing.id}": ${lines.join('; ')}` : `Create a ${label} with ${lines.join('; ')}`, lines };
+      return { text: existing ? `Update ${label} "${existing.name ?? existing.event ?? existing.key ?? existing.id}": ${lines.join('; ')}` : `Create a ${label} with ${lines.join('; ')}`, lines };
     },
   }),
 

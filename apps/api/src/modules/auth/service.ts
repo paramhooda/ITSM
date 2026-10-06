@@ -8,6 +8,7 @@ import { AppError, UnauthorizedError, ValidationError } from '@/core/errors';
 import { invalidatePrincipal, loadPrincipal } from '@/core/principal';
 import { writeAudit } from '@/core/audit';
 import { queueNotification } from '@/modules/notifications/dispatch';
+import { onPhoneChanged } from '@/modules/notifications/phone';
 
 const LOCKOUT_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -131,9 +132,13 @@ export async function resetPassword(token: string, newPassword: string) {
   await revokeAllSessions(row.userId);
 }
 
-export async function updatePreferences(userId: string, patch: { preferences?: Record<string, unknown>; timezone?: string; name?: string; phone?: string; whatsappOptIn?: boolean }) {
+/** Keys of users.preferences with a server-side writer of their own: the profile route never overwrites them with a stale copy. */
+const PREFERENCE_KEYS_OWNED_ELSEWHERE = new Set(['notifications', 'whatsapp']);
+
+export async function updatePreferences(userId: string, patch: { preferences?: Record<string, unknown>; timezone?: string; name?: string; phone?: string; whatsappOptIn?: boolean }, meta: LoginMeta & { requestId?: string } = {}) {
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
   if (!user) throw new UnauthorizedError();
+  const incoming = patch.preferences ? Object.fromEntries(Object.entries(patch.preferences).filter(([k]) => !PREFERENCE_KEYS_OWNED_ELSEWHERE.has(k))) : null;
   // Phone numbers are kept in E.164 when they parse, so WhatsApp can use them as entered.
   const phone = patch.phone === undefined ? user.phone : patch.phone.trim() ? (normalizePhone(patch.phone) ?? patch.phone.trim()) : null;
   const optIn = patch.whatsappOptIn === undefined ? user.whatsappOptIn : patch.whatsappOptIn;
@@ -141,7 +146,7 @@ export async function updatePreferences(userId: string, patch: { preferences?: R
   await db
     .update(schema.users)
     .set({
-      preferences: patch.preferences ? { ...user.preferences, ...patch.preferences } : user.preferences,
+      preferences: incoming ? { ...user.preferences, ...incoming } : user.preferences,
       timezone: patch.timezone ?? user.timezone,
       name: patch.name ?? user.name,
       phone,
@@ -150,6 +155,8 @@ export async function updatePreferences(userId: string, patch: { preferences?: R
       updatedAt: new Date(),
     })
     .where(eq(schema.users.id, userId));
+  // A changed number is no longer the verified one. phone_verifications is under forced row-level security, so the clear runs with the system context (as the password audit above does).
+  if (normalizePhone(user.phone) !== normalizePhone(phone)) await withSystem((tx) => onPhoneChanged(tx, userId, user.phone, phone, { userId, userName: user.name, source: 'ui', ip: meta.ip, userAgent: meta.userAgent, requestId: meta.requestId }));
   invalidatePrincipal(userId);
   return loadPrincipal(userId);
 }
