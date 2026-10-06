@@ -4,10 +4,12 @@ import { toast } from 'sonner';
 import { Check, Copy, MessageCircle, RefreshCw, RotateCcw, Send, ShieldAlert, Stethoscope, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 import { get, post, put, ApiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
-import { Badge, Button, Card, Field, Input, Toggle, type Column } from '@/components/ui';
+import { Badge, Button, Card, Checkbox, ErrorBlock, Field, Input, LoadingBlock, Textarea, Toggle, type Column } from '@/components/ui';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MutedCell, MonoCell } from '@/components/admin/ConfigTable';
 import { fmtDateTime, relativeTime, titleCase } from '@/lib/format';
+import { WHATSAPP_INBOUND_COLORS } from '@/lib/statusColors';
+import { whatsappApi, whatsappKeys, INBOUND_OUTCOME_LABELS, type InboundRow } from '@/components/whatsapp/api';
 
 interface Setting {
   key: string;
@@ -71,7 +73,51 @@ const KEYS = {
   countryCode: 'whatsapp.default_country_code',
   templates: 'whatsapp.templates',
   webhookUrl: 'whatsapp.webhook_url',
+  assistantEnabled: 'whatsapp.assistant.enabled',
+  assistantAudiences: 'whatsapp.assistant.audiences',
+  assistantCap: 'whatsapp.assistant.daily_message_cap',
+  assistantIdleHours: 'whatsapp.assistant.thread_idle_hours',
+  assistantGreeting: 'whatsapp.assistant.greeting',
+  assistantUnlinkedReply: 'whatsapp.assistant.unlinked_reply',
+  displayNumber: 'whatsapp.display_number',
 } as const;
+
+/** The assistant card's fields as typed (numbers as text so a half-typed value never snaps). */
+interface AssistantForm {
+  enabled: boolean;
+  audiences: string[];
+  dailyMessageCap: string;
+  threadIdleHours: string;
+  greeting: string;
+  unlinkedReply: string;
+  displayNumber: string;
+}
+const EMPTY_ASSISTANT: AssistantForm = { enabled: false, audiences: ['staff', 'customers'], dailyMessageCap: '100', threadIdleHours: '24', greeting: '', unlinkedReply: '', displayNumber: '' };
+const AUDIENCE_OPTIONS = [{ value: 'staff', label: 'Staff' }, { value: 'customers', label: 'Customers (portal users)' }];
+function assistantFromSettings(value: (k: string) => unknown): AssistantForm {
+  const audiences = value(KEYS.assistantAudiences);
+  return {
+    enabled: value(KEYS.assistantEnabled) === true,
+    audiences: Array.isArray(audiences) ? (audiences as unknown[]).filter((a): a is string => a === 'staff' || a === 'customers') : EMPTY_ASSISTANT.audiences,
+    dailyMessageCap: String(value(KEYS.assistantCap) ?? EMPTY_ASSISTANT.dailyMessageCap),
+    threadIdleHours: String(value(KEYS.assistantIdleHours) ?? EMPTY_ASSISTANT.threadIdleHours),
+    greeting: String(value(KEYS.assistantGreeting) ?? ''),
+    unlinkedReply: String(value(KEYS.assistantUnlinkedReply) ?? ''),
+    displayNumber: String(value(KEYS.displayNumber) ?? ''),
+  };
+}
+/** The same rules the assistant tool applies, so a refused value never reaches the settings table. */
+function assistantProblem(a: AssistantForm): string | null {
+  const cap = Number(a.dailyMessageCap);
+  const idle = Number(a.threadIdleHours);
+  if (!a.audiences.length) return 'Pick at least one audience: staff, customers or both';
+  if (!Number.isInteger(cap) || cap < 1 || cap > 2000) return 'The daily message cap is a whole number from 1 to 2000';
+  if (!Number.isInteger(idle) || idle < 1 || idle > 168) return 'Thread idle hours is a whole number from 1 to 168';
+  if (a.greeting.trim().length < 10 || a.greeting.trim().length > 500) return 'The greeting is 10 to 500 characters';
+  if (a.unlinkedReply.trim().length < 10 || a.unlinkedReply.trim().length > 500) return 'The reply to unknown numbers is 10 to 500 characters';
+  if (a.displayNumber.trim().length > 30) return 'The display number is at most 30 characters';
+  return null;
+}
 
 const WEBHOOK_PATH = '/api/webhooks/whatsapp';
 /** An origin on its own (`https://abcd.ngrok-free.app`) becomes the full webhook route; anything else is kept as typed. */
@@ -112,6 +158,7 @@ export default function WhatsAppPage() {
   const [form, setForm] = useState({ enabled: false, phoneNumberId: '', businessAccountId: '', accessToken: '', appSecret: '', verifyToken: '', apiVersion: 'v21.0', countryCode: '91', webhookUrl: '' });
   const [templates, setTemplates] = useState<Record<string, TemplateRow>>({});
   const [loaded, setLoaded] = useState(false);
+  const [assistant, setAssistant] = useState<AssistantForm>(EMPTY_ASSISTANT);
   useEffect(() => {
     // The webhook field shows the effective URL, so wait for the status too (or give up on it when it fails).
     if (!settingsQ.data || loaded || (!statusQ.data && !statusQ.isError)) return;
@@ -129,6 +176,7 @@ export default function WhatsAppPage() {
       webhookUrl: String(value(KEYS.webhookUrl) ?? '').trim() || statusQ.data?.webhookUrlDefault || '',
     });
     setTemplates(Object.fromEntries(GROUPS.map((g) => [g.key, { name: t[g.key]?.name ?? '', language: t[g.key]?.language ?? 'en', params: (t[g.key]?.params ?? (g.key === 'default' ? ['subject', 'text', 'link'] : [])).join(', ') }])));
+    setAssistant(assistantFromSettings(value));
     setLoaded(true);
   }, [settingsQ.data, statusQ.data, statusQ.isError, loaded]);
 
@@ -166,6 +214,32 @@ export default function WhatsAppPage() {
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Could not save'),
   });
+
+  // The assistant on WhatsApp: its seven settings, the readiness list and the inbound log.
+  const assistantQ = useQuery({ queryKey: whatsappKeys.status, queryFn: () => whatsappApi.assistantStatus(), refetchInterval: 30_000 });
+  const inboundQ = useQuery({ queryKey: whatsappKeys.inbound({ limit: 50 }), queryFn: () => whatsappApi.inbound({ limit: 50 }), refetchInterval: 30_000 });
+  const saveAssistant = useMutation({
+    mutationFn: async () => {
+      const problem = assistantProblem(assistant);
+      if (problem) throw new Error(problem);
+      return put('/config/settings', {
+        [KEYS.assistantEnabled]: assistant.enabled,
+        [KEYS.assistantAudiences]: AUDIENCE_OPTIONS.map((o) => o.value).filter((v) => assistant.audiences.includes(v)),
+        [KEYS.assistantCap]: Number(assistant.dailyMessageCap),
+        [KEYS.assistantIdleHours]: Number(assistant.threadIdleHours),
+        [KEYS.assistantGreeting]: assistant.greeting.trim(),
+        [KEYS.assistantUnlinkedReply]: assistant.unlinkedReply.trim(),
+        [KEYS.displayNumber]: assistant.displayNumber.trim(),
+      });
+    },
+    onSuccess: () => {
+      toast.success('Assistant settings saved');
+      qc.invalidateQueries({ queryKey: ['config', 'settings'] });
+      qc.invalidateQueries({ queryKey: whatsappKeys.status });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Could not save'),
+  });
+  const setAudience = (key: string, on: boolean) => setAssistant((a) => ({ ...a, audiences: on ? [...new Set([...a.audiences, key])] : a.audiences.filter((x) => x !== key) }));
 
   const [testTo, setTestTo] = useState('');
   const [tracking, setTracking] = useState<{ id: string; startedAt: number } | null>(null);
@@ -224,12 +298,23 @@ export default function WhatsAppPage() {
     ],
     [],
   );
+  const inboundColumns = useMemo<Column<InboundRow>[]>(
+    () => [
+      { key: 'receivedAt', header: 'Received', render: (r) => <MutedCell><span className="whitespace-nowrap" title={fmtDateTime(r.receivedAt)}>{relativeTime(r.receivedAt)}</span></MutedCell> },
+      { key: 'phone', header: 'Number', render: (r) => <div className="min-w-0"><MonoCell>{r.phone}</MonoCell>{r.displayName && <div className="text-[11.5px] text-subtle truncate max-w-[160px]" title="The WhatsApp profile name, as the sender set it">{r.displayName}</div>}</div> },
+      { key: 'user', header: 'Person', render: (r) => (r.user ? <div className="min-w-0"><div className="text-[12.5px] truncate max-w-[180px]">{r.user.name}</div><div className="text-[11.5px] text-subtle">{r.user.userType === 'customer' ? 'Customer' : 'Staff'}</div></div> : <MutedCell>—</MutedCell>) },
+      { key: 'text', header: 'Message', render: (r) => (r.text ? <div className="truncate max-w-md text-[12.5px]" title={r.text}>{r.text}</div> : <MutedCell>({r.kind})</MutedCell>) },
+      { key: 'outcome', header: 'Outcome', render: (r) => <div className="min-w-0"><Badge color={r.outcome ? WHATSAPP_INBOUND_COLORS[r.outcome] ?? 'slate' : 'blue'} dot>{r.outcome ? INBOUND_OUTCOME_LABELS[r.outcome] ?? titleCase(r.outcome) : titleCase(r.status)}</Badge>{r.error && <div className="text-[11.5px] text-red-600 break-words max-w-xs" title={r.error}>{r.error}</div>}</div> },
+      { key: 'reply', header: 'Reply', render: (r) => (r.reply ? <div className="min-w-0"><Badge color={r.reply.status === 'failed' ? 'red' : DELIVERY_COLOR[r.reply.deliveryStatus ?? ''] ?? STATUS_COLOR[r.reply.status] ?? 'slate'}>{titleCase(r.reply.deliveryStatus ?? r.reply.status)}</Badge>{r.reply.lastError && <div className="text-[11.5px] text-red-600 break-words max-w-xs">{r.reply.lastError}</div>}</div> : <MutedCell>—</MutedCell>) },
+    ],
+    [],
+  );
 
   return (
     <div>
       <SectionHeader
         title="WhatsApp"
-        description="Configure the WhatsApp Business account once. People then add a mobile number on their profile and tick WhatsApp notifications."
+        description="Configure the WhatsApp Business account once. People then add a mobile number on their profile and tick WhatsApp notifications; a verified number can also chat with Grady."
         actions={
           <span className="inline-flex items-center gap-2">
             {status && (status.configured ? <Badge color={status.enabled ? 'green' : 'amber'} dot>{status.enabled ? 'Enabled' : 'Configured, not enabled'}</Badge> : <Badge color="slate" dot>Not configured</Badge>)}
@@ -325,6 +410,75 @@ export default function WhatsAppPage() {
             )}
           </Card>
 
+          <Card title="Assistant on WhatsApp" actions={<Toggle checked={assistant.enabled} onChange={(v) => setAssistant({ ...assistant, enabled: v })} label="Answer messages with Grady" disabled={!canWrite} />} data-testid="assistant-card">
+            <div className="text-[12.5px] text-muted mb-3">
+              People who verified their mobile number and switched the chat on under Profile &amp; preferences message the business number and get Grady: the same tools, permissions, confirmations and audit trail as in the web application, rendered as WhatsApp text. Inbound messages are read only when the app secret above is set, because Meta signs every delivery with it.
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Who may chat" hint="Staff, customers (portal users), or both">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 min-h-9" data-testid="assistant-audiences">
+                  {AUDIENCE_OPTIONS.map((o) => (
+                    <Checkbox key={o.value} label={o.label} checked={assistant.audiences.includes(o.value)} onChange={(e) => setAudience(o.value, e.target.checked)} disabled={!canWrite} />
+                  ))}
+                </div>
+              </Field>
+              <Field label="Display number" hint="The business number people message, as shown on the profile page and in the wa.me link">
+                <Input value={assistant.displayNumber} onChange={(e) => setAssistant({ ...assistant, displayNumber: e.target.value })} disabled={!canWrite} placeholder="+91 11 4000 0000" maxLength={30} aria-label="Display number" />
+              </Field>
+              <Field label="Daily message cap per person" hint="Messages one person may send per day (UTC), 1 to 2000; the AI token budget applies as well">
+                <Input type="number" min={1} max={2000} value={assistant.dailyMessageCap} onChange={(e) => setAssistant({ ...assistant, dailyMessageCap: e.target.value })} disabled={!canWrite} aria-label="Daily message cap" />
+              </Field>
+              <Field label="Thread idle hours" hint="A conversation continues until it has been quiet for this long (1 to 168); then a fresh one starts">
+                <Input type="number" min={1} max={168} value={assistant.threadIdleHours} onChange={(e) => setAssistant({ ...assistant, threadIdleHours: e.target.value })} disabled={!canWrite} aria-label="Thread idle hours" />
+              </Field>
+              <Field label="Greeting" className="sm:col-span-2" hint={<>Sent once, before the first reply to a person; <span className="font-mono">{'{{name}}'}</span> and <span className="font-mono">{'{{platform}}'}</span> are filled in</>}>
+                <Textarea rows={3} value={assistant.greeting} onChange={(e) => setAssistant({ ...assistant, greeting: e.target.value })} disabled={!canWrite} maxLength={500} aria-label="Greeting" />
+              </Field>
+              <Field label="Reply to unknown numbers" className="sm:col-span-2" hint="What an unknown or unverified number receives, at most once an hour">
+                <Textarea rows={3} value={assistant.unlinkedReply} onChange={(e) => setAssistant({ ...assistant, unlinkedReply: e.target.value })} disabled={!canWrite} maxLength={500} aria-label="Reply to unknown numbers" />
+              </Field>
+            </div>
+            {canWrite && (
+              <div className="flex justify-end mt-3">
+                <Button icon={<Check className="h-4 w-4" />} onClick={() => saveAssistant.mutate()} loading={saveAssistant.isPending} data-testid="assistant-save">Save assistant settings</Button>
+              </div>
+            )}
+            <div className="mt-4 pt-4 border-t border-default">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div className="text-[13px] font-medium">Readiness</div>
+                {assistantQ.data && (
+                  <Badge color={assistantQ.data.ready ? 'green' : assistantQ.data.enabled ? 'amber' : 'slate'} dot data-testid="assistant-ready">
+                    {assistantQ.data.ready ? 'Ready' : assistantQ.data.enabled ? 'Something to fix' : 'Off'}
+                  </Badge>
+                )}
+              </div>
+              {assistantQ.isLoading && <LoadingBlock />}
+              {assistantQ.error && <ErrorBlock error={assistantQ.error} retry={() => assistantQ.refetch()} />}
+              {assistantQ.data && (
+                <>
+                  <ul className="flex flex-col gap-1.5" data-testid="assistant-checks">
+                    {assistantQ.data.checks.map((f, i) => {
+                      const Icon = FINDING_ICON[f.level];
+                      return (
+                        <li key={i} className="flex items-start gap-2 text-[12.5px]" data-level={f.level}>
+                          <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${FINDING_TONE[f.level]}`} />
+                          <span>{f.text}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <div className="mt-3 text-[12px] text-subtle" data-testid="assistant-counts">
+                    Today: {assistantQ.data.inboundToday} received · {assistantQ.data.repliedToday} answered · {assistantQ.data.failedToday} failed · {assistantQ.data.linkedUsers} {assistantQ.data.linkedUsers === 1 ? 'person has' : 'people have'} linked a number ({assistantQ.data.verifiedUsers} verified)
+                  </div>
+                </>
+              )}
+            </div>
+          </Card>
+
+          <Card title="Recent inbound messages" actions={<span className="text-[11.5px] text-subtle">What people sent to the business number and what Grady did with it</span>} padded={false} data-testid="inbound-card">
+            <ConfigTable<InboundRow> columns={inboundColumns} rows={inboundQ.data?.items ?? []} loading={inboundQ.isLoading} error={inboundQ.error} retry={() => inboundQ.refetch()} emptyTitle="Nothing received yet" emptyDescription="Messages people send to the business number appear here with what Grady did with them." />
+          </Card>
+
           <Card title="Recent WhatsApp messages" actions={<span className="text-[11.5px] text-subtle">Delivery states arrive through the webhook</span>} padded={false}>
             <ConfigTable<OutboxRow> columns={outboxColumns} rows={outboxQ.data?.recent ?? []} loading={outboxQ.isLoading} error={outboxQ.error} retry={() => outboxQ.refetch()} emptyTitle="Nothing sent yet" emptyDescription="Messages appear here once a notification rule includes WhatsApp and someone has opted in." />
           </Card>
@@ -380,6 +534,7 @@ export default function WhatsAppPage() {
               <li>Subscribe the webhook URL above with your verify token so delivery states come back. On a laptop, expose the API with a tunnel (ngrok, Cloudflare Tunnel) and enter that URL as the webhook URL; save, then copy it into Meta.</li>
               <li>Tick WhatsApp on the notification rules that should reach people on their phones.</li>
               <li>Everyone opts in on their profile with a mobile number; customer administrators can do it for their users.</li>
+              <li>Turn on the assistant here, set the display number, and people verify their number and switch on chat with Grady on their profile; the Users pages show who is linked and let you revoke a number.</li>
             </ol>
             <div className="mt-3 inline-flex items-center gap-1.5 text-[12px] text-subtle"><MessageCircle className="h-3.5 w-3.5" /> {status?.hasOptIns ? 'At least one person has opted in.' : 'Nobody has opted in yet.'}</div>
           </Card>

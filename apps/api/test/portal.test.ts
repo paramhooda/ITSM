@@ -297,6 +297,12 @@ describe('customer portal', () => {
     const list = await asA((ctx) => portal.listPortalUsers(ctx, { page: 1, pageSize: 50 }));
     const listed = list.items.map((u) => u.id);
     expect(listed).toContain(ids.userA);
+    // the WhatsApp state travels with every row (verified number and the chat flag), never the preferences themselves
+    for (const u of list.items) {
+      expect(typeof u.assistantOn).toBe('boolean');
+      expect(u).toHaveProperty('whatsappVerifiedAt');
+      expect(u).not.toHaveProperty('preferences');
+    }
     expect(listed).toContain(created.user.id);
     expect(listed).not.toContain(ids.userB);
     expect(listed).not.toContain(admin.id);

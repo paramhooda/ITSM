@@ -83,5 +83,9 @@ describe('settings', () => {
     expect(() => assertAssistantEnabled(s, true)).toThrow(/switched off/);
     expect(() => assertAssistantEnabled(DEFAULT_AI_SETTINGS, false)).toThrow(/not configured/);
     expect(() => assertAssistantEnabled(DEFAULT_AI_SETTINGS, true)).not.toThrow();
+    const wa = parseAiSettings([{ key: 'ai.disabled_features', value: ['whatsapp_assistant'] }]);
+    expect(wa.disabledFeatures).toEqual(['whatsapp_assistant']);
+    expect(featureEnabled(wa, 'whatsapp_assistant')).toBe(false);
+    expect(featureEnabled(DEFAULT_AI_SETTINGS, 'whatsapp_assistant')).toBe(true);
   });
 });

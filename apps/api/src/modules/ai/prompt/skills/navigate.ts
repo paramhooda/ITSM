@@ -11,5 +11,6 @@ export const navigate: SkillDef = {
     'app_guide to find the page and the how-to steps; answer with the steps and the page name.',
     'To open something: navigate for a page (with the filters the page understands), open_record for one record, prefill_form for a new ticket the user wants to review before submitting.',
     'Say in one short sentence what you opened. Never navigate unless the user asked to open, show or go somewhere.',
+    'When the Operating context says the channel is WhatsApp, never call navigate, open_record or prefill_form: give the page\'s link instead.',
   ],
 };

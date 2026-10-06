@@ -504,6 +504,8 @@ export interface ChatInput {
   /** A decision on the held action, bound to its id (the panel's Confirm / Cancel buttons). */
   confirm?: { actionId: string; decision: 'confirm' | 'cancel' } | null;
   skill?: string | null;
+  /** Where the message comes from: the web panel (default) or WhatsApp (no navigation, plain-text wording, the channel note in the prompt). */
+  channel?: 'web' | 'whatsapp' | null;
 }
 
 /** Something the web should do after the reply (navigation, a prefilled form); produced by UI tools. */
@@ -650,14 +652,16 @@ export async function chatTurn(p: Principal, meta: TurnMeta, input: ChatInput, e
     // explicit timestamps + role tie-breaker: rows written in one transaction would otherwise share now()
     const rows = await ctx.tx.select().from(schema.aiMessages).where(eq(schema.aiMessages.conversationId, conv.id)).orderBy(desc(schema.aiMessages.createdAt), asc(schema.aiMessages.role)).limit(HISTORY_MESSAGES);
     const skill = (input.skill && (SKILLS as readonly string[]).includes(input.skill) ? input.skill : null) as SkillKey | null;
-    const sets = resolveToolsets({ who: ctx, message: text, page: input.context?.page?.pathname ?? null, sticky: stickyOf(conv.context), skill });
+    const resolved = resolveToolsets({ who: ctx, message: text, page: input.context?.page?.pathname ?? null, sticky: stickyOf(conv.context), skill });
+    // Off the web there is nothing to navigate: the UI group is neither active nor offered (enable_toolset checks `offered`, and cap() re-adds a base set only when it is offered).
+    const sets = input.channel === 'whatsapp' ? { ...resolved, active: resolved.active.filter((k) => k !== 'ui'), offered: resolved.offered.filter((k) => k !== 'ui') } : resolved;
     const screen = await describeContext(ctx, input.context);
     return { rows: rows.reverse(), sets, screen, cancelledNote, skill };
   });
   // The prompt and the tool list need only the principal, so they are rebuilt outside any transaction when a toolset is enabled.
   const who: Who = { user: p, can: (perm, customerId) => can(p, perm, customerId) };
   const scope = describeScope(who, organisation);
-  const promptFor = (s: ToolsetState, t: AiTool[]) => buildSystemPrompt({ ctx: who, tools: t, toolsets: { active: s.active, offered: s.offered }, contextDescription: b.screen, notes: b.cancelledNote ? [b.cancelledNote] : [], customerScopeSummary: scope, organisation, autonomy: settings.autonomy, skill: b.skill });
+  const promptFor = (s: ToolsetState, t: AiTool[]) => buildSystemPrompt({ ctx: who, tools: t, toolsets: { active: s.active, offered: s.offered }, contextDescription: b.screen, notes: b.cancelledNote ? [b.cancelledNote] : [], customerScopeSummary: scope, organisation, autonomy: settings.autonomy, skill: b.skill, channel: input.channel ?? 'web' });
   let sets = b.sets;
   let tools = availableTools(who, sets.active);
   let built = promptFor(sets, tools);

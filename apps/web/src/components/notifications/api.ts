@@ -40,10 +40,22 @@ export interface VerifyStart {
   expiresAt: string;
 }
 
+/** The `typed` method: the code is shown once and the person sends it from their phone to the business number. */
+export interface VerifyStartTyped {
+  method: 'typed';
+  code: string;
+  phone: string;
+  expiresAt: string;
+  businessNumber: string | null;
+  /** wa.me link with the code prefilled, when the display number is set. */
+  waLink: string | null;
+}
+
 export const notificationPrefsApi = {
   matrix: () => get<PreferenceMatrix>('/notifications/preferences'),
   update: (rows: PrefRows) => put<PreferenceMatrix>('/notifications/preferences', { rows }),
   verifyStart: () => post<VerifyStart>('/notifications/phone/verify/start', { method: 'sent' }),
+  verifyStartTyped: () => post<VerifyStartTyped>('/notifications/phone/verify/start', { method: 'typed' }),
   verifyConfirm: (code: string) => post<PreferenceMatrix>('/notifications/phone/verify/confirm', { code }),
   categories: () => get<CategoryRow[]>('/config/notification-categories'),
   updateCategory: (id: string, body: CategoryPatch) => patch<CategoryRow>(`/config/notification-categories/${id}`, body),

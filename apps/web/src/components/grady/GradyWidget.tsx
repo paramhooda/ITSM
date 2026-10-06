@@ -7,7 +7,7 @@ import { matchRoute } from '@itsm/shared';
 import { Send, X, Trash2, Loader2, Plus, History, Search, Zap, AlertTriangle, Check, ChevronLeft, Settings2, Minus, ThumbsUp, ThumbsDown, Megaphone, ShieldAlert, Wrench, Compass } from 'lucide-react';
 import { useUiStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
-import { Button, Kbd } from '@/components/ui';
+import { Badge, Button, Kbd } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { relativeTime } from '@/lib/format';
 import { ApiError } from '@/api/client';
@@ -316,7 +316,10 @@ function GradyWindow({ open, onClose }: { open: boolean; onClose: () => void }) 
           {chat.conversations.map((c) => (
             <div key={c.id} className={cn('group flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer hover:bg-white hover:shadow-card', c.id === chat.conversationId && 'bg-white shadow-card')} onClick={() => { chat.open(c.id); setHistoryOpen(false); }}>
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] truncate text-default">{c.title || 'Untitled'}</div>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-[13px] truncate text-default">{c.title || 'Untitled'}</span>
+                  {c.context?.channel === 'whatsapp' && <Badge color="green" title="This thread runs on WhatsApp">WhatsApp</Badge>}
+                </div>
                 <div className="text-[11px] text-subtle">{relativeTime(c.updatedAt)} · {c.messageCount} messages</div>
               </div>
               <button className="opacity-0 group-hover:opacity-100 text-subtle hover:text-red-600" title="Delete" onClick={(e) => { e.stopPropagation(); chat.remove(c.id); }}><Trash2 className="h-3.5 w-3.5" /></button>

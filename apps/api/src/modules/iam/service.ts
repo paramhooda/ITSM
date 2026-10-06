@@ -43,6 +43,8 @@ const userColumns = {
   authProvider: schema.users.authProvider,
   whatsappOptIn: schema.users.whatsappOptIn,
   whatsappVerifiedAt: schema.users.whatsappVerifiedAt,
+  /** The person switched "chat with Grady on WhatsApp" on (users.preferences.whatsapp.assistant); a boolean so the list never returns anybody's preferences. */
+  assistantOn: sql<boolean>`coalesce(${schema.users.preferences}->'whatsapp'->'assistant' = 'true'::jsonb, false)`,
 };
 
 export async function listUsers(ctx: Ctx, f: UserFilters) {

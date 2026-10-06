@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { UserPlus, KeyRound, Pencil, UserX, UserCheck, Copy, Users } from 'lucide-react';
+import { UserPlus, KeyRound, Pencil, UserX, UserCheck, Copy, Users, Unlink } from 'lucide-react';
 import { PageHeader, Button, DataTable, Pagination, Badge, Dialog, Drawer, ConfirmDialog, Field, Input, Select, EmptyState, ErrorBlock, ListShell, FilterGroup, FilterOptions, type Column, type AppliedFilter, Checkbox } from '@/components/ui';
 import { fmtNumber } from '@/lib/format';
 import { useListState } from '@/hooks/useListState';
 import { fmtDateTime, relativeTime } from '@/lib/format';
 import { portalApi, pk, ROLE_LABELS, type PortalUser, type PortalRole } from '@/components/portal/api';
+import { whatsappApi } from '@/components/whatsapp/api';
 
 const ROLE_OPTIONS = [
   { value: 'customer_user', label: 'User — raises and tracks tickets' },
@@ -51,6 +52,7 @@ export default function PortalUsersPage() {
   const [ed, setEd] = useState({ name: '', phone: '', title: '', role: 'customer_user' as PortalRole, whatsappOptIn: false });
   const [resetTarget, setResetTarget] = useState<PortalUser | null>(null);
   const [toggleTarget, setToggleTarget] = useState<PortalUser | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<PortalUser | null>(null);
   const [temp, setTemp] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
@@ -96,11 +98,27 @@ export default function PortalUsersPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const revoke = useMutation({
+    mutationFn: (u: PortalUser) => whatsappApi.revokePortalUser(u.id),
+    onSuccess: (_r, u) => {
+      setRevokeTarget(null);
+      setEdit((prev) => (prev && prev.id === u.id ? { ...prev, whatsappVerifiedAt: null, assistantOn: false } : prev));
+      invalidate();
+      toast.success(`${u.name}'s number revoked`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const columns: Column<PortalUser>[] = [
     { key: 'name', header: 'Name', render: (u) => <div><div className="font-medium">{u.name}{u.isSelf && <span className="text-subtle font-normal"> (you)</span>}</div>{u.title && <div className="text-[11.5px] text-muted">{u.title}</div>}</div> },
     { key: 'email', header: 'E-mail', render: (u) => <span className="text-[12.5px]">{u.email}</span> },
     { key: 'role', header: 'Role', render: (u) => <Badge color={u.role === 'customer_admin' ? 'purple' : 'blue'}>{u.role ? ROLE_LABELS[u.role] : u.roleName ?? '—'}</Badge> },
-    { key: 'status', header: 'Status', render: (u) => <Badge color={u.status === 'active' ? 'green' : 'gray'} dot>{u.status === 'active' ? 'Active' : 'Disabled'}</Badge> },
+    { key: 'status', header: 'Status', render: (u) => (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <Badge color={u.status === 'active' ? 'green' : 'gray'} dot>{u.status === 'active' ? 'Active' : 'Disabled'}</Badge>
+        {u.assistantOn && u.whatsappVerifiedAt && <Badge color="green" title="Chats with Grady on WhatsApp from a verified number" data-testid="portal-chat-badge">Chat</Badge>}
+      </span>
+    ) },
     { key: 'lastLogin', header: 'Last sign-in', render: (u) => <span className="text-[12.5px] text-muted" title={fmtDateTime(u.lastLoginAt)}>{u.lastLoginAt ? relativeTime(u.lastLoginAt) : 'Never'}</span> },
     { key: 'actions', header: '', className: 'text-right', render: (u) => (
       <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
@@ -231,6 +249,17 @@ export default function PortalUsersPage() {
                   {edit.whatsappVerifiedAt ? `Number verified by ${edit.name.split(' ')[0]} on ${fmtDateTime(edit.whatsappVerifiedAt)}.` : 'Number not verified yet; the person verifies it with a code on their profile.'} Changing the number clears the verification; which categories reach them is their own choice under Profile & notifications.
                 </span>
               )}
+              {edit.whatsappVerifiedAt && (
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-default bg-surface-2/40 px-3 py-2" data-testid="portal-user-chat">
+                  <span className="inline-flex flex-wrap items-center gap-2 text-[12.5px]">
+                    <Badge color={edit.assistantOn ? 'green' : 'blue'} dot>{edit.assistantOn ? 'Chat with Grady on' : 'Chat with Grady off'}</Badge>
+                    <span className="text-muted">{edit.assistantOn ? 'Messages from this number are answered by the assistant.' : 'The person can switch it on from their profile.'}</span>
+                  </span>
+                  <Button type="button" size="sm" variant="ghost" icon={<Unlink className="h-3.5 w-3.5" />} onClick={() => setRevokeTarget(edit)} data-testid="portal-revoke-number">
+                    Revoke number
+                  </Button>
+                </div>
+              )}
             </div>
             <Field label="Job title">
               <Input value={ed.title} onChange={(e) => setEd({ ...ed, title: e.target.value })} />
@@ -256,6 +285,16 @@ export default function PortalUsersPage() {
         title={toggleTarget?.status === 'active' ? 'Disable user?' : 'Re-enable user?'}
         confirmLabel={toggleTarget?.status === 'active' ? 'Disable' : 'Enable'}
         description={toggleTarget ? (toggleTarget.status === 'active' ? `${toggleTarget.name} will no longer be able to sign in. Their tickets stay in place.` : `${toggleTarget.name} will be able to sign in again.`) : ''}
+      />
+      <ConfirmDialog
+        open={!!revokeTarget}
+        onClose={() => setRevokeTarget(null)}
+        onConfirm={() => revokeTarget && revoke.mutate(revokeTarget)}
+        loading={revoke.isPending}
+        danger
+        title="Revoke this number?"
+        confirmLabel="Revoke number"
+        description={revokeTarget ? `${revokeTarget.name} will no longer chat with Grady on WhatsApp until they verify the number again on their profile. Notifications and the number itself are not changed.` : ''}
       />
       <TempPasswordDialog open={!!temp} onClose={() => setTemp(null)} email={temp?.email ?? ''} password={temp?.password ?? ''} />
     </div>

@@ -19,7 +19,19 @@ export interface ContextInput {
   contextDescription?: string | null;
   /** Turn notes such as a cancelled proposal. */
   notes?: string[];
+  /** The web panel (default) or WhatsApp. */
+  channel?: 'web' | 'whatsapp';
 }
+
+/** Appended to the operating context for a WhatsApp turn: plain text, short, links as given, no navigation, YES/NO instead of the Confirm card. Volatile, so the stable block is unchanged. */
+export const WHATSAPP_CHANNEL_NOTE = [
+  '## Channel',
+  'The user is chatting from WhatsApp on a phone, not the web application. Plain text only: no Markdown tables (one record per line as "label: value"), no headings, no nested lists; bold only for the headline figure.',
+  'Keep replies under about 80 words and show at most 5 records, then offer more.',
+  'Links: still use the link field from tool results exactly as given; the platform turns them into full web links.',
+  'You cannot open pages or forms here: never call navigate, open_record or prefill_form; give the link instead.',
+  'Proposing an action: one sentence saying exactly what will happen, then end with "Reply YES to go ahead or NO to drop it." There is no Confirm card. After acting: one line starting with "Done:" and the link.',
+].join('\n');
 
 export const describeScope = (who: Who, organisation?: { name: string; code: string } | null): string => {
   const u = who.user;
@@ -48,5 +60,6 @@ export function contextSection(p: ContextInput): string {
   if (p.skill) lines.push(`Active skill: ${p.skill.title}. Follow its playbook for this request.`);
   if (p.contextDescription) lines.push('', '## Current screen', p.contextDescription, 'When the user says "this ticket", "this customer", "this page", "here" or similar, they mean what is on the current screen.');
   if (p.notes?.length) lines.push('', ...p.notes);
+  if (p.channel === 'whatsapp') lines.push('', WHATSAPP_CHANNEL_NOTE);
   return lines.join('\n');
 }

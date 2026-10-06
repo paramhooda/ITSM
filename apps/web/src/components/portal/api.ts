@@ -471,6 +471,8 @@ export interface PortalUser {
   whatsappOptIn: boolean;
   /** Set when the person proved they control the number with a one-time code over WhatsApp (ISO string), or null. */
   whatsappVerifiedAt: string | null;
+  /** The person switched "WhatsApp chat with Grady" on (meaningful only with a verified number). */
+  assistantOn: boolean;
   title: string | null;
   status: string;
   lastLoginAt: string | null;

@@ -28,6 +28,7 @@ import * as iam from '@/modules/iam/service';
 import { acknowledgeVisit } from '@/modules/field/service';
 import { getSetting } from '@/modules/config/service';
 import { plannedChangeState } from '@/modules/changes/service';
+import { revokeNumber } from '@/modules/whatsapp/link';
 import { windowOf } from '@/modules/changes/conflicts';
 import type { PortalKnownError } from '@/modules/known-errors/service';
 import { surveyRowFor, surveyView } from '@/modules/surveys/service';
@@ -977,7 +978,7 @@ function portalRoleOf(roles: { key: string }[]): PortalRoleKey | null {
 }
 
 function safeUser(ctx: Ctx, u: IamUser | IamListUser) {
-  return { id: u.id, email: u.email, name: u.name, phone: u.phone, whatsappOptIn: u.whatsappOptIn, whatsappVerifiedAt: u.whatsappVerifiedAt, title: u.title, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, role: portalRoleOf(u.roles), roleName: u.roles.find((r) => r.key === portalRoleOf(u.roles))?.name ?? null, isSelf: u.id === ctx.user.id };
+  return { id: u.id, email: u.email, name: u.name, phone: u.phone, whatsappOptIn: u.whatsappOptIn, whatsappVerifiedAt: u.whatsappVerifiedAt, assistantOn: u.assistantOn === true, title: u.title, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, role: portalRoleOf(u.roles), roleName: u.roles.find((r) => r.key === portalRoleOf(u.roles))?.name ?? null, isSelf: u.id === ctx.user.id };
 }
 
 async function portalRole(ctx: Ctx, key: string) {
@@ -1040,6 +1041,13 @@ export async function resetPortalUserPassword(ctx: Ctx, id: string) {
   await loadOwnUser(ctx, scope.customerId, id);
   const res = await iam.adminResetPassword(ctx, id);
   return { temporaryPassword: res.temporaryPassword ?? null };
+}
+
+/** A customer administrator revokes a user's WhatsApp number (chat off and verification cleared); a user of another organisation is not found. */
+export async function unlinkPortalUserWhatsApp(ctx: Ctx, id: string) {
+  const scope = resolvePortalCustomer(ctx, 'portal:manage_users', null, { mutation: true });
+  await loadOwnUser(ctx, scope.customerId, id);
+  return revokeNumber(ctx, id, { by: 'portal_admin' });
 }
 
 export { COVERING_STATUSES, isPortalUser };

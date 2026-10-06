@@ -350,7 +350,7 @@ async function seedSystemSettings(tx: Tx) {
     'audit.retention_months': { value: 36, description: 'Months to retain audit log partitions' },
     'events.retention_months': { value: 12, description: 'Months to retain integration event partitions' },
     'ai.assistant.enabled': { value: true, description: 'Kill switch for Grady: off stops every chat and AI feature at once' },
-    'ai.disabled_features': { value: [], description: 'AI features switched off (assistant, summarize, classify, assign, similar, suggest_kb, resolution, draft, duplicates, change_impact, problem_clusters, triage, sentiment, recommendations, handover, briefing, kedb_draft, report_builder)' },
+    'ai.disabled_features': { value: [], description: 'AI features switched off (assistant, summarize, classify, assign, similar, suggest_kb, resolution, draft, duplicates, change_impact, problem_clusters, triage, sentiment, recommendations, handover, briefing, kedb_draft, report_builder, whatsapp_assistant)' },
     'ai.autonomy': { value: 'confirm_all', description: 'confirm_all: every change waits for confirmation; auto_low: low-risk internal writes (work notes, watching, tasks, links) apply at once' },
     'ai.effort': { value: 'low', description: 'Reasoning effort for the assistant (low, medium, high) on models that support it' },
     'ai.daily_token_budget': { value: 250000, description: 'Tokens one person may spend on the assistant per day (0 = unlimited)' },
@@ -394,6 +394,13 @@ async function seedSystemSettings(tx: Tx) {
     'whatsapp.default_country_code': { value: '91', description: 'Country code assumed for ten-digit numbers' },
     'whatsapp.webhook_url': { value: '', description: 'Webhook URL to register in Meta; blank derives it from APP_URL. Set a tunnel URL (for example ngrok) when the platform runs on localhost' },
     'whatsapp.templates': { value: { default: { name: 'progression_update', language: 'en', params: ['subject', 'text', 'link'] } }, description: 'Approved template per event group (default, ticket, sla, incident, page, handover, briefing); params in template order from subject, text, link, event' },
+    'whatsapp.assistant.enabled': { value: false, description: 'Let people chat with Grady by messaging the business number from a verified mobile number; needs the app secret (inbound messages are verified) and the "Chat on WhatsApp" AI feature' },
+    'whatsapp.assistant.audiences': { value: ['staff', 'customers'], description: 'Who may chat on WhatsApp: staff, customers (portal users), or both' },
+    'whatsapp.assistant.daily_message_cap': { value: 100, description: 'Messages one person may send to the assistant per day (UTC); the AI token budget applies as well' },
+    'whatsapp.assistant.thread_idle_hours': { value: 24, description: 'A WhatsApp conversation continues the same thread until it has been quiet for this long; then a fresh one starts' },
+    'whatsapp.assistant.greeting': { value: 'Hi {{name}}, this is Grady from {{platform}}. Ask me about tickets, services, visits and approvals; when I propose a change, reply YES to go ahead or NO to drop it.', description: 'Sent once, before the first reply to a person' },
+    'whatsapp.assistant.unlinked_reply': { value: 'This number is not linked to a {{platform}} account. Sign in, open Profile & preferences and link your WhatsApp number to chat here.', description: 'What an unknown or unverified number receives (at most once an hour)' },
+    'whatsapp.display_number': { value: '', description: 'The business WhatsApp number people message, as shown on the profile page (for example +91 11 4000 0000)' },
   };
   for (const [key, def] of Object.entries(defaults)) {
     await tx.insert(schema.systemSettings).values({ key, value: def.value as never, description: def.description }).onConflictDoNothing();

@@ -25,11 +25,11 @@ interface AiAdminSettings {
   rateLimitPerMinute: number;
   triage: { autoApplyConfidence: number; stormWindowMinutes: number; stormThreshold: number; stormAutoLink: boolean };
 }
-interface UsageDay { day: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; toolCalls: number; up: number; down: number; avgDurationMs: number }
+interface UsageDay { day: string; turns: number; whatsappTurns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; toolCalls: number; up: number; down: number; avgDurationMs: number }
 interface ToolRow { id?: string; tool: string; calls: number; ok: number; proposed: number; failed: number; action: boolean }
 interface AiUsage {
   days: number;
-  totals: { turns: number; users: number; conversations: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheHitPct: number; toolCalls: number; up: number; down: number; avgDurationMs: number };
+  totals: { turns: number; whatsappTurns: number; users: number; conversations: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheHitPct: number; toolCalls: number; up: number; down: number; avgDurationMs: number };
   series: UsageDay[];
   byTool: ToolRow[];
   guardrails: { tenantFence: number; answerFence: number; forbiddenToolCalls: number; invalidToolCalls: number; toolErrors: number; proposals: number; outcomes: Record<string, number> };
@@ -54,6 +54,7 @@ const FEATURE_LABELS: Record<string, string> = {
   briefing: 'Daily briefings',
   kedb_draft: 'Drafted customer wording for known errors',
   report_builder: 'Report builder suggestions',
+  whatsapp_assistant: 'Chat on WhatsApp',
 };
 const fmt = (n: number) => n.toLocaleString('en-GB');
 const compact = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}k` : fmt(n));
@@ -191,7 +192,7 @@ export default function AiPage() {
               <KpiGrid
                 columns={4}
                 items={[
-                  { label: 'Replies', value: fmt(u.totals.turns), hint: `${fmt(u.totals.conversations)} conversations`, icon: <Bot className="h-4 w-4" />, spark: u.series.map((d) => d.turns) },
+                  { label: 'Replies', value: fmt(u.totals.turns), hint: `${fmt(u.totals.conversations)} conversations · ${fmt(u.totals.whatsappTurns)} on WhatsApp`, icon: <Bot className="h-4 w-4" />, spark: u.series.map((d) => d.turns) },
                   { label: 'People', value: fmt(u.totals.users), hint: 'asked at least once', icon: <Users className="h-4 w-4" /> },
                   { label: 'Tokens', value: compact(u.totals.inputTokens + u.totals.outputTokens), hint: `${compact(u.totals.inputTokens)} in · ${compact(u.totals.outputTokens)} out · ${u.totals.cacheHitPct}% from cache`, icon: <Coins className="h-4 w-4" />, spark: u.series.map((d) => d.inputTokens + d.outputTokens) },
                   { label: 'Tool calls', value: fmt(u.totals.toolCalls), hint: `${fmt(u.guardrails.proposals)} proposals`, icon: <Wrench className="h-4 w-4" />, spark: u.series.map((d) => d.toolCalls) },
@@ -203,7 +204,7 @@ export default function AiPage() {
               />
               <div>
                 <div className="text-[13px] font-medium mb-2">Replies and tool calls per day</div>
-                <TrendChart data={u.series as unknown as Record<string, unknown>[]} x="day" kind="bar" height={200} series={[{ key: 'turns', label: 'Replies' }, { key: 'toolCalls', label: 'Tool calls' }]} />
+                <TrendChart data={u.series as unknown as Record<string, unknown>[]} x="day" kind="bar" height={200} series={[{ key: 'turns', label: 'Replies' }, { key: 'whatsappTurns', label: 'WhatsApp replies' }, { key: 'toolCalls', label: 'Tool calls' }]} />
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <Stat label="Answered" value={fmt(outcomes.answered ?? 0)} />

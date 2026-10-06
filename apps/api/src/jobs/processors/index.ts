@@ -22,3 +22,4 @@ import './briefings';
 import './surveys';
 import './boards';
 import './software';
+import './whatsapp';

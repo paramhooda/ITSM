@@ -11,6 +11,7 @@ import { sha256 } from '@/lib/crypto';
 import { normalizePhone } from '@/lib/channels';
 import { queueNotification } from './dispatch';
 import { loadWhatsAppSettings } from './channels';
+import { getSetting } from '@/modules/config/service';
 import { assertPerson, myPreferences, type PreferenceMatrix } from './preferences';
 
 /**
@@ -26,7 +27,7 @@ export const CODE_LIFETIME_MS = 10 * 60_000;
 export const CODES_PER_HOUR = 3;
 export const MAX_ATTEMPTS = 5;
 
-export const startBody = z.object({ method: z.enum(['sent']).optional() });
+export const startBody = z.object({ method: z.enum(['sent', 'typed']).optional() });
 export const confirmBody = z.object({ code: z.string().regex(/^\d{6}$/) });
 export type VerificationMethod = 'sent' | 'typed';
 
@@ -67,14 +68,32 @@ async function loadUser(tx: Tx, userId: string) {
   return user ?? null;
 }
 
+export interface SentVerification {
+  method: 'sent';
+  sentTo: string;
+  expiresAt: string;
+}
+/** The `typed` method: the code is shown once (stored hashed) and the person sends it to the business number from their own phone. */
+export interface TypedVerification {
+  method: 'typed';
+  code: string;
+  phone: string;
+  expiresAt: string;
+  businessNumber: string | null;
+  waLink: string | null;
+}
+
 /**
- * Issues a code for the person's own number and sends it over WhatsApp.
- * Refusals: no number on the profile (422), a number that does not parse (422),
- * a number another account verified (409), more than three codes in the last
- * hour (429, `verification_rate_limited`), WhatsApp not set up or no template
- * mapped (422, nothing is stored because the transaction rolls back).
+ * Issues a code for the person's own number. `sent` (the default) delivers it
+ * over WhatsApp; `typed` returns it once so the person sends it to the business
+ * number (the WhatsApp assistant completes the link when the code arrives from
+ * the same number). Refusals: no number on the profile (422), a number that
+ * does not parse (422), a number another account verified (409), more than
+ * three codes in the last hour across both methods (429,
+ * `verification_rate_limited`), WhatsApp not set up or no template mapped
+ * (422, `sent` only; nothing is stored because the transaction rolls back).
  */
-export async function startPhoneVerification(ctx: Ctx, input: { method?: 'sent' } = {}): Promise<{ method: 'sent'; sentTo: string; expiresAt: string }> {
+export async function startPhoneVerification(ctx: Ctx, input: { method?: VerificationMethod } = {}): Promise<SentVerification | TypedVerification> {
   assertPerson(ctx);
   const method = input.method ?? 'sent';
   const user = await loadUser(ctx.tx, ctx.user.id);
@@ -92,6 +111,14 @@ export async function startPhoneVerification(ctx: Ctx, input: { method?: 'sent' 
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const expiresAt = new Date(Date.now() + CODE_LIFETIME_MS);
   await ctx.tx.insert(schema.phoneVerifications).values({ userId: user.id, phone, method, codeHash: hashVerificationCode(user.id, phone, code), expiresAt });
+  if (method === 'typed') {
+    // Nothing is sent: the person types the code into WhatsApp themselves. The business number is a plain setting
+    // read here through the config service so the notifications module never imports the assistant's module.
+    const businessNumber = String(await getSetting(ctx, 'whatsapp.display_number', '')).trim() || null;
+    const digits = businessNumber ? businessNumber.replace(/\D/g, '') : '';
+    await ctx.audit({ entityType: 'user', entityId: user.id, entityLabel: user.email, action: 'phone.verification_shown', customerId: user.customerId, metadata: { method, phone: maskPhone(phone) } });
+    return { method: 'typed', code, phone, expiresAt: expiresAt.toISOString(), businessNumber, waLink: digits ? `https://wa.me/${digits}?text=${code}` : null };
+  }
   const queued = await queueNotification(ctx.tx, {
     event: 'user.phone_verification',
     recipients: [{ userId: user.id, name: user.name, phone, whatsappOptIn: true }],

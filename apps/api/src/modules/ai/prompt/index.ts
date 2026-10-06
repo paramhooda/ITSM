@@ -36,6 +36,8 @@ export interface PromptInput {
   today?: Date;
   /** Turn notes (a cancelled proposal, …). */
   notes?: string[];
+  /** The web panel (default) or WhatsApp: the channel note tells the model how to write and that there is nothing to navigate. */
+  channel?: 'web' | 'whatsapp';
 }
 
 export interface BuiltPrompt {
@@ -54,7 +56,7 @@ export function buildSystemPrompt(p: PromptInput): BuiltPrompt {
   const skills = skillsFor({ customer, toolsets: offered });
   const stable = [identitySection(customer), rulesSection({ customer }), STYLE, playbooksSection(skills)].join('\n\n');
   const volatile = [
-    contextSection({ who: p.ctx, today: p.today, customerScopeSummary: p.customerScopeSummary, organisation: p.organisation, autonomy: p.autonomy, canAct, skill: p.skill ? skillByKey(p.skill) : null, contextDescription: p.contextDescription, notes: p.notes }),
+    contextSection({ who: p.ctx, today: p.today, customerScopeSummary: p.customerScopeSummary, organisation: p.organisation, autonomy: p.autonomy, canAct, skill: p.skill ? skillByKey(p.skill) : null, contextDescription: p.contextDescription, notes: p.notes, channel: p.channel }),
     capabilitiesSection({ tools: p.tools, active, offered, canAct }),
   ].join('\n\n');
   return { stable, volatile, version: PROMPT_VERSION, sections: ['Identity', 'Applications', 'Rules', 'How you answer', 'Skills', 'Operating context', 'Current screen', 'Capabilities'] };

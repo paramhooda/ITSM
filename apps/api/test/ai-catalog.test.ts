@@ -189,4 +189,15 @@ describe('prompt builder', () => {
     const noAct = build(whoOf(principal({ perms: staffPerms.filter((x) => x !== 'ai:act') })));
     expect(noAct.volatile).toContain('Actions: NOT enabled');
   });
+
+  it('puts the WhatsApp channel note in the volatile block only, so the stable block is the same on both channels', () => {
+    const web = build(admin);
+    const wa = build(admin, { channel: 'whatsapp' });
+    expect(wa.stable).toBe(web.stable);
+    expect(wa.volatile).toContain('## Channel');
+    expect(wa.volatile).toContain('Reply YES to go ahead or NO to drop it');
+    expect(wa.volatile).toContain('never call navigate, open_record or prefill_form');
+    expect(web.volatile).not.toContain('## Channel');
+    expect(web.stable).toContain('When the Operating context says the channel is WhatsApp');
+  });
 });

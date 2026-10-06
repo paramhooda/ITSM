@@ -167,6 +167,14 @@ CREATE POLICY tenant_isolation ON phone_verifications
   USING (app_all_customers() OR user_id = app_user_id())
   WITH CHECK (app_all_customers() OR user_id = app_user_id());
 
+-- inbound WhatsApp messages are an operations log: staff only, never a customer scope.
+ALTER TABLE whatsapp_inbound ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whatsapp_inbound FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON whatsapp_inbound;
+CREATE POLICY tenant_isolation ON whatsapp_inbound
+  USING (app_all_customers() OR app_is_msp())
+  WITH CHECK (app_all_customers() OR app_is_msp());
+
 -- ---------------------------------------------------------------------------
 -- Partitioned high-volume tables
 -- ---------------------------------------------------------------------------

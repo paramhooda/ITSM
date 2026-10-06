@@ -17,7 +17,7 @@ import { RULE_KINDS, SECRET_SETTING_KEY, settingVisible, type RuleKind } from '.
  */
 
 /** Settings the assistant may change, by prefix; anything else is read-only or hidden. */
-export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.', 'known_errors.', 'surveys.', 'boards.', 'software.', 'reports.'];
+export const WRITABLE_SETTING_PREFIXES = ['ai.', 'tickets.', 'contracts.', 'entitlements.', 'portal.', 'notifications.', 'platform.', 'changes.', 'known_errors.', 'surveys.', 'boards.', 'software.', 'reports.', 'whatsapp.assistant.'];
 const settingValue = z.union([z.string().max(2000), z.number(), z.boolean(), z.null(), z.array(z.string().max(100)).max(50)]);
 
 /** Validation for the settings whose shape the platform depends on. */
@@ -73,6 +73,12 @@ function validateSetting(key: string, value: unknown) {
     case 'ai.triage.storm_window_minutes': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 5 && value <= 1440, 'must be between 5 and 1440 minutes');
     case 'ai.triage.storm_threshold': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 50, 'must be between 2 and 50');
     case 'ai.triage.storm_auto_link': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'whatsapp.assistant.enabled': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'whatsapp.assistant.audiences': return expect(Array.isArray(value) && value.length > 0 && value.every((v) => v === 'staff' || v === 'customers'), 'must be a non-empty list of: staff, customers');
+    case 'whatsapp.assistant.daily_message_cap': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 2000, 'must be between 1 and 2000 messages a day');
+    case 'whatsapp.assistant.thread_idle_hours': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 168, 'must be between 1 and 168 hours');
+    case 'whatsapp.assistant.greeting':
+    case 'whatsapp.assistant.unlinked_reply': return expect(typeof value === 'string' && value.trim().length >= 10 && value.length <= 500, 'must be 10 to 500 characters');
     default: return undefined;
   }
 }

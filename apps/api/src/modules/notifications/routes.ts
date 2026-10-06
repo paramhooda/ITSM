@@ -7,6 +7,7 @@ import * as svc from './service';
 import * as channels from './channels';
 import * as prefs from './preferences';
 import * as phone from './phone';
+import * as inbound from '@/modules/whatsapp/inbound';
 import { withSystem } from '@/db/client';
 
 export default async function routes(app: FastifyInstance) {
@@ -28,7 +29,7 @@ export default async function routes(app: FastifyInstance) {
   // ------------------------------------------------------------ the person's own preferences and number
   r.get('/notifications/preferences', { preHandler: app.auth(), schema: { tags: ['notifications'] } }, h((ctx) => prefs.myPreferences(ctx)));
   r.put('/notifications/preferences', { preHandler: app.auth(), config: { rateLimit: { max: 60, timeWindow: '1 minute' } }, schema: { tags: ['notifications'], body: prefs.updatePreferencesBody } }, h((ctx, req) => prefs.updateMyPreferences(ctx, req.body as prefs.UpdatePreferencesInput)));
-  r.post('/notifications/phone/verify/start', { preHandler: app.auth(), config: { rateLimit: { max: 5, timeWindow: '10 minutes' } }, schema: { tags: ['notifications'], body: phone.startBody } }, h((ctx, req) => phone.startPhoneVerification(ctx, req.body as { method?: 'sent' })));
+  r.post('/notifications/phone/verify/start', { preHandler: app.auth(), config: { rateLimit: { max: 5, timeWindow: '10 minutes' } }, schema: { tags: ['notifications'], body: phone.startBody } }, h((ctx, req) => phone.startPhoneVerification(ctx, req.body as { method?: phone.VerificationMethod })));
   r.post('/notifications/phone/verify/confirm', { preHandler: app.auth(), config: { rateLimit: { max: 10, timeWindow: '10 minutes' } }, schema: { tags: ['notifications'], body: phone.confirmBody } }, h((ctx, req) => phone.confirmPhoneVerification(ctx, (req.body as { code: string }).code)));
 
   // ------------------------------------------------------------ WhatsApp (admin)
@@ -59,8 +60,8 @@ export default async function routes(app: FastifyInstance) {
       const settings = await withSystem((tx) => channels.loadWhatsAppSettings(tx));
       const raw = (req as { rawBody?: string }).rawBody ?? '';
       if (!channels.verifyWebhookSignature(raw, req.headers['x-hub-signature-256'] as string | undefined, settings.appSecret)) return reply.code(401).send({ error: 'bad signature' });
-      const updated = await channels.applyWhatsAppStatuses(req.body);
-      return reply.send({ ok: true, updated });
+      // Delivery states are applied and inbound messages queued for the assistant; the model never runs here.
+      return reply.send(await inbound.handleWhatsAppWebhook(req.body, settings));
     });
   });
 }

@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { briefingsApi, briefingKeys, BRIEFING_TIMES, type BriefingPrefs, type BriefingChannel } from '@/components/briefings/api';
 import { NotificationsCard } from '@/components/notifications/NotificationsCard';
 import { notificationPrefsKeys } from '@/components/notifications/api';
+import { WhatsAppLinkCard } from '@/components/whatsapp/WhatsAppLinkCard';
 
 const TIMEZONES = [
   'UTC',
@@ -219,6 +220,8 @@ export default function ProfilePage() {
               if (next !== knownPhone.current) setPhone(next);
             }}
           />
+
+          <WhatsAppLinkCard />
 
           {user.userType === 'msp' && (
             <Card title="Daily briefing" actions={<Sparkles className="h-4 w-4 text-brand-600" />}>

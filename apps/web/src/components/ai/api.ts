@@ -61,6 +61,8 @@ export interface Conversation {
   updatedAt: string;
   createdAt: string;
   messageCount: number;
+  /** Where the thread runs: absent on the web, `channel: 'whatsapp'` for the person's WhatsApp thread. */
+  context?: { channel?: string } | null;
 }
 
 /** An action the assistant proposed and the platform holds until the user confirms it. */

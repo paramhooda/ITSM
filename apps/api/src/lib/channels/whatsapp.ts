@@ -52,6 +52,26 @@ export async function sendText(cfg: WhatsAppConfig, to: string, text: string): P
   return { providerMessageId: id };
 }
 
+/**
+ * Marks an inbound message as read (the person sees blue ticks). Meta's read
+ * receipt takes exactly `messaging_product`, `status` and `message_id`, so this
+ * does not go through graphPost (which always adds `recipient_type`). Failures
+ * are reported as plain errors; callers treat the receipt as best effort.
+ */
+export async function markRead(cfg: WhatsAppConfig, messageId: string): Promise<void> {
+  const base = (cfg.baseUrl ?? 'https://graph.facebook.com').replace(/\/$/, '');
+  const url = `${base}/${cfg.apiVersion ?? 'v21.0'}/${cfg.phoneNumberId}/messages`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${cfg.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', status: 'read', message_id: messageId }),
+  });
+  if (!res.ok) {
+    const json = (await res.json().catch(() => ({}))) as GraphError;
+    throw new Error(`WhatsApp ${res.status}${json.error?.code !== undefined ? ` (code ${json.error.code})` : ''}: ${json.error?.message ?? res.statusText}`);
+  }
+}
+
 export const whatsappProvider: ChannelProvider<WhatsAppConfig> = {
   kind: 'whatsapp',
   async send(cfg, message: OutboundMessage) {

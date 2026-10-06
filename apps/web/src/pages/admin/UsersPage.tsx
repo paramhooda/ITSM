@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, KeyRound, Copy, UserX, UserCheck } from 'lucide-react';
+import { Plus, KeyRound, Copy, UserX, UserCheck, Unlink } from 'lucide-react';
 import { get, post, patch, put } from '@/api/client';
 import { Button, Badge, Avatar, Dialog, ConfirmDialog, Select, SearchInput, Pagination, type Column } from '@/components/ui';
 import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
@@ -14,6 +14,8 @@ import { FormDialog, type FieldSpec } from '@/components/admin/FormDialog';
 import { timezoneOptions } from '@/components/admin/inputs';
 import { RoleAssignmentsEditor, useRoles, type RoleAssignment } from '@/components/admin/RoleAssignmentsEditor';
 import { errorMessage } from '@/components/admin/api';
+import { WHATSAPP_LINK_COLORS } from '@/lib/statusColors';
+import { whatsappApi } from '@/components/whatsapp/api';
 
 interface UserRow {
   id: string;
@@ -31,6 +33,8 @@ interface UserRow {
   whatsappOptIn: boolean;
   /** Set when the person proved they control the phone number with a one-time code over WhatsApp. */
   whatsappVerifiedAt: string | null;
+  /** The person switched "WhatsApp chat with Grady" on (meaningful only with a verified number). */
+  assistantOn: boolean;
   roles: { roleId: string; key: string; name: string; customerId: string | null }[];
   teams: { id: string; key: string; name: string; isLead: boolean }[];
 }
@@ -61,6 +65,7 @@ export default function UsersPage() {
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmDisable, setConfirmDisable] = useState(false);
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [busy, setBusy] = useState(false);
   const invalidateUsers = () => {
     void qc.invalidateQueries({ queryKey: ['iam', 'users'] });
@@ -78,6 +83,7 @@ export default function UsersPage() {
     { key: 'customerId', label: 'Customer', type: 'select', required: true, visible: (v) => v.userType === 'customer', options: (customers.data?.items ?? []).map((c) => ({ value: c.id, label: `${c.name} (${c.code})` })) },
     { key: 'title', label: 'Job title', type: 'text' },
     { key: 'phone', label: 'Phone', type: 'text' },
+    { key: 'whatsapp', label: 'WhatsApp chat with Grady', type: 'custom', visible: (v) => !!v.id, render: () => (u ? <WhatsAppChatLine user={u} onRevoke={() => setConfirmRevoke(true)} /> : null) },
     { key: 'timezone', label: 'Timezone', type: 'select', options: timezoneOptions() },
     { key: 'password', label: 'Password', type: 'password', visible: (v) => !v.id, hint: 'Leave empty to generate a temporary password' },
     { key: 'sendWelcome', label: 'Welcome email', type: 'boolean', visible: (v) => !v.id, placeholder: 'Send sign-in details by email' },
@@ -122,6 +128,21 @@ export default function UsersPage() {
       setConfirmReset(false);
       if (res.temporaryPassword) setTempPassword(res.temporaryPassword);
       else toast.success('Password reset');
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revokeNumber() {
+    if (!u) return;
+    setBusy(true);
+    try {
+      await whatsappApi.revokeUser(u.id);
+      invalidateUsers();
+      setConfirmRevoke(false);
+      toast.success('Number revoked');
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -224,7 +245,26 @@ export default function UsersPage() {
       />
       <ConfirmDialog open={confirmReset} onClose={() => setConfirmReset(false)} onConfirm={() => void resetPassword()} loading={busy} title="Generate a new temporary password?" description="Existing sessions are signed out. The new password is shown once." confirmLabel="Reset password" />
       <ConfirmDialog open={confirmDisable} onClose={() => setConfirmDisable(false)} onConfirm={() => void setStatus('disabled')} loading={busy} danger title="Disable this account?" description="The user is signed out immediately and can no longer sign in until re-enabled." confirmLabel="Disable account" />
+      <ConfirmDialog open={confirmRevoke} onClose={() => setConfirmRevoke(false)} onConfirm={() => void revokeNumber()} loading={busy} danger title="Revoke this number?" description="Chat with Grady on WhatsApp goes off and the verification is cleared, so the person has to prove the number again before chatting. WhatsApp notifications and the number itself are not changed." confirmLabel="Revoke number" />
       <TempPasswordDialog password={tempPassword} onClose={() => setTempPassword(null)} />
+    </div>
+  );
+}
+
+/** Read-only line in the user drawer: whether the number is linked for chatting with Grady, with Revoke for administrators. */
+function WhatsAppChatLine({ user, onRevoke }: { user: UserDetail; onRevoke: () => void }) {
+  const state = user.whatsappVerifiedAt ? (user.assistantOn ? 'linked' : 'verified') : 'none';
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-default bg-surface-2/40 px-3 py-2" data-testid="user-whatsapp-chat">
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+        <Badge color={WHATSAPP_LINK_COLORS[state]} dot>{state === 'linked' ? 'Linked for chat' : state === 'verified' ? 'Verified · chat off' : 'Not verified'}</Badge>
+        <span className="text-muted">{user.whatsappVerifiedAt ? `since ${fmtDateTime(user.whatsappVerifiedAt)}` : user.phone ? 'The person verifies the number with a code on their profile.' : 'No mobile number.'}</span>
+      </div>
+      {user.whatsappVerifiedAt && (
+        <Button type="button" size="sm" variant="ghost" icon={<Unlink className="h-3.5 w-3.5" />} onClick={onRevoke} data-testid="revoke-number">
+          Revoke number
+        </Button>
+      )}
     </div>
   );
 }

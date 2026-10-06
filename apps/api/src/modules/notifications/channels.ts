@@ -188,7 +188,8 @@ export async function whatsappStatus(ctx: Ctx) {
   };
 }
 
-const isLocalUrl = (value: string) => {
+/** True for localhost-style hosts Meta can never reach (the readiness checks say so). */
+export const isLocalUrl = (value: string) => {
   try {
     const host = new URL(value).hostname;
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.localhost');
@@ -376,7 +377,6 @@ export async function applyWhatsAppStatuses(payload: unknown): Promise<number> {
   for (const entry of entries) {
     for (const change of entry.changes ?? []) {
       const value = change.value ?? {};
-      if (value.messages?.length) logger.info({ count: value.messages.length }, 'whatsapp inbound messages received (not handled)');
       for (const st of value.statuses ?? []) {
         const providerMessageId = st.id;
         const status = st.status;

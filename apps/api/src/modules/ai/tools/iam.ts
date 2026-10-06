@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { listUsers, listRoles, listApiKeys } from '@/modules/iam/service';
 import { listAudit } from '@/modules/audit/service';
 import { outboxStats } from '@/modules/notifications/service';
+import { assistantStatus } from '@/modules/whatsapp/service';
+import { sql } from 'drizzle-orm';
 import { define } from './types';
 import { iso, trunc, resolveCustomerId, resolveUser, resolveTeam } from '../helpers';
 
@@ -89,5 +91,49 @@ export const IAM: ReturnType<typeof define>[] = [
       return { byStatus: s.byStatus, byChannel: s.byChannel, facts: [`Outbox: ${Object.entries(s.byStatus).map(([k, v]) => `${v} ${k}`).join(', ') || 'empty'}${failed ? ` (${failed} failed)` : ''}`], recent: s.recent.map((r) => ({ at: iso(r.createdAt), channel: r.channel, event: r.event, recipient: r.recipient, subject: trunc(r.subject, 80), status: r.status, delivery: r.deliveryStatus, attempts: r.attempts, error: trunc(r.lastError, 160) })), link: '/admin/outbox' };
     },
     summary: () => 'Read the notification outbox status',
+  }),
+
+  define({
+    name: 'whatsapp_chat_status',
+    toolset: 'iam',
+    description: 'Whether Grady answers on WhatsApp and how it is doing: switch state, readiness checks (app secret, feature switch, provider, webhook), how many people linked a number, and inbound messages, replies and failures over the last hours. Answers: is WhatsApp chat working, who can use it, why did nobody get a reply.',
+    inputSchema: z.object({ hours: z.number().int().min(1).max(168).optional() }),
+    requires: [],
+    anyOf: ['admin:system', 'admin:config'],
+    portal: null,
+    action: false,
+    run: async (ctx, input) => {
+      const hours = input.hours ?? 24;
+      const s = await assistantStatus(ctx);
+      const since = new Date(Date.now() - hours * 3_600_000);
+      const [w] = (await ctx.tx.execute(sql`
+        SELECT count(*)::int AS inbound,
+          count(*) FILTER (WHERE outcome = 'replied')::int AS replied,
+          count(*) FILTER (WHERE status = 'failed')::int AS failed,
+          count(*) FILTER (WHERE outcome = 'unverified')::int AS unverified
+        FROM whatsapp_inbound WHERE received_at >= ${since}`)).rows as { inbound: number; replied: number; failed: number; unverified: number }[];
+      const problems = s.checks.filter((c) => c.level !== 'ok').length;
+      const inbound = Number(w?.inbound ?? 0);
+      const replied = Number(w?.replied ?? 0);
+      const failed = Number(w?.failed ?? 0);
+      const unverified = Number(w?.unverified ?? 0);
+      return {
+        enabled: s.enabled,
+        ready: s.ready,
+        checks: s.checks,
+        linkedUsers: s.linkedUsers,
+        verifiedUsers: s.verifiedUsers,
+        hours,
+        inbound,
+        replied,
+        failed,
+        unverified,
+        audiences: s.settings.audiences,
+        dailyMessageCap: s.settings.dailyMessageCap,
+        facts: [`WhatsApp chat: ${s.enabled ? 'on' : 'off'}, ${s.ready ? 'ready' : `${problems} thing${problems === 1 ? '' : 's'} to fix`}, ${s.linkedUsers} linked people, ${inbound} messages in the last ${hours} h, ${replied} answered, ${failed} failed, ${unverified} from unlinked numbers`],
+        link: '/admin/whatsapp',
+      };
+    },
+    summary: () => 'Read the WhatsApp chat status',
   }),
 ];

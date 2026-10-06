@@ -33,6 +33,7 @@ describe('AI administration', () => {
     expect(before.statusCode).toBe(200);
     const s = before.json() as { assistantEnabled: boolean; features: string[]; rateLimitPerMinute: number };
     expect(s.features).toContain('summarize');
+    expect(s.features).toContain('whatsapp_assistant');
     expect(s.rateLimitPerMinute).toBe(30);
 
     const bad = await app.inject({ method: 'PUT', url: '/api/ai/admin/settings', headers: { authorization: `Bearer ${admin}` }, payload: { retentionDays: 3 } });
@@ -65,7 +66,7 @@ describe('AI administration', () => {
     expect(res.statusCode).toBe(200);
     const u = res.json() as { days: number; totals: Record<string, number>; series: { day: string }[]; byTool: unknown[]; guardrails: { tenantFence: number; outcomes: Record<string, number> } };
     expect(u.days).toBe(7);
-    for (const k of ['turns', 'users', 'conversations', 'inputTokens', 'outputTokens', 'cacheHitPct', 'toolCalls', 'up', 'down']) expect(typeof u.totals[k]).toBe('number');
+    for (const k of ['turns', 'users', 'conversations', 'inputTokens', 'outputTokens', 'cacheHitPct', 'toolCalls', 'up', 'down', 'whatsappTurns']) expect(typeof u.totals[k]).toBe('number');
     expect(Array.isArray(u.series)).toBe(true);
     expect(Array.isArray(u.byTool)).toBe(true);
     expect(typeof u.guardrails.tenantFence).toBe('number');

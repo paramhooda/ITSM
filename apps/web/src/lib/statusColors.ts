@@ -67,6 +67,11 @@ export const DOMAIN_COLORS: Record<string, string> = { noc: 'blue', soc: 'red', 
 /** Who a custom report reaches: only its owner, the roles and teams it is shared with, or the customer portal too. */
 export const REPORT_VISIBILITY_COLORS: Record<string, string> = { private: 'slate', shared: 'blue', portal: 'green' };
 
+/** A person's mobile number for chatting with Grady on WhatsApp: linked (verified and the chat on), verified with the chat off, a code pending, or nothing yet. */
+export const WHATSAPP_LINK_COLORS: Record<string, string> = { linked: 'green', verified: 'blue', pending: 'amber', none: 'slate' };
+/** What became of a message sent to the business number (whatsapp_inbound.outcome). */
+export const WHATSAPP_INBOUND_COLORS: Record<string, string> = { replied: 'green', linked: 'green', started: 'green', unverified: 'amber', chat_off: 'amber', stopped: 'amber', audience: 'amber', cap: 'amber', throttled: 'slate', feature_off: 'slate', unsupported: 'slate', inactive: 'slate', ignored: 'gray', failed: 'red' };
+
 /** Hex equivalents for charts (bars/dots), matching the badge tints. */
 export const COLOR_HEX: Record<string, string> = {
   red: '#dc2626', orange: '#ea580c', amber: '#d97706', yellow: '#ca8a04', green: '#16a34a', emerald: '#16a34a', teal: '#0d9488', cyan: '#0891b2', sky: '#0284c7',

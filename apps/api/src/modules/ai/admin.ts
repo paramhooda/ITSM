@@ -78,6 +78,8 @@ export interface UsageDay {
   up: number;
   down: number;
   avgDurationMs: number;
+  /** Replies answered on WhatsApp (conversations whose context.channel is whatsapp). */
+  whatsappTurns: number;
 }
 
 const n = (v: unknown) => Number(v ?? 0) || 0;
@@ -97,8 +99,9 @@ export async function usage(ctx: Ctx, q: { days: number }) {
         coalesce(sum(jsonb_array_length(m.tool_calls)), 0)::int AS tool_calls,
         count(*) FILTER (WHERE m.feedback = 'up')::int AS up,
         count(*) FILTER (WHERE m.feedback = 'down')::int AS down,
-        coalesce(avg(m.duration_ms) FILTER (WHERE m.role = 'assistant'), 0)::int AS avg_duration_ms
-      FROM ai_messages m WHERE m.created_at >= ${from}
+        coalesce(avg(m.duration_ms) FILTER (WHERE m.role = 'assistant'), 0)::int AS avg_duration_ms,
+        count(*) FILTER (WHERE m.role = 'assistant' AND c.context->>'channel' = 'whatsapp')::int AS whatsapp_turns
+      FROM ai_messages m JOIN ai_conversations c ON c.id = m.conversation_id WHERE m.created_at >= ${from}
       GROUP BY 1 ORDER BY 1`),
     ctx.tx.execute(sql`
       SELECT count(*) FILTER (WHERE m.role = 'assistant')::int AS turns,
@@ -110,7 +113,8 @@ export async function usage(ctx: Ctx, q: { days: number }) {
         coalesce(sum(jsonb_array_length(m.tool_calls)), 0)::int AS tool_calls,
         count(*) FILTER (WHERE m.feedback = 'up')::int AS up,
         count(*) FILTER (WHERE m.feedback = 'down')::int AS down,
-        coalesce(avg(m.duration_ms) FILTER (WHERE m.role = 'assistant'), 0)::int AS avg_duration_ms
+        coalesce(avg(m.duration_ms) FILTER (WHERE m.role = 'assistant'), 0)::int AS avg_duration_ms,
+        count(*) FILTER (WHERE m.role = 'assistant' AND c.context->>'channel' = 'whatsapp')::int AS whatsapp_turns
       FROM ai_messages m JOIN ai_conversations c ON c.id = m.conversation_id WHERE m.created_at >= ${from}`),
     ctx.tx.execute(sql`
       SELECT t->>'name' AS tool, count(*)::int AS calls,
@@ -135,8 +139,8 @@ export async function usage(ctx: Ctx, q: { days: number }) {
   const cache = n(t.cache_read_tokens);
   return {
     days,
-    totals: { turns: n(t.turns), users: n(t.users), conversations: n(t.conversations), inputTokens: input, outputTokens: n(t.output_tokens), cacheReadTokens: cache, cacheHitPct: input > 0 ? Math.round((cache / input) * 100) : 0, toolCalls: n(t.tool_calls), up: n(t.up), down: n(t.down), avgDurationMs: n(t.avg_duration_ms) },
-    series: (series.rows as Record<string, unknown>[]).map((r): UsageDay => ({ day: String(r.day), turns: n(r.turns), inputTokens: n(r.input_tokens), outputTokens: n(r.output_tokens), cacheReadTokens: n(r.cache_read_tokens), toolCalls: n(r.tool_calls), up: n(r.up), down: n(r.down), avgDurationMs: n(r.avg_duration_ms) })),
+    totals: { turns: n(t.turns), users: n(t.users), conversations: n(t.conversations), inputTokens: input, outputTokens: n(t.output_tokens), cacheReadTokens: cache, cacheHitPct: input > 0 ? Math.round((cache / input) * 100) : 0, toolCalls: n(t.tool_calls), up: n(t.up), down: n(t.down), avgDurationMs: n(t.avg_duration_ms), whatsappTurns: n(t.whatsapp_turns) },
+    series: (series.rows as Record<string, unknown>[]).map((r): UsageDay => ({ day: String(r.day), turns: n(r.turns), inputTokens: n(r.input_tokens), outputTokens: n(r.output_tokens), cacheReadTokens: n(r.cache_read_tokens), toolCalls: n(r.tool_calls), up: n(r.up), down: n(r.down), avgDurationMs: n(r.avg_duration_ms), whatsappTurns: n(r.whatsapp_turns) })),
     byTool: (byTool.rows as Record<string, unknown>[]).map((r) => ({ tool: String(r.tool ?? ''), calls: n(r.calls), ok: n(r.ok), proposed: n(r.proposed), failed: n(r.failed), action: r.action === true })),
     guardrails: {
       tenantFence: sumWhere((r) => r.action === 'ai.tenant_fence'),

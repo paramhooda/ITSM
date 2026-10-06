@@ -95,4 +95,5 @@ export default async function routes(app: FastifyInstance) {
   }));
   r.patch('/portal/users/:id', { preHandler: act, schema: { tags, params: idParam, body: S.updateUserBody } }, h((ctx, req) => svc.updatePortalUser(ctx, (req.params as { id: string }).id, req.body as S.UpdateUserBody)));
   r.post('/portal/users/:id/reset-password', { preHandler: act, schema: { tags, params: idParam } }, h((ctx, req) => svc.resetPortalUserPassword(ctx, (req.params as { id: string }).id)));
+  r.post('/portal/users/:id/whatsapp/unlink', { preHandler: act, schema: { tags, params: idParam } }, h((ctx, req) => svc.unlinkPortalUserWhatsApp(ctx, (req.params as { id: string }).id)));
 }

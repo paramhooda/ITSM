@@ -13,6 +13,7 @@ import { encryptSecret } from '../src/lib/crypto';
 import { queueNotification } from '../src/modules/notifications/dispatch';
 import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings, whatsappStatus, resolveWebhookUrl, sendWhatsAppTest, explainWhatsAppError, expectedParamCount, whatsappMessageStatus, whatsappDiagnostics, rulesWithoutWhatsApp, enableWhatsAppOnRules } from '../src/modules/notifications/channels';
 import { PermanentChannelError } from '../src/lib/channels';
+import { handleWhatsAppWebhook } from '../src/modules/whatsapp/inbound';
 import { deliverOutbox } from '../src/jobs/processors/notifications';
 import { listSettings, updateSettings } from '../src/modules/config/service';
 import { config } from '../src/config';
@@ -242,28 +243,38 @@ describe('fan-out and delivery', () => {
   /** The outbox job takes the oldest pending rows first; dating this test's rows back keeps them ahead of whatever other suites queued in parallel. */
   const deliverFirst = () => withSystem((tx) => tx.update(schema.notificationOutbox).set({ scheduledAt: new Date(Date.now() - 3_600_000) }).where(and(eq(schema.notificationOutbox.recipient, '+919876543210'), eq(schema.notificationOutbox.status, 'pending'))));
 
+  /** The provider id the stub answered for this test's own send; other suites' pending WhatsApp rows (verification codes) may be delivered in the same batch and get their own ids. */
+  let sentId = '';
+
   it('delivers through the Cloud API and records the provider message id', async () => {
     await deliverFirst();
-    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const calls: { url: string; body: Record<string, unknown>; id: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { body?: string }) => {
-      calls.push({ url: String(url), body: JSON.parse(init?.body ?? '{}') });
-      return new Response(JSON.stringify({ messages: [{ id: `wamid.${S}` }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      const id = `wamid.${S}.${calls.length + 1}`;
+      calls.push({ url: String(url), body: JSON.parse(init?.body ?? '{}'), id });
+      return new Response(JSON.stringify({ messages: [{ id }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }));
     await deliverOutbox(200);
-    const [row] = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(eq(schema.notificationOutbox.providerMessageId, `wamid.${S}`)));
-    expect(row).toBeTruthy();
-    expect(row!.status).toBe('sent');
-    expect(row!.deliveryStatus).toBe('accepted');
-    const call = calls.find((c) => c.url.includes('/100200300/messages'));
+    const call = calls.find((c) => c.url.includes('/100200300/messages') && c.body.to === '919876543210');
     expect(call).toBeTruthy();
     expect(call!.body).toMatchObject({ messaging_product: 'whatsapp', to: '919876543210', type: 'template' });
     expect((call!.body.template as { name: string }).name).toBe('progression_update');
+    sentId = call!.id;
+    const [row] = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(eq(schema.notificationOutbox.providerMessageId, sentId)));
+    expect(row).toBeTruthy();
+    expect(row!.recipient).toBe('+919876543210');
+    expect(row!.status).toBe('sent');
+    expect(row!.deliveryStatus).toBe('accepted');
   });
 
   it('applies delivery callbacks and verifies the signature', async () => {
-    const payload = { object: 'whatsapp_business_account', entry: [{ changes: [{ value: { statuses: [{ id: `wamid.${S}`, status: 'delivered' }] } }] }] };
+    expect(sentId).toBeTruthy();
+    const payload = { object: 'whatsapp_business_account', entry: [{ changes: [{ value: { statuses: [{ id: sentId, status: 'delivered' }] } }] }] };
+    // the webhook handler applies the statuses and queues nothing (no inbound message in the payload)
+    const settings = await withSystem((tx) => loadWhatsAppSettings(tx));
+    expect(await handleWhatsAppWebhook(payload, settings)).toEqual({ ok: true, updated: 1, queued: 0 });
     expect(await applyWhatsAppStatuses(payload)).toBe(1);
-    const [row] = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(eq(schema.notificationOutbox.providerMessageId, `wamid.${S}`)));
+    const [row] = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(eq(schema.notificationOutbox.providerMessageId, sentId)));
     expect(row!.deliveryStatus).toBe('delivered');
     const raw = JSON.stringify(payload);
     const good = `sha256=${createHmac('sha256', 'app-secret').update(raw).digest('hex')}`;

@@ -70,6 +70,18 @@ describe('navigation areas', () => {
   });
 });
 
+describe('users list', () => {
+  it('carries the WhatsApp chat flag as a boolean on every row and never returns anybody\'s preferences', async () => {
+    const listed = await asAdmin((ctx) => iam.listUsers(ctx, { page: 1, pageSize: 5, q: `iam-${S}@msp.local` }));
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0]).toMatchObject({ id: ids.user, assistantOn: false, whatsappVerifiedAt: null });
+    expect(listed.items[0]).not.toHaveProperty('preferences');
+    const one = await asAdmin((ctx) => iam.getUser(ctx, ids.user));
+    expect(typeof one.assistantOn).toBe('boolean');
+    expect(one.whatsappVerifiedAt).toBeNull();
+  });
+});
+
 describe('team directory', () => {
   it('lists teams with members, leads, roles and cross-team membership', async () => {
     const dir = await asAdmin((ctx) => iam.teamDirectory(ctx));

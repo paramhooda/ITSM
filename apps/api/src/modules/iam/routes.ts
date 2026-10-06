@@ -4,6 +4,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { h } from '@/core/context';
 import { paginationSchema } from '@/core/pagination';
 import * as svc from './service';
+import { revokeNumber } from '@/modules/whatsapp/link';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -58,6 +59,12 @@ export default async function routes(app: FastifyInstance) {
     preHandler: app.auth('admin:users', 'portal:manage_users'),
     schema: { tags: ['iam'], params: idParam, body: z.object({ password: z.string().min(10).optional() }).optional() },
   }, h((ctx, req) => svc.adminResetPassword(ctx, (req.params as { id: string }).id, (req.body as { password?: string } | undefined)?.password)));
+
+  // Revoke a person's WhatsApp number: the chat flag goes off and the verification is cleared (customer administrators use the portal route).
+  r.post('/iam/users/:id/whatsapp/unlink', {
+    preHandler: app.auth('admin:users'),
+    schema: { tags: ['iam'], params: idParam },
+  }, h((ctx, req) => revokeNumber(ctx, (req.params as { id: string }).id, { by: 'admin' })));
 
   r.put('/iam/users/:id/roles', {
     preHandler: app.auth('admin:users', 'portal:manage_users'),
