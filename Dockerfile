@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # ---------------------------------------------------------------------------
 # Enterprise MSP Service Management Platform
 # Multi-stage build: all dependencies are downloaded and compiled inside Docker.
