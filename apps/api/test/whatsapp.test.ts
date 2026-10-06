@@ -11,7 +11,7 @@ import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { encryptSecret } from '../src/lib/crypto';
 import { queueNotification } from '../src/modules/notifications/dispatch';
-import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings, whatsappStatus, resolveWebhookUrl, sendWhatsAppTest, explainWhatsAppError, expectedParamCount, whatsappMessageStatus, whatsappDiagnostics } from '../src/modules/notifications/channels';
+import { resetWhatsAppSettingsCache, applyWhatsAppStatuses, verifyWebhookSignature, templateForEvent, loadWhatsAppSettings, whatsappStatus, resolveWebhookUrl, sendWhatsAppTest, explainWhatsAppError, expectedParamCount, whatsappMessageStatus, whatsappDiagnostics, rulesWithoutWhatsApp, enableWhatsAppOnRules } from '../src/modules/notifications/channels';
 import { PermanentChannelError } from '../src/lib/channels';
 import { deliverOutbox } from '../src/jobs/processors/notifications';
 import { listSettings, updateSettings } from '../src/modules/config/service';
@@ -162,6 +162,29 @@ describe('connection check', () => {
     } finally {
       vi.unstubAllGlobals();
       await setSettings({ 'whatsapp.business_account_id': '', 'whatsapp.templates': { default: { name: 'progression_update', language: 'en', params: ['subject', 'text', 'link'] } } });
+    }
+  });
+});
+
+describe('rules', () => {
+  it('lists active rules whose event has a WhatsApp text but no WhatsApp channel, and adds the channel on request', async () => {
+    const name = `Resolved without WhatsApp ${S}`;
+    const [rule] = await withSystem((tx) => tx.insert(schema.notificationRules).values({ event: 'ticket.resolved', name, recipients: { requester: true }, channels: ['email', 'in_app'], isActive: true }).returning({ id: schema.notificationRules.id }));
+    try {
+      const before = await asAdmin((ctx) => whatsappStatus(ctx));
+      expect(before.rulesWithoutWhatsApp.some((r) => r.id === rule!.id && r.event === 'ticket.resolved')).toBe(true);
+      const res = await asAdmin((ctx) => enableWhatsAppOnRules(ctx));
+      expect(res.updated).toBeGreaterThanOrEqual(1);
+      expect(res.rules.some((r) => r.id === rule!.id)).toBe(true);
+      const [after] = await withSystem((tx) => tx.select({ channels: schema.notificationRules.channels }).from(schema.notificationRules).where(eq(schema.notificationRules.id, rule!.id)));
+      expect(after!.channels).toEqual(['email', 'in_app', 'whatsapp']);
+      const again = await withSystem((tx) => rulesWithoutWhatsApp(tx));
+      expect(again.some((r) => r.id === rule!.id)).toBe(false);
+      // an inactive rule is never reported
+      await withSystem((tx) => tx.update(schema.notificationRules).set({ channels: ['email'], isActive: false }).where(eq(schema.notificationRules.id, rule!.id)));
+      expect((await withSystem((tx) => rulesWithoutWhatsApp(tx))).some((r) => r.id === rule!.id)).toBe(false);
+    } finally {
+      await withSystem((tx) => tx.delete(schema.notificationRules).where(eq(schema.notificationRules.id, rule!.id)));
     }
   });
 });

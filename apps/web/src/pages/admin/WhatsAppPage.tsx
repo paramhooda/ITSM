@@ -27,6 +27,8 @@ interface Status {
   webhookUrlDefault: string;
   webhookUrlIsCustom: boolean;
   hasOptIns: boolean;
+  /** Active rules whose event has a WhatsApp text but whose channels leave WhatsApp out. */
+  rulesWithoutWhatsApp: { id: string; event: string; name: string }[];
 }
 interface OutboxRow {
   id: string;
@@ -187,6 +189,15 @@ export default function WhatsAppPage() {
     },
   });
   const trackTimedOut = !!tracking && Date.now() - tracking.startedAt > TRACK_MS && !['delivered', 'read', 'failed'].includes(track.data?.deliveryStatus ?? '');
+  const enableRules = useMutation({
+    mutationFn: () => post<{ updated: number; rules: { event: string }[] }>('/notifications/whatsapp/enable-rules', {}),
+    onSuccess: (r) => {
+      toast.success(r.updated ? `WhatsApp added to ${r.updated} rule${r.updated === 1 ? '' : 's'}` : 'Every rule already lists WhatsApp');
+      qc.invalidateQueries({ queryKey: ['notifications', 'whatsapp'] });
+      qc.invalidateQueries({ queryKey: ['config', 'notification-rules'] });
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Could not update the rules'),
+  });
   const check = useMutation({
     mutationFn: () => post<{ checkedAt: string; findings: Finding[]; phone: Record<string, unknown> | null }>('/notifications/whatsapp/check', {}),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Check failed'),
@@ -229,6 +240,16 @@ export default function WhatsAppPage() {
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 flex items-start gap-2">
           <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
           <div>Still needed: {status.missing.join(', ')}.</div>
+        </div>
+      )}
+      {status && status.rulesWithoutWhatsApp.length > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 flex flex-wrap items-start gap-2" data-testid="whatsapp-rules-warning">
+          <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">{status.rulesWithoutWhatsApp.length} notification rule{status.rulesWithoutWhatsApp.length === 1 ? '' : 's'} never send WhatsApp.</div>
+            <div className="mt-0.5">A rule decides the channels of an event; the opt-in only decides who. These rules deliver by email and in-app only: {[...new Set(status.rulesWithoutWhatsApp.map((r) => r.event))].join(', ')}. Add the channel here, or tick WhatsApp per rule under Notification rules.</div>
+          </div>
+          <Button size="sm" onClick={() => enableRules.mutate()} loading={enableRules.isPending} disabled={!can('admin:config')}>Add WhatsApp to these rules</Button>
         </div>
       )}
 

@@ -111,23 +111,28 @@ const WHATSAPP_SEEDS = [
 
 export const NOTIFICATION_TEMPLATE_SEEDS_ALL = [...NOTIFICATION_TEMPLATE_SEEDS, ...WHATSAPP_SEEDS];
 
+/**
+ * Default rules. WhatsApp is listed wherever a WhatsApp template exists for the
+ * event: the channel only reaches people who opted in with a mobile number, so the
+ * opt-in is the consent and the rule is what makes it possible.
+ */
 export const NOTIFICATION_RULE_SEEDS = [
-  { event: 'ticket.created', name: 'Notify requester, team and watchers on creation', recipients: { requester: true, team: true, watchers: true }, channels: ['email', 'in_app'] },
-  { event: 'ticket.assigned', name: 'Notify assignee', recipients: { assignee: true }, channels: ['email', 'in_app'] },
-  { event: 'ticket.status_changed', name: 'Notify requester and assignee', recipients: { requester: true, assignee: true, watchers: true }, channels: ['email', 'in_app'] },
-  { event: 'ticket.customer_comment', name: 'Notify assignee and team', recipients: { assignee: true, team: true, watchers: true }, channels: ['email', 'in_app'] },
-  { event: 'ticket.engineer_comment', name: 'Notify requester', recipients: { requester: true, watchers: true }, channels: ['email', 'in_app'] },
-  { event: 'ticket.resolved', name: 'Notify requester', recipients: { requester: true, watchers: true }, channels: ['email', 'in_app'] },
-  { event: 'ticket.closed', name: 'Notify requester', recipients: { requester: true }, channels: ['email'] },
-  { event: 'ticket.escalated', name: 'Notify assignee, team and manager', recipients: { assignee: true, team: true, manager: true }, channels: ['email', 'in_app'] },
-  { event: 'sla.warning', name: 'Notify assignee and team', recipients: { assignee: true, team: true }, channels: ['email', 'in_app'] },
-  { event: 'sla.breached', name: 'Notify assignee, team and manager', recipients: { assignee: true, team: true, manager: true }, channels: ['email', 'in_app'] },
-  { event: 'change.approval_requested', name: 'Notify approvers', recipients: { approvers: true }, channels: ['email', 'in_app'] },
+  { event: 'ticket.created', name: 'Notify requester, team and watchers on creation', recipients: { requester: true, team: true, watchers: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'ticket.assigned', name: 'Notify assignee', recipients: { assignee: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'ticket.status_changed', name: 'Notify requester and assignee', recipients: { requester: true, assignee: true, watchers: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'ticket.customer_comment', name: 'Notify assignee and team', recipients: { assignee: true, team: true, watchers: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'ticket.engineer_comment', name: 'Notify requester', recipients: { requester: true, watchers: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'ticket.resolved', name: 'Notify requester', recipients: { requester: true, watchers: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'ticket.closed', name: 'Notify requester', recipients: { requester: true }, channels: ['email', 'whatsapp'] },
+  { event: 'ticket.escalated', name: 'Notify assignee, team and manager', recipients: { assignee: true, team: true, manager: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'sla.warning', name: 'Notify assignee and team', recipients: { assignee: true, team: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'sla.breached', name: 'Notify assignee, team and manager', recipients: { assignee: true, team: true, manager: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'change.approval_requested', name: 'Notify approvers', recipients: { approvers: true }, channels: ['email', 'in_app', 'whatsapp'] },
   { event: 'change.approved', name: 'Notify requester and assignee', recipients: { requester: true, assignee: true }, channels: ['email', 'in_app'] },
   { event: 'change.rejected', name: 'Notify requester and assignee', recipients: { requester: true, assignee: true }, channels: ['email', 'in_app'] },
-  { event: 'request.approval_requested', name: 'Notify approvers', recipients: { approvers: true }, channels: ['email', 'in_app'] },
-  { event: 'request.approved', name: 'Notify requester and assignee', recipients: { requester: true, assignee: true }, channels: ['email', 'in_app'] },
-  { event: 'request.rejected', name: 'Notify requester', recipients: { requester: true }, channels: ['email', 'in_app'] },
+  { event: 'request.approval_requested', name: 'Notify approvers', recipients: { approvers: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'request.approved', name: 'Notify requester and assignee', recipients: { requester: true, assignee: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'request.rejected', name: 'Notify requester', recipients: { requester: true }, channels: ['email', 'in_app', 'whatsapp'] },
   { event: 'contract.expiring', name: 'Notify account manager and contract admins', recipients: { accountManager: true, roles: ['contract_admin', 'service_manager'] }, channels: ['email', 'in_app'] },
   { event: 'contract.expired', name: 'Notify account manager and contract admins', recipients: { accountManager: true, roles: ['contract_admin', 'service_manager'] }, channels: ['email', 'in_app'] },
   { event: 'contract.renewal_due', name: 'Notify account manager', recipients: { accountManager: true, roles: ['contract_admin'] }, channels: ['email', 'in_app'] },
@@ -136,11 +141,11 @@ export const NOTIFICATION_RULE_SEEDS = [
   { event: 'incident.major_declared', name: 'Notify the team, its manager, the account manager and operations managers', recipients: { assignee: true, team: true, manager: true, accountManager: true, roles: ['noc_manager', 'soc_manager', 'service_manager'] }, channels: ['email', 'in_app', 'whatsapp'] },
   { event: 'incident.major_resolved', name: 'Notify the requester, watchers, customer contacts and the account manager', recipients: { requester: true, watchers: true, customerContacts: true, accountManager: true }, channels: ['email', 'in_app', 'whatsapp'] },
   { event: 'entitlement.exhausted', name: 'Notify account manager and service manager', recipients: { accountManager: true, roles: ['service_manager', 'contract_admin'] }, channels: ['email', 'in_app'] },
-  { event: 'pm.scheduled', name: 'Notify customer contacts and engineer', recipients: { customerContacts: true, assignee: true }, channels: ['email', 'in_app'] },
+  { event: 'pm.scheduled', name: 'Notify customer contacts and engineer', recipients: { customerContacts: true, assignee: true }, channels: ['email', 'in_app', 'whatsapp'] },
   { event: 'pm.due', name: 'Notify field team', recipients: { team: true, roles: ['service_manager'] }, channels: ['email', 'in_app'] },
   { event: 'pm.missed', name: 'Notify service manager', recipients: { team: true, roles: ['service_manager'] }, channels: ['email', 'in_app'] },
-  { event: 'field_visit.scheduled', name: 'Notify engineer and customer contacts', recipients: { assignee: true, customerContacts: true }, channels: ['email', 'in_app'] },
-  { event: 'field_visit.completed', name: 'Notify customer contacts', recipients: { customerContacts: true, requester: true }, channels: ['email', 'in_app'] },
+  { event: 'field_visit.scheduled', name: 'Notify engineer and customer contacts', recipients: { assignee: true, customerContacts: true }, channels: ['email', 'in_app', 'whatsapp'] },
+  { event: 'field_visit.completed', name: 'Notify customer contacts', recipients: { customerContacts: true, requester: true }, channels: ['email', 'in_app', 'whatsapp'] },
   { event: 'report.delivered', name: 'Deliver to configured recipients', recipients: { scheduleRecipients: true }, channels: ['email'] },
   { event: 'ticket.survey_low_rating', name: 'Notify assignee, team manager and account manager', recipients: { assignee: true, manager: true, accountManager: true }, channels: ['email', 'in_app'] },
   { event: 'licence.expiring', name: 'Notify account manager and contract admins', recipients: { accountManager: true, roles: ['contract_admin', 'service_manager'] }, channels: ['email', 'in_app'] },

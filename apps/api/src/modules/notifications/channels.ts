@@ -124,6 +124,39 @@ export function templateForEvent(settings: WhatsAppSettings, event: string, fiel
 }
 
 /** What the admin page shows: configured or not, what is missing, the webhook URL to register in Meta. */
+/**
+ * Active notification rules whose event has a WhatsApp template but whose
+ * channels leave WhatsApp out. Those rules never produce a WhatsApp message,
+ * however many people opted in: the rule decides the channels, the opt-in only
+ * decides who. Rules seeded before the channel existed look like this.
+ */
+export async function rulesWithoutWhatsApp(tx: Tx): Promise<{ id: string; event: string; name: string }[]> {
+  const templates = await tx
+    .select({ event: schema.notificationTemplates.event })
+    .from(schema.notificationTemplates)
+    .where(and(eq(schema.notificationTemplates.channel, 'whatsapp'), eq(schema.notificationTemplates.isActive, true)));
+  const events = [...new Set(templates.map((t) => t.event))];
+  if (!events.length) return [];
+  const rules = await tx
+    .select({ id: schema.notificationRules.id, event: schema.notificationRules.event, name: schema.notificationRules.name, channels: schema.notificationRules.channels })
+    .from(schema.notificationRules)
+    .where(and(inArray(schema.notificationRules.event, events), eq(schema.notificationRules.isActive, true)));
+  return rules.filter((r) => !(r.channels ?? []).includes('whatsapp')).map((r) => ({ id: r.id, event: r.event, name: r.name })).sort((a, b) => a.event.localeCompare(b.event));
+}
+
+/** Adds the WhatsApp channel to every rule `rulesWithoutWhatsApp` lists; idempotent. */
+export async function enableWhatsAppOnRules(ctx: Ctx) {
+  ctx.require('admin:config');
+  const missing = await rulesWithoutWhatsApp(ctx.tx);
+  for (const rule of missing) {
+    const [row] = await ctx.tx.select({ channels: schema.notificationRules.channels }).from(schema.notificationRules).where(eq(schema.notificationRules.id, rule.id)).limit(1);
+    const channels = [...(row?.channels ?? []), 'whatsapp'];
+    await ctx.tx.update(schema.notificationRules).set({ channels }).where(eq(schema.notificationRules.id, rule.id));
+    await ctx.audit({ entityType: 'notification_rule', entityId: rule.id, entityLabel: rule.name, action: 'update', changes: { channels: { old: row?.channels ?? [], new: channels } }, metadata: { source: 'whatsapp.enable_rules' } });
+  }
+  return { updated: missing.length, rules: missing };
+}
+
 export async function whatsappStatus(ctx: Ctx) {
   resetWhatsAppSettingsCache(); // the admin page must see what was just saved
   const s = await loadWhatsAppSettings(ctx.tx);
@@ -136,6 +169,7 @@ export async function whatsappStatus(ctx: Ctx) {
   const webhookUrl = resolveWebhookUrl(s.webhookUrl);
   if (isLocalUrl(webhookUrl)) missing.push('a public webhook URL (the platform URL is local; enter a tunnel URL such as ngrok so Meta can reach the webhook)');
   const [optedIn] = await ctx.tx.select({ n: schema.users.id }).from(schema.users).where(eq(schema.users.whatsappOptIn, true));
+  const rulesMissingWhatsApp = await rulesWithoutWhatsApp(ctx.tx);
   return {
     enabled: s.enabled,
     configured: s.configured,
@@ -149,6 +183,8 @@ export async function whatsappStatus(ctx: Ctx) {
     webhookUrlDefault: defaultWebhookUrl(),
     webhookUrlIsCustom: !!s.webhookUrl.trim(),
     hasOptIns: !!optedIn,
+    /** Rules that would carry a WhatsApp text but do not list the channel. */
+    rulesWithoutWhatsApp: rulesMissingWhatsApp,
   };
 }
 
@@ -308,6 +344,9 @@ export async function whatsappDiagnostics(ctx: Ctx): Promise<{ checkedAt: string
     findings.push({ level: 'warn', text: `Could not read the webhook subscription: ${(err as Error).message}.` });
   }
   if (isLocalUrl(resolveWebhookUrl(s.webhookUrl))) findings.push({ level: 'warn', text: 'The webhook URL is local; Meta cannot reach it, so delivery states will not arrive. Use a tunnel URL on a laptop.' });
+  const missingRules = await rulesWithoutWhatsApp(ctx.tx);
+  if (missingRules.length) findings.push({ level: 'error', text: `${missingRules.length} notification rule${missingRules.length === 1 ? '' : 's'} (${[...new Set(missingRules.map((r) => r.event))].slice(0, 6).join(', ')}${missingRules.length > 6 ? ', …' : ''}) deliver by email and in-app only, so nobody receives WhatsApp for those events however many people opted in. Use "Add WhatsApp to these rules" above, or tick WhatsApp on each rule under Administration → Notification rules.` });
+  else findings.push({ level: 'ok', text: 'Every rule for an event with a WhatsApp text lists the WhatsApp channel; opted-in people with a mobile number receive those events.' });
   await ctx.audit({ entityType: 'system_settings', action: 'whatsapp.check', metadata: { findings: findings.map((f) => f.level) } });
   return { checkedAt: new Date().toISOString(), findings, phone };
 }
