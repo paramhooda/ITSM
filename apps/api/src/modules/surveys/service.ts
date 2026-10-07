@@ -518,6 +518,14 @@ export interface CsatSummary {
   lowest: { id: string; ticketId: string; number: string; title: string; customerId: string; customerName: string | null; rating: number; comment: string | null; channel: string | null; answeredAt: Date; assigneeName?: string | null }[];
 }
 
+/**
+ * The CSAT page's figures, trend, breakdown and lowest-rated tickets over a
+ * scope (customer, engineer, team, service, period). The response-list
+ * filters (`rating`, `low`, `channel`, `q`) are deliberately not part of this
+ * query: the tiles are fixed counts over the scope, so toggling "Low ratings"
+ * or a rating bar narrows the list below without moving the tiles above it
+ * (the same rule as the ticket list's quick filters).
+ */
 export async function csatSummary(ctx: Ctx, q: SummaryQuery): Promise<CsatSummary> {
   const { customerId, customer, excludeSoc } = visibility(ctx, q.customerId);
   let groupBy: GroupBy = q.groupBy ?? 'customer';

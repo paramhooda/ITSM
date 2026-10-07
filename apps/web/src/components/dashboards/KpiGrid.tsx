@@ -2,7 +2,6 @@ import { useId, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowDownRight, ArrowUpRight, ArrowUpRight as ArrowOut, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { scrollToResults } from '@/components/ui/ListShell';
 import type { Delta } from './types';
 
 export type Tone = 'default' | 'good' | 'warn' | 'bad' | 'accent';
@@ -19,14 +18,12 @@ export interface KpiItem {
   spark?: (number | null)[];
   sparkLabel?: string;
   icon?: ReactNode;
-  /** Quick filter on the page's own list: toggles a filter in place (pair with `active` and `scrollTo`). */
+  /** Quick filter on the page's own list: toggles a condition in place (pair with `active`); the page never scrolls. */
   onClick?: () => void;
   /** Link tile: opens the list that holds the matching records (overview pages and dashboards). */
   to?: string;
-  /** The tile's filter is in effect: ring and brand border, so the band and the bar agree. */
+  /** The tile's condition is in effect: ring and brand border, so the band and the breadcrumb agree. */
   active?: boolean;
-  /** After `onClick`, scroll the page's results into view so the effect of the click is visible. */
-  scrollTo?: boolean;
 }
 
 const TONE_TEXT: Record<Tone, string> = { default: 'text-default', good: 'text-emerald-600', warn: 'text-amber-600', bad: 'text-red-600', accent: 'text-brand-600' };
@@ -86,13 +83,9 @@ export function Sparkline({ data, color = '#2563eb', width = 96, height = 36, cl
   );
 }
 
-export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBetter, spark, sparkLabel, icon, onClick, to, active, scrollTo, className }: KpiItem & { className?: string }) {
+export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBetter, spark, sparkLabel, icon, onClick, to, active, className }: KpiItem & { className?: string }) {
   const isLink = !!to;
   const clickable = isLink || !!onClick;
-  const handle = () => {
-    onClick?.();
-    if (scrollTo) scrollToResults();
-  };
   const body = (
     <>
       <div className="flex items-center justify-between gap-2">
@@ -119,7 +112,7 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
     className,
   );
   if (isLink) return <Link to={to!} className={cls} title={typeof hint === 'string' ? hint : undefined}>{body}</Link>;
-  if (clickable) return <button type="button" className={cls} onClick={handle} aria-pressed={active} data-active={active || undefined}>{body}</button>;
+  if (clickable) return <button type="button" className={cls} onClick={onClick} aria-pressed={active} data-active={active || undefined}>{body}</button>;
   return <div className={cls}>{body}</div>;
 }
 

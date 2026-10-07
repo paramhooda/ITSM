@@ -9,6 +9,7 @@ import { expiringContracts } from '@/modules/contracts/service';
 import { entitlementSummary } from '@/modules/contracts/entitlements';
 import { buildDigest } from '@/modules/ai/digest';
 import { listQuery } from '@/modules/ai/helpers';
+import { BREACHED } from '@/modules/dashboards/common';
 
 /**
  * What each role's morning briefing is made of. Every definition reads
@@ -192,7 +193,7 @@ const accountManager: BriefingDefinition = {
     const perCustomer = (await ctx.tx.execute(sql`
       SELECT t.customer_id,
         count(*) FILTER (WHERE t.status_id IN ${openStatus})::int AS open,
-        count(*) FILTER (WHERE t.status_id IN ${openStatus} AND EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = t.id AND s.state = 'breached'))::int AS breached,
+        count(*) FILTER (WHERE t.status_id IN ${openStatus} AND ${BREACHED})::int AS breached,
         count(*) FILTER (WHERE t.scope_status = 'out_of_scope' AND t.created_at >= ${weekAgo})::int AS out_of_scope,
         count(*) FILTER (WHERE t.last_sentiment IN ('negative', 'angry') AND t.status_id IN ${openStatus})::int AS unhappy
       FROM tickets t WHERE t.customer_id IN (${idList}) ${ctx.can('soc:read') ? sql`` : sql`AND t.domain <> 'soc'`} GROUP BY t.customer_id`)).rows as { customer_id: string; open: number; breached: number; out_of_scope: number; unhappy: number }[];

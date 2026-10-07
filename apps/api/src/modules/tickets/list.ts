@@ -1,4 +1,4 @@
-import { eq, and, or, inArray, isNull, isNotNull, gte, lte, ne, sql, desc, type SQL } from 'drizzle-orm';
+import { eq, and, or, inArray, isNull, isNotNull, gte, lte, lt, ne, sql, desc, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { TicketType } from '@itsm/shared';
 import { schema } from '@/db/client';
@@ -6,6 +6,7 @@ import type { Ctx } from '@/core/context';
 import { ForbiddenError } from '@/core/errors';
 import { countRows, searchFts } from '@/core/query';
 import { slaSummariesFor, worstSla, slaStateFilterSql } from '@/modules/sla/engine';
+import { slaStateCond } from '@/modules/sla/predicates';
 import type { RiskLevel } from '@/modules/sla/risk';
 import type { Sentiment } from '@/modules/ai/sentiment';
 import { TYPE_LABEL, csv, isCustomerUser, loadTicket, optionMap, toLabel } from './common';
@@ -43,6 +44,25 @@ interface WhereOpts {
 }
 const whereOpts = async (ctx: Ctx, q: StatsQuery): Promise<WhereOpts> => (q.csat === 'low' ? { lowThreshold: (await loadSurveyDefaults(ctx.tx)).lowRatingThreshold } : {});
 
+/**
+ * Inclusive range on a timestamp column. A date-only bound (`2026-10-06`) covers
+ * the whole day in UTC (`to` becomes `< next day`), the same window the
+ * dashboards' daily series use, so a period tile reproduces its number on the
+ * list; a full timestamp is taken as given.
+ */
+function dateRange(col: typeof T.createdAt | typeof T.resolvedAt, from?: string, to?: string): SQL[] {
+  const conds: SQL[] = [];
+  if (from && !Number.isNaN(Date.parse(from))) conds.push(gte(col, new Date(from)));
+  if (to && !Number.isNaN(Date.parse(to))) {
+    const end = new Date(to);
+    if (to.length <= 10) {
+      end.setUTCDate(end.getUTCDate() + 1);
+      conds.push(lt(col, end));
+    } else conds.push(lte(col, end));
+  }
+  return conds;
+}
+
 /** The list predicates for one filter set; exported so the task boards count lanes over exactly what the list shows. */
 export function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL | undefined {
   const conds: SQL[] = visibilityConds(ctx);
@@ -61,22 +81,19 @@ export function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL |
   const prios = csv(q.priorityId);
   if (prios.length) conds.push(inArray(T.priorityId, prios));
   if (q.assigneeId) conds.push(eq(T.assigneeId, q.assigneeId));
-  if (q.teamId) conds.push(eq(T.assignedTeamId, q.teamId));
+  const teams = csv(q.teamId);
+  if (teams.length) conds.push(inArray(T.assignedTeamId, teams));
   if (q.categoryId) conds.push(or(eq(T.categoryId, q.categoryId), eq(T.subcategoryId, q.categoryId))!);
-  if (q.domain) conds.push(eq(T.domain, q.domain));
+  const domains = csv(q.domain);
+  if (domains.length) conds.push(inArray(T.domain, domains));
   if (q.scopeStatus) conds.push(eq(T.scopeStatus, q.scopeStatus));
-  if (q.slaState === 'breached') conds.push(slaStateFilterSql.breached);
-  else if (q.slaState === 'at_risk') conds.push(slaStateFilterSql.atRisk);
-  else if (q.slaState === 'ok') conds.push(slaStateFilterSql.ok);
+  const slaCond = slaStateCond(slaStateFilterSql, csv(q.slaState));
+  if (slaCond) conds.push(slaCond);
   if (q.breachRisk) conds.push(eq(T.breachRisk, q.breachRisk));
   if (q.sentiment === 'unhappy') conds.push(inArray(T.lastSentiment, ['negative', 'angry']));
   else if (q.sentiment) conds.push(eq(T.lastSentiment, q.sentiment));
-  if (q.createdFrom) conds.push(gte(T.createdAt, new Date(q.createdFrom)));
-  if (q.createdTo) {
-    const to = new Date(q.createdTo);
-    if (q.createdTo.length <= 10) to.setUTCDate(to.getUTCDate() + 1);
-    conds.push(lte(T.createdAt, to));
-  }
+  conds.push(...dateRange(T.createdAt, q.createdFrom, q.createdTo));
+  conds.push(...dateRange(T.resolvedAt, q.resolvedFrom, q.resolvedTo));
   if (q.unassigned) conds.push(isNull(T.assigneeId));
   if (q.mine) conds.push(eq(T.assigneeId, ctx.user.id));
   if (q.watching) conds.push(sql`EXISTS (SELECT 1 FROM ticket_watchers w WHERE w.ticket_id = ${T.id} AND w.user_id = ${ctx.user.id}::uuid)`);
@@ -86,7 +103,8 @@ export function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL |
   if (q.primaryCiId) conds.push(or(eq(T.primaryCiId, q.primaryCiId), sql`EXISTS (SELECT 1 FROM ticket_cis tc WHERE tc.ticket_id = ${T.id} AND tc.ci_id = ${q.primaryCiId}::uuid)`)!);
   if (q.assetId) conds.push(or(eq(T.primaryAssetId, q.assetId), sql`EXISTS (SELECT 1 FROM ticket_assets ta WHERE ta.ticket_id = ${T.id} AND ta.asset_id = ${q.assetId}::uuid)`)!);
   if (q.catalogItemId) conds.push(eq(T.catalogItemId, q.catalogItemId));
-  if (q.securitySeverityId) conds.push(eq(T.securitySeverityId, q.securitySeverityId));
+  const severities = csv(q.securitySeverityId);
+  if (severities.length) conds.push(inArray(T.securitySeverityId, severities));
   if (q.requesterUserId) conds.push(eq(T.requesterUserId, q.requesterUserId));
   if (q.parentTicketId) conds.push(eq(T.parentTicketId, q.parentTicketId));
   // Change filters read the change_details row of the ticket.
@@ -266,34 +284,55 @@ function seriesWindow(q: StatsQuery): { from: string; to: string } {
   return { from: addDays(today, -(SERIES_DEFAULT_DAYS - 1)), to: today };
 }
 
+/** The status dimension of the list: the category chips, an explicit status and the open flag. */
+const STATUS_KEYS = ['statusCategory', 'statusId', 'open'] as const;
+/** The quick-filter dimensions a tile or an assignee pill toggles. */
+const TILE_KEYS = ['slaState', 'breachRisk', 'knownError', 'mine', 'unassigned', 'watching', 'assigneeId'] as const;
+const strip = (q: StatsQuery, keys: readonly (keyof StatsQuery)[]): StatsQuery => {
+  const out: StatsQuery = { ...q };
+  for (const k of keys) delete out[k];
+  return out;
+};
+
 /**
- * Aggregates for the ticket list header/dashboard under the same filters as
- * the list. `byStatusCategory` ignores the status filters (so the category
- * chips can show every bucket) and `byType` ignores the type filter; every
- * other number is computed against the full filter set.
+ * Aggregates for the ticket list header under the same visibility as the list.
+ *
+ * Quick filters never move each other: the tile numbers (`open`, `breached`,
+ * `atRisk`, `unassigned`, `dueToday`, `overdue`, `mine`, `major`, `highRisk`,
+ * `unhappy`, `knownErrors`, `createdToday`, `resolvedToday`) are computed over
+ * the base scope of the query (customer, type, priority, team, service, dates
+ * and the rest) with the status dimension (`STATUS_KEYS`) and the tile
+ * dimensions (`TILE_KEYS`) stripped, so clicking "Unassigned" or a status chip
+ * leaves every tile where it was and the Open tile stays the baseline.
+ * `total` keeps the full query (it is the list's own count). `byType` also
+ * strips the type and `allTypes` is its sum, so the "All" pill is right before
+ * any click; `byStatusCategory` strips the status and tile dimensions but keeps
+ * the type, so the chips describe the current tab. `byPriority`, `byStatus`,
+ * `byTeam` and the series describe exactly what is in the list (full query).
  */
 export async function ticketStats(ctx: Ctx, q: StatsQuery) {
   const wo = await whereOpts(ctx, q);
   const base = buildWhere(ctx, q, wo);
+  const tileScope = buildWhere(ctx, strip(q, [...STATUS_KEYS, ...TILE_KEYS]), wo);
   const openCond = statusIdsOfCategories(OPEN_CATEGORIES);
   const count = sql<number>`count(*)::int`;
+  const total = await countRows(ctx.tx, sql`tickets`, base);
   const byCategory = await ctx.tx
     .select({ category: st.statusCategory, count })
     .from(T)
     .leftJoin(st, eq(st.id, T.statusId))
-    .where(buildWhere(ctx, { ...q, statusCategory: undefined, statusId: undefined, open: undefined }, wo))
+    .where(tileScope)
     .groupBy(st.statusCategory);
   const byType = await ctx.tx
     .select({ type: T.type, count })
     .from(T)
-    .where(and(buildWhere(ctx, { ...q, type: undefined }, wo), openCond))
+    .where(and(buildWhere(ctx, strip(q, [...STATUS_KEYS, ...TILE_KEYS, 'type']), wo), openCond))
     .groupBy(T.type);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayEnd = new Date(todayStart.getTime() + 86_400_000);
   const [agg] = await ctx.tx
     .select({
-      total: count,
       open: sql<number>`count(*) FILTER (WHERE ${openCond})::int`,
       breached: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${slaStateFilterSql.breached})::int`,
       atRisk: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${slaStateFilterSql.atRisk})::int`,
@@ -309,7 +348,7 @@ export async function ticketStats(ctx: Ctx, q: StatsQuery) {
       knownErrors: sql<number>`count(*) FILTER (WHERE EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error))::int`,
     })
     .from(T)
-    .where(base);
+    .where(tileScope);
   const byPriority = await ctx.tx
     .select({ id: pr.id, label: pr.label, color: pr.color, level: pr.level, count })
     .from(T)
@@ -346,13 +385,17 @@ export async function ticketStats(ctx: Ctx, q: StatsQuery) {
   const [pending] = isCustomerUser(ctx)
     ? [{ count: 0 }]
     : await ctx.tx.select({ count: sql<number>`count(*)::int` }).from(schema.approvals).where(eq(schema.approvals.status, 'pending'));
+  const typeCounts = Object.fromEntries(byType.map((r) => [r.type, r.count]));
   return {
     byStatusCategory: Object.fromEntries(byCategory.map((r) => [r.category ?? 'unknown', r.count])),
-    byType: Object.fromEntries(byType.map((r) => [r.type, r.count])),
+    byType: typeCounts,
+    /** Open tickets across every type in the base scope: the "All" pill, right before any click. */
+    allTypes: byType.reduce((n, r) => n + r.count, 0),
     byPriority: byPriority.map((r) => ({ id: r.id, label: r.label ?? 'No priority', color: r.color, level: r.level, count: r.count })),
     byStatus: byStatus.map((r) => ({ id: r.id, label: r.label, color: r.color, category: r.category, count: r.count })),
     byTeam: byTeam.map((r) => ({ id: r.id, label: r.label ?? 'No team', count: r.count, breached: r.breached })),
     series,
+    total,
     ...agg,
     pendingApprovals: pending?.count ?? 0,
   };

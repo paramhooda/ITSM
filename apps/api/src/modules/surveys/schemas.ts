@@ -36,6 +36,7 @@ export const publicCommentBody = z.object({ comment: commentSchema.min(1) });
 export const GROUP_BY = ['customer', 'engineer', 'team', 'service', 'priority', 'channel', 'month'] as const;
 export type GroupBy = (typeof GROUP_BY)[number];
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/** The figures' scope only: `rating`, `low`, `channel` and `q` belong to the response list and never reach the tiles (see `csatSummary`). */
 export const summaryQuery = z.object({
   customerId: uuid.optional(),
   days: z.coerce.number().int().min(1).max(730).optional(),

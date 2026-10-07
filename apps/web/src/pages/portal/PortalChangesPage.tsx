@@ -91,9 +91,9 @@ export default function PortalChangesPage() {
             <KpiGrid
               columns={3}
               items={[
-                { label: 'Upcoming', value: d.counts.upcoming, icon: <CalendarClock className="h-4 w-4" />, hint: `in the next ${Math.round((new Date(d.window.to).getTime() - Date.now()) / 86_400_000)} days`, onClick: () => set({ state: 'upcoming' }), active: when === 'upcoming', scrollTo: true },
-                { label: 'In progress now', value: d.counts.inProgress, tone: d.counts.inProgress ? 'warn' : 'good', icon: <Activity className="h-4 w-4" />, hint: 'work under way on your services', onClick: () => set({ state: 'in_progress' }), active: when === 'in_progress', scrollTo: true },
-                { label: 'Completed · 30 days', value: d.counts.past, icon: <CheckCircle2 className="h-4 w-4" />, hint: 'implemented or cancelled', onClick: () => set({ state: 'past' }), active: when === 'past', scrollTo: true },
+                { label: 'Upcoming', value: d.counts.upcoming, icon: <CalendarClock className="h-4 w-4" />, hint: `in the next ${Math.round((new Date(d.window.to).getTime() - Date.now()) / 86_400_000)} days`, onClick: () => set({ state: 'upcoming' }), active: when === 'upcoming' },
+                { label: 'In progress now', value: d.counts.inProgress, tone: d.counts.inProgress ? 'warn' : 'good', icon: <Activity className="h-4 w-4" />, hint: 'work under way on your services', onClick: () => set({ state: 'in_progress' }), active: when === 'in_progress' },
+                { label: 'Completed · 30 days', value: d.counts.past, icon: <CheckCircle2 className="h-4 w-4" />, hint: 'implemented or cancelled', onClick: () => set({ state: 'past' }), active: when === 'past' },
               ]}
             />
           )

@@ -5,6 +5,7 @@ import { type Bucket, countBuckets, num, pct1, todayStr, addDays } from '@/core/
 import { optionLabels, sequential } from '@/modules/contracts/common';
 import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 import { entitlementSummary } from '@/modules/contracts/entitlements';
+import { slaPredicates } from '@/modules/sla/predicates';
 
 const cu = schema.customers;
 
@@ -31,7 +32,7 @@ export async function customersOverview(ctx: Ctx) {
   const today = todayStr();
   const count = sql<number>`count(*)::int`;
   const open = sql`EXISTS (SELECT 1 FROM config_options o WHERE o.id = t.status_id AND o.status_category IN ('new', 'open', 'pending'))`;
-  const breached = sql`EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = t.id AND (s.state = 'breached' OR (s.state = 'running' AND s.due_at < now())))`;
+  const breached = slaPredicates(sql`t.id`).breached;
 
   const [[totals], statusRows, typeRows, industryRows, customersList, ticketRows, slaRows, contractRows, ents] = await sequential([
     () => ctx.tx.select({ total: count, active: sql<number>`count(*) filter (where ${cu.isActive})::int`, inactive: sql<number>`count(*) filter (where not ${cu.isActive})::int`, newLast90d: sql<number>`count(*) filter (where ${cu.createdAt} >= now() - interval '90 days')::int` }).from(cu),

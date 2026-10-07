@@ -266,11 +266,11 @@ export default function CiListPage() {
             kpis={
               sm
                 ? [
-                    { label: 'Configuration items', value: fmtNumber(sm.total), icon: <Server className="h-4 w-4" />, hint: `${fmtNumber(sm.active)} active`, onClick: () => set({ status: undefined, stale: undefined, criticality: undefined }), scrollTo: true },
-                    { label: 'Critical', value: fmtNumber(sm.critical), tone: sm.critical ? 'bad' : 'good', icon: <AlertOctagon className="h-4 w-4" />, hint: 'business-critical items', onClick: () => set({ criticality: state.criticality === 'critical' ? undefined : 'critical' }), scrollTo: true, active: state.criticality === 'critical' },
+                    { label: 'Configuration items', value: fmtNumber(sm.total), icon: <Server className="h-4 w-4" />, hint: `${fmtNumber(sm.active)} active`, onClick: () => set({ status: undefined, stale: undefined, criticality: undefined }) },
+                    { label: 'Critical', value: fmtNumber(sm.critical), tone: sm.critical ? 'bad' : 'good', icon: <AlertOctagon className="h-4 w-4" />, hint: 'business-critical items', onClick: () => set({ criticality: state.criticality === 'critical' ? undefined : 'critical' }), active: state.criticality === 'critical' },
                     { label: 'Discovered', value: fmtNumber(sm.discovered), icon: <Radar className="h-4 w-4" />, hint: 'via network discovery' },
-                    { label: 'Stale · 30d unseen', value: fmtNumber(sm.stale), tone: sm.stale ? 'warn' : 'good', icon: <EyeOff className="h-4 w-4" />, hint: 'discovered but not seen lately', onClick: () => set({ stale: state.stale ? undefined : 'true' }), scrollTo: true, active: !!state.stale },
-                    { label: 'Linked to assets', value: fmtNumber(sm.withAsset), icon: <Boxes className="h-4 w-4" />, hint: 'with a financial record', onClick: () => set({ hasAsset: state.hasAsset ? undefined : 'true' }), scrollTo: true, active: !!state.hasAsset },
+                    { label: 'Stale · 30d unseen', value: fmtNumber(sm.stale), tone: sm.stale ? 'warn' : 'good', icon: <EyeOff className="h-4 w-4" />, hint: 'discovered but not seen lately', onClick: () => set({ stale: state.stale ? undefined : 'true' }), active: !!state.stale },
+                    { label: 'Linked to assets', value: fmtNumber(sm.withAsset), icon: <Boxes className="h-4 w-4" />, hint: 'with a financial record', onClick: () => set({ hasAsset: state.hasAsset ? undefined : 'true' }), active: !!state.hasAsset },
                   ]
                 : []
             }

@@ -79,9 +79,9 @@ export default function BusinessServicesPage() {
               q.data
                 ? [
                     { label: 'Business services', value: fmtNumber(all.length), icon: <Workflow className="h-4 w-4" />, hint: `${fmtNumber(all.reduce((n, s) => n + s.dependencies, 0))} dependent CIs mapped` },
-                    { label: 'Critical', value: fmtNumber(counts.critical), tone: counts.critical ? 'bad' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'P1/P2 or major ticket in the chain', onClick: () => set({ health: state.health === 'critical' ? undefined : 'critical' }), scrollTo: true, active: state.health === 'critical' },
-                    { label: 'Degraded', value: fmtNumber(counts.warning), tone: counts.warning ? 'warn' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'open tickets on dependencies', onClick: () => set({ health: state.health === 'warning' ? undefined : 'warning' }), scrollTo: true, active: state.health === 'warning' },
-                    { label: 'Healthy', value: fmtNumber(counts.good), tone: 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: 'nothing open underneath', onClick: () => set({ health: state.health === 'good' ? undefined : 'good' }), scrollTo: true, active: state.health === 'good' },
+                    { label: 'Critical', value: fmtNumber(counts.critical), tone: counts.critical ? 'bad' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'P1/P2 or major ticket in the chain', onClick: () => set({ health: state.health === 'critical' ? undefined : 'critical' }), active: state.health === 'critical' },
+                    { label: 'Degraded', value: fmtNumber(counts.warning), tone: counts.warning ? 'warn' : 'good', icon: <AlertTriangle className="h-4 w-4" />, hint: 'open tickets on dependencies', onClick: () => set({ health: state.health === 'warning' ? undefined : 'warning' }), active: state.health === 'warning' },
+                    { label: 'Healthy', value: fmtNumber(counts.good), tone: 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: 'nothing open underneath', onClick: () => set({ health: state.health === 'good' ? undefined : 'good' }), active: state.health === 'good' },
                   ]
                 : []
             }

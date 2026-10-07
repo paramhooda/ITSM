@@ -106,7 +106,9 @@ export interface TicketListRow {
 
 export interface TicketStats {
   byStatusCategory: Record<string, number>;
+  /** Open tickets per type over the scope without the type tab, status chips or tile toggles; `allTypes` is their sum (the "All" pill). */
   byType: Record<string, number>;
+  allTypes: number;
   /** Rows matching the current filters. */
   total: number;
   byPriority: { id: string | null; label: string; color: string | null; level: number | null; count: number }[];

@@ -129,7 +129,8 @@ describe('dashboards', () => {
     expect(m.byService.find((s) => s.name === `Reporting Service ${suffix}`)?.tickets).toBe(4);
     expect(m.entitlementAlerts.some((e) => e.id === ids.entitlement)).toBe(true); // 6.5/10 = 65% > 50% threshold
     expect(m.outOfScopeByCustomer[0]?.id).toBe(ids.customerA);
-    expect(m.trends.opened.current).toBe(m.kpis.ticketsOpened);
+    // The tile counts live (fenced, whole-day window); the period-over-period delta compares the two daily series.
+    expect(m.trends.opened.current).toBe(m.series.reduce((n, d) => n + d.opened, 0));
   });
 
   it('7-day management view uses live series and still reports today', async () => {

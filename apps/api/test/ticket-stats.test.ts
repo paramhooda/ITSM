@@ -4,16 +4,16 @@
  *   npx vitest run test/ticket-stats.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { withSystem, closeDb, schema, type Tx } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
-import { createTicket } from '../src/modules/tickets/service';
-import { ticketStats } from '../src/modules/tickets/list';
+import { createTicket, resolveTicket } from '../src/modules/tickets/service';
+import { ticketStats, countTickets, groupTickets } from '../src/modules/tickets/list';
 import { toDay, addDays } from '../src/modules/reports/dates';
 
 const suffix = Math.random().toString(36).slice(2, 8);
-const ids = { customerId: '', otherCustomerId: '', siteId: '', serviceId: '', p1: '', p4: '', serviceDesk: '', noc: '', portalUserId: '' };
+const ids = { customerId: '', otherCustomerId: '', siteId: '', serviceId: '', p1: '', p4: '', serviceDesk: '', noc: '', portalUserId: '', t1: '', t2: '', t3: '' };
 let admin: Principal;
 let portal: Principal;
 const createdTicketIds: string[] = [];
@@ -73,6 +73,16 @@ beforeAll(async () => {
     const t3 = await createTicket(ctx, { type: 'request', customerId: ids.customerId, title: `Stats request ${suffix}`, priorityId: ids.p4 });
     const foreign = await createTicket(ctx, { type: 'incident', customerId: ids.otherCustomerId, title: `Stats foreign ${suffix}`, priorityId: ids.p1 });
     createdTicketIds.push(t1.id, t2.id, t3.id, foreign.id);
+    ids.t1 = t1.id;
+    ids.t2 = t2.id;
+    ids.t3 = t3.id;
+  });
+  // SLA vocabulary fixtures on the engine's own rows: t1 breached (the engine flag), t2 running and warned (at risk), t3 running past due but
+  // not swept yet (neither: the sweep flags it within a minute, nobody re-derives it from due_at).
+  await withSystem(async (tx) => {
+    await tx.execute(sql`UPDATE ticket_slas SET state = 'breached', breached_at = now() WHERE ticket_id = ${ids.t1}::uuid AND metric = 'resolution'`);
+    await tx.execute(sql`UPDATE ticket_slas SET warned_at = now() WHERE ticket_id = ${ids.t2}::uuid AND metric = 'resolution'`);
+    await tx.execute(sql`UPDATE ticket_slas SET due_at = now() - interval '1 hour' WHERE ticket_id = ${ids.t3}::uuid AND metric = 'resolution'`);
   });
 });
 
@@ -135,11 +145,12 @@ describe('ticket stats', () => {
     expect(teams[ids.noc]).toBeUndefined();
   });
 
-  it('statusCategory=resolved with nothing resolved gives zero totals but unchanged category counts', async () => {
+  it('statusCategory=resolved with nothing resolved gives an empty list but unchanged tiles and category counts', async () => {
     const all = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId }));
     const s = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, statusCategory: 'resolved' }));
     expect(s.total).toBe(0);
-    expect(s.open).toBe(0);
+    // The Open tile is the baseline of the scope: the status chips never move it.
+    expect(s.open).toBe(3);
     expect(s.byStatus).toEqual([]);
     expect(s.byPriority).toEqual([]);
     expect(s.byTeam).toEqual([]);
@@ -163,11 +174,91 @@ describe('ticket stats', () => {
     expect(wide.series).toHaveLength(14);
   });
 
+  it('tiles use the shared SLA vocabulary: breached is the engine flag, at risk is running and warned, past due unswept is neither', async () => {
+    const s = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId }));
+    expect(s.breached).toBe(1);
+    expect(s.atRisk).toBe(1);
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, slaState: 'breached' }))).toBe(1);
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, slaState: 'at_risk' }))).toBe(1);
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, slaState: 'ok' }))).toBe(1);
+    const g = await asAdmin((ctx) => groupTickets(ctx, { customerId: ids.customerId }, 'slaState'));
+    expect(g.groups).toEqual([{ label: 'Breached', count: 1 }, { label: 'At risk', count: 1 }, { label: 'On track', count: 1 }]);
+    const teams = Object.fromEntries(s.byTeam.map((t) => [t.id ?? 'none', t.breached]));
+    expect(teams[ids.serviceDesk]).toBe(1);
+    expect(teams[ids.noc]).toBe(0);
+  });
+
+  it('quick filters never move each other: a tile or assignee condition narrows the list but leaves every tile and the chips where they were', async () => {
+    const base = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId }));
+    const tiles = (x: Awaited<ReturnType<typeof ticketStats>>) => ({ open: x.open, breached: x.breached, atRisk: x.atRisk, unassigned: x.unassigned, mine: x.mine, major: x.major, highRisk: x.highRisk, unhappy: x.unhappy, knownErrors: x.knownErrors, dueToday: x.dueToday, overdue: x.overdue });
+    expect(base.unassigned).toBe(3);
+    for (const q of [{ unassigned: true }, { slaState: 'breached' }, { slaState: 'at_risk,ok' }, { mine: true }, { breachRisk: 'high' as const }, { knownError: true }, { watching: true }, { open: true }, { statusCategory: 'pending' }]) {
+      const s = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, ...q }));
+      expect(tiles(s), JSON.stringify(q)).toEqual(tiles(base));
+      expect(s.byStatusCategory, JSON.stringify(q)).toEqual(base.byStatusCategory);
+      expect(s.byType, JSON.stringify(q)).toEqual(base.byType);
+      expect(s.allTypes, JSON.stringify(q)).toBe(3);
+    }
+    // ...while the list itself (total, and the breakdowns that describe it) follows the condition.
+    const breached = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, slaState: 'breached' }));
+    expect(breached.total).toBe(1);
+    expect(breached.byPriority).toEqual([expect.objectContaining({ id: ids.p1, count: 1 })]);
+    const mine = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, mine: true }));
+    expect(mine.total).toBe(0);
+    expect(mine.open).toBe(3);
+  });
+
+  it('the type tab keeps the tiles on its own scope while All (allTypes) and the per-type counts ignore it', async () => {
+    const s = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, type: 'incident' }));
+    expect(s.total).toBe(2);
+    expect(s.open).toBe(2);
+    expect(s.breached).toBe(1);
+    expect(s.byType).toEqual({ incident: 2, request: 1 });
+    expect(s.allTypes).toBe(3);
+    // The category chips describe the current tab.
+    expect(s.byStatusCategory).toEqual({ new: 2 });
+    const r = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, type: 'request' }));
+    expect(r.open).toBe(1);
+    expect(r.breached).toBe(0);
+    expect(r.allTypes).toBe(3);
+  });
+
+  it('comma lists: priorityId, slaState, domain, teamId and securitySeverityId open the list with exactly a breakdown predicate', async () => {
+    const c = (q: Parameters<typeof countTickets>[1]) => asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, ...q }));
+    expect(await c({ priorityId: `${ids.p1},${ids.p4}` })).toBe(3);
+    expect(await c({ priorityId: ids.p1 })).toBe(1);
+    expect(await c({ slaState: 'breached,at_risk' })).toBe(2);
+    expect(await c({ domain: 'noc' })).toBe(2);
+    expect(await c({ domain: 'noc,general' })).toBe(3);
+    expect(await c({ domain: 'general,amc,service_desk' })).toBe(1);
+    expect(await c({ teamId: `${ids.serviceDesk},${ids.noc}` })).toBe(2);
+    expect(await c({ teamId: ids.noc })).toBe(1);
+    expect(await c({ securitySeverityId: `${ids.p1},${ids.p4}` })).toBe(0);
+  });
+
+  it('a resolved range counts by resolution day whatever the current status; a date-only bound covers the whole day', async () => {
+    const today = toDay(new Date());
+    const yesterday = addDays(today, -1);
+    await asAdmin((ctx) => resolveTicket(ctx, ids.t3, { resolutionNotes: 'Done during the stats test' }));
+    const c = (q: Parameters<typeof countTickets>[1]) => asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, ...q }));
+    expect(await c({ resolvedFrom: today, resolvedTo: today })).toBe(1);
+    expect(await c({ resolvedFrom: yesterday, resolvedTo: yesterday })).toBe(0);
+    expect(await c({ resolvedFrom: yesterday })).toBe(1);
+    expect(await c({ resolvedTo: yesterday })).toBe(0);
+    expect(await c({ createdFrom: today, createdTo: today })).toBe(3);
+    expect(await c({ createdFrom: addDays(today, -6), createdTo: yesterday })).toBe(0);
+    // The resolved tile moves with the list's own scope, not with the status chips.
+    const s = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, statusCategory: 'resolved' }));
+    expect(s.total).toBe(1);
+    expect(s.open).toBe(2);
+    expect(s.byStatusCategory).toEqual({ new: 2, resolved: 1 });
+  });
+
   it('a portal user only sees their own customer and cannot name another one', async () => {
     const s = await asPortal((ctx) => ticketStats(ctx, {}));
     expect(s.total).toBe(3);
-    expect(s.open).toBe(3);
-    expect(s.byStatusCategory).toEqual({ new: 3 });
+    expect(s.open).toBe(2);
+    expect(s.byStatusCategory).toEqual({ new: 2, resolved: 1 });
     expect(s.pendingApprovals).toBe(0);
     expect(s.series).toHaveLength(14);
     await expect(asPortal((ctx) => ticketStats(ctx, { customerId: ids.otherCustomerId }))).rejects.toThrow();

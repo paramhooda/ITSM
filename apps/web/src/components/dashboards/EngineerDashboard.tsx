@@ -15,6 +15,7 @@ import { truncate } from '@/lib/utils';
 import { fmtPct } from '@/lib/format';
 import { fmtRating, ratingTone } from '@/components/surveys/api';
 import { RatingBadge } from '@/components/surveys/RatingBadge';
+import { ticketListPath, type TicketListLink } from '@itsm/shared';
 
 interface Engineer {
   generatedAt: string;
@@ -60,30 +61,34 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
     ...d.today.tasks.map((k) => ({ key: `k-${k.id}`, href: `/tickets/${k.ticket_id}`, primary: k.title, secondary: `Task on ${k.ticket_number}`, right: k.due_at ? relativeTime(k.due_at) : '' })),
   ];
   const queueTotal = d.teamQueues.reduce((s, t) => s + t.unassigned, 0);
+  // Links carry the customer scope; "me" is the signed-in person, the period is the dashboard's own range.
+  const scope: TicketListLink = { customerId: customerId || null };
+  const mine: TicketListLink = { ...scope, assignee: 'me', status: 'open' };
+  const unassignedInTeams: TicketListLink = { ...scope, teamId: d.teamQueues.map((t) => t.id), assignee: 'unassigned', status: 'open' };
   const resolvedDaily = d.series.some((s) => s.resolved) ? d.series : [];
   // Weekly rollup: ISO-week buckets labelled by their Monday, so a 90-day period reads as 13 bars instead of 90.
   const resolvedFlow = resolvedView === 'weekly' ? Object.values(resolvedDaily.reduce<Record<string, { day: string; resolved: number }>>((acc, s) => { const dt = new Date(`${s.day}T00:00:00`); const monday = new Date(dt); monday.setDate(dt.getDate() - ((dt.getDay() + 6) % 7)); const key = monday.toISOString().slice(0, 10); acc[key] = acc[key] ?? { day: key, resolved: 0 }; acc[key].resolved += s.resolved; return acc; }, {})) : resolvedDaily;
   const teamRows = teamFilter ? d.teamQueues.filter((t) => t.id === teamFilter) : d.teamQueues;
   // Priority colours follow the level (P1 red → P5 slate); the API orders the queue P1 first.
-  const queueByPriority = d.assigned.byPriority.map((p) => ({ label: p.label, value: p.count, color: PRIORITY_LEVEL_COLORS[p.level] ?? p.color, href: p.id ? `/tickets?mine=true&open=true&priorityId=${p.id}` : '/tickets?mine=true&open=true' }));
+  const queueByPriority = d.assigned.byPriority.map((p) => ({ label: p.label, value: p.count, color: PRIORITY_LEVEL_COLORS[p.level] ?? p.color, href: p.id ? ticketListPath({ ...mine, priorityIds: [p.id] }) : ticketListPath(mine) }));
   return (
     <div className="flex flex-col gap-6">
       <KpiGrid
         items={[
-          { label: 'Assigned to me', value: fmtNumber(d.assigned.total), tone: d.assigned.breached > 0 ? 'bad' : 'default', hint: d.assigned.breached > 0 ? `${fmtNumber(d.assigned.breached)} SLA breached` : 'all within SLA', to: '/tickets?mine=true&open=true' },
+          { label: 'Assigned to me', value: fmtNumber(d.assigned.total), tone: d.assigned.breached > 0 ? 'bad' : 'default', hint: d.assigned.breached > 0 ? `${fmtNumber(d.assigned.breached)} SLA breached` : 'all within SLA', to: ticketListPath(mine) },
           { label: 'Due within 4 hours', value: fmtNumber(dueIn4h), tone: dueIn4h > 0 ? 'warn' : 'good', hint: 'by SLA remaining' },
           { label: 'Approvals waiting', value: fmtNumber(d.approvalsPending), tone: d.approvalsPending > 0 ? 'warn' : 'default', hint: 'requests and changes for you to decide' },
           { label: 'Today', value: fmtNumber(todayItems.length), hint: `${d.today.visits.length} visits · ${d.today.pmOccurrences.length} maintenance · ${d.today.dueTickets.length} due` },
         ]}
       />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="My queue" subtitle="Soonest SLA deadline first" to="/tickets?mine=true&open=true" className="xl:col-span-2" padded={false}>
+        <Panel title="My queue" subtitle="Soonest SLA deadline first" to={ticketListPath(mine)} className="xl:col-span-2" padded={false}>
           <div className="px-5">
             <TicketMiniTable rows={d.assigned.dueSoon.length ? d.assigned.dueSoon : d.assigned.items} max={10} columns={['customer', 'priority', 'status', 'sla']} empty="Nothing assigned to you. Pick up unassigned work from your team queues." />
           </div>
           {queueTotal > 0 && (
             <div className="px-5 py-3 border-t border-default text-[12.5px] text-muted">
-              {fmtNumber(queueTotal)} unassigned in your teams · <Link to="/tickets?unassigned=true&open=true" className="text-brand-700 hover:underline">Take the next one</Link>
+              {fmtNumber(queueTotal)} unassigned in your teams · <Link to={ticketListPath(unassignedInTeams)} className="text-brand-700 hover:underline">Take the next one</Link>
             </div>
           )}
         </Panel>
@@ -92,10 +97,10 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
         </Panel>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="Resolved by me" subtitle={`Tickets you resolved per ${resolvedView === 'weekly' ? 'week' : 'day'}, last ${days} days`} className="xl:col-span-2" to="/tickets?mine=true&statusCategory=resolved" toLabel="Resolved tickets" action={<Segmented size="sm" options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }]} value={resolvedView} onChange={setResolvedView} />}>
+        <Panel title="Resolved by me" subtitle={`Tickets you resolved per ${resolvedView === 'weekly' ? 'week' : 'day'}, last ${days} days`} className="xl:col-span-2" to={ticketListPath({ ...scope, assignee: 'me', status: 'any', resolvedFrom: d.period.from, resolvedTo: d.period.to })} toLabel="Resolved tickets" action={<Segmented size="sm" options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }]} value={resolvedView} onChange={setResolvedView} />}>
           <TrendChart data={resolvedFlow} x="day" kind="bar" series={[{ key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={160} />
         </Panel>
-        <Panel title="My queue by priority" subtitle="Open tickets assigned to you" to="/tickets?mine=true&open=true">
+        <Panel title="My queue by priority" subtitle="Open tickets assigned to you" to={ticketListPath(mine)}>
           <BreakdownBar items={queueByPriority} emptyText="Nothing assigned to you" />
         </Panel>
       </div>
@@ -104,7 +109,7 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
           <RowList
             dense
             empty="You are not a member of any team"
-            items={teamRows.map((t) => ({ key: t.id, href: `/tickets?teamId=${t.id}&unassigned=true&open=true`, primary: t.name, secondary: `${fmtNumber(t.open)} open${t.breached ? ` · ${t.breached} breached` : ''}`, right: <span className={t.unassigned > 0 ? 'text-amber-600 font-medium' : ''}>{fmtNumber(t.unassigned)} unassigned</span> }))}
+            items={teamRows.map((t) => ({ key: t.id, href: ticketListPath({ ...scope, teamId: t.id, assignee: 'unassigned', status: 'open' }), primary: t.name, secondary: `${fmtNumber(t.open)} open${t.breached ? ` · ${t.breached} breached` : ''}`, right: <span className={t.unassigned > 0 ? 'text-amber-600 font-medium' : ''}>{fmtNumber(t.unassigned)} unassigned</span> }))}
           />
         </Panel>
         <Panel title="Watched tickets" subtitle="Updates in the last 24 hours" padded={false}>
@@ -123,7 +128,7 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
         )}
       </div>
       {d.csat && (
-        <Panel title="Customer feedback for you" subtitle={`Ratings on tickets you resolved, last ${days} days`} to="/tickets?mine=true&csat=rated" toLabel="Rated tickets">
+        <Panel title="Customer feedback for you" subtitle={`Ratings on tickets you resolved, last ${days} days`} to={ticketListPath({ ...scope, assignee: 'me', status: 'any', csat: 'rated' })} toLabel="Rated tickets">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="grid grid-cols-3 lg:grid-cols-1 gap-4 content-start">
               <Stat label="Average rating" value={fmtRating(d.csat.avg)} tone={ratingTone(d.csat.avg)} />

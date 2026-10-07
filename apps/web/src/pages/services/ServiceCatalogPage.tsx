@@ -10,7 +10,6 @@ import { Stat } from '@/components/dashboards/Panel';
 import { get } from '@/api/client';
 import { useAuthStore } from '@/stores/auth';
 import { useListState } from '@/hooks/useListState';
-import { scrollToResults } from '@/components/ui/ListShell';
 import { cn, colorClass, dotClass } from '@/lib/utils';
 import { DOMAIN_COLORS } from '@/lib/statusColors';
 import { fmtDate, fmtNumber } from '@/lib/format';
@@ -91,10 +90,7 @@ export default function ServiceCatalogPage() {
                   ...((data?.uncategorised.length ?? 0) > 0 ? [{ value: 'uncategorised', label: 'Uncategorised', count: data!.uncategorised.length }] : []),
                 ]}
                 value={line || undefined}
-                onChange={(v) => {
-                  set({ line: v as string | undefined }, false);
-                  scrollToResults();
-                }}
+                onChange={(v) => set({ line: v as string | undefined }, false)}
                 emptyLabel={catalog.isLoading ? 'Loading…' : 'No service lines'}
               />
             </FilterGroup>
@@ -120,10 +116,10 @@ export default function ServiceCatalogPage() {
               panels={
                 <>
                   <Panel title="Offerings by service line" subtitle="Click a line to browse it">
-                    <BreakdownBar dense scrollTo items={[...allCategories].sort((a, b) => categoryCount(b) - categoryCount(a)).map((c) => ({ label: c.label, value: categoryCount(c), color: c.color ?? null, active: line === c.key }))} onSelect={(i) => { const c = allCategories.find((x) => x.label === i.label); if (c) set({ line: line === c.key ? undefined : c.key }, false); }} emptyText="No service lines" />
+                    <BreakdownBar dense items={[...allCategories].sort((a, b) => categoryCount(b) - categoryCount(a)).map((c) => ({ label: c.label, value: categoryCount(c), color: c.color ?? null, active: line === c.key }))} onSelect={(i) => { const c = allCategories.find((x) => x.label === i.label); if (c) set({ line: line === c.key ? undefined : c.key }, false); }} emptyText="No service lines" />
                   </Panel>
                   <Panel title="By domain" subtitle="Click to filter">
-                    <BreakdownBar dense scrollTo items={DOMAINS.map((d) => ({ label: DOMAIN_LABEL[d] ?? d, value: allServices.filter((sv) => sv.domain === d).length, color: DOMAIN_COLORS[d] ?? null, active: domain === d })).filter((i) => i.value > 0)} onSelect={(i) => { const d = DOMAINS.find((x) => (DOMAIN_LABEL[x] ?? x) === i.label); if (d) set({ domain: domain === d ? undefined : d }, false); }} />
+                    <BreakdownBar dense items={DOMAINS.map((d) => ({ label: DOMAIN_LABEL[d] ?? d, value: allServices.filter((sv) => sv.domain === d).length, color: DOMAIN_COLORS[d] ?? null, active: domain === d })).filter((i) => i.value > 0)} onSelect={(i) => { const d = DOMAINS.find((x) => (DOMAIN_LABEL[x] ?? x) === i.label); if (d) set({ domain: domain === d ? undefined : d }, false); }} />
                   </Panel>
                 </>
               }

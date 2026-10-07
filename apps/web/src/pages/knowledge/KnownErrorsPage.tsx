@@ -183,9 +183,9 @@ function StaffKnownErrors() {
             kpis={
               s
                 ? [
-                    { label: 'Open known errors', value: fmtNumber(s.open), tone: s.open > 0 ? 'warn' : 'good', icon: <Bug className="h-4 w-4" />, hint: 'workaround known, no fix under way', onClick: () => toggleStatus('open'), scrollTo: true, active: state.status === 'open' },
-                    { label: 'Fix in progress', value: fmtNumber(s.fixInProgress), icon: <Wrench className="h-4 w-4" />, hint: 'a permanent fix is being delivered', onClick: () => toggleStatus('fix_in_progress'), scrollTo: true, active: state.status === 'fix_in_progress' },
-                    { label: 'Published to portal', value: fmtNumber(s.published), tone: 'accent', icon: <Globe className="h-4 w-4" />, hint: 'customers can read the workaround', onClick: () => set({ portalVisible: state.portalVisible === 'true' ? undefined : 'true' }), scrollTo: true, active: state.portalVisible === 'true' },
+                    { label: 'Open known errors', value: fmtNumber(s.open), tone: s.open > 0 ? 'warn' : 'good', icon: <Bug className="h-4 w-4" />, hint: 'workaround known, no fix under way', onClick: () => toggleStatus('open'), active: state.status === 'open' },
+                    { label: 'Fix in progress', value: fmtNumber(s.fixInProgress), icon: <Wrench className="h-4 w-4" />, hint: 'a permanent fix is being delivered', onClick: () => toggleStatus('fix_in_progress'), active: state.status === 'fix_in_progress' },
+                    { label: 'Published to portal', value: fmtNumber(s.published), tone: 'accent', icon: <Globe className="h-4 w-4" />, hint: 'customers can read the workaround', onClick: () => set({ portalVisible: state.portalVisible === 'true' ? undefined : 'true' }), active: state.portalVisible === 'true' },
                     { label: 'Incidents linked · 30d', value: fmtNumber(s.incidentsLinked30d), icon: <Link2 className="h-4 w-4" />, hint: 'incidents explained by a known error' },
                   ]
                 : []
@@ -202,7 +202,6 @@ function StaffKnownErrors() {
                         const b = s.byService.find((x) => x.name === i.label);
                         if (b?.id) set({ serviceId: state.serviceId === b.id ? undefined : b.id });
                       }}
-                      scrollTo
                     />
                   </Panel>
                   <Panel title="Most linked" subtitle="Known errors that explain the most incidents">

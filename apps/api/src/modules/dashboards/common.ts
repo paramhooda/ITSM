@@ -1,6 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '@/core/context';
 import { toDay, addDays, daysBetween } from '@/modules/reports/dates';
+import { slaPredicates } from '@/modules/sla/predicates';
 
 export { toDay, addDays, daysBetween };
 
@@ -23,8 +24,10 @@ export const OPEN_STATUS = sql`(SELECT id FROM config_options WHERE type = 'tick
 export const openCond = (col: SQL = sql`t.status_id`) => sql`${col} IN ${OPEN_STATUS}`;
 export const custCond = (customerId: string | null | undefined, col: SQL = sql`t.customer_id`) => (customerId ? sql`AND ${col} = ${customerId}::uuid` : EMPTY);
 export const socCond = (ctx: Ctx, col: SQL = sql`t.domain`) => (!isCustomerUser(ctx) && !ctx.can('soc:read') ? sql`AND ${col} <> 'soc'` : EMPTY);
-export const BREACHED = sql`EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = t.id AND (s.state = 'breached' OR (s.state = 'running' AND s.due_at < now())))`;
-export const AT_RISK = sql`(EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = t.id AND s.state = 'running' AND s.warned_at IS NOT NULL AND s.due_at >= now()) AND NOT ${BREACHED})`;
+/** The SLA vocabulary over a ticket row aliased `t`: the same predicates the ticket list filters on (`modules/sla/predicates`). */
+const SLA = slaPredicates(sql`t.id`);
+export const BREACHED = SLA.breached;
+export const AT_RISK = SLA.atRisk;
 export const AGE_BUCKET = sql`CASE WHEN now() - t.created_at < interval '4 hours' THEN '< 4h' WHEN now() - t.created_at < interval '24 hours' THEN '4-24h' WHEN now() - t.created_at < interval '3 days' THEN '1-3d' ELSE '> 3d' END`;
 
 /** Compact ticket columns used by dashboard lists. */

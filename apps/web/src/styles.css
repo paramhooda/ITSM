@@ -206,6 +206,49 @@ textarea {
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
+  /* The breadcrumb of conditions under the bar: a root chip, then one removable chip per condition. */
+  .breadcrumb-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    max-width: 100%;
+  }
+  .breadcrumb-chip.breadcrumb-root {
+    padding-right: 10px;
+    color: var(--text-muted);
+    background: var(--surface-2);
+  }
+  button.breadcrumb-root:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+  .breadcrumb-chip.is-current {
+    color: var(--text);
+  }
+  .breadcrumb-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 16px;
+    width: 16px;
+    margin-right: -3px;
+    border-radius: 999px;
+    color: var(--text-subtle);
+    transition: background-color 0.15s, color 0.15s;
+  }
+  .breadcrumb-remove:hover {
+    background: var(--surface-3);
+    color: var(--text);
+  }
   .card {
     background: var(--surface);
     border: 1px solid var(--border);

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TICKET_TYPES, LINK_TYPES, CHANGE_TYPES, SCOPE_STATUSES } from '@itsm/shared';
 import { paginationSchema, sortSchema } from '@/core/pagination';
 import { knownErrorPatchSchema } from '@/modules/known-errors/schemas';
+import { SLA_STATES } from '@/modules/sla/predicates';
 
 const uuid = z.string().uuid();
 const nullableUuid = uuid.nullable().optional();
@@ -232,25 +233,33 @@ export const bulkSchema = z.object({
   payload: z.object({ teamId: nullableUuid, assigneeId: nullableUuid, statusId: uuid.optional(), priorityId: uuid.optional(), comment: z.string().max(2000).nullable().optional() }).default({}),
 });
 
+/** A comma-separated list (`?priorityId=a,b`): every element must satisfy `item`; the raw string is kept so `csv()` splits it once in `buildWhere`. */
+const csvOf = (item: z.ZodType<string>, max = 800) => z.string().max(max).refine((v) => v.split(',').map((x) => x.trim()).filter(Boolean).every((x) => item.safeParse(x).success), 'Invalid list value');
+const dateParam = z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date');
+
 export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   q: z.string().max(200).optional(),
   type: z.enum(TICKET_TYPES).optional(),
   customerId: uuid.optional(),
   siteId: uuid.optional(),
   serviceId: uuid.optional(),
-  statusId: z.string().optional(),
+  statusId: csvOf(uuid).optional(),
   statusCategory: z.string().optional(),
-  priorityId: z.string().optional(),
+  /** Comma lists: a dashboard breakdown ("P1 and P2", "breached or at risk", "every domain but security") opens the list with exactly its predicate. */
+  priorityId: csvOf(uuid).optional(),
   assigneeId: uuid.optional(),
-  teamId: uuid.optional(),
+  teamId: csvOf(uuid).optional(),
   categoryId: uuid.optional(),
-  domain: z.string().max(40).optional(),
+  domain: csvOf(z.string().max(40)).optional(),
   scopeStatus: z.enum(SCOPE_STATUSES).optional(),
-  slaState: z.enum(['breached', 'at_risk', 'ok']).optional(),
+  slaState: csvOf(z.enum(SLA_STATES), 40).optional(),
   breachRisk: z.enum(['high', 'medium', 'low']).optional(),
   sentiment: z.enum(['unhappy', 'angry', 'negative', 'neutral', 'positive']).optional(),
-  createdFrom: z.string().optional(),
-  createdTo: z.string().optional(),
+  /** Date ranges: a date-only value covers the whole day (`createdTo=2026-10-06` includes that day); a timestamp is exact. */
+  createdFrom: dateParam.optional(),
+  createdTo: dateParam.optional(),
+  resolvedFrom: dateParam.optional(),
+  resolvedTo: dateParam.optional(),
   unassigned: boolQ,
   mine: boolQ,
   watching: boolQ,
@@ -260,14 +269,14 @@ export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   primaryCiId: uuid.optional(),
   assetId: uuid.optional(),
   catalogItemId: uuid.optional(),
-  securitySeverityId: uuid.optional(),
+  securitySeverityId: csvOf(uuid).optional(),
   requesterUserId: uuid.optional(),
   parentTicketId: uuid.optional(),
   /** Change filters (type, risk level with `none` = not assessed, window start between two dates). */
   changeType: z.enum(CHANGE_TYPES).optional(),
   riskLevel: z.enum(['low', 'medium', 'high', 'none']).optional(),
-  scheduledFrom: z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date').optional(),
-  scheduledTo: z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date').optional(),
+  scheduledFrom: dateParam.optional(),
+  scheduledTo: dateParam.optional(),
   /** Problems flagged as known errors (true) or not (false). */
   knownError: boolQ,
   /** Customer satisfaction: rated, low (at or below the low-rating threshold), pending (survey awaiting an answer), unrated (ended without a rating). */

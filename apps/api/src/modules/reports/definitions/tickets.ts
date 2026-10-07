@@ -3,11 +3,12 @@ import { KNOWN_ERROR_STATUS_LABELS } from '@itsm/shared';
 import { registerReport, type ReportResult } from '../registry';
 import { arrivalHeatmap, changeOutcomes, scopeTimezone } from '../analytics';
 import { rows, customerCond, rangeCond, socCond, openCond, limitSql, pct, num, round1, col, totals, countsOf, weekdayHours, STATUS_CATEGORY_LABEL, listParam, strParam, boolParam, inUuids, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
+import { worstSlaStateSql } from '@/modules/sla/predicates';
 
 const TYPE_LABEL: Record<string, string> = { incident: 'Incidents', request: 'Requests', problem: 'Problems', change: 'Changes' };
 
 const AGE_BUCKET = sql`CASE WHEN now() - t.created_at < interval '4 hours' THEN '< 4h' WHEN now() - t.created_at < interval '24 hours' THEN '4-24h' WHEN now() - t.created_at < interval '3 days' THEN '1-3d' ELSE '> 3d' END`;
-const WORST_SLA = sql`(SELECT CASE WHEN bool_or(s.state = 'breached' OR (s.state = 'running' AND s.due_at < now())) THEN 'breached' WHEN bool_or(s.state = 'running' AND s.warned_at IS NOT NULL) THEN 'at_risk' WHEN bool_or(s.state IN ('running','paused')) THEN 'ok' ELSE NULL END FROM ticket_slas s WHERE s.ticket_id = t.id)`;
+const WORST_SLA = worstSlaStateSql(sql`t.id`);
 const NEXT_DUE = sql`(SELECT min(s.due_at) FROM ticket_slas s WHERE s.ticket_id = t.id AND s.state IN ('running','paused'))`;
 
 // ---------------------------------------------------------------- open_tickets

@@ -4,6 +4,7 @@ import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { addWorkingMinutes, workingMinutesBetween, type CalendarDef } from '@/lib/calendar';
 import { selectPolicy, resolveCalendar } from './select';
+import { slaPredicates } from './predicates';
 
 /**
  * SLA engine: creates one `ticket_slas` row per applicable metric, keeps the
@@ -408,9 +409,5 @@ export function worstSla(summaries: SlaMetricSummary[] | undefined): SlaCompact 
   return { metric: pick.metric, state: pick.state, dueAt: pick.dueAt, pctConsumed: pick.pctConsumed, remainingMinutes: pick.remainingMinutes, breached: pick.breached, paused: pick.state === 'paused' };
 }
 
-/** Lightweight SQL fragment helpers for list filters. */
-export const slaStateFilterSql = {
-  breached: sql`EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = tickets.id AND s.state = 'breached')`,
-  atRisk: sql`EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = tickets.id AND s.state = 'running' AND (s.warned_at IS NOT NULL OR s.due_at < now())) AND NOT EXISTS (SELECT 1 FROM ticket_slas s2 WHERE s2.ticket_id = tickets.id AND s2.state = 'breached')`,
-  ok: sql`NOT EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = tickets.id AND (s.state = 'breached' OR (s.state = 'running' AND (s.warned_at IS NOT NULL OR s.due_at < now()))))`,
-};
+/** The list-filter predicates over the `tickets` table (query-builder code): the shared vocabulary from `./predicates`. */
+export const slaStateFilterSql = slaPredicates(sql`tickets.id`);

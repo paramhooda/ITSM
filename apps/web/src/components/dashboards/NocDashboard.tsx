@@ -6,6 +6,7 @@ import { Activity, Flame, Timer, UserX, PhoneCall, AlertTriangle, Gauge } from '
 import { get } from '@/api/client';
 import { fmtNumber, relativeTime, fmtDuration } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { ticketListPath, type TicketListLink } from '@itsm/shared';
 import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
@@ -17,6 +18,7 @@ import type { TicketRow, Breakdown } from './types';
 
 interface Noc {
   generatedAt: string;
+  period: { days: number; from: string; to: string };
   totals: { open: number; openIncidents: number; breached: number; atRisk: number; unassigned: number; major: number; escalated: number; openedToday: number; resolvedToday: number; mttrTodayMinutes: number | null; highRisk?: number; mediumRisk?: number; unhappy?: number; knownErrorsOpen?: number };
   openIncidents: Breakdown[];
   criticalOpen: TicketRow[];
@@ -77,7 +79,12 @@ export function NocDashboard({ days = 30, customerId = '' }: { days?: number; cu
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
   if (!d) return <KpiSkeleton />;
   const t = d.totals;
-  const p1p2 = d.openIncidents.filter((p) => (p.level ?? 99) <= 2).reduce((s, p) => s + p.count, 0);
+  const critical = d.openIncidents.filter((p) => (p.level ?? 99) <= 2);
+  const p1p2 = critical.reduce((s, p) => s + p.count, 0);
+  const criticalIds = critical.map((p) => p.id).filter((id): id is string => !!id);
+  // Every link carries what the number was counted with: the customer scope, every domain but security, open status.
+  const open: TicketListLink = { customerId: customerId || null, domain: 'not_soc', status: 'open' };
+  const incidents: TicketListLink = { ...open, type: 'incident' };
   const criticalRows = criticalView === 'p1' ? d.criticalOpen.filter((r) => r.priority_level === 1) : criticalView === 'major' ? d.criticalOpen.filter((r) => r.is_major) : d.criticalOpen;
   const riskRows = riskOrder === 'priority' ? [...d.slaAtRisk.items].sort((a, b) => (a.priority_level ?? 99) - (b.priority_level ?? 99) || (a.sla?.remainingMinutes ?? 0) - (b.sla?.remainingMinutes ?? 0)) : d.slaAtRisk.items;
   const categoryRows = allCategories ? d.byCategory : d.byCategory.slice(0, 10);
@@ -90,11 +97,11 @@ export function NocDashboard({ days = 30, customerId = '' }: { days?: number; cu
       </div>
       <KpiGrid
         items={[
-          { label: 'Open incidents', value: fmtNumber(t.openIncidents), icon: <Activity className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened · ${fmtNumber(t.resolvedToday)} resolved today`, spark: d.series.map((s) => s.incidents), sparkLabel: `Incidents opened per day, last ${days} days`, to: '/tickets?type=incident&open=true' },
-          { label: 'P1 / P2 open', value: fmtNumber(p1p2), icon: <Flame className="h-4 w-4" />, tone: p1p2 > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.major)} major · ${fmtNumber(t.escalated)} escalated` },
-          { label: 'SLA at risk', value: fmtNumber(t.atRisk), icon: <Timer className="h-4 w-4" />, tone: t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} already breached`, spark: d.series.map((s) => s.breaches), sparkLabel: `SLA breaches per day, last ${days} days`, to: '/tickets?open=true&slaState=breached' },
-          { label: 'Likely to breach', value: fmtNumber(t.highRisk ?? 0), icon: <Gauge className="h-4 w-4" />, tone: (t.highRisk ?? 0) > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.mediumRisk ?? 0)} medium risk · ${fmtNumber(t.unhappy ?? 0)} unhappy customers`, to: '/tickets?open=true&breachRisk=high' },
-          { label: 'Unassigned', value: fmtNumber(t.unassigned), icon: <UserX className="h-4 w-4" />, tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', to: '/tickets?open=true&unassigned=true' },
+          { label: 'Open incidents', value: fmtNumber(t.openIncidents), icon: <Activity className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened · ${fmtNumber(t.resolvedToday)} resolved today`, spark: d.series.map((s) => s.incidents), sparkLabel: `Incidents opened per day, last ${days} days`, to: ticketListPath(incidents) },
+          { label: 'P1 / P2 open', value: fmtNumber(p1p2), icon: <Flame className="h-4 w-4" />, tone: p1p2 > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.major)} major · ${fmtNumber(t.escalated)} escalated`, to: criticalIds.length ? ticketListPath({ ...incidents, priorityIds: criticalIds }) : undefined },
+          { label: 'SLA at risk', value: fmtNumber(t.atRisk), icon: <Timer className="h-4 w-4" />, tone: t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} already breached`, spark: d.series.map((s) => s.breaches), sparkLabel: `SLA breaches per day, last ${days} days`, to: ticketListPath({ ...open, sla: 'at_risk' }) },
+          { label: 'Likely to breach', value: fmtNumber(t.highRisk ?? 0), icon: <Gauge className="h-4 w-4" />, tone: (t.highRisk ?? 0) > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.mediumRisk ?? 0)} medium risk · ${fmtNumber(t.unhappy ?? 0)} unhappy customers`, to: ticketListPath({ ...open, breachRisk: 'high' }) },
+          { label: 'Unassigned', value: fmtNumber(t.unassigned), icon: <UserX className="h-4 w-4" />, tone: t.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', to: ticketListPath({ ...open, assignee: 'unassigned' }) },
         ]}
         columns={5}
       />
@@ -102,7 +109,7 @@ export function NocDashboard({ days = 30, customerId = '' }: { days?: number; cu
         {(d.majorIncidents?.length ?? 0) > 0 && <MajorIncidentsPanel items={d.majorIncidents} />}
         <OnCallPanel items={d.onCall ?? []} />
       </div>
-      <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" to="/tickets?open=true&priorityId=&type=incident" toLabel="All incidents" padded={false} action={<Segmented size="sm" options={[{ value: 'all', label: 'All' }, { value: 'p1', label: 'P1' }, { value: 'major', label: 'Major' }]} value={criticalView} onChange={setCriticalView} />}>
+      <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" to={criticalIds.length ? ticketListPath({ ...incidents, priorityIds: criticalIds }) : ticketListPath(incidents)} toLabel={criticalIds.length ? 'All P1 / P2' : 'All incidents'} padded={false} action={<Segmented size="sm" options={[{ value: 'all', label: 'All' }, { value: 'p1', label: 'P1' }, { value: 'major', label: 'Major' }]} value={criticalView} onChange={setCriticalView} />}>
         <div className="px-5">
           <TicketMiniTable rows={criticalRows} max={8} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee']} empty="No P1/P2 or major incidents open" />
         </div>
@@ -117,19 +124,19 @@ export function NocDashboard({ days = 30, customerId = '' }: { days?: number; cu
             <Stat label="Known errors" value={fmtNumber(d.totals.knownErrorsOpen)} tone={(d.totals.knownErrorsOpen ?? 0) > 0 ? 'warn' : 'default'} />
           </div>
         </Panel>
-        <Panel title="At risk or breached" subtitle={riskOrder === 'deadline' ? 'Soonest SLA deadline first' : 'Highest priority first'} to="/tickets?open=true&slaState=breached" toLabel="All breached" padded={false} action={<Segmented size="sm" options={[{ value: 'deadline', label: 'Deadline' }, { value: 'priority', label: 'Priority' }]} value={riskOrder} onChange={setRiskOrder} />}>
+        <Panel title="At risk or breached" subtitle={riskOrder === 'deadline' ? 'Soonest SLA deadline first' : 'Highest priority first'} to={ticketListPath({ ...open, sla: ['breached', 'at_risk'] })} toLabel="All at risk or breached" padded={false} action={<Segmented size="sm" options={[{ value: 'deadline', label: 'Deadline' }, { value: 'priority', label: 'Priority' }]} value={riskOrder} onChange={setRiskOrder} />}>
           <div className="px-5">
             <TicketMiniTable rows={riskRows} max={6} columns={['customer', 'priority', 'sla']} empty="Every open ticket is within SLA" />
           </div>
         </Panel>
         <Panel title="Engineer load" subtitle="Open tickets per engineer in NOC, infrastructure and network teams" action={d.engineerWorkload.length > 8 ? <Segmented size="sm" options={[{ value: 'top', label: 'Top 8' }, { value: 'all', label: `All ${d.engineerWorkload.length}` }]} value={allEngineers ? 'all' : 'top'} onChange={(v) => setAllEngineers(v === 'all')} /> : undefined}>
-          <WorkloadList items={allEngineers ? d.engineerWorkload : d.engineerWorkload.slice(0, 8)} />
+          <WorkloadList items={allEngineers ? d.engineerWorkload : d.engineerWorkload.slice(0, 8)} link={open} />
         </Panel>
       </div>
-      <Panel title="Open by category" subtitle="NOC categories, breaches in red" to="/tickets?open=true" toLabel="All open" action={d.byCategory.length > 10 ? <Segmented size="sm" options={[{ value: 'top', label: 'Top 10' }, { value: 'all', label: `All ${d.byCategory.length}` }]} value={allCategories ? 'all' : 'top'} onChange={(v) => setAllCategories(v === 'all')} /> : undefined}>
+      <Panel title="Open by category" subtitle="NOC categories, breaches in red" to={ticketListPath(open)} toLabel="All open" action={d.byCategory.length > 10 ? <Segmented size="sm" options={[{ value: 'top', label: 'Top 10' }, { value: 'all', label: `All ${d.byCategory.length}` }]} value={allCategories ? 'all' : 'top'} onChange={(v) => setAllCategories(v === 'all')} /> : undefined}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
-          <BreakdownBar items={categoryRows.slice(0, half).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="No open NOC tickets" />
-          <BreakdownBar items={categoryRows.slice(half).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? `/tickets?open=true&categoryId=${c.id}` : undefined }))} emptyText="" max={Math.max(1, ...d.byCategory.map((c) => c.count))} />
+          <BreakdownBar items={categoryRows.slice(0, half).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? ticketListPath({ ...open, categoryId: c.id }) : undefined }))} emptyText="No open NOC tickets" />
+          <BreakdownBar items={categoryRows.slice(half).map((c) => ({ label: c.label, value: c.count, secondary: c.breached, href: c.id ? ticketListPath({ ...open, categoryId: c.id }) : undefined }))} emptyText="" max={Math.max(1, ...d.byCategory.map((c) => c.count))} />
         </div>
       </Panel>
     </div>

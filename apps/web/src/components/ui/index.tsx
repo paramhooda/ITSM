@@ -160,9 +160,9 @@ export function FilterBar({ children, chips, trailing, activeCount = 0, onClear,
 }
 
 /** Pill used for quick status/category filters; shows the state colour as a dot. */
-export function FilterChip({ active, onClick, dot, count, children, className }: { active: boolean; onClick: () => void; dot?: string | null; count?: number | null; children: ReactNode; className?: string }) {
+export function FilterChip({ active, onClick, dot, count, children, className, testId }: { active: boolean; onClick: () => void; dot?: string | null; count?: number | null; children: ReactNode; className?: string; testId?: string }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={active} className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', active ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default hover:border-strong', className)}>
+    <button type="button" onClick={onClick} aria-pressed={active} data-testid={testId} data-active={active || undefined} className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors', active ? 'border-brand-500 bg-brand-600/10 text-brand-700' : 'border-default text-muted hover:text-default hover:border-strong', className)}>
       {dot && <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />}
       {children}
       {count !== undefined && count !== null && <span className={cn('tnum', active ? 'text-brand-700/70' : 'text-subtle')}>{count}</span>}

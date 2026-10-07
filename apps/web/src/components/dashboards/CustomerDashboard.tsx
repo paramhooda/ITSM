@@ -8,6 +8,8 @@ import { useAuthStore } from '@/stores/auth';
 import { fmtNumber, fmtDate, fmtDateTime, fmtPct } from '@/lib/format';
 import { fmtRating, ratingTone } from '@/components/surveys/api';
 import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
+import { useLookups } from '@/hooks/useLookups';
+import { ticketListPath, type TicketListLink } from '@itsm/shared';
 import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
@@ -43,6 +45,9 @@ export function CustomerDashboard({ customerId, days = 30 }: { customerId?: stri
   const isCustomer = useAuthStore((s) => s.user?.userType === 'customer');
   const can = useAuthStore((s) => s.can);
   const [upcomingView, setUpcomingView] = useState<'both' | 'visits' | 'pm'>('both');
+  // The staff link behind "awaiting your reply" names the status by id (the portal list keeps its own `status=awaiting` key).
+  const { options } = useLookups();
+  const pendingCustomer = options('ticket_status').find((o) => o.key === 'pending_customer')?.id;
   const q = useQuery({ queryKey: ['dashboards', 'customer', customerId ?? 'me', days], queryFn: () => get<Customer>('/dashboards/customer', { customerId, days }), placeholderData: (p) => p, staleTime: 30_000 });
   const d = q.data;
   if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
@@ -58,7 +63,8 @@ export function CustomerDashboard({ customerId, days = 30 }: { customerId?: stri
   const t = d.tickets;
   const slaBlock = d.sla.period ?? d.sla.days30;
   const sla = slaBlock.totals.compliancePct;
-  const ticketsHref = isCustomer ? '/portal/tickets' : `/tickets?customerId=${d.customer.id}`;
+  const open: TicketListLink = { customerId: d.customer.id, status: 'open' };
+  const ticketsHref = isCustomer ? '/portal/tickets' : ticketListPath(open);
   const openTickets = d.recentTickets.filter((r) => r.status_category && !['resolved', 'closed', 'cancelled'].includes(r.status_category));
   const upcoming: RowItem[] = [
     ...(upcomingView === 'pm' ? [] : d.scheduledVisits).map((v) => ({ key: `v-${v.id}`, href: isCustomer ? `/portal/maintenance?visit=${v.id}` : `/field/${v.id}`, primary: v.title, secondary: `Site visit${v.site ? ` · ${v.site}` : ''}${v.engineer ? ` · ${v.engineer}` : ''}`, right: v.scheduled_start ? fmtDateTime(v.scheduled_start) : 'to be scheduled' })),
@@ -71,7 +77,7 @@ export function CustomerDashboard({ customerId, days = 30 }: { customerId?: stri
     label: p.label,
     value: p.count,
     color: PRIORITY_LEVEL_COLORS[p.level] ?? p.color,
-    href: p.key ? (isCustomer ? `/portal/tickets?priority=${p.key}` : `/tickets?customerId=${d.customer.id}&open=true&priorityId=${p.id}`) : undefined,
+    href: p.key ? (isCustomer ? `/portal/tickets?priority=${p.key}` : ticketListPath({ ...open, priorityIds: [p.id as string] })) : undefined,
   }));
   const slaGroups: RowItem[] = slaBlock.groups.slice(0, 5).map((g) => ({
     key: g.key || g.label,
@@ -85,8 +91,8 @@ export function CustomerDashboard({ customerId, days = 30 }: { customerId?: stri
         columns={5}
         items={[
           { label: 'Open tickets', value: fmtNumber(t.open), hint: `${fmtNumber(t.byType.incident ?? 0)} incidents · ${fmtNumber(t.byType.request ?? 0)} requests`, to: ticketsHref },
-          { label: 'Awaiting your reply', value: fmtNumber(t.awaitingReply), tone: t.awaitingReply > 0 ? 'warn' : 'good', hint: t.awaitingApproval ? `${t.awaitingApproval} awaiting your approval` : 'nothing waiting on you', to: isCustomer ? '/portal/tickets?status=awaiting' : ticketsHref },
-          { label: `Resolved · ${days} days`, value: fmtNumber(t.resolved30d), hint: `${fmtNumber(t.opened30d)} opened in the same period` },
+          { label: 'Awaiting your reply', value: fmtNumber(t.awaitingReply), tone: t.awaitingReply > 0 ? 'warn' : 'good', hint: t.awaitingApproval ? `${t.awaitingApproval} awaiting your approval` : 'nothing waiting on you', to: isCustomer ? '/portal/tickets?status=awaiting' : pendingCustomer ? ticketListPath({ ...open, statusIds: [pendingCustomer] }) : ticketsHref },
+          { label: `Resolved · ${days} days`, value: fmtNumber(t.resolved30d), hint: `${fmtNumber(t.opened30d)} opened in the same period`, to: isCustomer ? undefined : ticketListPath({ customerId: d.customer.id, status: 'any', resolvedFrom: d.period.from, resolvedTo: d.period.to }) },
           { label: `SLA compliance · ${days} days`, value: sla === null ? '—' : `${sla}%`, tone: sla === null ? 'default' : sla >= 95 ? 'good' : sla >= 85 ? 'warn' : 'bad', hint: `${slaBlock.totals.met} met · ${slaBlock.totals.breached} breached` },
           { label: `Satisfaction · ${days} days`, value: fmtRating(d.csat?.avg), tone: ratingTone(d.csat?.avg), hint: d.csat?.responses ? `${fmtNumber(d.csat.responses)} ${d.csat.responses === 1 ? 'response' : 'responses'} · ${fmtPct(d.csat.satisfiedPct)} satisfied` : 'no ratings yet', to: isCustomer ? '/portal/tickets?status=rate' : can('surveys:read') ? `/reports/csat?customerId=${d.customer.id}&days=${days}` : undefined },
         ]}

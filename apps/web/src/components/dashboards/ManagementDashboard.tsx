@@ -8,6 +8,7 @@ import { useCustomersLookup } from '@/hooks/useLookups';
 import { fmtDuration, fmtNumber, fmtPct } from '@/lib/format';
 import { truncate } from '@/lib/utils';
 import { fmtRating, ratingTone } from '@/components/surveys/api';
+import { ticketListPath, type TicketListLink } from '@itsm/shared';
 import { RatingBadge } from '@/components/surveys/RatingBadge';
 import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
@@ -62,7 +63,10 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
   const needsAttention = [...d.byCustomer].filter((c) => c.slaBreached > 0 || c.out_of_scope > 0 || c.major > 0).sort((a, b) => b.slaBreached - a.slaBreached || b.major - a.major || b.out_of_scope - a.out_of_scope).slice(0, 5);
   // Sorted copy for the local control; computed after the early returns, so no hook here.
   const attentionRows = [...needsAttention].sort((a, b) => (attentionSort === 'major' ? b.major - a.major || b.slaBreached - a.slaBreached : attentionSort === 'scope' ? b.out_of_scope - a.out_of_scope || b.slaBreached - a.slaBreached : b.slaBreached - a.slaBreached || b.major - a.major));
-  const custQ = customerId ? `&customerId=${customerId}` : '';
+  // Every number that links carries the predicates it was counted with (scope, SLA state, the period as a date range).
+  const scope: TicketListLink = { customerId: customerId || null };
+  const open: TicketListLink = { ...scope, status: 'open' };
+  const inPeriod: TicketListLink = { ...scope, status: 'any', createdFrom: d.period.from, createdTo: d.period.to };
   const sparkDays = Math.min(d.series.length, days <= 7 ? 7 : 14);
   const recent = tail(d.series, sparkDays);
   const complianceTone = compliance === null ? 'default' : (compliance ?? 0) >= 95 ? 'good' : (compliance ?? 0) >= 85 ? 'warn' : 'bad';
@@ -77,7 +81,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedToday)} resolved`,
             spark: recent.map((s) => s.opened),
             sparkLabel: `Tickets opened per day, last ${sparkDays} days`,
-            to: `/tickets?open=true${custQ}`,
+            to: ticketListPath(open),
           },
           {
             label: `SLA compliance · ${days}d`,
@@ -99,7 +103,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             hint: `${fmtNumber(k.slaBreaches)} in period`,
             spark: recent.map((s) => s.breaches),
             sparkLabel: `SLA breaches per day, last ${sparkDays} days`,
-            to: `/tickets?open=true&slaState=breached${custQ}`,
+            to: ticketListPath({ ...open, sla: 'breached' }),
           },
           {
             label: `Resolved · ${days}d`,
@@ -109,7 +113,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
             hint: `${fmtDuration(k.mttrMinutes)} mean time to resolve`,
             spark: recent.map((s) => s.resolved),
             sparkLabel: `Tickets resolved per day, last ${sparkDays} days`,
-            to: `/tickets?status=resolved${custQ}`,
+            to: ticketListPath({ ...scope, status: 'any', resolvedFrom: d.period.from, resolvedTo: d.period.to }),
           },
         ]}
       />
@@ -158,7 +162,7 @@ export function ManagementDashboard({ days, customerId }: { days: number; custom
           />
         </Panel>
         <Panel className="rise-in rise-in-3" title="Service health" subtitle="Tickets by service in the period, breaches in red" to="/services" toLabel="Service catalog" action={d.byService.length > 6 ? <Segmented size="sm" options={[{ value: 'top', label: 'Top 6' }, { value: 'all', label: `All ${d.byService.length}` }]} value={allServices ? 'all' : 'top'} onChange={(v) => setAllServices(v === 'all')} /> : undefined}>
-          <BreakdownBar items={d.byService.slice(0, allServices ? undefined : 6).map((s) => ({ label: s.name, value: s.tickets, secondary: s.breaches, href: s.id ? `/tickets?serviceId=${s.id}` : undefined }))} emptyText="No tickets in this period" />
+          <BreakdownBar items={d.byService.slice(0, allServices ? undefined : 6).map((s) => ({ label: s.name, value: s.tickets, secondary: s.breaches, href: s.id ? ticketListPath({ ...inPeriod, serviceId: s.id }) : undefined }))} emptyText="No tickets in this period" />
         </Panel>
         <Panel className="rise-in rise-in-4" title="Expiring contracts" subtitle={`${fmtNumber(d.expiringContractsTotal)} ending within 90 days · ${fmtNumber(k.contractsActive)} active`} to="/contracts?expiringWithinDays=90">
           <ExpiringContracts items={d.expiringContracts.slice(0, 5)} />

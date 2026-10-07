@@ -128,11 +128,11 @@ export default function SoftwareInstallationsPage() {
             kpis={
               ov
                 ? [
-                    { label: 'Installations', value: fmtNumber(ov.installations), icon: <HardDrive className="h-4 w-4" />, hint: 'every record', onClick: () => set({ source: undefined, host: undefined, stale: undefined }), scrollTo: true },
+                    { label: 'Installations', value: fmtNumber(ov.installations), icon: <HardDrive className="h-4 w-4" />, hint: 'every record', onClick: () => set({ source: undefined, host: undefined, stale: undefined }) },
                     { label: 'Titles', value: fmtNumber(ov.titlesInUse), icon: <Package className="h-4 w-4" />, hint: 'in use', to: `/assets/software/titles?inUseOnly=true${state.customerId ? `&customerId=${state.customerId}` : ''}` },
-                    { label: 'Hosts', value: fmtNumber(ov.hosts), icon: <Server className="h-4 w-4" />, hint: 'CIs, assets and host names', onClick: () => set({ host: state.host === 'ci' ? undefined : 'ci' }), active: state.host === 'ci', scrollTo: true },
-                    { label: 'Stale', value: fmtNumber(ov.stale), tone: ov.stale ? 'warn' : 'good', icon: <Clock className="h-4 w-4" />, hint: 'not seen within the stale window', onClick: () => set({ stale: state.stale === 'true' ? undefined : 'true' }), active: state.stale === 'true', scrollTo: true },
-                    { label: 'Not linked', value: fmtNumber(ov.unlinked), tone: ov.unlinked ? 'warn' : 'good', icon: <Unlink className="h-4 w-4" />, hint: 'no CI or asset yet', onClick: () => set({ host: state.host === 'unlinked' ? undefined : 'unlinked' }), active: state.host === 'unlinked', scrollTo: true },
+                    { label: 'Hosts', value: fmtNumber(ov.hosts), icon: <Server className="h-4 w-4" />, hint: 'CIs, assets and host names', onClick: () => set({ host: state.host === 'ci' ? undefined : 'ci' }), active: state.host === 'ci' },
+                    { label: 'Stale', value: fmtNumber(ov.stale), tone: ov.stale ? 'warn' : 'good', icon: <Clock className="h-4 w-4" />, hint: 'not seen within the stale window', onClick: () => set({ stale: state.stale === 'true' ? undefined : 'true' }), active: state.stale === 'true' },
+                    { label: 'Not linked', value: fmtNumber(ov.unlinked), tone: ov.unlinked ? 'warn' : 'good', icon: <Unlink className="h-4 w-4" />, hint: 'no CI or asset yet', onClick: () => set({ host: state.host === 'unlinked' ? undefined : 'unlinked' }), active: state.host === 'unlinked' },
                   ]
                 : []
             }

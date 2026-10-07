@@ -5,6 +5,7 @@ import { isCustomerUser } from '../registry';
 import { socCond, OPEN_STATUS, EMPTY } from '../definitions/helpers';
 import { CI_ENVIRONMENTS, CI_CRITICALITIES } from '@/modules/cmdb/schemas';
 import { CONTRACT_STATUSES } from '@/modules/contracts/schemas';
+import { worstSlaStateSql } from '@/modules/sla/predicates';
 
 /**
  * The field catalogue of the report builder: every entity a custom report can be
@@ -108,7 +109,7 @@ const G = { identity: 'Identity', classification: 'Classification', people: 'Peo
 
 /** Age, resolution and response durations of a ticket row aliased `t`. */
 const minutesBetween = (a: SQL, b: SQL) => sql`round((extract(epoch from (${a} - ${b})) / 60)::numeric)`;
-const WORST_SLA = sql`(SELECT CASE WHEN bool_or(x.state = 'breached' OR (x.state = 'running' AND x.due_at < now())) THEN 'breached' WHEN bool_or(x.state = 'running' AND x.warned_at IS NOT NULL) THEN 'at_risk' WHEN bool_or(x.state IN ('running','paused')) THEN 'ok' ELSE NULL END FROM ticket_slas x WHERE x.ticket_id = t.id)`;
+const WORST_SLA = worstSlaStateSql(sql`t.id`, sql`x`);
 
 const TICKET_JOINS: Record<string, SQL> = {
   pr: sql`LEFT JOIN config_options pr ON pr.id = t.priority_id`,

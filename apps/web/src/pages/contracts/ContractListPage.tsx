@@ -168,8 +168,8 @@ export default function ContractListPage() {
             kpis={
               sm
                 ? [
-                    { label: 'Active contracts', value: fmtNumber(sm.active), icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(sm.total)} in total · ${fmtNumber(sm.expired)} expired`, onClick: () => set({ status: 'active,expiring' }), scrollTo: true, active: state.status === 'active,expiring' },
-                    { label: 'Expiring · 90d', value: fmtNumber(sm.expiring90), tone: sm.expiring90 > 0 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(sm.expiring30)} within 30 days`, onClick: () => set({ expiringWithinDays: state.expiringWithinDays === '90' ? undefined : '90' }), scrollTo: true, active: state.expiringWithinDays === '90' },
+                    { label: 'Active contracts', value: fmtNumber(sm.active), icon: <FileSignature className="h-4 w-4" />, hint: `${fmtNumber(sm.total)} in total · ${fmtNumber(sm.expired)} expired`, onClick: () => set({ status: 'active,expiring' }), active: state.status === 'active,expiring' },
+                    { label: 'Expiring · 90d', value: fmtNumber(sm.expiring90), tone: sm.expiring90 > 0 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(sm.expiring30)} within 30 days`, onClick: () => set({ expiringWithinDays: state.expiringWithinDays === '90' ? undefined : '90' }), active: state.expiringWithinDays === '90' },
                     { label: 'Entitlements near limit', value: fmtNumber(sm.entitlementsOverThreshold), tone: sm.entitlementsOverThreshold > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: 'usage past the warning threshold' },
                     { label: 'Entitlements exhausted', value: fmtNumber(sm.entitlementsExhausted), tone: sm.entitlementsExhausted > 0 ? 'bad' : 'good', icon: <Ban className="h-4 w-4" />, hint: 'further usage is out of scope' },
                   ]

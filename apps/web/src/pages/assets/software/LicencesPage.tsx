@@ -111,10 +111,10 @@ export default function LicencesPage() {
             kpis={
               ov
                 ? [
-                    { label: 'Licences in term', value: fmtNumber(ov.licencesActive), icon: <FileSignature className="h-4 w-4" />, hint: 'active today, expiring and renewed ones included', onClick: () => set({ inTerm: state.inTerm === 'true' ? undefined : 'true', status: undefined, endingWithinDays: undefined }), active: state.inTerm === 'true', scrollTo: true },
+                    { label: 'Licences in term', value: fmtNumber(ov.licencesActive), icon: <FileSignature className="h-4 w-4" />, hint: 'active today, expiring and renewed ones included', onClick: () => set({ inTerm: state.inTerm === 'true' ? undefined : 'true', status: undefined, endingWithinDays: undefined }), active: state.inTerm === 'true' },
                     { label: 'Seats licensed', value: fmtNumber(ov.seatsLicensed), icon: <Users className="h-4 w-4" />, hint: 'devices, users and cores in term' },
-                    { label: 'Ending · 90d', value: fmtNumber(ending90), tone: ending90 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(ov.renewals.d30)} within 30 days`, onClick: () => set({ endingWithinDays: state.endingWithinDays === '90' ? undefined : '90', status: undefined, inTerm: undefined }), active: state.endingWithinDays === '90', scrollTo: true },
-                    { label: 'Expired', value: fmtNumber(ov.renewals.expired), tone: ov.renewals.expired ? 'bad' : 'good', icon: <ShieldOff className="h-4 w-4" />, hint: 'past the end date, not renewed', onClick: () => set({ status: state.status === 'expired' ? undefined : 'expired', endingWithinDays: undefined, inTerm: undefined }), active: state.status === 'expired', scrollTo: true },
+                    { label: 'Ending · 90d', value: fmtNumber(ending90), tone: ending90 ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: `${fmtNumber(ov.renewals.d30)} within 30 days`, onClick: () => set({ endingWithinDays: state.endingWithinDays === '90' ? undefined : '90', status: undefined, inTerm: undefined }), active: state.endingWithinDays === '90' },
+                    { label: 'Expired', value: fmtNumber(ov.renewals.expired), tone: ov.renewals.expired ? 'bad' : 'good', icon: <ShieldOff className="h-4 w-4" />, hint: 'past the end date, not renewed', onClick: () => set({ status: state.status === 'expired' ? undefined : 'expired', endingWithinDays: undefined, inTerm: undefined }), active: state.status === 'expired' },
                     { label: 'Spend this year', value: ov.spendYear === null ? '—' : fmtMoney(ov.spendYear), icon: <Wallet className="h-4 w-4" />, hint: 'licences that started this year' },
                   ]
                 : []

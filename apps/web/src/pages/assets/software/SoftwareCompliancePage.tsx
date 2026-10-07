@@ -95,11 +95,11 @@ export default function SoftwareCompliancePage() {
             kpis={
               t
                 ? [
-                    { label: 'Compliant', value: fmtNumber(t.compliant + t.unlimited), tone: 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: `${fmtNumber(t.unlimited)} on a site licence`, onClick: () => togglePosition('compliant'), active: state.position === 'compliant', scrollTo: true },
-                    { label: 'Under-deployed', value: fmtNumber(t.under_deployed), tone: t.under_deployed ? 'warn' : 'good', icon: <TrendingDown className="h-4 w-4" />, hint: 'seats bought but unused', onClick: () => togglePosition('under_deployed'), active: state.position === 'under_deployed', scrollTo: true },
-                    { label: 'Over-deployed', value: fmtNumber(t.over_deployed), tone: t.over_deployed ? 'bad' : 'good', icon: <AlertOctagon className="h-4 w-4" />, hint: 'more installed than licensed', onClick: () => togglePosition('over_deployed'), active: state.position === 'over_deployed', scrollTo: true },
-                    { label: 'Unlicensed', value: fmtNumber(t.unlicensed), tone: t.unlicensed ? 'bad' : 'good', icon: <ShieldOff className="h-4 w-4" />, hint: 'installed, no licence in term', onClick: () => togglePosition('unlicensed'), active: state.position === 'unlicensed', scrollTo: true },
-                    { label: `Ending · ${horizon}d`, value: fmtNumber(t.expiring), tone: t.expiring ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: 'a licence ends within the notice window', onClick: () => set({ expiringOnly: state.expiringOnly === 'true' ? undefined : 'true' }), active: state.expiringOnly === 'true', scrollTo: true },
+                    { label: 'Compliant', value: fmtNumber(t.compliant + t.unlimited), tone: 'good', icon: <ShieldCheck className="h-4 w-4" />, hint: `${fmtNumber(t.unlimited)} on a site licence`, onClick: () => togglePosition('compliant'), active: state.position === 'compliant' },
+                    { label: 'Under-deployed', value: fmtNumber(t.under_deployed), tone: t.under_deployed ? 'warn' : 'good', icon: <TrendingDown className="h-4 w-4" />, hint: 'seats bought but unused', onClick: () => togglePosition('under_deployed'), active: state.position === 'under_deployed' },
+                    { label: 'Over-deployed', value: fmtNumber(t.over_deployed), tone: t.over_deployed ? 'bad' : 'good', icon: <AlertOctagon className="h-4 w-4" />, hint: 'more installed than licensed', onClick: () => togglePosition('over_deployed'), active: state.position === 'over_deployed' },
+                    { label: 'Unlicensed', value: fmtNumber(t.unlicensed), tone: t.unlicensed ? 'bad' : 'good', icon: <ShieldOff className="h-4 w-4" />, hint: 'installed, no licence in term', onClick: () => togglePosition('unlicensed'), active: state.position === 'unlicensed' },
+                    { label: `Ending · ${horizon}d`, value: fmtNumber(t.expiring), tone: t.expiring ? 'warn' : 'good', icon: <CalendarClock className="h-4 w-4" />, hint: 'a licence ends within the notice window', onClick: () => set({ expiringOnly: state.expiringOnly === 'true' ? undefined : 'true' }), active: state.expiringOnly === 'true' },
                   ]
                 : []
             }

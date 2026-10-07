@@ -17,6 +17,6 @@ export function csatTiles(f: CsatFigures | undefined, opts: { thresholds?: { sat
     { label: 'Satisfied', value: fmtPct(f.satisfiedPct), tone: f.satisfiedPct == null ? 'default' : f.satisfiedPct >= 80 ? 'good' : f.satisfiedPct >= 60 ? 'warn' : 'bad', icon: <ThumbsUp className="h-4 w-4" />, hint: `rated ${satisfied} or more` },
     { label: 'Response rate', value: fmtPct(f.responseRate), icon: <Send className="h-4 w-4" />, hint: `${fmtNumber(f.sent)} ${f.sent === 1 ? 'survey' : 'surveys'} sent` },
     { label: 'Responses', value: fmtNumber(f.responses), icon: <MessageSquare className="h-4 w-4" />, hint: `${fmtNumber(f.sent)} sent` },
-    { label: 'Low ratings', value: fmtNumber(f.low), tone: f.low > 0 ? 'bad' : 'good', icon: <ThumbsDown className="h-4 w-4" />, hint: `rated ${low} or less`, onClick: opts.onLow, active: opts.lowActive, scrollTo: !!opts.onLow },
+    { label: 'Low ratings', value: fmtNumber(f.low), tone: f.low > 0 ? 'bad' : 'good', icon: <ThumbsDown className="h-4 w-4" />, hint: `rated ${low} or less`, onClick: opts.onLow, active: opts.lowActive },
   ];
 }

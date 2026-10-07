@@ -116,10 +116,10 @@ export default function MajorIncidentsPage() {
           summary && (
             <KpiGrid
               items={[
-                { label: 'Active now', value: summary.active, tone: summary.active ? 'bad' : 'good', icon: <Flame className="h-4 w-4" />, hint: 'bridge open, updates on a cadence', onClick: () => set({ status: 'active' }), active: (state.status || 'active') === 'active', scrollTo: true },
+                { label: 'Active now', value: summary.active, tone: summary.active ? 'bad' : 'good', icon: <Flame className="h-4 w-4" />, hint: 'bridge open, updates on a cadence', onClick: () => set({ status: 'active' }), active: (state.status || 'active') === 'active' },
                 { label: 'Update overdue', value: summary.overdue, tone: summary.overdue ? 'bad' : 'default', icon: <AlertTriangle className="h-4 w-4" />, hint: 'stakeholders waiting' },
-                { label: 'Awaiting review', value: summary.awaitingReview, tone: summary.awaitingReview ? 'warn' : 'default', icon: <ClipboardList className="h-4 w-4" />, hint: 'resolved, no post-incident review yet', onClick: () => set({ status: state.status === 'resolved' ? undefined : 'resolved' }), active: state.status === 'resolved', scrollTo: true },
-                { label: 'Resolved · 30 days', value: summary.resolved30d, icon: <CheckCircle2 className="h-4 w-4" />, hint: 'everything, including reviews done', onClick: () => set({ status: state.status === 'all' ? undefined : 'all' }), active: state.status === 'all', scrollTo: true },
+                { label: 'Awaiting review', value: summary.awaitingReview, tone: summary.awaitingReview ? 'warn' : 'default', icon: <ClipboardList className="h-4 w-4" />, hint: 'resolved, no post-incident review yet', onClick: () => set({ status: state.status === 'resolved' ? undefined : 'resolved' }), active: state.status === 'resolved' },
+                { label: 'Resolved · 30 days', value: summary.resolved30d, icon: <CheckCircle2 className="h-4 w-4" />, hint: 'everything, including reviews done', onClick: () => set({ status: state.status === 'all' ? undefined : 'all' }), active: state.status === 'all' },
               ]}
             />
           )

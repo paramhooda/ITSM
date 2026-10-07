@@ -12,6 +12,10 @@ import { queueNotification } from '@/modules/notifications/dispatch';
 import { onPhoneChanged, actorOf as auditActorOf } from '@/modules/notifications/phone';
 import { config } from '@/config';
 import type { Pagination } from '@/core/pagination';
+import { slaPredicates } from '@/modules/sla/predicates';
+
+/** The team and engineer load counts use the shared SLA vocabulary (rows aliased `t`). */
+const TICKET_BREACHED = slaPredicates(sql`t.id`).breached;
 
 // ---------------------------------------------------------------- users
 
@@ -449,7 +453,7 @@ export async function teamDirectory(ctx: Ctx) {
     SELECT t.assigned_team_id AS team_id,
       count(*)::int AS open,
       count(*) FILTER (WHERE t.assignee_id IS NULL)::int AS unassigned,
-      count(*) FILTER (WHERE EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = t.id AND s.state = 'breached'))::int AS breached,
+      count(*) FILTER (WHERE ${TICKET_BREACHED})::int AS breached,
       count(*) FILTER (WHERE t.created_at >= current_date)::int AS opened_today
     FROM tickets t JOIN config_options st ON st.id = t.status_id
     WHERE t.assigned_team_id IS NOT NULL AND st.status_category IN ('new', 'open', 'pending')
@@ -457,7 +461,7 @@ export async function teamDirectory(ctx: Ctx) {
   const userLoad = userIds.length
     ? ((await ctx.tx.execute(sql`
         SELECT t.assignee_id AS user_id, count(*)::int AS open,
-          count(*) FILTER (WHERE EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = t.id AND s.state = 'breached'))::int AS breached
+          count(*) FILTER (WHERE ${TICKET_BREACHED})::int AS breached
         FROM tickets t JOIN config_options st ON st.id = t.status_id
         WHERE t.assignee_id IS NOT NULL AND st.status_category IN ('new', 'open', 'pending')
         GROUP BY t.assignee_id`)).rows as { user_id: string; open: number; breached: number }[])

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
-import { ChevronDown, Check, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SearchInput, Select, type SelectProps } from './index';
 import { ModuleNav } from './ModuleNav';
@@ -14,6 +14,13 @@ import type { ModuleItem } from '@/layouts/modules';
  * link clears everything. Filter state stays in the URL as before, and the building
  * blocks (FilterGroup, FilterOptions, FilterSelect, FilterDateRange, FilterToggle)
  * keep their props, so every list page picks the new layout up unchanged.
+ *
+ * Under the bar the filters in effect read as a breadcrumb, the way a ServiceNow list
+ * spells its condition out ("All > Active = true > Priority = 1"): a root chip for the
+ * page's default view, then one removable chip per applied condition in the order it
+ * was applied, with the count line beside it. Clicking the root resets to the default.
+ * Nothing here scrolls the page: a click changes the data in place and the person stays
+ * where they are.
  */
 
 export interface AppliedFilter {
@@ -34,8 +41,12 @@ export interface ListShellProps {
   /** Number of filters in effect (search excluded or included as the page prefers). */
   activeCount?: number;
   onClear?: () => void;
-  /** The filters in effect. Pills already show them, so this only feeds the count. */
+  /** The conditions in effect, in the order applied: each becomes a removable chip in the breadcrumb row. */
   applied?: AppliedFilter[];
+  /** The breadcrumb's root chip: the page's default view ("All open", "All responses"). Defaults to "All". */
+  breadcrumbRoot?: ReactNode;
+  /** What the reset action is called in the bar and on the root chip's tooltip. Defaults to "Reset". */
+  clearLabel?: string;
   /** Quick views: status chips, segmented control, saved views. */
   quick?: ReactNode;
   /** Stats and charts band. */
@@ -48,18 +59,8 @@ export interface ListShellProps {
   className?: string;
 }
 
-/** Which pill is open (one popover at a time) and which pills are in effect (for the count line). */
-const BarContext = createContext<{ openKey: string | null; setOpenKey: (k: string | null) => void; report: (id: string, label: string | null) => void } | null>(null);
-
-/**
- * Scrolls the page's results (the list under the filter bar) into view. Stat tiles and
- * breakdown rows that filter in place call it so the effect of a click is always visible.
- */
-export function scrollToResults() {
-  if (typeof document === 'undefined') return;
-  const el = document.querySelector<HTMLElement>('[data-results]');
-  el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
+/** Which pill is open (one popover at a time). */
+const BarContext = createContext<{ openKey: string | null; setOpenKey: (k: string | null) => void } | null>(null);
 
 type PillSummary = { label: ReactNode; count: number } | null;
 interface PillApi {
@@ -70,32 +71,24 @@ interface PillApi {
 }
 const PillContext = createContext<PillApi | null>(null);
 
-export function ListShell({ modules, filters, search, activeCount = 0, onClear, applied = [], quick, insights, toolbar, count, children, className }: ListShellProps) {
+export function ListShell({ modules, filters, search, activeCount = 0, onClear, applied = [], breadcrumbRoot = 'All', clearLabel = 'Reset', quick, insights, toolbar, count, children, className }: ListShellProps) {
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [labels, setLabels] = useState<Record<string, string>>({});
-  const report = (id: string, label: string | null) =>
-    setLabels((prev) => {
-      if (label === null ? !(id in prev) : prev[id] === label) return prev;
-      const next = { ...prev };
-      if (label === null) delete next[id];
-      else next[id] = label;
-      return next;
-    });
   const hasBar = !!filters || !!search;
-  const active = Math.max(activeCount, applied.length);
-  const inEffect = Object.values(labels);
+  // The chips the page spells out are the conditions in effect; a page that gives none is counted by `activeCount`
+  // and gets one summary chip in their place.
+  const active = applied.length > 0 ? applied.length : activeCount;
   return (
     <div className={cn('flex flex-col', className)}>
       {modules && <ModuleNav items={modules} />}
       <div className="min-w-0 flex flex-col gap-3">
         {hasBar && (
-          <BarContext.Provider value={{ openKey, setOpenKey, report }}>
+          <BarContext.Provider value={{ openKey, setOpenKey }}>
             <div className="filter-bar" role="toolbar" aria-label="Filters" data-testid="filter-bar">
               {search && <SearchInput value={search.value} onChange={search.onChange} placeholder={search.placeholder ?? 'Search…'} className="w-full sm:w-64 shrink-0" />}
               {filters && <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">{filters}</div>}
               {active > 0 && onClear && (
                 <button type="button" onClick={onClear} className="ml-auto inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-[12.5px] font-medium text-brand-700 hover:bg-white/80 whitespace-nowrap" data-testid="filters-reset">
-                  <X className="h-3.5 w-3.5" /> Reset{active > 1 ? ` (${active})` : ''}
+                  <X className="h-3.5 w-3.5" /> {clearLabel}{active > 1 ? ` (${active})` : ''}
                 </button>
               )}
             </div>
@@ -108,22 +101,42 @@ export function ListShell({ modules, filters, search, activeCount = 0, onClear, 
           </div>
         )}
         {(count || active > 0) && (
-          <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted" data-testid="applied-filters">
-            {count && <span>{count}</span>}
-            {active > 0 && (
-              <span className="text-subtle">
-                · filtered by {inEffect.length ? inEffect.join(', ') : `${active} filter${active === 1 ? '' : 's'}`}
-              </span>
-            )}
-            {active > 0 && onClear && (
-              <button type="button" onClick={onClear} className="text-brand-700 hover:underline">
-                Reset
-              </button>
-            )}
-          </div>
+          <nav className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] text-muted" aria-label="Filters in effect" data-testid="applied-filters">
+            <ol className="flex flex-wrap items-center gap-1 min-w-0" data-testid="breadcrumb">
+              <li className="flex items-center">
+                {active > 0 && onClear ? (
+                  <button type="button" onClick={onClear} title={clearLabel} className="breadcrumb-chip breadcrumb-root" data-testid="breadcrumb-root">
+                    {breadcrumbRoot}
+                  </button>
+                ) : (
+                  <span className="breadcrumb-chip breadcrumb-root is-current" aria-current="page" data-testid="breadcrumb-root">
+                    {breadcrumbRoot}
+                  </span>
+                )}
+              </li>
+              {applied.map((a) => (
+                <li key={a.key} className="flex items-center gap-1 min-w-0">
+                  <ChevronRight className="h-3.5 w-3.5 text-subtle shrink-0" aria-hidden />
+                  <span className="breadcrumb-chip min-w-0" data-testid="breadcrumb-chip" data-key={a.key}>
+                    <span className="truncate max-w-[32ch]">{a.label}</span>
+                    <button type="button" onClick={a.onRemove} className="breadcrumb-remove" aria-label={typeof a.label === 'string' ? `Remove ${a.label}` : 'Remove this condition'}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                </li>
+              ))}
+              {applied.length === 0 && active > 0 && (
+                <li className="flex items-center gap-1">
+                  <ChevronRight className="h-3.5 w-3.5 text-subtle shrink-0" aria-hidden />
+                  <span className="breadcrumb-chip">{active} {active === 1 ? 'condition' : 'conditions'}</span>
+                </li>
+              )}
+            </ol>
+            {count && <span className="tnum whitespace-nowrap" data-testid="list-count">{count}</span>}
+          </nav>
         )}
         {insights}
-        <div data-results className="scroll-mt-4 flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
           {children}
         </div>
       </div>
@@ -162,11 +175,6 @@ export function FilterGroup({ label, children, hint, className }: { label: React
   }, [open]);
   const active = !!summary && summary.count > 0;
   const name = textOf(label, 'Filter');
-  useEffect(() => {
-    bar?.report(id, active ? name : null);
-    return () => bar?.report(id, null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, name]);
   return (
     <div ref={ref} className={cn('relative', className)}>
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog" className={cn('filter-pill', active && 'filter-pill-active', open && 'filter-pill-open')} data-testid="filter-pill" data-active={active || undefined}>
@@ -267,9 +275,11 @@ export function FilterOptions({ options, value, onChange, multi = false, max = 8
 export function FilterSelect(props: SelectProps) {
   const pill = usePill();
   const v = props.value == null ? '' : String(props.value);
-  const label = v ? textOf(props.options?.find((o) => o.value === v)?.label, v) : '';
+  // A comma list (a dashboard link with several ids) reads as its labels; the select itself shows the first one.
+  const parts = v ? v.split(',').filter(Boolean) : [];
+  const label = parts.map((x) => textOf(props.options?.find((o) => o.value === x)?.label, x)).join(', ');
   useEffect(() => {
-    pill?.report(v ? { label, count: 1 } : null);
+    pill?.report(parts.length ? { label, count: 1 } : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [v, label]);
   return (

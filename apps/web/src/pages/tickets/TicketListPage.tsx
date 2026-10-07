@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Bookmark, Trash2, Share2, AlertTriangle, Flame, ChevronDown, Inbox, Timer, UserX, UserCheck, Gauge, Bug } from 'lucide-react';
+import { Plus, Bookmark, BookmarkPlus, Trash2, Share2, AlertTriangle, Flame, ChevronDown, Inbox, Timer, UserX, UserCheck, Gauge, Bug } from 'lucide-react';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { TrendChart } from '@/components/dashboards/TrendChart';
 import { BreakdownBar, type BreakdownItem } from '@/components/dashboards/BreakdownBar';
@@ -17,6 +17,7 @@ import { dotClass } from '@/lib/utils';
 import { TICKET_CATEGORY_COLORS, PRIORITY_LEVEL_COLORS, SCOPE_COLORS, BREACH_RISK_COLORS, SENTIMENT_COLORS } from '@/lib/statusColors';
 import { DOMAINS } from '@itsm/shared';
 import { ticketsApi, qk, itemsOf } from '@/components/tickets/api';
+import { toStatsParams, TICKET_LIST_DEFAULTS } from '@/components/tickets/listQuery';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { ScopeBadge } from '@/components/tickets/ScopeBadge';
@@ -68,8 +69,8 @@ const ASSIGNEE_VIEWS = [
   { value: 'watching', label: 'Watching' },
 ];
 const DOMAIN_LABELS: Record<string, string> = { general: 'General', noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk' };
-/** Every filter the page owns; sort/order live beside them in the URL but are not filters. */
-const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat'];
+/** Every filter the page owns; sort/order/page live beside them in the URL but are not filters. */
+const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'statusId', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat'];
 /** The customer's satisfaction rating after resolution: rated, low, awaiting a reply, never surveyed. */
 const CSAT_OPTIONS: { value: string; label: string; dot: string | null }[] = [
   { value: 'rated', label: 'Rated', dot: 'green' },
@@ -89,11 +90,14 @@ const RISK_LEVEL_OPTIONS = [
   { value: 'high', label: 'High', color: 'red' },
   { value: 'none', label: 'Not assessed', color: 'slate' },
 ];
-const DEFAULTS = { statusCategory: 'new,open,pending', sort: 'lastActivityAt', order: 'desc' };
+/** The page's default view ("All open", the breadcrumb root): the open categories, newest activity first. */
+const DEFAULTS = TICKET_LIST_DEFAULTS;
 /**
- * Parameters that dashboards and record pages link with (`mine=true`, `open=true`,
- * `assigneeId=…`, `status=resolved`, `contractId=…`). They are rewritten into the
- * page's own keys on arrival so one set of chips and rail controls describes the list.
+ * Parameters that older links from record pages and the assistant still carry
+ * (`mine=true`, `open=true`, `assigneeId=…`, `status=resolved`, `contractId=…`).
+ * They are rewritten into the page's own keys on arrival so one breadcrumb and one
+ * set of pills describes the list; dashboards no longer emit them (they build their
+ * links through the shared builder), but the rewrite stays so nothing old breaks.
  */
 const LEGACY_KEYS = ['mine', 'unassigned', 'open', 'assigneeId', 'status', 'contractId'];
 type Breakdown = 'priority' | 'status' | 'team';
@@ -115,7 +119,11 @@ function legacyPatch(state: Record<string, string>): Record<string, string | und
   return patch;
 }
 
-const dateRangeLabel = (from?: string, to?: string) => (from && to ? `${fmtDate(from)} – ${fmtDate(to)}` : from ? `from ${fmtDate(from)}` : `until ${fmtDate(to)}`);
+const dateRangeLabel = (from?: string, to?: string) => (from && to ? (from === to ? fmtDate(from) : `${fmtDate(from)} – ${fmtDate(to)}`) : from ? `from ${fmtDate(from)}` : `until ${fmtDate(to)}`);
+/** Keys that may carry a comma list (dashboard links with several ids) read as their labels joined. */
+const labelsOf = (csv: string, lookup: (id: string) => string | undefined) => csv.split(',').filter(Boolean).map((v) => lookup(v) ?? '…').join(', ');
+const splitCsv = (v?: string) => (v ? v.split(',').filter(Boolean) : undefined);
+const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`);
 
 /** A breached SLA gets a red rail, a clock past 75% an amber one; everything else stays quiet. */
 const rowRail = (r: TicketListRow) => {
@@ -128,6 +136,8 @@ export default function TicketListPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { state, set, page, pageSize, setPage } = useListState(DEFAULTS);
+  // Read-only view of the URL: its key order is the order the conditions were applied, which the breadcrumb follows.
+  const [urlParams] = useSearchParams();
   const { options, lookups, byId } = useLookups();
   const engineers = useEngineers();
   const customers = useCustomersLookup();
@@ -137,7 +147,7 @@ export default function TicketListPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [breakdown, setBreakdown] = useState<Breakdown>('priority');
 
-  // Links from dashboards arrive with legacy keys; normalise them once, then query.
+  // Older links (record pages, the assistant) arrive with legacy keys; normalise them once, then query.
   const legacy = useMemo(() => legacyPatch(state), [state]);
   useEffect(() => {
     if (legacy) set(legacy, false);
@@ -145,24 +155,12 @@ export default function TicketListPage() {
 
   const tab = (state.type as Tab) || 'all';
   const assigneeFilter = state.assignee ?? '';
-  const filterParams = useMemo(() => {
-    const p: Record<string, unknown> = {};
-    if (state.q) p.q = state.q;
-    if (tab !== 'all') p.type = tab;
-    for (const k of ['customerId', 'statusCategory', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo'] as const) if (state[k]) p[k] = state[k];
-    if (state.isMajor === 'true') p.isMajor = 'true';
-    if (state.knownError === 'true') p.knownError = 'true';
-    if (state.csat) p.csat = state.csat;
-    if (assigneeFilter === 'me') p.mine = 'true';
-    else if (assigneeFilter === 'unassigned') p.unassigned = 'true';
-    else if (assigneeFilter === 'watching') p.watching = 'true';
-    else if (assigneeFilter) p.assigneeId = assigneeFilter;
-    return p;
-  }, [state, tab, assigneeFilter]);
+  // One mapping from the URL state to the API (shared with the dashboards guard test), so a link reproduces its number.
+  const filterParams = useMemo(() => toStatsParams({ ...state, type: tab }) as Record<string, unknown>, [state, tab]);
   const params = useMemo(() => ({ ...filterParams, page, pageSize, sort: state.sort, order: state.order }), [filterParams, page, pageSize, state.sort, state.order]);
 
   const list = useQuery({ queryKey: qk.list(params), queryFn: () => ticketsApi.list(params), placeholderData: (prev) => prev, enabled: !legacy });
-  // Stats honour the same filters as the list, so the band above the table always describes what is in it.
+  // Stats take the same filters as the list; the API counts the tiles over the scope without the status chips and tile toggles, so one tile never moves another.
   const stats = useQuery({ queryKey: qk.stats(filterParams), queryFn: () => ticketsApi.stats(filterParams), refetchInterval: 60_000, placeholderData: (prev) => prev, enabled: !legacy });
   const views = useQuery({ queryKey: qk.views, queryFn: () => ticketsApi.views() });
 
@@ -178,12 +176,16 @@ export default function TicketListPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [navigate, can]);
 
-  const cats = (state.statusCategory ?? '').split(',').filter(Boolean);
+  // `any` lifts the status filter altogether (dashboard links to resolved-in-period lists use it); it is never a category.
+  const anyStatus = state.statusCategory === 'any';
+  const cats = anyStatus ? [] : (state.statusCategory ?? '').split(',').filter(Boolean);
   const toggleCat = (key: string) => {
     const next = cats.includes(key) ? cats.filter((c) => c !== key) : [...cats, key];
     set({ statusCategory: next.join(',') });
   };
   const clearFilters = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
+  /** A saved view is "on" when every filter it holds is what the page shows. */
+  const viewActive = (v: SavedView) => FILTER_KEYS.every((k) => String(v.filters[k] ?? DEFAULTS[k] ?? '') === (state[k] ?? ''));
 
   const applyView = (v: SavedView) => {
     const patch: Record<string, string | undefined> = Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined]));
@@ -339,37 +341,59 @@ export default function TicketListPage() {
     }
   };
 
-  // Every filter in effect, spelled out above the results; removing one clears only its key(s).
+  // The breadcrumb: one chip per condition in effect, in the order they were applied (the URL's key order);
+  // removing a chip clears only its key(s), the root chip clears them all.
   const applied: AppliedFilter[] = [];
-  const addApplied = (key: string, label: ReactNode, keys: string[] = [key]) => applied.push({ key, label, onRemove: () => set(Object.fromEntries(keys.map((k) => [k, undefined]))) });
-  if (state.q) addApplied('q', `Search: “${state.q}”`);
-  if (tab !== 'all') addApplied('type', `Type: ${TABS.find((t) => t.key === tab)?.label ?? tab}`);
-  if (state.statusCategory !== DEFAULTS.statusCategory) addApplied('statusCategory', `Status: ${cats.map((c) => STATUS_CATEGORIES.find((x) => x.key === c)?.label ?? c).join(', ')}`);
-  if (state.priorityId) addApplied('priorityId', `Priority: ${priorities.find((p) => p.id === state.priorityId)?.label ?? '…'}`);
-  if (state.customerId) addApplied('customerId', `Customer: ${customerItems.find((c) => c.id === state.customerId)?.name ?? '…'}`);
-  if (assigneeFilter) addApplied('assignee', `Assignee: ${ASSIGNEE_VIEWS.find((v) => v.value === assigneeFilter)?.label ?? engineerItems.find((u) => u.id === assigneeFilter)?.name ?? '…'}`);
-  if (state.teamId) addApplied('teamId', `Team: ${teams.find((t) => t.id === state.teamId)?.name ?? '…'}`);
-  if (state.serviceId) addApplied('serviceId', `Service: ${services.find((sv) => sv.id === state.serviceId)?.name ?? '…'}`);
-  if (state.domain) addApplied('domain', `Domain: ${DOMAIN_LABELS[state.domain] ?? state.domain}`);
-  if (state.categoryId) addApplied('categoryId', `Category: ${byId(state.categoryId)?.label ?? '…'}`);
-  if (state.securitySeverityId) addApplied('securitySeverityId', `Security severity: ${byId(state.securitySeverityId)?.label ?? '…'}`);
-  if (state.scopeStatus) addApplied('scopeStatus', `Scope: ${SCOPE_OPTIONS.find((o) => o.value === state.scopeStatus)?.label ?? state.scopeStatus}`);
-  if (state.slaState) addApplied('slaState', `SLA: ${SLA_OPTIONS.find((o) => o.value === state.slaState)?.label ?? state.slaState}`);
-  if (state.breachRisk) addApplied('breachRisk', `Breach risk: ${RISK_OPTIONS.find((o) => o.value === state.breachRisk)?.label ?? state.breachRisk}`);
-  if (state.sentiment) addApplied('sentiment', `Customer mood: ${SENTIMENT_OPTIONS.find((o) => o.value === state.sentiment)?.label ?? state.sentiment}`);
-  if (state.csat) addApplied('csat', `Rating: ${CSAT_OPTIONS.find((o) => o.value === state.csat)?.label ?? state.csat}`);
-  if (state.createdFrom || state.createdTo) addApplied('created', `Created: ${dateRangeLabel(state.createdFrom, state.createdTo)}`, ['createdFrom', 'createdTo']);
-  if (state.isMajor === 'true') addApplied('isMajor', 'Major incidents only');
-  if (state.knownError === 'true') addApplied('knownError', 'Known errors only');
-  if (state.changeType) addApplied('changeType', `Type: ${CHANGE_TYPE_OPTIONS.find((o) => o.value === state.changeType)?.label ?? state.changeType}`);
-  if (state.riskLevel) addApplied('riskLevel', `Risk: ${RISK_LEVEL_OPTIONS.find((o) => o.value === state.riskLevel)?.label ?? state.riskLevel}`);
-  if (state.scheduledFrom || state.scheduledTo) addApplied('window', `Window: ${dateRangeLabel(state.scheduledFrom, state.scheduledTo)}`, ['scheduledFrom', 'scheduledTo']);
+  const seen = new Set<string>();
+  const addApplied = (key: string, label: ReactNode, keys: string[] = [key]) => {
+    keys.forEach((k) => seen.add(k));
+    applied.push({ key, label, onRemove: () => set(Object.fromEntries(keys.map((k) => [k, undefined]))) });
+  };
+  const chipFor = (key: string) => {
+    switch (key) {
+      case 'q': return state.q && addApplied('q', `Search: “${state.q}”`);
+      case 'type': return tab !== 'all' && addApplied('type', TABS.find((t) => t.key === tab)?.label ?? tab);
+      case 'statusCategory':
+        if (anyStatus) return addApplied('statusCategory', 'Any status');
+        return state.statusCategory !== DEFAULTS.statusCategory && addApplied('statusCategory', `Status: ${cats.map((c) => STATUS_CATEGORIES.find((x) => x.key === c)?.label ?? c).join(', ')}`);
+      case 'statusId': return state.statusId && addApplied('statusId', `Status: ${labelsOf(state.statusId, (id) => byId(id)?.label)}`);
+      case 'priorityId': return state.priorityId && addApplied('priorityId', `Priority: ${labelsOf(state.priorityId, (id) => priorities.find((p) => p.id === id)?.label)}`);
+      case 'customerId': return state.customerId && addApplied('customerId', `Customer: ${customerItems.find((c) => c.id === state.customerId)?.name ?? '…'}`);
+      case 'assignee': return assigneeFilter && addApplied('assignee', ASSIGNEE_VIEWS.find((v) => v.value === assigneeFilter)?.label ?? `Assignee: ${engineerItems.find((u) => u.id === assigneeFilter)?.name ?? '…'}`);
+      case 'teamId': return state.teamId && addApplied('teamId', `Team: ${labelsOf(state.teamId, (id) => teams.find((t) => t.id === id)?.name)}`);
+      case 'serviceId': return state.serviceId && addApplied('serviceId', `Service: ${services.find((sv) => sv.id === state.serviceId)?.name ?? '…'}`);
+      case 'domain': return state.domain && addApplied('domain', `Domain: ${labelsOf(state.domain, (d) => DOMAIN_LABELS[d] ?? d)}`);
+      case 'categoryId': return state.categoryId && addApplied('categoryId', `Category: ${byId(state.categoryId)?.label ?? '…'}`);
+      case 'securitySeverityId': return state.securitySeverityId && addApplied('securitySeverityId', `Security severity: ${labelsOf(state.securitySeverityId, (id) => byId(id)?.label)}`);
+      case 'scopeStatus': return state.scopeStatus && addApplied('scopeStatus', `Scope: ${SCOPE_OPTIONS.find((o) => o.value === state.scopeStatus)?.label ?? state.scopeStatus}`);
+      case 'slaState': return state.slaState && addApplied('slaState', `SLA: ${labelsOf(state.slaState, (v) => SLA_OPTIONS.find((o) => o.value === v)?.label ?? v)}`);
+      case 'breachRisk': return state.breachRisk && addApplied('breachRisk', RISK_OPTIONS.find((o) => o.value === state.breachRisk)?.label ?? `Breach risk: ${state.breachRisk}`);
+      case 'sentiment': return state.sentiment && addApplied('sentiment', `Customer mood: ${SENTIMENT_OPTIONS.find((o) => o.value === state.sentiment)?.label ?? state.sentiment}`);
+      case 'csat': return state.csat && addApplied('csat', `Rating: ${CSAT_OPTIONS.find((o) => o.value === state.csat)?.label ?? state.csat}`);
+      case 'createdFrom':
+      case 'createdTo': return (state.createdFrom || state.createdTo) && addApplied('created', `Created: ${dateRangeLabel(state.createdFrom, state.createdTo)}`, ['createdFrom', 'createdTo']);
+      case 'resolvedFrom':
+      case 'resolvedTo': return (state.resolvedFrom || state.resolvedTo) && addApplied('resolved', `Resolved: ${dateRangeLabel(state.resolvedFrom, state.resolvedTo)}`, ['resolvedFrom', 'resolvedTo']);
+      case 'isMajor': return state.isMajor === 'true' && addApplied('isMajor', 'Major incidents');
+      case 'knownError': return state.knownError === 'true' && addApplied('knownError', 'Known errors');
+      case 'changeType': return state.changeType && addApplied('changeType', `Change type: ${CHANGE_TYPE_OPTIONS.find((o) => o.value === state.changeType)?.label ?? state.changeType}`);
+      case 'riskLevel': return state.riskLevel && addApplied('riskLevel', `Risk: ${RISK_LEVEL_OPTIONS.find((o) => o.value === state.riskLevel)?.label ?? state.riskLevel}`);
+      case 'scheduledFrom':
+      case 'scheduledTo': return (state.scheduledFrom || state.scheduledTo) && addApplied('window', `Window: ${dateRangeLabel(state.scheduledFrom, state.scheduledTo)}`, ['scheduledFrom', 'scheduledTo']);
+      default: return undefined;
+    }
+  };
+  for (const k of urlParams.keys()) if (!seen.has(k) && FILTER_KEYS.includes(k)) chipFor(k);
 
+  // "1–25 of 148 open incidents": what the list holds, named the way the breadcrumb reads.
   const total = list.data?.total;
+  const noun = plural(total ?? 0, tab === 'all' ? 'ticket' : tab);
+  const statusWord = anyStatus ? '' : state.statusCategory === DEFAULTS.statusCategory ? 'open ' : cats.length === 1 ? `${(STATUS_CATEGORIES.find((c) => c.key === cats[0])?.label ?? cats[0]).toLowerCase()} ` : '';
+  const countLine = total === undefined ? undefined : total === 0 ? `0 ${statusWord}${noun}` : `${fmtNumber((page - 1) * pageSize + 1)}–${fmtNumber(Math.min(total, page * pageSize))} of ${fmtNumber(total)} ${statusWord}${noun}`;
   const rail = (
     <>
       <FilterGroup label="Priority">
-        <FilterOptions options={priorities.map((o) => ({ value: o.id, label: o.label, dot: dotClass(o.color ?? (o.level ? PRIORITY_LEVEL_COLORS[o.level] : null)), count: s ? priorityCounts.get(o.id) ?? 0 : undefined }))} value={state.priorityId} onChange={(v) => set({ priorityId: v as string | undefined })} />
+        <FilterOptions options={priorities.map((o) => ({ value: o.id, label: o.label, dot: dotClass(o.color ?? (o.level ? PRIORITY_LEVEL_COLORS[o.level] : null)), count: s ? priorityCounts.get(o.id) ?? 0 : undefined }))} value={splitCsv(state.priorityId)} onChange={(v) => set({ priorityId: v as string | undefined })} />
       </FilterGroup>
       <FilterGroup label="Customer">
         <FilterSelect value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} placeholder="All customers" options={customerItems.map((c) => ({ value: c.id, label: c.name }))} />
@@ -388,7 +412,7 @@ export default function TicketListPage() {
         <FilterOptions options={SCOPE_OPTIONS.map((o) => ({ ...o, dot: dotClass(SCOPE_COLORS[o.value]) }))} value={state.scopeStatus} onChange={(v) => set({ scopeStatus: v as string | undefined })} />
       </FilterGroup>
       <FilterGroup label="SLA">
-        <FilterOptions options={SLA_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(o.color) }))} value={state.slaState} onChange={(v) => set({ slaState: v as string | undefined })} />
+        <FilterOptions options={SLA_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(o.color) }))} value={splitCsv(state.slaState)} onChange={(v) => set({ slaState: v as string | undefined })} />
       </FilterGroup>
       <FilterGroup label="Breach risk" hint="Forecast from the clock, how long similar tickets take and who owns it" defaultOpen={!!state.breachRisk}>
         <FilterOptions options={RISK_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(BREACH_RISK_COLORS[o.value]) }))} value={state.breachRisk} onChange={(v) => set({ breachRisk: v as string | undefined })} />
@@ -401,6 +425,18 @@ export default function TicketListPage() {
       </FilterGroup>
       <FilterGroup label="Created">
         <FilterDateRange from={state.createdFrom} to={state.createdTo} onChange={(r) => set({ createdFrom: r.from, createdTo: r.to })} />
+      </FilterGroup>
+      <FilterGroup label="Resolved" hint="When the ticket was resolved; lifts the open-status default so the resolved tickets show" defaultOpen={!!(state.resolvedFrom || state.resolvedTo)}>
+        {/* A resolved ticket is never new, open or pending: setting the range lifts the default status to Any status (and only that default comes back when the range is cleared), as a dashboard link does. */}
+        <FilterDateRange
+          from={state.resolvedFrom}
+          to={state.resolvedTo}
+          onChange={(r) => {
+            const ranged = !!(r.from || r.to);
+            const status = ranged && state.statusCategory === DEFAULTS.statusCategory ? 'any' : !ranged && anyStatus ? undefined : state.statusCategory;
+            set({ resolvedFrom: r.from, resolvedTo: r.to, statusCategory: status });
+          }}
+        />
       </FilterGroup>
       {tab === 'problem' && (
         <FilterGroup label="Known errors" hint="Problems flagged as known errors on their Problem analysis tab" defaultOpen={state.knownError === 'true'}>
@@ -421,7 +457,7 @@ export default function TicketListPage() {
         </>
       )}
       <FilterGroup label="Domain" defaultOpen={!!state.domain}>
-        <FilterOptions options={DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABELS[d] ?? d }))} value={state.domain} onChange={(v) => set({ domain: v as string | undefined })} />
+        <FilterOptions options={DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABELS[d] ?? d }))} value={splitCsv(state.domain)} onChange={(v) => set({ domain: v as string | undefined })} />
       </FilterGroup>
       <FilterGroup label="Category" defaultOpen={!!state.categoryId}>
         <FilterSelect value={state.categoryId ?? ''} onChange={(e) => set({ categoryId: e.target.value })} placeholder="Any category" options={categories.map((o) => ({ value: o.id, label: o.label }))} />
@@ -442,6 +478,11 @@ export default function TicketListPage() {
           onChange={(v) => set({ isMajor: v ? 'true' : undefined })}
         />
       </FilterGroup>
+      {applied.length > 0 && (
+        <button type="button" onClick={() => setSaveOpen(true)} className="filter-pill text-muted hover:text-default" data-testid="save-view">
+          <BookmarkPlus className="h-3.5 w-3.5" /> Save this view
+        </button>
+      )}
     </>
   );
 
@@ -449,7 +490,7 @@ export default function TicketListPage() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Tickets"
-        subtitle={s ? <span>{fmtNumber(s.total)} match the current filters · {fmtNumber(s.breached)} breached · {fmtNumber(s.unassigned)} unassigned</span> : 'Incidents, requests, problems and changes across every customer'}
+        subtitle={s ? <span>{fmtNumber(s.open)} open · {fmtNumber(s.breached)} breached · {fmtNumber(s.unassigned)} unassigned</span> : 'Incidents, requests, problems and changes across every customer'}
         actions={
           <>
             <Menu
@@ -480,7 +521,7 @@ export default function TicketListPage() {
                   ),
                   onClick: () => applyView(v),
                 })),
-                { label: 'Save current filters…', icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setSaveOpen(true) },
+                { label: 'Save this view…', icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setSaveOpen(true) },
               ]}
             />
             {can('tickets:create') && (
@@ -499,22 +540,34 @@ export default function TicketListPage() {
         applied={applied}
         activeCount={applied.length}
         onClear={clearFilters}
-        count={total !== undefined ? `${fmtNumber(total)} ${total === 1 ? 'ticket' : 'tickets'}` : undefined}
+        breadcrumbRoot="All open"
+        count={countLine}
         quick={
           <>
+            {(views.data?.items ?? []).map((v) => (
+              <FilterChip key={v.id} active={viewActive(v)} onClick={() => applyView(v)} className="gap-1" testId="saved-view">
+                <Bookmark className="h-3 w-3" aria-hidden /> {v.name}
+              </FilterChip>
+            ))}
+            {(views.data?.items.length ?? 0) > 0 && <span className="hidden sm:block h-5 w-px bg-[var(--border)] mx-0.5" aria-hidden />}
             <Segmented
               size="sm"
-              options={TABS.map((t) => ({ value: t.key, label: t.label, count: t.key === 'all' ? openTotal : (byType[t.key] ?? 0) }))}
+              // "All" is the sum of the type pills, counted over the same scope, so it is right before any click.
+              options={TABS.map((t) => ({ value: t.key, label: t.label, count: t.key === 'all' ? (s?.allTypes ?? openTotal) : (byType[t.key] ?? 0) }))}
               value={tab}
               // Leaving the Changes tab drops its pills' values too: hidden pills must not keep filtering the other tabs.
               onChange={(v) => set({ type: v === 'all' ? undefined : v, ...(v === 'change' ? {} : { changeType: undefined, riskLevel: undefined, scheduledFrom: undefined, scheduledTo: undefined }), ...(v === 'problem' ? {} : { knownError: undefined }) })}
             />
-            <span className="hidden sm:block h-5 w-px bg-[var(--border)] mx-0.5" aria-hidden />
+            {/* The status chips take a row of their own, so the group never splits mid-way when the row wraps. */}
+            <span className="basis-full h-0" aria-hidden />
             {STATUS_CATEGORIES.map((c) => (
-              <FilterChip key={c.key} active={cats.includes(c.key)} onClick={() => toggleCat(c.key)} dot={dotClass(TICKET_CATEGORY_COLORS[c.key])} count={s?.byStatusCategory?.[c.key] ?? 0}>
+              <FilterChip key={c.key} active={cats.includes(c.key)} onClick={() => toggleCat(c.key)} dot={dotClass(TICKET_CATEGORY_COLORS[c.key])} count={s?.byStatusCategory?.[c.key] ?? 0} testId={`status-${c.key}`}>
                 {c.label}
               </FilterChip>
             ))}
+            <FilterChip active={anyStatus} onClick={() => set({ statusCategory: anyStatus ? undefined : 'any' })} count={s ? Object.values(s.byStatusCategory ?? {}).reduce((n, c) => n + c, 0) : 0} testId="any-status">
+              Any status
+            </FilterChip>
           </>
         }
         toolbar={
@@ -542,18 +595,20 @@ export default function TicketListPage() {
           <InsightBand
             id="tickets"
             loading={stats.isLoading}
-            summary={s ? `${fmtNumber(s.total)} tickets match` : undefined}
+            summary={s ? `${fmtNumber(s.total)} ${plural(s.total, 'ticket')} match · tiles ignore the quick filters` : undefined}
             columns={5}
             kpis={
               s
                 ? [
-                    { label: 'Open tickets', value: fmtNumber(s.open), icon: <Inbox className="h-4 w-4" />, hint: `${fmtNumber(s.createdToday)} opened today · ${fmtNumber(s.resolvedToday)} resolved`, spark: series.map((d) => d.opened), sparkLabel: 'Tickets opened per day', onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: undefined, assignee: undefined }), scrollTo: true },
-                    { label: 'SLA breached', value: fmtNumber(s.breached), tone: s.breached > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: `${fmtNumber(s.atRisk)} at risk · ${fmtNumber(s.overdue)} overdue`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, slaState: state.slaState === 'breached' ? undefined : 'breached' }), scrollTo: true, active: state.slaState === 'breached' },
+                    // The Open tile is the baseline every other tile is a slice of; it never filters.
+                    { label: 'Open tickets', value: fmtNumber(s.open), icon: <Inbox className="h-4 w-4" />, hint: `${fmtNumber(s.createdToday)} opened today · ${fmtNumber(s.resolvedToday)} resolved`, spark: series.map((d) => d.opened), sparkLabel: 'Tickets opened per day' },
+                    // The other four toggle one condition in place: the ring and the breadcrumb chip show it; the numbers stay put.
+                    { label: 'SLA breached', value: fmtNumber(s.breached), tone: s.breached > 0 ? 'bad' : 'good', icon: <Timer className="h-4 w-4" />, hint: `${fmtNumber(s.atRisk)} at risk · ${fmtNumber(s.overdue)} overdue`, onClick: () => set({ slaState: state.slaState === 'breached' ? undefined : 'breached' }), active: state.slaState === 'breached' },
                     tab === 'problem'
-                      ? { label: 'Known errors', value: fmtNumber(s.knownErrors ?? 0), tone: 'accent', icon: <Bug className="h-4 w-4" />, hint: 'problems with a documented workaround', onClick: () => set({ knownError: state.knownError === 'true' ? undefined : 'true' }), scrollTo: true, active: state.knownError === 'true' }
-                      : { label: 'Likely to breach', value: fmtNumber(s.highRisk ?? 0), tone: (s.highRisk ?? 0) > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: `${fmtNumber(s.unhappy ?? 0)} unhappy customer${s.unhappy === 1 ? '' : 's'}`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, breachRisk: state.breachRisk === 'high' ? undefined : 'high' }), scrollTo: true, active: state.breachRisk === 'high' },
-                    { label: 'Unassigned', value: fmtNumber(s.unassigned), tone: s.unassigned > 0 ? 'warn' : 'good', icon: <UserX className="h-4 w-4" />, hint: `${fmtNumber(s.major)} major open`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: assigneeFilter === 'unassigned' ? undefined : 'unassigned' }), scrollTo: true, active: assigneeFilter === 'unassigned' },
-                    { label: 'Assigned to me', value: fmtNumber(s.mine), icon: <UserCheck className="h-4 w-4" />, hint: `${fmtNumber(s.dueToday)} due today · ${fmtNumber(s.pendingApprovals)} awaiting approval`, onClick: () => set({ statusCategory: DEFAULTS.statusCategory, assignee: assigneeFilter === 'me' ? undefined : 'me' }), scrollTo: true, active: assigneeFilter === 'me' },
+                      ? { label: 'Known errors', value: fmtNumber(s.knownErrors ?? 0), tone: 'accent', icon: <Bug className="h-4 w-4" />, hint: 'problems with a documented workaround', onClick: () => set({ knownError: state.knownError === 'true' ? undefined : 'true' }), active: state.knownError === 'true' }
+                      : { label: 'Likely to breach', value: fmtNumber(s.highRisk ?? 0), tone: (s.highRisk ?? 0) > 0 ? 'warn' : 'good', icon: <Gauge className="h-4 w-4" />, hint: `${fmtNumber(s.unhappy ?? 0)} unhappy customer${s.unhappy === 1 ? '' : 's'}`, onClick: () => set({ breachRisk: state.breachRisk === 'high' ? undefined : 'high' }), active: state.breachRisk === 'high' },
+                    { label: 'Unassigned', value: fmtNumber(s.unassigned), tone: s.unassigned > 0 ? 'warn' : 'good', icon: <UserX className="h-4 w-4" />, hint: `${fmtNumber(s.major)} major open`, onClick: () => set({ assignee: assigneeFilter === 'unassigned' ? undefined : 'unassigned' }), active: assigneeFilter === 'unassigned' },
+                    { label: 'Assigned to me', value: fmtNumber(s.mine), icon: <UserCheck className="h-4 w-4" />, hint: `${fmtNumber(s.dueToday)} due today · ${fmtNumber(s.pendingApprovals)} awaiting approval`, onClick: () => set({ assignee: assigneeFilter === 'me' ? undefined : 'me' }), active: assigneeFilter === 'me' },
                   ]
                 : []
             }
@@ -563,7 +618,7 @@ export default function TicketListPage() {
                   <Panel title="Ticket flow" subtitle={state.createdFrom && state.createdTo ? 'Opened and resolved per day in the selected range' : 'Opened and resolved per day, last 14 days'}>
                     <TrendChart data={series} x="day" series={[{ key: 'opened', label: 'Opened', color: '#2563eb' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} kind="area" height={190} />
                   </Panel>
-                  <Panel title="Breakdown" subtitle="Click a row to filter" action={<Segmented size="sm" options={[{ value: 'priority', label: 'Priority' }, { value: 'status', label: 'Status' }, { value: 'team', label: 'Team' }]} value={breakdown} onChange={setBreakdown} />}>
+                  <Panel title="Breakdown" subtitle="Click a row to filter the list in place" action={<Segmented size="sm" options={[{ value: 'priority', label: 'Priority' }, { value: 'status', label: 'Status' }, { value: 'team', label: 'Team' }]} value={breakdown} onChange={setBreakdown} />}>
                     <BreakdownBar items={breakdownItems} dense emptyText="No tickets in this view" onSelect={onBreakdownSelect} />
                   </Panel>
                 </>
@@ -632,7 +687,7 @@ function SaveViewDialog({ open, onClose, onSave, saving }: { open: boolean; onCl
       <div className="flex flex-col gap-3">
         <Input autoFocus placeholder="View name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name.trim() && onSave(name.trim(), shared)} />
         <Checkbox checked={shared} onChange={(e) => setShared(e.target.checked)} label="Share with all MSP users" />
-        <div className="text-[12px] text-subtle">Saves the current filters, status chips and sort order.</div>
+        <div className="text-[12px] text-subtle">Saves the conditions in the breadcrumb and the sort order as a pill on this page.</div>
       </div>
     </Dialog>
   );

@@ -108,7 +108,7 @@ export default function SoftwareTitlesPage() {
             kpis={
               ov
                 ? [
-                    { label: 'Titles in use', value: fmtNumber(ov.titlesInUse), icon: <Package className="h-4 w-4" />, hint: 'with an installation or a licence', onClick: () => set({ inUseOnly: state.inUseOnly === 'true' ? undefined : 'true' }), active: state.inUseOnly === 'true', scrollTo: true },
+                    { label: 'Titles in use', value: fmtNumber(ov.titlesInUse), icon: <Package className="h-4 w-4" />, hint: 'with an installation or a licence', onClick: () => set({ inUseOnly: state.inUseOnly === 'true' ? undefined : 'true' }), active: state.inUseOnly === 'true' },
                     { label: 'Installations', value: fmtNumber(ov.installations), icon: <HardDrive className="h-4 w-4" />, hint: `on ${fmtNumber(ov.hosts)} hosts`, to: `/assets/software/installations${state.customerId ? `?customerId=${state.customerId}` : ''}` },
                     { label: 'Licensed seats', value: fmtNumber(ov.seatsLicensed), icon: <Users className="h-4 w-4" />, hint: `${fmtNumber(ov.licencesActive)} licences in term`, to: `/assets/software/licences${state.customerId ? `?customerId=${state.customerId}` : ''}` },
                     { label: 'Over-deployed or unlicensed', value: fmtNumber(overDeployed), tone: overDeployed ? 'bad' : 'good', icon: <AlertOctagon className="h-4 w-4" />, hint: 'title and customer pairs', to: `/assets/software/compliance?position=over_deployed${state.customerId ? `&customerId=${state.customerId}` : ''}` },

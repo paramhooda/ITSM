@@ -177,11 +177,10 @@ export default function CsatPage() {
                         const g = s.groups.find((x) => i.label.startsWith(`${x.label} · `));
                         if (g?.key) set({ [groupMeta.filterKey]: state[groupMeta.filterKey] === g.key ? undefined : g.key });
                       }}
-                      scrollTo
                     />
                   </Panel>
                   <Panel title="Distribution" subtitle="Responses by rating">
-                    <BreakdownBar dense emptyText="No responses in this period" items={distribution} onSelect={(i) => { const n = i.label.slice(0, 1); set({ rating: state.rating === n ? undefined : n }); }} scrollTo />
+                    <BreakdownBar dense emptyText="No responses in this period" items={distribution} onSelect={(i) => { const n = i.label.slice(0, 1); set({ rating: state.rating === n ? undefined : n }); }} />
                   </Panel>
                 </>
               )

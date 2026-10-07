@@ -14,6 +14,7 @@ import { Panel, KpiSkeleton, Skeleton, Segmented, Stat, Updated, RowList } from 
 import type { TicketRow } from './types';
 import { VISIT_STATUS_COLORS, PM_STATUS_COLORS } from '@/lib/statusColors';
 import { fmtRating, ratingTone } from '@/components/surveys/api';
+import { ticketListPath, type TicketListLink } from '@itsm/shared';
 
 interface Amc {
   generatedAt: string;
@@ -73,6 +74,8 @@ export function AmcDashboard({ days = 30, customerId = '' }: { days?: number; cu
     );
   const k = d.kpis;
   const c = d.queue.counts;
+  // Tiles are doors: each opens the list its number was counted on (the scope, the AMC domain, open status).
+  const open: TicketListLink = { customerId: customerId || null, domain: 'amc', status: 'open' };
   const work = d.series.some((s) => s.visitsCompleted || s.pmCompleted) ? d.series : [];
   return (
     <div className="flex flex-col gap-6">
@@ -82,16 +85,16 @@ export function AmcDashboard({ days = 30, customerId = '' }: { days?: number; cu
       </div>
       <KpiGrid
         items={[
-          { label: 'Open AMC tickets', icon: <Wrench className="h-4 w-4" />, value: fmtNumber(k.open), hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedThisWeek)} resolved this week`, to: '/tickets?domain=amc&open=true' },
-          { label: 'Unassigned', icon: <UserX className="h-4 w-4" />, value: fmtNumber(k.unassigned), tone: k.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an engineer', onClick: () => setFilter('unassigned') },
-          { label: 'SLA at risk', icon: <Timer className="h-4 w-4" />, value: fmtNumber(k.atRisk + k.breached), tone: k.breached > 0 ? 'bad' : k.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(k.breached)} breached · ${fmtNumber(k.dueToday)} due today`, onClick: () => setFilter('breached') },
+          { label: 'Open AMC tickets', icon: <Wrench className="h-4 w-4" />, value: fmtNumber(k.open), hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.resolvedThisWeek)} resolved this week`, to: ticketListPath(open) },
+          { label: 'Unassigned', icon: <UserX className="h-4 w-4" />, value: fmtNumber(k.unassigned), tone: k.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an engineer', to: ticketListPath({ ...open, assignee: 'unassigned' }) },
+          { label: 'SLA at risk', icon: <Timer className="h-4 w-4" />, value: fmtNumber(k.atRisk + k.breached), tone: k.breached > 0 ? 'bad' : k.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(k.breached)} breached · ${fmtNumber(k.dueToday)} due today`, to: ticketListPath({ ...open, sla: ['at_risk', 'breached'] }) },
           { label: 'Site visits this week', icon: <CalendarCheck className="h-4 w-4" />, value: fmtNumber(k.visitsThisWeek), hint: 'scheduled or in progress', to: '/field' },
         ]}
       />
       <Panel
         title="AMC work queue"
         subtitle="Open tickets in the AMC domain, highest priority first"
-        to="/tickets?domain=amc&open=true"
+        to={ticketListPath(open)}
         padded={false}
         action={
           <Segmented

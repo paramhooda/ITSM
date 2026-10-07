@@ -4,6 +4,7 @@ import { ErrorBlock, Badge } from '@/components/ui';
 import { ShieldAlert, Siren, Timer, Radio } from 'lucide-react';
 import { get } from '@/api/client';
 import { fmtDuration, fmtNumber } from '@/lib/format';
+import { ticketListPath, type TicketListLink } from '@itsm/shared';
 import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
@@ -45,6 +46,10 @@ export function SocDashboard({ days = 30, customerId = '' }: { days?: number; cu
       </div>
     );
   const t = d.totals;
+  // Every link carries the customer scope and the security domain; critical/high is the severities at level 1 and 2.
+  const soc: TicketListLink = { customerId: customerId || null, domain: 'soc', status: 'any' };
+  const open: TicketListLink = { ...soc, status: 'open' };
+  const criticalIds = d.bySeverity.filter((s) => (s.level ?? 99) <= 2 && s.id).map((s) => s.id as string);
   const recent = d.series.slice(-14);
   const flow = d.series.some((s) => s.opened || s.resolved) ? d.series : [];
   return (
@@ -55,14 +60,14 @@ export function SocDashboard({ days = 30, customerId = '' }: { days?: number; cu
       </div>
       <KpiGrid
         items={[
-          { label: 'Open security incidents', value: fmtNumber(t.open), icon: <ShieldAlert className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened today`, spark: recent.map((s) => s.opened), sparkLabel: 'Security incidents opened per day, last 14 days', to: '/tickets?domain=soc&open=true' },
-          { label: 'Critical / high', value: fmtNumber(t.criticalHigh), icon: <Siren className="h-4 w-4" />, tone: t.criticalHigh > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.escalated)} escalated` },
-          { label: 'SLA at risk', value: fmtNumber(t.atRisk + t.breached), icon: <Timer className="h-4 w-4" />, tone: t.breached > 0 ? 'bad' : t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} breached · ${fmtNumber(t.unassigned)} unassigned`, spark: recent.map((s) => s.breaches), sparkLabel: 'Security SLA breaches per day, last 14 days' },
+          { label: 'Open security incidents', value: fmtNumber(t.open), icon: <ShieldAlert className="h-4 w-4" />, hint: `${fmtNumber(t.openedToday)} opened today`, spark: recent.map((s) => s.opened), sparkLabel: 'Security incidents opened per day, last 14 days', to: ticketListPath(open) },
+          { label: 'Critical / high', value: fmtNumber(t.criticalHigh), icon: <Siren className="h-4 w-4" />, tone: t.criticalHigh > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.escalated)} escalated`, to: criticalIds.length ? ticketListPath({ ...open, severityIds: criticalIds }) : undefined },
+          { label: 'SLA at risk', value: fmtNumber(t.atRisk + t.breached), icon: <Timer className="h-4 w-4" />, tone: t.breached > 0 ? 'bad' : t.atRisk > 0 ? 'warn' : 'good', hint: `${fmtNumber(t.breached)} breached · ${fmtNumber(t.unassigned)} unassigned`, spark: recent.map((s) => s.breaches), sparkLabel: 'Security SLA breaches per day, last 14 days', to: ticketListPath({ ...open, sla: ['at_risk', 'breached'] }) },
           { label: 'SIEM events · 24h', value: fmtNumber(d.siemEvents24h.total), icon: <Radio className="h-4 w-4" />, hint: `${fmtNumber(d.siemEvents24h.ticketsCreated)} became tickets`, to: '/admin/integrations' },
         ]}
       />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Panel title="Security incident flow" subtitle={`${flowView === 'flow' ? 'Opened and resolved' : 'SLA breaches'} per day, last ${days} days`} className="xl:col-span-2" to="/tickets?domain=soc" toLabel="All security incidents" action={<Segmented size="sm" options={[{ value: 'flow', label: 'Flow' }, { value: 'breaches', label: 'Breaches' }]} value={flowView} onChange={setFlowView} />}>
+        <Panel title="Security incident flow" subtitle={`${flowView === 'flow' ? 'Opened and resolved' : 'SLA breaches'} per day, last ${days} days`} className="xl:col-span-2" to={ticketListPath(soc)} toLabel="All security incidents" action={<Segmented size="sm" options={[{ value: 'flow', label: 'Flow' }, { value: 'breaches', label: 'Breaches' }]} value={flowView} onChange={setFlowView} />}>
           {flowView === 'flow' ? (
             <TrendChart data={flow} x="day" kind="area" series={[{ key: 'opened', label: 'Opened' }, { key: 'resolved', label: 'Resolved', color: '#0f9d6f' }]} height={220} />
           ) : (
@@ -70,14 +75,14 @@ export function SocDashboard({ days = 30, customerId = '' }: { days?: number; cu
           )}
         </Panel>
         <Panel title="Open by severity" subtitle="Security severity of open incidents">
-          <BreakdownBar items={d.bySeverity.map((s) => ({ label: s.label, value: s.count, secondary: s.breached, color: s.color, href: s.id ? `/tickets?domain=soc&open=true&securitySeverityId=${s.id}` : undefined }))} emptyText="No open security incidents" />
+          <BreakdownBar items={d.bySeverity.map((s) => ({ label: s.label, value: s.count, secondary: s.breached, color: s.color, href: s.id ? ticketListPath({ ...open, severityIds: [s.id] }) : undefined }))} emptyText="No open security incidents" />
           <div className="mt-4 pt-4 border-t border-default grid grid-cols-2 gap-3">
             <Stat label="Resolved · 30d" value={fmtNumber(d.mttrSecurity30d.resolved)} />
             <Stat label="Mean time to resolve" value={fmtDuration(d.mttrSecurity30d.mttrMinutes)} />
           </div>
         </Panel>
       </div>
-      <Panel title="Recent security incidents" subtitle="Newest first" to="/tickets?domain=soc" padded={false}>
+      <Panel title="Recent security incidents" subtitle="Newest first" to={ticketListPath(soc)} padded={false}>
         <div className="px-5">
           <TicketMiniTable rows={d.recent} max={8} columns={['customer', 'severity', 'status', 'sla', 'assignee']} empty="No security incidents recorded" />
         </div>
@@ -95,7 +100,7 @@ export function SocDashboard({ days = 30, customerId = '' }: { days?: number; cu
             dense
             items={d.byCustomer.slice(0, allCustomers ? undefined : 6).map((c) => ({
               key: c.id,
-              href: `/tickets?domain=soc&open=true&customerId=${c.id}`,
+              href: ticketListPath({ ...open, customerId: c.id }),
               primary: c.name,
               secondary: `${fmtNumber(c.critical_high)} critical/high`,
               right: (

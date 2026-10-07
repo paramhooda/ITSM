@@ -105,7 +105,7 @@ export default function ChangeCatalogPage() {
               columns={4}
               items={[
                 { label: 'Templates', value: items.length, icon: <LayoutGrid className="h-4 w-4" />, hint: state.customerId ? 'offered to this customer' : 'active, in this view' },
-                { label: 'Pre-approved', value: preApproved, tone: preApproved ? 'good' : 'default', icon: <ShieldCheck className="h-4 w-4" />, hint: 'no approval workflow', onClick: () => set({ preApproved: state.preApproved === 'true' ? undefined : 'true' }), active: state.preApproved === 'true', scrollTo: true },
+                { label: 'Pre-approved', value: preApproved, tone: preApproved ? 'good' : 'default', icon: <ShieldCheck className="h-4 w-4" />, hint: 'no approval workflow', onClick: () => set({ preApproved: state.preApproved === 'true' ? undefined : 'true' }), active: state.preApproved === 'true' },
                 { label: 'Raised in the last 90 days', value: raised90d, icon: <Rocket className="h-4 w-4" />, hint: 'changes raised from these templates' },
                 { label: 'Most used', value: top && top.usageCount ? <span className="text-[17px] leading-tight" title={top.name}>{shortName(top.name)}</span> : '—', icon: <Trophy className="h-4 w-4" />, hint: top && top.usageCount ? `${top.usageCount} time${top.usageCount === 1 ? '' : 's'} all time · open the details` : 'nothing raised yet', onClick: top && top.usageCount ? () => setDetails(top) : undefined },
               ]}
