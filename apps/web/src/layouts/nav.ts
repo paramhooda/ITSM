@@ -47,12 +47,16 @@ export const MSP_NAV: NavItem[] = [
   // ---- Insight
   {
     to: '/', label: 'Dashboards', short: 'Home', icon: LayoutDashboard, tint: 'text-brand-600', section: S.insight,
+    match: (p) => p === '/' || startsWithAny(p, '/dashboards'),
+    // The Overview is the landing page; the dedicated dashboards are pages of their own (the same list as
+    // DASHBOARD_MODULES in modules.ts and the registry in components/dashboards/registry.ts).
     children: [
-      { to: '/?view=management', label: 'Management overview', perm: ['dashboards:management'] },
-      { to: '/?view=noc', label: 'Network operations', perm: ['dashboards:noc'] },
-      { to: '/?view=soc', label: 'Security operations', perm: ['dashboards:soc'] },
-      { to: '/?view=amc', label: 'AMC & field service', perm: ['dashboards:amc'] },
-      { to: '/?view=engineer', label: 'My work' },
+      { to: '/', label: 'Overview' },
+      { to: '/dashboards/noc', label: 'Network operations', perm: ['dashboards:noc'] },
+      { to: '/dashboards/soc', label: 'Security operations', perm: ['dashboards:soc'] },
+      { to: '/dashboards/amc', label: 'AMC & field service', perm: ['dashboards:amc'] },
+      { to: '/dashboards/my-work', label: 'My work' },
+      // Custom dashboards append here, one module per registered dashboard (components/dashboards/registry.ts), with its permission.
     ],
   },
   {

@@ -26,7 +26,7 @@ const labels = (items: NavItem[]) => items.map((i) => i.label);
 const can1 = (p: Permission) => (...x: Permission[]) => x.includes(p);
 /** Strip ↔ application pairs (case 8). A plain array: #5 pushes `['PORTAL_STATUS_MODULES', 'Service status']` here. */
 const PAIRS: [keyof typeof strips, string][] = [
-  ['OPERATIONS_MODULES', 'Operations'], ['CHANGE_MODULES', 'Changes'], ['CMDB_MODULES', 'Configuration (CMDB)'], ['ASSET_MODULES', 'Assets'], ['CUSTOMER_MODULES', 'Customers'], ['CONTRACT_MODULES', 'Contracts & scope'], ['FIELD_MODULES', 'Field service'], ['KNOWLEDGE_MODULES', 'Knowledge'], ['REPORT_MODULES', 'Reports'],
+  ['DASHBOARD_MODULES', 'Dashboards'], ['OPERATIONS_MODULES', 'Operations'], ['CHANGE_MODULES', 'Changes'], ['CMDB_MODULES', 'Configuration (CMDB)'], ['ASSET_MODULES', 'Assets'], ['CUSTOMER_MODULES', 'Customers'], ['CONTRACT_MODULES', 'Contracts & scope'], ['FIELD_MODULES', 'Field service'], ['KNOWLEDGE_MODULES', 'Knowledge'], ['REPORT_MODULES', 'Reports'],
   ['PORTAL_ASSET_MODULES', 'Assets'], ['PORTAL_SERVICE_MODULES', 'Services & contracts'], ['PORTAL_MAINTENANCE_MODULES', 'Maintenance & visits'], ['PORTAL_KNOWLEDGE_MODULES', 'Knowledge'], ['PORTAL_STATUS_MODULES', 'Service status'],
 ];
 const itemOf = (tree: NavItem[], label: string) => {
@@ -99,9 +99,11 @@ describe('staff navigator', () => {
 
   it('lists modules only when at least two are visible', () => {
     const cmdbAdmin = visibleNav(MSP_NAV, roleCan('cmdb_admin'), roleAreas('cmdb_admin'));
-    expect(itemOf(cmdbAdmin, 'Dashboards').children).toBeUndefined(); // only My work would be visible
+    // Every staff member sees the Overview and My work; the dedicated dashboards follow their permission.
+    expect(itemOf(cmdbAdmin, 'Dashboards').children?.map((c) => c.label)).toEqual(['Overview', 'My work']);
     const noc = visibleNav(MSP_NAV, roleCan('noc_engineer'), roleAreas('noc_engineer'));
-    expect(itemOf(noc, 'Dashboards').children?.map((c) => c.label)).toEqual(['Network operations', 'My work']);
+    expect(itemOf(noc, 'Dashboards').children?.map((c) => c.label)).toEqual(['Overview', 'Network operations', 'My work']);
+    expect(itemOf(visibleNav(MSP_NAV, roleCan('admin'), roleAreas('admin')), 'Dashboards').children?.map((c) => c.label)).toEqual(['Overview', 'Network operations', 'Security operations', 'AMC & field service', 'My work']);
     expect(itemOf(noc, 'Configuration (CMDB)').children?.map((c) => c.label)).toContain('Monitoring & SIEM');
     const am = visibleNav(MSP_NAV, roleCan('account_manager'), roleAreas('account_manager'));
     expect(am.find((i) => i.label === 'Configuration (CMDB)')).toBeUndefined();
@@ -137,7 +139,11 @@ describe('staff navigator', () => {
     expect(isAppActive(itemOf(MSP_NAV, 'Configuration (CMDB)'), '/admin/integrations')).toBe(true);
     expect(isAppActive(itemOf(MSP_NAV, 'Administration'), '/admin/integrations')).toBe(true);
     expect(isAppActive(itemOf(MSP_NAV, 'Dashboards'), '/')).toBe(true);
+    // The dedicated dashboards are pages under /dashboards and belong to the Dashboards application.
+    expect(isAppActive(itemOf(MSP_NAV, 'Dashboards'), '/dashboards/noc')).toBe(true);
+    expect(isAppActive(itemOf(MSP_NAV, 'Dashboards'), '/dashboards/my-work')).toBe(true);
     expect(isAppActive(itemOf(MSP_NAV, 'Dashboards'), '/tickets')).toBe(false);
+    expect(isAppActive(itemOf(MSP_NAV, 'Dashboards'), '/dashboardsx')).toBe(false);
     expect(isAppActive(itemOf(MSP_NAV, 'Tickets'), '/operations')).toBe(false);
     expect(isAppActive(itemOf(MSP_NAV, 'Tickets'), '/tickets/abc')).toBe(true);
   });

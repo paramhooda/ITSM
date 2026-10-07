@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest, RouteHandlerMethod } from 'fastify';
 import type { Permission } from '@itsm/shared';
-import { withTenant, type Tx, type TenantContext } from '@/db/client';
+import { withTenant, type Tx, type TenantContext, type TenantTxOptions } from '@/db/client';
 import type { Principal } from './principal';
 import { UnauthorizedError } from './errors';
 import { writeAudit, type AuditEntry } from './audit';
@@ -62,8 +62,8 @@ export function buildCtx(p: Principal, tx: Tx, meta: CtxMeta): Ctx {
 }
 
 /** Runs a service function with a tenant-scoped transaction for an authenticated principal. */
-export async function runAs<T>(p: Principal, meta: Partial<CtxMeta>, fn: (ctx: Ctx) => Promise<T>): Promise<T> {
-  return withTenant(tenantContextOf(p), (tx) => fn(buildCtx(p, tx, { requestId: meta.requestId ?? 'internal', ...meta })));
+export async function runAs<T>(p: Principal, meta: Partial<CtxMeta>, fn: (ctx: Ctx) => Promise<T>, opts: TenantTxOptions = {}): Promise<T> {
+  return withTenant(tenantContextOf(p), (tx) => fn(buildCtx(p, tx, { requestId: meta.requestId ?? 'internal', ...meta })), opts);
 }
 
 type Handler<R = unknown> = (ctx: Ctx, req: FastifyRequest, reply: FastifyReply) => Promise<R>;

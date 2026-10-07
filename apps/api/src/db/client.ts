@@ -37,10 +37,15 @@ export const SYSTEM_CONTEXT: TenantContext = { userId: null, allCustomers: true,
  * `set_config(..., true)` so PostgreSQL row-level security enforces isolation
  * for every statement, independent of application code correctness.
  */
-export async function withTenant<T>(ctx: TenantContext, fn: (tx: Tx) => Promise<T>): Promise<T> {
+export interface TenantTxOptions {
+  /** Open the transaction REPEATABLE READ so every statement reads one snapshot (read-only work that compares figures, such as the consistency guard test). */
+  snapshot?: boolean;
+}
+
+export async function withTenant<T>(ctx: TenantContext, fn: (tx: Tx) => Promise<T>, opts: TenantTxOptions = {}): Promise<T> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query(opts.snapshot ? 'BEGIN ISOLATION LEVEL REPEATABLE READ' : 'BEGIN');
     await client.query(
       "SELECT set_config('app.user_id', $1, true), set_config('app.all_customers', $2, true), set_config('app.customer_ids', $3, true)",
       [ctx.userId ?? '', ctx.allCustomers ? 'true' : 'false', ctx.customerIds.join(',')],

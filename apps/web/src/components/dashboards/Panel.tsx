@@ -12,7 +12,8 @@ export function Panel({ title, subtitle, action, to, toLabel = 'View all', child
           <h2 className="text-[14px] font-semibold text-default leading-tight tracking-[-0.01em]">{title}</h2>
           {subtitle && <p className="text-[12.5px] text-muted mt-0.5">{subtitle}</p>}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        {/* The controls wrap under the title on a narrow card instead of widening it (a Segmented and a link side by side can exceed a phone's width). */}
+        <div className="flex flex-wrap items-center gap-2 max-w-full">
           {action}
           {to && <ViewAll to={to} label={toLabel} />}
         </div>

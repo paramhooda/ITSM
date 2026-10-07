@@ -153,8 +153,8 @@ export const REPORTS: ReturnType<typeof define>[] = [
   define({
     name: 'dashboard_kpis',
     toolset: 'reports',
-    description: 'The headline figures of a dashboard (management, NOC, SOC, AMC, my work; the customer overview in the portal) for a period and optional customer scope.',
-    inputSchema: z.object({ view: z.enum(['management', 'noc', 'soc', 'amc', 'engineer']).optional(), days: z.number().int().min(1).max(365).optional(), customer: z.string().max(200).optional() }),
+    description: 'The headline figures of a dashboard for a period and an optional customer scope: the Overview (the default: the desk\'s open, breached, unassigned, resolved and SLA compliance, the person\'s own day, and the NOC, SOC and AMC strips they may see), or the NOC, SOC, AMC or my-work dashboard; the customer overview in the portal. Answers "how are we doing", "how many open incidents do we have", "what is our SLA compliance this month".',
+    inputSchema: z.object({ view: z.enum(['overview', 'management', 'noc', 'soc', 'amc', 'engineer']).optional(), days: z.number().int().min(1).max(365).optional(), customer: z.string().max(200).optional() }),
     requires: [],
     portal: ['portal:access'],
     action: false,
@@ -166,12 +166,33 @@ export const REPORTS: ReturnType<typeof define>[] = [
         return { view: 'customer', days, ...c.data, facts: c.facts, link: '/portal' };
       }
       const customerId = await resolveCustomerId(ctx, input.customer);
-      const view = input.view ?? (ctx.can('dashboards:management') ? 'management' : ctx.can('dashboards:noc') ? 'noc' : ctx.can('dashboards:soc') ? 'soc' : ctx.can('dashboards:amc') ? 'amc' : 'engineer');
-      if (view !== 'engineer' && !ctx.can(`dashboards:${view}` as never)) throw new ForbiddenError(`Missing permission: dashboards:${view}`);
+      // `management` is the old name of the home dashboard: it reads as the Overview, which carries the management section for those who hold the right.
+      const view = (input.view === 'management' ? 'overview' : input.view) ?? 'overview';
+      if (view !== 'overview' && view !== 'engineer' && !ctx.can(`dashboards:${view}` as never)) throw new ForbiddenError(`Missing permission: dashboards:${view}`);
+      const route = { overview: '/', noc: '/dashboards/noc', soc: '/dashboards/soc', amc: '/dashboards/amc', engineer: '/dashboards/my-work' }[view];
+      const link = `${route}?days=${days}${customerId ? `&customerId=${customerId}` : ''}`;
+      const customer = customerId ? await customerName(ctx, customerId) : null;
+      if (view === 'overview') {
+        const d = await dashboards.overview(ctx, { days, customerId });
+        const c = compactDashboard(d as unknown as Record<string, unknown>);
+        const facts: string[] = [];
+        const desk = d.desk as { kpis: Record<string, number | null> } | null;
+        if (desk) {
+          facts.push(`open tickets now: ${desk.kpis.open}`, `breached SLA on open tickets: ${desk.kpis.breached}`, `at risk: ${desk.kpis.atRisk}`, `unassigned: ${desk.kpis.unassigned}`, `opened in the last ${days} days: ${desk.kpis.openedInPeriod}`, `resolved in the last ${days} days: ${desk.kpis.resolvedInPeriod}`);
+          if (desk.kpis.slaCompliancePct !== null) facts.push(`resolution SLA compliance (${days} days): ${desk.kpis.slaCompliancePct}%`);
+        }
+        facts.push(`assigned to me (open): ${d.me.assigned}`, `breached on my tickets: ${d.me.breached}`, `due today: ${d.me.dueToday}`, `approvals waiting for me: ${d.me.approvals}`);
+        if (d.strips.noc) facts.push(`NOC open incidents: ${d.strips.noc.openIncidents}`, `NOC SLA at risk: ${d.strips.noc.atRisk}`, `NOC unassigned: ${d.strips.noc.unassigned}`);
+        if (d.strips.soc) facts.push(`SOC open security incidents: ${d.strips.soc.open}`, `SOC critical or high: ${d.strips.soc.criticalHigh}`);
+        if (d.strips.amc) facts.push(`AMC open tickets: ${d.strips.amc.open}`, `AMC site visits this week: ${d.strips.amc.visitsThisWeek}`);
+        const m = d.management as { kpis: Record<string, number | null>; csat: { avg: number | null; responses: number } } | null;
+        if (m) facts.push(`active customers: ${m.kpis.customersActive}`, `contracts expiring within 90 days: ${m.kpis.contractsExpiring90d}`, `entitlements over threshold: ${m.kpis.entitlementsOverThreshold}`, `CSAT average (${days} days): ${m.csat.avg === null ? 'no responses' : `${m.csat.avg} from ${m.csat.responses} responses`}`);
+        return { view, days, customer, ...c.data, facts: facts.slice(0, 24), link };
+      }
       const fn = dashboards[view];
       const d = (await fn(ctx, { days, customerId })) as unknown as Record<string, unknown>;
       const c = compactDashboard(d);
-      return { view, days, customer: customerId ? await customerName(ctx, customerId) : null, ...c.data, facts: c.facts, link: `/?view=${view}&days=${days}${customerId ? `&customerId=${customerId}` : ''}` };
+      return { view, days, customer, ...c.data, facts: c.facts, link };
     },
     summary: (_i, result) => `Read the ${(result as { view: string }).view} dashboard (${(result as { days: number }).days} days)`,
   }),

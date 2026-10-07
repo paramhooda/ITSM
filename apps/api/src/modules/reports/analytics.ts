@@ -80,6 +80,10 @@ export interface Scope {
   from: string;
   to: string;
   type?: 'incident' | 'request' | 'problem' | 'change';
+  /** Ticket domains to keep (`['soc']` for the security dashboard, every domain but `soc` for the NOC); unset keeps every domain the caller may see. */
+  domains?: string[];
+  /** Tickets assigned to one team (the NOC dashboard's team filter). */
+  teamId?: string | null;
 }
 
 export interface TicketKpis {
@@ -100,7 +104,12 @@ export interface TicketKpis {
   outOfScope: number;
 }
 
-const typeCond = (s: Scope) => (s.type ? sql`AND t.type = ${s.type}::ticket_type` : sql``);
+const typeCond = (s: Pick<Scope, 'type'>) => (s.type ? sql`AND t.type = ${s.type}::ticket_type` : sql``);
+/** `AND t.domain IN (…)` when the scope names domains (an empty list keeps every domain). */
+export const domainCond = (s: Pick<Scope, 'domains'>) => (s.domains && s.domains.length ? sql`AND t.domain IN (${sql.join(s.domains.map((d) => sql`${d}`), sql`, `)})` : sql``);
+const teamCond = (s: Pick<Scope, 'teamId'>) => (s.teamId ? sql`AND t.assigned_team_id = ${s.teamId}::uuid` : sql``);
+/** Every scope condition but the period: customer, security fence, type, domains and team. */
+const scopeCond = (ctx: Ctx, s: Pick<Scope, 'customerId' | 'type' | 'domains' | 'teamId'>) => sql`${customerCond(s.customerId)} ${socCond(ctx)} ${typeCond(s)} ${domainCond(s)} ${teamCond(s)}`;
 const within = (col: ReturnType<typeof sql>, s: Scope) => sql`${col} >= ${s.from}::date AND ${col} < ${s.to}::date + interval '1 day'`;
 /** Assignments of a ticket resolved in the period; CASE keeps the subquery from running for the rest of the history the backlog counts need. */
 const assignmentsInRange = (s: Scope) => sql`CASE WHEN ${within(sql`t.resolved_at`, s)} THEN (SELECT count(*)::int FROM ticket_activities a WHERE a.ticket_id = t.id AND a.activity_type = 'assignment') ELSE 0 END`;
@@ -123,7 +132,7 @@ export async function ticketKpis(ctx: Ctx, s: Scope): Promise<TicketKpis> {
       count(*) FILTER (WHERE t.assignee_id IS NULL AND t.resolved_at IS NULL AND t.closed_at IS NULL ${openCond()})::int AS unassigned_now,
       count(*) FILTER (WHERE ${within(sql`t.created_at`, s)} AND t.scope_status = 'out_of_scope')::int AS out_of_scope
     FROM tickets t
-    WHERE t.created_at < ${s.to}::date + interval '1 day' ${customerCond(s.customerId)} ${socCond(ctx)} ${typeCond(s)}`);
+    WHERE t.created_at < ${s.to}::date + interval '1 day' ${scopeCond(ctx, s)}`);
   const g = (k: string) => num(r?.[k]);
   const resolved = g('resolved');
   return {
@@ -147,6 +156,8 @@ export async function ticketKpis(ctx: Ctx, s: Scope): Promise<TicketKpis> {
 
 export type BreakdownDimension = 'priority' | 'service' | 'category' | 'engineer' | 'team' | 'site' | 'customer' | 'type' | 'source';
 export interface BreakdownRow {
+  /** The record behind the row (option, service, user, team, site or customer id; the type key for `type`), null for the "none" row, so the row can drill down. */
+  id: string | null;
   label: string;
   opened: number;
   resolved: number;
@@ -155,30 +166,31 @@ export interface BreakdownRow {
   compliancePct: number | null;
 }
 
+/** Each dimension's id and label expressions and its row order (`opened` is the output column the orders name). */
 const DIMENSION = {
-  priority: { expr: sql`coalesce(pr.label, 'No priority')`, order: sql`min(coalesce(pr.level, 99)), 2 DESC` },
-  service: { expr: sql`coalesce(sv.name, 'No service')`, order: sql`2 DESC` },
-  category: { expr: sql`coalesce(cat.label, 'No category')`, order: sql`2 DESC` },
-  engineer: { expr: sql`coalesce(asg.name, 'Unassigned')`, order: sql`2 DESC` },
-  team: { expr: sql`coalesce(tm.name, 'No team')`, order: sql`2 DESC` },
-  site: { expr: sql`coalesce(si.name, 'No site')`, order: sql`2 DESC` },
-  customer: { expr: sql`coalesce(cu.name, 'No customer')`, order: sql`2 DESC` },
-  type: { expr: sql`t.type::text`, order: sql`2 DESC` },
-  source: { expr: sql`coalesce(src.label, 'Unknown')`, order: sql`2 DESC` },
+  priority: { id: sql`pr.id::text`, expr: sql`coalesce(pr.label, 'No priority')`, order: sql`min(coalesce(pr.level, 99)), opened DESC` },
+  service: { id: sql`sv.id::text`, expr: sql`coalesce(sv.name, 'No service')`, order: sql`opened DESC` },
+  category: { id: sql`cat.id::text`, expr: sql`coalesce(cat.label, 'No category')`, order: sql`opened DESC` },
+  engineer: { id: sql`asg.id::text`, expr: sql`coalesce(asg.name, 'Unassigned')`, order: sql`opened DESC` },
+  team: { id: sql`tm.id::text`, expr: sql`coalesce(tm.name, 'No team')`, order: sql`opened DESC` },
+  site: { id: sql`si.id::text`, expr: sql`coalesce(si.name, 'No site')`, order: sql`opened DESC` },
+  customer: { id: sql`cu.id::text`, expr: sql`coalesce(cu.name, 'No customer')`, order: sql`opened DESC` },
+  type: { id: sql`t.type::text`, expr: sql`t.type::text`, order: sql`opened DESC` },
+  source: { id: sql`src.id::text`, expr: sql`coalesce(src.label, 'Unknown')`, order: sql`opened DESC` },
 } as const;
 
-/** Tickets created in the period grouped by one dimension: opened, resolved, MTTR, resolution breaches and compliance; at most 20 rows. */
+/** Tickets created in the period grouped by one dimension: the record id (so the row can drill down), opened, resolved, MTTR, resolution breaches and compliance; at most 20 rows. */
 export async function breakdown(ctx: Ctx, s: Scope, by: BreakdownDimension): Promise<BreakdownRow[]> {
   const dim = DIMENSION[by];
   const list = await rows<Record<string, unknown>>(ctx, sql`
-    SELECT ${dim.expr} AS label, count(*)::int AS opened, count(*) FILTER (WHERE t.resolved_at IS NOT NULL)::int AS resolved,
+    SELECT ${dim.id} AS id, ${dim.expr} AS label, count(*)::int AS opened, count(*) FILTER (WHERE t.resolved_at IS NOT NULL)::int AS resolved,
       round(avg(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 60) FILTER (WHERE t.resolved_at IS NOT NULL)) AS mttr_minutes,
       (SELECT count(*)::int FROM ticket_slas sl WHERE sl.ticket_id = ANY(array_agg(t.id)) AND sl.metric = 'resolution' AND sl.state = 'breached') AS breaches,
       (SELECT count(*)::int FROM ticket_slas sl WHERE sl.ticket_id = ANY(array_agg(t.id)) AND sl.metric = 'resolution' AND sl.state = 'met') AS met
     FROM tickets t ${ticketJoins} LEFT JOIN sites si ON si.id = t.site_id LEFT JOIN config_options src ON src.id = t.source_id
-    WHERE true ${rangeCond(sql`t.created_at`, s.from, s.to)} ${customerCond(s.customerId)} ${socCond(ctx)} ${typeCond(s)}
-    GROUP BY 1 ORDER BY ${dim.order} LIMIT 20`);
-  return list.map((r) => ({ label: String(r.label), opened: num(r.opened), resolved: num(r.resolved), mttrMinutes: r.mttr_minutes === null || r.mttr_minutes === undefined ? null : num(r.mttr_minutes), breaches: num(r.breaches), compliancePct: pct(num(r.met), num(r.met) + num(r.breaches)) }));
+    WHERE true ${rangeCond(sql`t.created_at`, s.from, s.to)} ${scopeCond(ctx, s)}
+    GROUP BY 1, 2 ORDER BY ${dim.order} LIMIT 20`);
+  return list.map((r) => ({ id: r.id === null || r.id === undefined ? null : String(r.id), label: String(r.label), opened: num(r.opened), resolved: num(r.resolved), mttrMinutes: r.mttr_minutes === null || r.mttr_minutes === undefined ? null : num(r.mttr_minutes), breaches: num(r.breaches), compliancePct: pct(num(r.met), num(r.met) + num(r.breaches)) }));
 }
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
@@ -189,7 +201,7 @@ export async function arrivalHeatmap(ctx: Ctx, s: Scope & { timezone: string }):
   const tz = isValidTimezone(s.timezone) ? s.timezone : 'UTC';
   const list = await rows<{ dow: number; hour: number; n: number }>(ctx, sql`
     SELECT EXTRACT(DOW FROM (t.created_at AT TIME ZONE ${tz}))::int AS dow, EXTRACT(HOUR FROM (t.created_at AT TIME ZONE ${tz}))::int AS hour, count(*)::int AS n
-    FROM tickets t WHERE true ${rangeCond(sql`t.created_at`, s.from, s.to)} ${customerCond(s.customerId)} ${socCond(ctx)} ${typeCond(s)}
+    FROM tickets t WHERE true ${rangeCond(sql`t.created_at`, s.from, s.to)} ${scopeCond(ctx, s)}
     GROUP BY 1, 2`);
   const counts = new Map(list.map((r) => [`${(num(r.dow) + 6) % 7}:${num(r.hour)}`, num(r.n)]));
   return WEEKDAYS.flatMap((row, d) => HOURS.map((col, h) => ({ row, col, value: counts.get(`${d}:${h}`) ?? 0 })));
@@ -197,18 +209,53 @@ export async function arrivalHeatmap(ctx: Ctx, s: Scope & { timezone: string }):
 
 export const AGE_ORDER = ['< 1 day', '1-3 days', '3-7 days', '7-30 days', '> 30 days'] as const;
 
-/** Open tickets now, bucketed by age, with how many already breached a clock. */
-export async function backlogAgeing(ctx: Ctx, s: Pick<Scope, 'customerId' | 'type'>): Promise<{ bucket: string; count: number; breached: number }[]> {
+export interface AgeBucket {
+  bucket: (typeof AGE_ORDER)[number];
+  count: number;
+  breached: number;
+  /** The created window of the bucket as exact timestamps (the ticket list's `createdFrom`/`createdTo`, inclusive), so the bar drills down to the same tickets. */
+  createdFrom: string | null;
+  createdTo: string | null;
+}
+
+const AGE_EDGES_DAYS = [1, 3, 7, 30] as const;
+const iso = (d: Date) => d.toISOString();
+const msBefore = (d: Date) => new Date(d.getTime() - 1);
+
+/**
+ * Open tickets now, bucketed by age, with how many already breached a clock.
+ * The buckets are cut at exact instants computed from `at` (a day, three, seven
+ * and thirty days before it): a bucket is `created_at >= lower AND created_at
+ * <= upper`, the same inclusive predicates the ticket list applies to a
+ * `createdFrom`/`createdTo` pair, so each bar carries the window it was counted
+ * with and reproduces on the list.
+ */
+export async function backlogAgeing(ctx: Ctx, s: Pick<Scope, 'customerId' | 'type' | 'domains' | 'teamId'>, at = new Date()): Promise<AgeBucket[]> {
+  const edges = AGE_EDGES_DAYS.map((d) => new Date(at.getTime() - d * 86_400_000));
+  const [e1, e3, e7, e30] = edges as [Date, Date, Date, Date];
+  // lower bound inclusive, upper bound inclusive and one millisecond before the next bucket's lower bound
+  const windows: { bucket: AgeBucket['bucket']; from: Date | null; to: Date | null }[] = [
+    { bucket: '< 1 day', from: e1, to: null },
+    { bucket: '1-3 days', from: e3, to: msBefore(e1) },
+    { bucket: '3-7 days', from: e7, to: msBefore(e3) },
+    { bucket: '7-30 days', from: e30, to: msBefore(e7) },
+    { bucket: '> 30 days', from: null, to: msBefore(e30) },
+  ];
+  const caseSql = sql.join(
+    windows.map((w) => sql`WHEN ${w.from ? sql`t.created_at >= ${w.from}` : sql`true`} AND ${w.to ? sql`t.created_at <= ${w.to}` : sql`true`} THEN ${w.bucket}`),
+    sql` `,
+  );
   const list = await rows<{ bucket: string; count: number; breached: number }>(ctx, sql`
-    SELECT CASE WHEN now() - t.created_at < interval '1 day' THEN '< 1 day' WHEN now() - t.created_at < interval '3 days' THEN '1-3 days' WHEN now() - t.created_at < interval '7 days' THEN '3-7 days' WHEN now() - t.created_at < interval '30 days' THEN '7-30 days' ELSE '> 30 days' END AS bucket,
-      count(*)::int AS count, count(*) FILTER (WHERE ${BREACHED})::int AS breached
-    FROM tickets t WHERE true ${openCond()} ${customerCond(s.customerId)} ${socCond(ctx)} ${typeCond(s as Scope)}
+    SELECT CASE ${caseSql} END AS bucket, count(*)::int AS count, count(*) FILTER (WHERE ${BREACHED})::int AS breached
+    FROM tickets t WHERE true ${openCond()} ${scopeCond(ctx, s)}
     GROUP BY 1`);
   const byBucket = new Map(list.map((r) => [r.bucket, r]));
-  return AGE_ORDER.map((bucket) => ({ bucket, count: num(byBucket.get(bucket)?.count), breached: num(byBucket.get(bucket)?.breached) }));
+  return windows.map((w) => ({ bucket: w.bucket, count: num(byBucket.get(w.bucket)?.count), breached: num(byBucket.get(w.bucket)?.breached), createdFrom: w.from ? iso(w.from) : null, createdTo: w.to ? iso(w.to) : null }));
 }
 
 export interface ResponsivenessRow {
+  /** The priority option id (null for tickets without one), so the row can drill down. */
+  id: string | null;
   priority: string;
   level: number;
   opened: number;
@@ -222,7 +269,7 @@ export interface ResponsivenessRow {
 /** MTTA, MTTR, first-contact resolution and reopen rate per priority. */
 export async function responsiveness(ctx: Ctx, s: Scope): Promise<ResponsivenessRow[]> {
   const list = await rows<Record<string, unknown>>(ctx, sql`
-    SELECT coalesce(pr.label, 'No priority') AS priority, coalesce(pr.level, 99)::int AS level,
+    SELECT pr.id::text AS id, coalesce(pr.label, 'No priority') AS priority, coalesce(pr.level, 99)::int AS level,
       count(*) FILTER (WHERE ${within(sql`t.created_at`, s)})::int AS opened,
       count(*) FILTER (WHERE ${within(sql`t.resolved_at`, s)})::int AS resolved,
       round(avg(EXTRACT(EPOCH FROM (t.first_response_at - t.created_at)) / 60) FILTER (WHERE ${within(sql`t.resolved_at`, s)} AND t.first_response_at IS NOT NULL)) AS mtta_minutes,
@@ -230,9 +277,9 @@ export async function responsiveness(ctx: Ctx, s: Scope): Promise<Responsiveness
       count(*) FILTER (WHERE ${within(sql`t.resolved_at`, s)} AND t.reopen_count = 0 AND t.escalation_level = 0 AND ${assignmentsInRange(s)} <= 1)::int AS fcr,
       count(*) FILTER (WHERE ${within(sql`t.resolved_at`, s)} AND t.reopen_count > 0)::int AS reopened
     FROM tickets t LEFT JOIN config_options pr ON pr.id = t.priority_id
-    WHERE (${within(sql`t.created_at`, s)} OR ${within(sql`t.resolved_at`, s)}) ${customerCond(s.customerId)} ${socCond(ctx)} ${typeCond(s)}
-    GROUP BY 1, 2 ORDER BY 2`);
-  return list.map((r) => ({ priority: String(r.priority), level: num(r.level), opened: num(r.opened), resolved: num(r.resolved), mttaMinutes: r.mtta_minutes === null || r.mtta_minutes === undefined ? null : num(r.mtta_minutes), mttrMinutes: r.mttr_minutes === null || r.mttr_minutes === undefined ? null : num(r.mttr_minutes), fcrPct: pct(num(r.fcr), num(r.resolved)), reopenPct: pct(num(r.reopened), num(r.resolved)) }));
+    WHERE (${within(sql`t.created_at`, s)} OR ${within(sql`t.resolved_at`, s)}) ${scopeCond(ctx, s)}
+    GROUP BY 1, 2, 3 ORDER BY 3`);
+  return list.map((r) => ({ id: r.id === null || r.id === undefined ? null : String(r.id), priority: String(r.priority), level: num(r.level), opened: num(r.opened), resolved: num(r.resolved), mttaMinutes: r.mtta_minutes === null || r.mtta_minutes === undefined ? null : num(r.mtta_minutes), mttrMinutes: r.mttr_minutes === null || r.mttr_minutes === undefined ? null : num(r.mttr_minutes), fcrPct: pct(num(r.fcr), num(r.resolved)), reopenPct: pct(num(r.reopened), num(r.resolved)) }));
 }
 
 // ---------------------------------------------------------------- changes
@@ -255,7 +302,7 @@ export async function changeOutcomes(ctx: Ctx, s: Scope): Promise<ChangeOutcomes
     FROM tickets t JOIN change_details cd ON cd.ticket_id = t.id LEFT JOIN config_options st ON st.id = t.status_id LEFT JOIN users asg ON asg.id = t.assignee_id
     WHERE t.type = 'change' AND st.status_category IN ('resolved', 'closed')
       AND coalesce(cd.actual_end, cd.scheduled_end, cd.scheduled_start, t.created_at) >= ${s.from}::date AND coalesce(cd.actual_end, cd.scheduled_end, cd.scheduled_start, t.created_at) < ${s.to}::date + interval '1 day'
-      ${customerCond(s.customerId)} ${socCond(ctx)}
+      ${customerCond(s.customerId)} ${socCond(ctx)} ${domainCond(s)} ${teamCond(s)}
     ORDER BY coalesce(cd.actual_end, cd.scheduled_end, cd.scheduled_start, t.created_at) DESC LIMIT 2000`);
   // a change that reached resolved or closed without failing or being backed out was implemented (closed changes rarely keep the implemented key)
   const outcomeOf = (r: Record<string, unknown>) => (r.pir_outcome === 'backed_out' ? 'backed_out' : r.status_key === 'failed' || r.pir_outcome === 'failed' ? 'failed' : 'implemented');

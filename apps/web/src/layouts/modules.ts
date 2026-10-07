@@ -21,6 +21,21 @@ export interface ModuleItem {
   match?: (pathname: string) => boolean;
 }
 
+/**
+ * The dashboards strip under every dashboard hero: the Overview, the dedicated
+ * dashboards the person may open and, later, custom dashboards. The navigator's
+ * Dashboards children and components/dashboards/registry.ts list the same
+ * entries; a custom dashboard appends to all three with its permission.
+ */
+export const DASHBOARD_MODULES: ModuleItem[] = [
+  { to: '/', label: 'Overview', end: true },
+  { to: '/dashboards/noc', label: 'Network operations', perm: ['dashboards:noc'] },
+  { to: '/dashboards/soc', label: 'Security operations', perm: ['dashboards:soc'] },
+  { to: '/dashboards/amc', label: 'AMC & field service', perm: ['dashboards:amc'] },
+  { to: '/dashboards/my-work', label: 'My work' },
+  // Custom dashboards append here (components/dashboards/registry.ts).
+];
+
 export const OPERATIONS_MODULES: ModuleItem[] = [
   { to: '/operations/major-incidents', label: 'Major incidents', match: (p) => p === '/operations' || p.startsWith('/operations/major-incidents') },
   { to: '/operations/on-call', label: 'On-call', perm: ['oncall:read'] },

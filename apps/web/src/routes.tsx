@@ -1,5 +1,6 @@
 import { lazy, type ComponentType } from 'react';
 import type { Permission } from '@itsm/shared';
+import { dashboard } from '@/components/dashboards/registry';
 
 export interface AppRoute {
   path: string;
@@ -18,7 +19,14 @@ const page = (loader: () => Promise<{ default: ComponentType }>) => lazy(loader)
  * PortalShell) decides what to show based on permissions; routes guard again.
  */
 export const routes: AppRoute[] = [
-  { path: '/', component: page(() => import('@/pages/dashboards/DashboardPage')), shared: true, portal: true },
+  // Dashboards: the Overview is the staff landing page (portal users keep their portal home); the dedicated
+  // dashboards are pages of their own. The built-ins and the extension point for custom dashboards live in
+  // components/dashboards/registry.ts; an old `?view=` link on `/` redirects to the matching page.
+  { path: '/', component: page(dashboard('overview').component), shared: true, portal: true },
+  { path: '/dashboards/noc', component: page(dashboard('noc').component), perm: ['dashboards:noc'] },
+  { path: '/dashboards/soc', component: page(dashboard('soc').component), perm: ['dashboards:soc'] },
+  { path: '/dashboards/amc', component: page(dashboard('amc').component), perm: ['dashboards:amc'] },
+  { path: '/dashboards/my-work', component: page(dashboard('my-work').component) },
   // Tickets
   { path: '/tickets', component: page(() => import('@/pages/tickets/TicketListPage')), perm: ['tickets:read'] },
   { path: '/tickets/new', component: page(() => import('@/pages/tickets/TicketCreatePage')), perm: ['tickets:create'] },

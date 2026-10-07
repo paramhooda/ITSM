@@ -15,7 +15,7 @@ import { TICKET_LIST_OPEN_CATEGORIES } from '@itsm/shared';
 export const TICKET_LIST_DEFAULTS: Record<string, string> = { statusCategory: TICKET_LIST_OPEN_CATEGORIES, sort: 'lastActivityAt', order: 'desc' };
 
 /** Keys copied to the API as they are when set (comma lists included). */
-const PASS_THROUGH = ['customerId', 'priorityId', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'domain', 'categoryId', 'securitySeverityId', 'statusId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'csat'] as const;
+const PASS_THROUGH = ['customerId', 'priorityId', 'teamId', 'serviceId', 'siteId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'domain', 'categoryId', 'securitySeverityId', 'statusId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'csat'] as const;
 
 export type ListState = Record<string, string | undefined>;
 

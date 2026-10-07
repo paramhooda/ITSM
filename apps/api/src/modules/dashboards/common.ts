@@ -1,6 +1,8 @@
 import { sql, type SQL } from 'drizzle-orm';
+import { DateTime } from 'luxon';
+import { DOMAINS } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
-import { toDay, addDays, daysBetween } from '@/modules/reports/dates';
+import { toDay, addDays, daysBetween, isValidTimezone } from '@/modules/reports/dates';
 import { slaPredicates } from '@/modules/sla/predicates';
 
 export { toDay, addDays, daysBetween };
@@ -138,4 +140,148 @@ export async function ticketFlowSeries(ctx: Ctx, from: string, to: string, cond:
     SELECT d.day::text AS day, coalesce(o.opened, 0) AS opened, coalesce(r.resolved, 0) AS resolved, coalesce(b.breaches, 0) AS breaches
     FROM d LEFT JOIN o ON o.day = d.day LEFT JOIN r ON r.day = d.day LEFT JOIN b ON b.day = d.day ORDER BY d.day`);
   return rows.map((r) => ({ day: String(r.day), opened: num(r.opened), resolved: num(r.resolved), breaches: num(r.breaches) }));
+}
+
+// ---------------------------------------------------------------- scope fragments shared by the overview and the dedicated dashboards
+
+/** Every domain but security: what the NOC dashboard counts and what staff without `soc:read` see. */
+export const NOT_SOC_DOMAINS: string[] = DOMAINS.filter((d) => d !== 'soc');
+/** `AND t.assigned_team_id = …` for a team filter (the NOC dashboard's hero control). */
+export const teamCond = (teamId: string | null | undefined, col: SQL = sql`t.assigned_team_id`) => (teamId ? sql`AND ${col} = ${teamId}::uuid` : EMPTY);
+
+// ---------------------------------------------------------------- arrivals by day and hour with exact drill-down windows
+
+export interface ArrivalCell {
+  /** The local day (YYYY-MM-DD in `timezone`). */
+  day: string;
+  /** Weekday label of that day (Mon … Sun). */
+  row: string;
+  /** Hour of day, two digits. */
+  col: string;
+  value: number;
+  /** The exact created window of the cell (inclusive timestamps): the ticket list's `createdFrom`/`createdTo`. */
+  createdFrom: string;
+  createdTo: string;
+}
+
+export interface ArrivalsWeek {
+  timezone: string;
+  from: string;
+  to: string;
+  cells: ArrivalCell[];
+}
+
+const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * Ticket arrivals per local day and hour over at most seven days ending `to`,
+ * in `timezone`. Each cell is counted over its own exact window (the hour's
+ * first instant to its last millisecond), the very predicates the ticket list
+ * applies to a `createdFrom`/`createdTo` pair, so a cell drills down to the
+ * tickets it counted. The day is walked in wall-clock hours, so on a
+ * daylight-saving change the skipped hour has no cell and the repeated hour's
+ * cell spans both passes: every instant of the day lands in exactly one cell
+ * and the cells add up to the whole window. `cond` is an `AND …` fragment
+ * over the alias `t` (customer scope, security fence, domain, team). Every
+ * hour the day has is present, zeros included.
+ */
+export async function arrivalsWeek(ctx: Ctx, cond: SQL, opts: { from: string; to: string; timezone: string }): Promise<ArrivalsWeek> {
+  const tz = isValidTimezone(opts.timezone) ? opts.timezone : 'UTC';
+  const from = daysBetween(opts.from, opts.to) >= 7 ? addDays(opts.to, -6) : opts.from;
+  const windows: { day: string; hour: number; s: Date; e: Date }[] = [];
+  for (let d = from; d <= opts.to; d = addDays(d, 1)) {
+    const midnight = DateTime.fromISO(d, { zone: tz }).startOf('day');
+    const nextMidnight = midnight.plus({ days: 1 }).startOf('day');
+    for (let s = midnight; s < nextMidnight; ) {
+      const e = DateTime.min(s.plus({ hours: 1 }), nextMidnight);
+      const prev = windows[windows.length - 1];
+      if (prev && prev.day === d && prev.hour === s.hour) prev.e = new Date(e.toMillis() - 1);
+      else windows.push({ day: d, hour: s.hour, s: s.toJSDate(), e: new Date(e.toMillis() - 1) });
+      s = e;
+    }
+  }
+  const first = windows[0]!.s;
+  const last = windows[windows.length - 1]!.e;
+  const values = sql.join(windows.map((w, i) => sql`(${i}::int, ${w.s}::timestamptz, ${w.e}::timestamptz)`), sql`, `);
+  const counts = await q<{ i: number; n: number }>(ctx, sql`
+    WITH w(i, s, e) AS (VALUES ${values}),
+    x AS (SELECT t.created_at FROM tickets t WHERE t.created_at >= ${first} AND t.created_at <= ${last} ${cond})
+    SELECT w.i, count(x.created_at)::int AS n FROM w LEFT JOIN x ON x.created_at >= w.s AND x.created_at <= w.e GROUP BY w.i`);
+  const byIndex = new Map(counts.map((r) => [num(r.i), num(r.n)]));
+  return {
+    timezone: tz,
+    from,
+    to: opts.to,
+    cells: windows.map((w, i) => ({ day: w.day, row: WEEKDAY[(DateTime.fromISO(w.day, { zone: tz }).weekday + 6) % 7]!, col: String(w.hour).padStart(2, '0'), value: byIndex.get(i) ?? 0, createdFrom: w.s.toISOString(), createdTo: w.e.toISOString() })),
+  };
+}
+
+// ---------------------------------------------------------------- daily flow with the incident share (NOC)
+
+export interface DomainFlowDay extends FlowDay { incidents: number }
+
+/** `ticketFlowSeries` plus the incidents opened per day, for the NOC chart; live and fenced like the tiles. */
+export async function domainFlowSeries(ctx: Ctx, from: string, to: string, cond: SQL = EMPTY): Promise<DomainFlowDay[]> {
+  const win = (col: SQL) => sql`${col} >= ${from}::date AND ${col} < ${to}::date + interval '1 day'`;
+  const rows = await q<DomainFlowDay>(ctx, sql`
+    WITH d AS (SELECT generate_series(${from}::date, ${to}::date, interval '1 day')::date AS day),
+    o AS (SELECT t.created_at::date AS day, count(*)::int AS opened, count(*) FILTER (WHERE t.type = 'incident')::int AS incidents FROM tickets t WHERE ${win(sql`t.created_at`)} ${cond} GROUP BY 1),
+    r AS (SELECT t.resolved_at::date AS day, count(*)::int AS resolved FROM tickets t WHERE ${win(sql`t.resolved_at`)} ${cond} GROUP BY 1),
+    b AS (SELECT s.breached_at::date AS day, count(*)::int AS breaches FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.state = 'breached' AND ${win(sql`s.breached_at`)} ${cond} GROUP BY 1)
+    SELECT d.day::text AS day, coalesce(o.opened, 0) AS opened, coalesce(o.incidents, 0) AS incidents, coalesce(r.resolved, 0) AS resolved, coalesce(b.breaches, 0) AS breaches
+    FROM d LEFT JOIN o ON o.day = d.day LEFT JOIN r ON r.day = d.day LEFT JOIN b ON b.day = d.day ORDER BY d.day`);
+  return rows.map((r) => ({ day: String(r.day), opened: num(r.opened), incidents: num(r.incidents), resolved: num(r.resolved), breaches: num(r.breaches) }));
+}
+
+// ---------------------------------------------------------------- customers needing attention (management and the overview)
+
+export interface AttentionRow {
+  id: string;
+  name: string;
+  code: string;
+  tickets: number;
+  resolved: number;
+  out_of_scope: number;
+  major: number;
+  slaMet: number;
+  slaBreached: number;
+  compliancePct: number | null;
+}
+
+/**
+ * The customers with the most tickets opened in the period, with their
+ * resolved, out-of-scope and major counts and their resolution-SLA compliance
+ * on those tickets: the "needs attention" list of the management dashboard and
+ * of the overview's management section (one query, so both show the same rows).
+ */
+export async function attentionByCustomer(ctx: Ctx, opts: { from: string; to: string; customerId: string | null; limit?: number }): Promise<AttentionRow[]> {
+  const range = sql`t.created_at >= ${opts.from}::date AND t.created_at < ${opts.to}::date + interval '1 day'`;
+  const soc = socCond(ctx);
+  const top = await q<Record<string, unknown>>(ctx, sql`
+    SELECT cu.id, cu.name, cu.code, count(*)::int AS tickets, count(*) FILTER (WHERE t.resolved_at IS NOT NULL)::int AS resolved, count(*) FILTER (WHERE t.scope_status = 'out_of_scope')::int AS out_of_scope, count(*) FILTER (WHERE t.is_major)::int AS major
+    FROM tickets t JOIN customers cu ON cu.id = t.customer_id WHERE ${range} ${custCond(opts.customerId)} ${soc} GROUP BY cu.id, cu.name, cu.code ORDER BY tickets DESC LIMIT ${opts.limit ?? 10}`);
+  const ids = top.map((c) => String(c.id));
+  const sla = ids.length
+    ? await q<Record<string, unknown>>(ctx, sql`
+      SELECT s.customer_id, count(*) FILTER (WHERE s.state = 'met')::int AS met, count(*) FILTER (WHERE s.state = 'breached')::int AS breached
+      FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.metric = 'resolution' AND s.customer_id = ANY(ARRAY[${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}]) AND ${range} ${soc} GROUP BY s.customer_id`)
+    : [];
+  const slaMap = new Map(sla.map((r) => [String(r.customer_id), r]));
+  return top.map((c) => {
+    const s = slaMap.get(String(c.id));
+    return { id: String(c.id), name: String(c.name), code: String(c.code), tickets: num(c.tickets), resolved: num(c.resolved), out_of_scope: num(c.out_of_scope), major: num(c.major), slaMet: num(s?.met), slaBreached: num(s?.breached), compliancePct: pct(num(s?.met), num(s?.met) + num(s?.breached)) };
+  });
+}
+
+/** Period selector shared by every dashboard: 7, 30 or 90 days from the UI, anything sane from the API. */
+export const clampDays = (d?: number | null) => Math.min(365, Math.max(1, Math.round(d ?? 30)));
+
+/** Active customers and contracts (active, expiring within 90 days, expired in the last 30) in the scope: the management figures. */
+export async function accountCounts(ctx: Ctx, customerId: string | null) {
+  const counts = await one<Record<string, unknown>>(ctx, sql`
+    SELECT (SELECT count(*)::int FROM customers c WHERE c.is_active ${custCond(customerId, sql`c.id`)}) AS customers_active,
+      (SELECT count(*)::int FROM contracts c WHERE c.status IN ('active', 'expiring') ${custCond(customerId, sql`c.customer_id`)}) AS contracts_active,
+      (SELECT count(*)::int FROM contracts c WHERE c.status IN ('active', 'expiring') AND c.end_date >= current_date AND c.end_date <= current_date + 90 ${custCond(customerId, sql`c.customer_id`)}) AS contracts_expiring_90d,
+      (SELECT count(*)::int FROM contracts c WHERE c.status = 'expired' AND c.end_date >= current_date - 30 ${custCond(customerId, sql`c.customer_id`)}) AS contracts_expired_30d`);
+  return { customersActive: num(counts.customers_active), contractsActive: num(counts.contracts_active), contractsExpiring90d: num(counts.contracts_expiring_90d), contractsExpired30d: num(counts.contracts_expired_30d) };
 }

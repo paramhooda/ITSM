@@ -5,7 +5,7 @@
  *   - arbitrary hex colours in class names instead of tokens
  *   - the retired "secondary" button variant
  *   - an <h1> outside the shared headers
- *   - a page file without a shared header (PageHeader, RecordHeader, DashboardHero, ListShell, AdminLayout) or redirect
+ *   - a page file without a shared header (PageHeader, RecordHeader, DashboardHero, DashboardFrame, ListShell, AdminLayout) or redirect
  *   - a ListShell page without an empty state
  * Run: node scripts/ui-lint.mjs   (also `npm run lint:ui` from apps/web, part of the root `verify`)
  */
@@ -28,7 +28,7 @@ walk(root);
 const H1_ALLOWED = [/components\/ui\/index\.tsx$/, /components\/record\/RecordHeader\.tsx$/, /components\/dashboards\/Hero\.tsx$/, /pages\/auth\//];
 /** Page files that are not pages in the contract's sense (redirects, logged-out, tab bodies hosted by a page). */
 const PAGE_EXEMPT = [/Redirect\.tsx$/, /pages\/auth\//, /Tab\.tsx$/, /FindingsTable\.tsx$/];
-const HEADER_MARKERS = ['<PageHeader', '<RecordHeader', '<DashboardHero', '<ListShell', '<AdminLayout', '<SectionHeader', '<Navigate', '<RecordLayout'];
+const HEADER_MARKERS = ['<PageHeader', '<RecordHeader', '<DashboardHero', '<DashboardFrame', '<ListShell', '<AdminLayout', '<SectionHeader', '<Navigate', '<RecordLayout'];
 /** A page that only renders another page (a module alias such as /portal/services/sla) inherits that page's header. */
 const isAlias = (src) => /^import \w+Page from '\.\/\w+Page';/m.test(src) && /return <\w+Page\b/.test(src);
 

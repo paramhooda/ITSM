@@ -16,6 +16,7 @@ import * as schedules from '@/modules/reports/schedules';
 import { computeNextRun } from '@/modules/reports/schedules';
 import { executeSchedule } from '@/jobs/processors/reports';
 import { resolveDateRange } from '@/modules/reports/dates';
+import { ticketKpis, breakdown, responsiveness, backlogAgeing, arrivalHeatmap, AGE_ORDER } from '@/modules/reports/analytics';
 
 const suffix = Math.random().toString(36).slice(2, 8);
 const ids = { adminUser: '', customerA: '', customerB: '', service: '', contract: '', entitlement: '', p1: '', p2: '', p3: '', p4: '', customerUser: '', schedule: '', mspSchedule: '', customerC: '', amcService: '', amcTicket: '' };
@@ -131,6 +132,43 @@ describe('dashboards', () => {
     expect(m.outOfScopeByCustomer[0]?.id).toBe(ids.customerA);
     // The tile counts live (fenced, whole-day window); the period-over-period delta compares the two daily series.
     expect(m.trends.opened.current).toBe(m.series.reduce((n, d) => n + d.opened, 0));
+  });
+
+  it('analytics: the domains and team scope keep only the named tickets, and breakdown rows carry the record id behind them', async () => {
+    const scope = { customerId: ids.customerA, from: today, to: today };
+    const all = await asAdmin((ctx) => ticketKpis(ctx, scope));
+    const nocOnly = await asAdmin((ctx) => ticketKpis(ctx, { ...scope, domains: ['noc'] }));
+    const socOnly = await asAdmin((ctx) => ticketKpis(ctx, { ...scope, domains: ['soc'] }));
+    const nobody = await asAdmin((ctx) => ticketKpis(ctx, { ...scope, teamId: ids.adminUser }));
+    // Every ticket of A rides the NOC service, so the NOC slice is the whole and the security slice is empty.
+    expect(all.opened).toBe(4);
+    expect(nocOnly.opened).toBe(4);
+    expect(socOnly).toMatchObject({ opened: 0, resolved: 0, backlogEnd: 0 });
+    expect(nobody.opened).toBe(0);
+    const byService = await asAdmin((ctx) => breakdown(ctx, scope, 'service'));
+    expect(byService.find((r) => r.label === `Reporting Service ${suffix}`)).toMatchObject({ id: ids.service, opened: 4, resolved: 2 });
+    const byType = await asAdmin((ctx) => breakdown(ctx, scope, 'type'));
+    expect(byType.map((r) => [r.id, r.label, r.opened])).toEqual([['incident', 'incident', 3], ['request', 'request', 1]]);
+    const byPriority = await asAdmin((ctx) => breakdown(ctx, scope, 'priority'));
+    expect(byPriority.map((r) => r.id)).toEqual([ids.p1, ids.p3, ids.p4]);
+    const byEngineer = await asAdmin((ctx) => breakdown(ctx, scope, 'engineer'));
+    expect(byEngineer).toEqual([expect.objectContaining({ id: null, label: 'Unassigned', opened: 4 })]);
+    expect((await asAdmin((ctx) => breakdown(ctx, { ...scope, domains: ['soc'] }, 'service')))).toEqual([]);
+    const resp = await asAdmin((ctx) => responsiveness(ctx, scope));
+    expect(resp.map((r) => r.id)).toEqual([ids.p1, ids.p3, ids.p4]);
+    expect(resp.find((r) => r.id === ids.p3)).toMatchObject({ opened: 2, resolved: 1 });
+    // Ageing buckets are cut at exact instants and carry the created window each bar links with.
+    const ageing = await asAdmin((ctx) => backlogAgeing(ctx, { customerId: ids.customerA }));
+    expect(ageing.map((a) => a.bucket)).toEqual([...AGE_ORDER]);
+    expect(ageing[0]).toMatchObject({ count: 2, createdTo: null });
+    expect(typeof ageing[0]!.createdFrom).toBe('string');
+    expect(ageing[4]).toMatchObject({ count: 0, createdFrom: null });
+    expect(Date.parse(ageing[1]!.createdTo!)).toBe(Date.parse(ageing[0]!.createdFrom!) - 1);
+    expect((await asAdmin((ctx) => backlogAgeing(ctx, { customerId: ids.customerA, domains: ['soc'] }))).every((a) => a.count === 0)).toBe(true);
+    const heat = await asAdmin((ctx) => arrivalHeatmap(ctx, { ...scope, timezone: 'UTC' }));
+    expect(heat).toHaveLength(168);
+    expect(heat.reduce((n, c) => n + c.value, 0)).toBe(4);
+    expect((await asAdmin((ctx) => arrivalHeatmap(ctx, { ...scope, timezone: 'UTC', domains: ['soc'] }))).reduce((n, c) => n + c.value, 0)).toBe(0);
   });
 
   it('7-day management view uses live series and still reports today', async () => {

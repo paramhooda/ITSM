@@ -1,10 +1,15 @@
+import { CATEGORICAL, DEEMPHASIS, SEQUENTIAL, ORDINAL, DIVERGING, STATUS, DELTA_TEXT } from '@itsm/shared';
+
 /**
  * Design tokens of the printed report document: a light theme of its own
- * (the application UI never uses the brand navy and red), the validated chart
- * palette and the type scale. Every data colour below was checked with the
- * palette validator on a white surface (lightness band, chroma floor, colour
- * vision deficiency separation); brand colours are never used as data colours.
+ * (the application UI never uses the brand navy and red) and the type scale.
+ * The validated chart palette lives in the shared package
+ * (`packages/shared/src/palette.ts`) so the dashboards draw the same colours;
+ * it is re-exported here for the document renderer. Brand colours are never
+ * used as data colours.
  */
+
+export { CATEGORICAL, DEEMPHASIS, SEQUENTIAL, ORDINAL, DIVERGING, STATUS, DELTA_TEXT };
 
 export const DOC = {
   ink: '#09090b',
@@ -25,19 +30,6 @@ export const DOC = {
   font: `"Geist Variable", "Liberation Sans", "DejaVu Sans", Helvetica, Arial, sans-serif`,
 } as const;
 
-/** Categorical slots, fixed order, assigned in sequence, never cycled (validated). */
-export const CATEGORICAL = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'] as const;
-/** The gray every non-emphasised mark wears when one category is singled out. */
-export const DEEMPHASIS = '#c3c2b7';
-/** Sequential blue ramp for heatmaps (near-zero to dark); zero cells use the surface. */
-export const SEQUENTIAL = ['#cde2fb', '#9ec5f4', '#5598e7', '#2a78d6', '#1c5cab', '#0d366b'] as const;
-/** Ordinal ramp (discrete ordered marks such as age buckets). */
-export const ORDINAL = ['#86b6ef', '#5598e7', '#2a78d6', '#1c5cab', '#104281'] as const;
-export const DIVERGING = { negative: '#e34948', mid: '#f0efec', positive: '#2a78d6' } as const;
-/** Status scale, fixed, always paired with an icon or a label. */
-export const STATUS = { good: '#0ca30c', warning: '#fab219', serious: '#ec835a', critical: '#d03b3b' } as const;
-/** Delta text colours (contrast safe on white). */
-export const DELTA_TEXT = { good: '#006300', bad: '#d03b3b', neutral: '#52514e' } as const;
 export const TYPE = { body: '10.5pt', small: '9pt', caption: '8pt', h1: '30pt', h2: '15pt', h3: '11.5pt', tile: '20pt', hero: '36pt' } as const;
 
 /** Series keys that carry a status meaning on charts flagged `statusSeries`. */

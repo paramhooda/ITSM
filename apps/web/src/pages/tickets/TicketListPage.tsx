@@ -16,6 +16,7 @@ import { relativeTime, fmtDateTime, fmtNumber, fmtDate } from '@/lib/format';
 import { dotClass } from '@/lib/utils';
 import { TICKET_CATEGORY_COLORS, PRIORITY_LEVEL_COLORS, SCOPE_COLORS, BREACH_RISK_COLORS, SENTIMENT_COLORS } from '@/lib/statusColors';
 import { DOMAINS } from '@itsm/shared';
+import { get } from '@/api/client';
 import { ticketsApi, qk, itemsOf } from '@/components/tickets/api';
 import { toStatsParams, TICKET_LIST_DEFAULTS } from '@/components/tickets/listQuery';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
@@ -70,7 +71,7 @@ const ASSIGNEE_VIEWS = [
 ];
 const DOMAIN_LABELS: Record<string, string> = { general: 'General', noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk' };
 /** Every filter the page owns; sort/order/page live beside them in the URL but are not filters. */
-const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'statusId', 'priorityId', 'assignee', 'teamId', 'serviceId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat'];
+const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'statusId', 'priorityId', 'assignee', 'teamId', 'serviceId', 'siteId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat'];
 /** The customer's satisfaction rating after resolution: rated, low, awaiting a reply, never surveyed. */
 const CSAT_OPTIONS: { value: string; label: string; dot: string | null }[] = [
   { value: 'rated', label: 'Rated', dot: 'green' },
@@ -119,7 +120,18 @@ function legacyPatch(state: Record<string, string>): Record<string, string | und
   return patch;
 }
 
-const dateRangeLabel = (from?: string, to?: string) => (from && to ? (from === to ? fmtDate(from) : `${fmtDate(from)} – ${fmtDate(to)}`) : from ? `from ${fmtDate(from)}` : `until ${fmtDate(to)}`);
+/** A bound with a time part (a heatmap hour, an ageing bucket cut at an instant) reads with its time, same-day bounds as "6 Oct 2026, 09:00 – 09:59"; a date-only bound reads as the day. */
+const dateRangeLabel = (from?: string, to?: string) => {
+  const timed = (v?: string) => !!v && v.length > 10;
+  if (timed(from) || timed(to)) {
+    const f = from ? new Date(from) : null;
+    const t = to ? new Date(to) : null;
+    const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    if (f && t) return f.toDateString() === t.toDateString() ? `${fmtDate(f)}, ${time(f)} – ${time(t)}` : `${fmtDateTime(f)} – ${fmtDateTime(t)}`;
+    return f ? `from ${fmtDateTime(f)}` : `until ${fmtDateTime(t)}`;
+  }
+  return from && to ? (from === to ? fmtDate(from) : `${fmtDate(from)} – ${fmtDate(to)}`) : from ? `from ${fmtDate(from)}` : `until ${fmtDate(to)}`;
+};
 /** Keys that may carry a comma list (dashboard links with several ids) read as their labels joined. */
 const labelsOf = (csv: string, lookup: (id: string) => string | undefined) => csv.split(',').filter(Boolean).map((v) => lookup(v) ?? '…').join(', ');
 const splitCsv = (v?: string) => (v ? v.split(',').filter(Boolean) : undefined);
@@ -163,6 +175,8 @@ export default function TicketListPage() {
   // Stats take the same filters as the list; the API counts the tiles over the scope without the status chips and tile toggles, so one tile never moves another.
   const stats = useQuery({ queryKey: qk.stats(filterParams), queryFn: () => ticketsApi.stats(filterParams), refetchInterval: 60_000, placeholderData: (prev) => prev, enabled: !legacy });
   const views = useQuery({ queryKey: qk.views, queryFn: () => ticketsApi.views() });
+  // A site filter arrives only from a dashboard link (the AMC load by site); its chip names the site so the condition is never silent.
+  const site = useQuery({ queryKey: ['site', state.siteId], queryFn: () => get<{ id: string; name: string }>(`/sites/${state.siteId}`), enabled: !!state.siteId, staleTime: 5 * 60_000 });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -362,6 +376,7 @@ export default function TicketListPage() {
       case 'assignee': return assigneeFilter && addApplied('assignee', ASSIGNEE_VIEWS.find((v) => v.value === assigneeFilter)?.label ?? `Assignee: ${engineerItems.find((u) => u.id === assigneeFilter)?.name ?? '…'}`);
       case 'teamId': return state.teamId && addApplied('teamId', `Team: ${labelsOf(state.teamId, (id) => teams.find((t) => t.id === id)?.name)}`);
       case 'serviceId': return state.serviceId && addApplied('serviceId', `Service: ${services.find((sv) => sv.id === state.serviceId)?.name ?? '…'}`);
+      case 'siteId': return state.siteId && addApplied('siteId', `Site: ${site.data?.name ?? '…'}`);
       case 'domain': return state.domain && addApplied('domain', `Domain: ${labelsOf(state.domain, (d) => DOMAIN_LABELS[d] ?? d)}`);
       case 'categoryId': return state.categoryId && addApplied('categoryId', `Category: ${byId(state.categoryId)?.label ?? '…'}`);
       case 'securitySeverityId': return state.securitySeverityId && addApplied('securitySeverityId', `Security severity: ${labelsOf(state.securitySeverityId, (id) => byId(id)?.label)}`);

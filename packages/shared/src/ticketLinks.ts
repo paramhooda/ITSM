@@ -33,6 +33,7 @@ export interface TicketListLink {
   statusIds?: string[] | null;
   categoryId?: string | null;
   serviceId?: string | null;
+  siteId?: string | null;
   csat?: 'rated' | 'low' | 'pending' | 'unrated' | null;
   knownError?: boolean | null;
   isMajor?: boolean | null;
@@ -70,6 +71,7 @@ export function ticketListQuery(link: TicketListLink): string {
   put('securitySeverityId', list(link.severityIds));
   put('categoryId', link.categoryId);
   put('serviceId', link.serviceId);
+  put('siteId', link.siteId);
   put('csat', link.csat);
   if (link.knownError) put('knownError', 'true');
   if (link.isMajor) put('isMajor', 'true');

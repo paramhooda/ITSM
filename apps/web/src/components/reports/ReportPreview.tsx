@@ -1,8 +1,9 @@
-import { Fragment, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Card, StatTile } from '@/components/ui';
 import { TrendChart } from '@/components/dashboards/TrendChart';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { SlaGauge } from '@/components/dashboards/SlaGauge';
+import { HeatmapGrid } from '@/components/dashboards/HeatmapGrid';
 import { InsightsCard } from './InsightsCard';
 import { formatCell, fmtDelta, fmtTileValue, type Insight, type ReportColumn, type ReportChart, type ReportSection, type RunPreview, type SummaryTile } from './types';
 
@@ -35,31 +36,11 @@ const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' &
 const short = (v: string) => (typeof v === 'string' && v.length > 18 ? `${v.slice(0, 17)}…` : String(v));
 const unitFormatter = (unit?: ReportChart['unit']) => (v: number) => fmtTileValue({ value: v, unit });
 
-/** The compact weekday-by-hour grid of a heatmap chart: opacity on the brand colour scales with the value. */
+/** The weekday-by-hour grid of a heatmap chart on the shared sequential ramp (no drill-down on a report preview). */
 function Heatmap({ chart }: { chart: ReportChart }) {
   const key = Array.isArray(chart.y) ? chart.y[0]! : chart.y;
   const cells = chart.data.map((d) => ({ row: String(d.row ?? ''), col: String(d.col ?? ''), value: Math.max(0, num(d[key]) || 0) }));
-  const rows = chart.rows ?? [...new Set(cells.map((c) => c.row))];
-  const cols = chart.cols ?? [...new Set(cells.map((c) => c.col))];
-  const max = Math.max(1, ...cells.map((c) => c.value));
-  const lookup = new Map(cells.map((c) => [`${c.row}\u0000${c.col}`, c.value]));
-  return (
-    <div className="overflow-x-auto">
-      <div className="grid gap-px text-[10px] text-subtle min-w-[520px]" style={{ gridTemplateColumns: `auto repeat(${cols.length}, minmax(0, 1fr))` }}>
-        <div />
-        {cols.map((c) => <div key={c} className="text-center">{c}</div>)}
-        {rows.map((r) => (
-          <Fragment key={r}>
-            <div className="pr-1.5 text-right leading-4">{r}</div>
-            {cols.map((c) => {
-              const v = lookup.get(`${r}\u0000${c}`) ?? 0;
-              return <div key={c} className="h-4 rounded-[2px] bg-brand-600" style={{ opacity: v ? 0.15 + (v / max) * 0.85 : 0.04 }} title={`${r} ${c}:00 · ${v}`} />;
-            })}
-          </Fragment>
-        ))}
-      </div>
-    </div>
-  );
+  return <HeatmapGrid cells={cells} rows={chart.rows} cols={chart.cols} unit={chart.unit === 'minutes' ? 'min' : chart.unit === 'pct' ? '%' : 'tickets'} />;
 }
 
 function Chart({ chart }: { chart: ReportChart }) {

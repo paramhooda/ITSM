@@ -1,11 +1,26 @@
-/** Categorical slots (validated with the dataviz palette checks on a white surface). Fixed order, never cycled past 8. */
-const SERIES_LIGHT = ['#2563eb', '#f97316', '#0f9d6f', '#eda100', '#c026d3', '#1a7f37', '#6d28d9', '#e11d48'];
-/** Status colours are reserved for state (good/warning/serious/critical) and always paired with a label. */
+import { CATEGORICAL, DEEMPHASIS, SEQUENTIAL, ORDINAL } from '@itsm/shared';
+
+/**
+ * Categorical slots: the brand blue keeps slot 1 (so every existing single-series
+ * chart looks as it did) and the rest follow the validated shared palette
+ * (`packages/shared/src/palette.ts`, the same hues the report documents print)
+ * in its fixed order. Slots are assigned in sequence and never cycled: a chart
+ * with more categories than slots folds the rest into "Other" in the
+ * de-emphasis gray.
+ */
+const SERIES_LIGHT = ['#2563eb', ...CATEGORICAL.slice(1)];
+/** Status colours are reserved for state (good/warning/serious/critical), always paired with a label, never reused as a series colour. */
 export const STATUS_COLORS = { good: '#16a34a', warning: '#f59e0b', serious: '#ea580c', critical: '#dc2626' } as const;
 
 export interface ChartTheme {
   dark: boolean;
   series: string[];
+  /** Single-hue ramp for magnitude (heatmaps), light to dark; zero cells use the surface. */
+  sequential: readonly string[];
+  /** Ordered discrete marks (age buckets), light to dark. */
+  ordinal: readonly string[];
+  /** The gray every folded or de-emphasised mark wears. */
+  deemphasis: string;
   grid: string;
   axis: string;
   text: string;
@@ -21,6 +36,9 @@ export function useIsDark() {
 const LIGHT: ChartTheme = {
   dark: false,
   series: SERIES_LIGHT,
+  sequential: SEQUENTIAL,
+  ordinal: ORDINAL,
+  deemphasis: DEEMPHASIS,
   grid: '#f0f0f1',
   axis: '#d4d4d8',
   text: '#71717a',

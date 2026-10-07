@@ -95,9 +95,14 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
           {icon && <span className={cn('inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/10', TONE_CHIP[tone])}>{icon}</span>}
         </span>
       </div>
-      <div className="flex items-center justify-between gap-4">
-        <div className={cn('text-[30px] leading-none font-semibold tracking-[-0.03em] tnum min-w-0 truncate', TONE_TEXT[tone])}>{value}</div>
-        {spark && spark.length > 1 && <Sparkline data={spark} color={TONE_HEX[tone]} ariaLabel={sparkLabel} />}
+      <div className="flex items-center justify-between gap-3">
+        {/* The number never truncates; on a narrow tile the sparkline shrinks first (the SVG scales with its viewBox). */}
+        <div className={cn('text-[30px] leading-none font-semibold tracking-[-0.03em] tnum shrink-0 whitespace-nowrap', TONE_TEXT[tone])}>{value}</div>
+        {spark && spark.length > 1 && (
+          <span className="flex-1 min-w-[40px] max-w-[96px] [&>svg]:w-full [&>svg]:h-auto">
+            <Sparkline data={spark} color={TONE_HEX[tone]} ariaLabel={sparkLabel} />
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-2 text-[12px] text-subtle min-h-[18px] -mt-1">
         {delta !== undefined && <DeltaBadge delta={delta} lowerIsBetter={lowerIsBetter} compact />}
