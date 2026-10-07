@@ -314,7 +314,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex-1 flex min-h-0">
           <main className="flex-1 overflow-y-auto">
             <AnnouncementBanner />
-            <div className="p-5 md:p-7 max-w-[1500px] mx-auto">{children}</div>
+            {/* the extra room at the end lets the last control of a page (a pager) scroll clear of the assistant launcher */}
+            <div className="p-5 md:p-7 pb-20 md:pb-20 max-w-[1500px] mx-auto">{children}</div>
           </main>
         </div>
         <MobileNav items={MSP_NAV} />

@@ -72,7 +72,6 @@ interface PillApi {
 const PillContext = createContext<PillApi | null>(null);
 
 export function ListShell({ modules, filters, search, activeCount = 0, onClear, applied = [], breadcrumbRoot = 'All', clearLabel = 'Reset', quick, insights, toolbar, count, children, className }: ListShellProps) {
-  const [openKey, setOpenKey] = useState<string | null>(null);
   const hasBar = !!filters || !!search;
   // The chips the page spells out are the conditions in effect; a page that gives none is counted by `activeCount`
   // and gets one summary chip in their place.
@@ -82,17 +81,11 @@ export function ListShell({ modules, filters, search, activeCount = 0, onClear, 
       {modules && <ModuleNav items={modules} />}
       <div className="min-w-0 flex flex-col gap-3">
         {hasBar && (
-          <BarContext.Provider value={{ openKey, setOpenKey }}>
-            <div className="filter-bar" role="toolbar" aria-label="Filters" data-testid="filter-bar">
-              {search && <SearchInput value={search.value} onChange={search.onChange} placeholder={search.placeholder ?? 'Search…'} className="w-full sm:w-64 shrink-0" />}
-              {filters && <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">{filters}</div>}
-              {active > 0 && onClear && (
-                <button type="button" onClick={onClear} className="ml-auto inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-[12.5px] font-medium text-brand-700 hover:bg-white/80 whitespace-nowrap" data-testid="filters-reset">
-                  <X className="h-3.5 w-3.5" /> {clearLabel}{active > 1 ? ` (${active})` : ''}
-                </button>
-              )}
-            </div>
-          </BarContext.Provider>
+          <ListFilterBar>
+            {search && <SearchInput value={search.value} onChange={search.onChange} placeholder={search.placeholder ?? 'Search…'} className="w-full sm:w-64 shrink-0" />}
+            {filters && <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">{filters}</div>}
+            {active > 0 && onClear && <ResetButton onClick={onClear} label={clearLabel} count={active} className="ml-auto" />}
+          </ListFilterBar>
         )}
         {(quick || toolbar) && (
           <div className="flex flex-wrap items-center gap-2 min-h-8 max-w-full overflow-x-auto [scrollbar-width:thin]">
@@ -100,47 +93,96 @@ export function ListShell({ modules, filters, search, activeCount = 0, onClear, 
             {toolbar && <div className="ml-auto flex items-center gap-2">{toolbar}</div>}
           </div>
         )}
-        {(count || active > 0) && (
-          <nav className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] text-muted" aria-label="Filters in effect" data-testid="applied-filters">
-            <ol className="flex flex-wrap items-center gap-1 min-w-0" data-testid="breadcrumb">
-              <li className="flex items-center">
-                {active > 0 && onClear ? (
-                  <button type="button" onClick={onClear} title={clearLabel} className="breadcrumb-chip breadcrumb-root" data-testid="breadcrumb-root">
-                    {breadcrumbRoot}
-                  </button>
-                ) : (
-                  <span className="breadcrumb-chip breadcrumb-root is-current" aria-current="page" data-testid="breadcrumb-root">
-                    {breadcrumbRoot}
-                  </span>
-                )}
-              </li>
-              {applied.map((a) => (
-                <li key={a.key} className="flex items-center gap-1 min-w-0">
-                  <ChevronRight className="h-3.5 w-3.5 text-subtle shrink-0" aria-hidden />
-                  <span className="breadcrumb-chip min-w-0" data-testid="breadcrumb-chip" data-key={a.key}>
-                    <span className="truncate max-w-[32ch]">{a.label}</span>
-                    <button type="button" onClick={a.onRemove} className="breadcrumb-remove" aria-label={typeof a.label === 'string' ? `Remove ${a.label}` : 'Remove this condition'}>
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                </li>
-              ))}
-              {applied.length === 0 && active > 0 && (
-                <li className="flex items-center gap-1">
-                  <ChevronRight className="h-3.5 w-3.5 text-subtle shrink-0" aria-hidden />
-                  <span className="breadcrumb-chip">{active} {active === 1 ? 'condition' : 'conditions'}</span>
-                </li>
-              )}
-            </ol>
-            {count && <span className="tnum whitespace-nowrap" data-testid="list-count">{count}</span>}
-          </nav>
-        )}
+        {(count || active > 0) && <BreadcrumbRow root={breadcrumbRoot} applied={applied} active={active} onClear={onClear} clearLabel={clearLabel} count={count} />}
         {insights}
         <div className="flex flex-col gap-3">
           {children}
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- shared surfaces
+
+/**
+ * The quiet toolbar surface the filters sit on. It also keeps "one popover at a time"
+ * for the pills inside it, so any page (lists through ListShell, configuration pages
+ * through ConfigToolbar) gets the same bar from the same markup.
+ */
+export function ListFilterBar({ children, className, label = 'Filters' }: { children: ReactNode; className?: string; label?: string }) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  return (
+    <BarContext.Provider value={{ openKey, setOpenKey }}>
+      <div className={cn('filter-bar', className)} role="toolbar" aria-label={label} data-testid="filter-bar">
+        {children}
+      </div>
+    </BarContext.Provider>
+  );
+}
+
+/** The bar's reset action: "Reset (3)". */
+export function ResetButton({ onClick, label = 'Reset', count = 0, className }: { onClick: () => void; label?: string; count?: number; className?: string }) {
+  return (
+    <button type="button" onClick={onClick} className={cn('inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-[12.5px] font-medium text-brand-700 hover:bg-white/80 whitespace-nowrap', className)} data-testid="filters-reset">
+      <X className="h-3.5 w-3.5" /> {label}{count > 1 ? ` (${count})` : ''}
+    </button>
+  );
+}
+
+export interface BreadcrumbRowProps {
+  /** The root chip: the page's default view ("All", "All open"). */
+  root?: ReactNode;
+  /** The conditions in effect, in the order applied. */
+  applied?: AppliedFilter[];
+  /** Conditions in effect when the page spells none out (a summary chip takes their place). */
+  active?: number;
+  onClear?: () => void;
+  clearLabel?: string;
+  /** The count line beside the breadcrumb ("1–25 of 148 open incidents", "12 of 48 services"). */
+  count?: ReactNode;
+  className?: string;
+}
+
+/**
+ * The conditions in effect as a breadcrumb: the root chip (clicking it resets to the
+ * default view), then one removable chip per condition, with the count line beside it.
+ */
+export function BreadcrumbRow({ root = 'All', applied = [], active = applied.length, onClear, clearLabel = 'Reset', count, className }: BreadcrumbRowProps) {
+  return (
+    <nav className={cn('flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] text-muted', className)} aria-label="Filters in effect" data-testid="applied-filters">
+      <ol className="flex flex-wrap items-center gap-1 min-w-0" data-testid="breadcrumb">
+        <li className="flex items-center">
+          {active > 0 && onClear ? (
+            <button type="button" onClick={onClear} title={clearLabel} className="breadcrumb-chip breadcrumb-root" data-testid="breadcrumb-root">
+              {root}
+            </button>
+          ) : (
+            <span className="breadcrumb-chip breadcrumb-root is-current" aria-current="page" data-testid="breadcrumb-root">
+              {root}
+            </span>
+          )}
+        </li>
+        {applied.map((a) => (
+          <li key={a.key} className="flex items-center gap-1 min-w-0">
+            <ChevronRight className="h-3.5 w-3.5 text-subtle shrink-0" aria-hidden />
+            <span className="breadcrumb-chip min-w-0" data-testid="breadcrumb-chip" data-key={a.key}>
+              <span className="truncate max-w-[32ch]">{a.label}</span>
+              <button type="button" onClick={a.onRemove} className="breadcrumb-remove" aria-label={typeof a.label === 'string' ? `Remove ${a.label}` : 'Remove this condition'}>
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          </li>
+        ))}
+        {applied.length === 0 && active > 0 && (
+          <li className="flex items-center gap-1">
+            <ChevronRight className="h-3.5 w-3.5 text-subtle shrink-0" aria-hidden />
+            <span className="breadcrumb-chip">{active} {active === 1 ? 'condition' : 'conditions'}</span>
+          </li>
+        )}
+      </ol>
+      {count && <span className="tnum whitespace-nowrap" data-testid="list-count">{count}</span>}
+    </nav>
   );
 }
 

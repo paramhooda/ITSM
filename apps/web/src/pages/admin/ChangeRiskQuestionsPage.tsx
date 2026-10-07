@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Gauge, Save } from 'lucide-react';
 import { Button, Badge, Input, Card, Field, type Column } from '@/components/ui';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MonoCell, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { useAdminMutation } from '@/components/admin/api';
+import { moveBeside } from '@/lib/configFilter';
 import { useLookups } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { changesApi, changeKeys, type RiskQuestion, type RiskOption } from '@/components/changes/api';
 
 type Values = Record<string, unknown>;
@@ -61,7 +64,7 @@ function ThresholdsCard({ current, onSave, saving }: { current: { medium: number
   );
 }
 
-/** The change risk questionnaire: weighted questions whose answers score a change low, medium or high. */
+/** The change risk questionnaire: weighted questions whose answers score a change low, medium or high; the search and include-inactive filters live in the URL (`q`, `inactive`). */
 export default function ChangeRiskQuestionsPage() {
   const q = useQuery({ queryKey: changeKeys.questions, queryFn: () => changesApi.questions(true) });
   const editor = useEditor<RiskQuestion>();
@@ -74,15 +77,19 @@ export default function ChangeRiskQuestionsPage() {
   const create = useAdminMutation((body: Values) => changesApi.createQuestion(body), { invalidate, success: 'Question added' });
   const update = useAdminMutation(({ id, ...body }: Values & { id: string }) => changesApi.updateQuestion(id, body), { invalidate });
   const remove = useAdminMutation((id: string) => changesApi.deleteQuestion(id), { invalidate, success: 'Question deleted' });
-  const rows = q.data?.items ?? [];
-  // One call with the whole order: the server writes sort_order = position for every id.
+  const rows = useMemo(() => q.data?.items ?? [], [q.data]);
+  const f = useConfigFilter(rows, {
+    search: [(r) => r.question, (r) => r.key, (r) => r.hint, (r) => r.options.map((o) => o.label)],
+    active: (r) => r.isActive,
+    noun: ['question', 'questions'],
+    searchPlaceholder: 'Search questions, answers',
+  });
+  // One call with the whole order: the server writes sort_order = position for every id. The
+  // row moves past the row shown next to it, so an inactive question hidden from the view keeps its place.
   const move = (r: RiskQuestion, dir: -1 | 1) => {
-    const ids = rows.map((x) => x.id);
-    const i = ids.indexOf(r.id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
-    reorder.mutate(ids);
+    const neighbour = f.matching[f.matching.findIndex((x) => x.id === r.id) + dir];
+    if (!neighbour) return;
+    reorder.mutate(moveBeside(rows.map((x) => x.id), r.id, neighbour.id, dir));
   };
 
   const fields: FieldSpec<Values>[] = [
@@ -102,10 +109,11 @@ export default function ChangeRiskQuestionsPage() {
     else await create.mutateAsync({ ...body, sortOrder: rows.length });
   }
   const columns: Column<RiskQuestion>[] = [
+    // The arrows wait while a search or a pill narrows the view; Include inactive alone keeps them.
     { key: 'order', header: '', width: '70px', render: (r) => (
       <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
-        <Button size="sm" variant="ghost" className="px-1" icon={<ArrowUp className="h-3.5 w-3.5" />} aria-label="Move up" onClick={() => move(r, -1)} />
-        <Button size="sm" variant="ghost" className="px-1" icon={<ArrowDown className="h-3.5 w-3.5" />} aria-label="Move down" onClick={() => move(r, 1)} />
+        <Button size="sm" variant="ghost" className="px-1" icon={<ArrowUp className="h-3.5 w-3.5" />} aria-label="Move up" disabled={f.narrowed || f.matching[0]?.id === r.id} onClick={() => move(r, -1)} />
+        <Button size="sm" variant="ghost" className="px-1" icon={<ArrowDown className="h-3.5 w-3.5" />} aria-label="Move down" disabled={f.narrowed || f.matching[f.matching.length - 1]?.id === r.id} onClick={() => move(r, 1)} />
       </span>
     ) },
     { key: 'question', header: 'Question', render: (r) => <div><div className="font-medium">{r.question}</div><MonoCell>{r.key}</MonoCell></div> },
@@ -117,15 +125,17 @@ export default function ChangeRiskQuestionsPage() {
     <div>
       <SectionHeader title="Change risk questions" description="Weighted questions an implementer answers on the change plan; the answers score the change low, medium or high against the thresholds below. A fresh installation ships six." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New question</Button>} />
       <ThresholdsCard current={thresholds} onSave={(t) => saveThresholds.mutate(t)} saving={saveThresholds.isPending} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<RiskQuestion>
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
-        emptyTitle="No risk questions yet"
-        emptyDescription="Add the questions an implementer answers before a change is approved."
+        emptyTitle={f.filtered ? 'No questions match' : 'No risk questions yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Add the questions an implementer answers before a change is approved.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete "${r.question}"?`, description: 'Existing assessments keep their score.', confirmLabel: 'Delete' }), onClick: (r) => remove.mutate(r.id) },

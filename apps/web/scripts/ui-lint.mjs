@@ -7,6 +7,8 @@
  *   - an <h1> outside the shared headers
  *   - a page file without a shared header (PageHeader, RecordHeader, DashboardHero, DashboardFrame, ListShell, AdminLayout) or redirect
  *   - a ListShell page without an empty state
+ *   - a page rendering a ConfigTable without the ConfigToolbar (search, filters, breadcrumb, count); a small
+ *     sub-panel table opts out with a `// ui-lint: no-toolbar` comment
  * Run: node scripts/ui-lint.mjs   (also `npm run lint:ui` from apps/web, part of the root `verify`)
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -55,6 +57,9 @@ for (const file of files) {
       const sources = [src, ...siblings.map((p) => readFileSync(p, 'utf8'))];
       if (!sources.some((t) => /EmptyState|empty=/.test(t))) report(file, 1, 'list-without-empty-state', rel);
     }
+    // Every configuration list gets the same toolbar (search, filters, breadcrumb, count); a page whose
+    // ConfigTable is a small sub-panel says so with `// ui-lint: no-toolbar`.
+    if (src.includes('<ConfigTable') && !src.includes('<ConfigToolbar') && !/\/\/ ui-lint: no-toolbar\b/.test(src)) report(file, 1, 'config-table-without-toolbar', rel);
   }
 }
 

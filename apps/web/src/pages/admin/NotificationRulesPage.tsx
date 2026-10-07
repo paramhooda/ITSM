@@ -3,8 +3,11 @@ import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { NOTIFICATION_EVENTS } from '@itsm/shared';
 import { Button, Badge, type Column } from '@/components/ui';
 import { useEngineers } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MutedCell, MonoCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
+import { eventGroup, eventGroupOptions, channelLabel } from '@/components/admin/notificationEvents';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { CheckboxGroup } from '@/components/admin/inputs';
 import { useRoles } from '@/components/admin/RoleAssignmentsEditor';
@@ -39,6 +42,7 @@ const CHANNELS = [
 
 type Values = Record<string, unknown>;
 
+/** Notification rules by event, with the search, event-group, channel and include-inactive filters in the URL (`q`, `group`, `channel`, `inactive`). */
 export default function NotificationRulesPage() {
   const q = useConfigKind<Rule>('notification-rules');
   const rows = useMemo(() => [...(q.data ?? [])].sort((a, b) => a.event.localeCompare(b.event)), [q.data]);
@@ -46,6 +50,25 @@ export default function NotificationRulesPage() {
   const editor = useEditor<Rule>();
   const roles = useRoles();
   const engineers = useEngineers();
+
+  const describe = (r: Rule) => {
+    const parts = RECIPIENT_FLAGS.filter((f) => r.recipients[f.value]).map((f) => f.label.toLowerCase());
+    if (r.recipients.roles?.length) parts.push(`roles: ${r.recipients.roles.join(', ')}`);
+    if (r.recipients.users?.length) parts.push(`${r.recipients.users.length} user(s)`);
+    if (r.recipients.emails?.length) parts.push(`${r.recipients.emails.length} email(s)`);
+    return parts.join(', ') || 'nobody';
+  };
+  const groups = useMemo(() => eventGroupOptions(rows.map((r) => r.event)), [rows]);
+  const f = useConfigFilter(rows, {
+    search: [(r) => r.event, (r) => r.name, (r) => describe(r), (r) => r.channels.map(channelLabel)],
+    selects: [
+      { key: 'group', label: 'Event group', options: groups, predicate: (r, v) => eventGroup(r.event) === v },
+      { key: 'channel', label: 'Channel', options: CHANNELS, predicate: (r, v) => r.channels.includes(v) },
+    ],
+    active: (r) => r.isActive,
+    noun: ['rule', 'rules'],
+    searchPlaceholder: 'Search events, rules, recipients',
+  });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'event', label: 'Event', type: 'select', required: true, options: NOTIFICATION_EVENTS.map((e) => ({ value: e, label: e })) },
@@ -73,32 +96,28 @@ export default function NotificationRulesPage() {
     else await create.mutateAsync(body);
   }
 
-  const describe = (r: Rule) => {
-    const parts = RECIPIENT_FLAGS.filter((f) => r.recipients[f.value]).map((f) => f.label.toLowerCase());
-    if (r.recipients.roles?.length) parts.push(`roles: ${r.recipients.roles.join(', ')}`);
-    if (r.recipients.users?.length) parts.push(`${r.recipients.users.length} user(s)`);
-    if (r.recipients.emails?.length) parts.push(`${r.recipients.emails.length} email(s)`);
-    return parts.join(', ') || 'nobody';
-  };
-
   const columns: Column<Rule>[] = [
     { key: 'event', header: 'Event', render: (r) => <MonoCell>{r.event}</MonoCell> },
     { key: 'name', header: 'Rule', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'recipients', header: 'Recipients', render: (r) => <MutedCell>{describe(r)}</MutedCell> },
-    { key: 'channels', header: 'Channels', render: (r) => <span className="inline-flex gap-1">{r.channels.map((c) => <Badge key={c} color={c === 'email' ? 'blue' : c === 'whatsapp' ? 'green' : 'violet'}>{c === 'in_app' ? 'in-app' : c}</Badge>)}</span> },
+    { key: 'channels', header: 'Channels', render: (r) => <span className="inline-flex gap-1">{r.channels.map((c) => <Badge key={c} color={c === 'email' ? 'blue' : c === 'whatsapp' ? 'green' : 'violet'}>{channelLabel(c)}</Badge>)}</span> },
     { key: 'isActive', header: 'Status', render: (r) => <ActiveDot active={r.isActive} /> },
   ];
 
   return (
     <div>
       <SectionHeader title="Notification rules" description="Who receives a notification for each event and through which channels. Several rules per event are allowed." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New rule</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<Rule>
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
+        emptyTitle={f.filtered ? 'No rules match' : 'No notification rules yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Add a rule naming who is notified for an event and through which channels.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete rule "${r.name}"?`, description: 'Notifications already queued are still sent.', confirmLabel: 'Delete rule' }), onClick: (r) => remove.mutate(r.id) },

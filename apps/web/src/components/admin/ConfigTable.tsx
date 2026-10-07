@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { MoreHorizontal } from 'lucide-react';
-import { DataTable, ErrorBlock, EmptyState, ConfirmDialog, type Column } from '@/components/ui';
+import { DataTable, ErrorBlock, EmptyState, ConfirmDialog, Pagination, type Column } from '@/components/ui';
 import { Menu, type MenuItem } from '@/components/Menu';
 import { cn } from '@/lib/utils';
 
@@ -37,8 +37,11 @@ export interface ConfigTableProps<T> {
   retry?: () => void;
   actions?: RowAction<T>[];
   onRowClick?: (row: T) => void;
+  /** Controls inside the card above the rows; a page's filters belong in ConfigToolbar above the card instead. */
   toolbar?: ReactNode;
   footer?: ReactNode;
+  /** Paging under the rows, shown only when the rows exceed a page (`useConfigFilter().pager`). */
+  pager?: { page: number; pageSize: number; total: number; onPage: (p: number) => void } | null;
   empty?: ReactNode;
   emptyTitle?: string;
   emptyDescription?: ReactNode;
@@ -48,10 +51,11 @@ export interface ConfigTableProps<T> {
 }
 
 /**
- * Generic configuration list: optional toolbar, columns, inline icon actions
- * and an overflow menu per row. Wraps the UI kit DataTable in a card.
+ * Generic configuration list: columns, inline icon actions, an overflow menu per
+ * row and paging. Wraps the UI kit DataTable in a card; the search and filter bar
+ * is ConfigToolbar, rendered above it (ui-lint checks every page pairs the two).
  */
-export function ConfigTable<T extends { id?: string }>({ columns, rows, loading, error, retry, actions, onRowClick, toolbar, footer, empty, emptyTitle, emptyDescription, rowKey, dense = true, className }: ConfigTableProps<T>) {
+export function ConfigTable<T extends { id?: string }>({ columns, rows, loading, error, retry, actions, onRowClick, toolbar, footer, pager, empty, emptyTitle, emptyDescription, rowKey, dense = true, className }: ConfigTableProps<T>) {
   const [pending, setPending] = useState<{ action: RowAction<T>; row: T; spec: ConfirmSpec } | null>(null);
   const run = (a: RowAction<T>, row: T) => {
     if (a.confirm) setPending({ action: a, row, spec: a.confirm(row) });
@@ -104,6 +108,7 @@ export function ConfigTable<T extends { id?: string }>({ columns, rows, loading,
         <DataTable<T> columns={cols} rows={rows} loading={loading} onRowClick={onRowClick} rowKey={rowKey} dense={dense} empty={empty ?? <EmptyState title={emptyTitle ?? 'Nothing configured yet'} description={emptyDescription} />} />
       )}
       {footer}
+      {pager && pager.total > pager.pageSize && <Pagination page={pager.page} pageSize={pager.pageSize} total={pager.total} onPage={pager.onPage} />}
       <ConfirmDialog
         open={!!pending}
         onClose={() => setPending(null)}

@@ -6,7 +6,9 @@ import { Plus, Pencil, Trash2, Folder, CornerDownRight } from 'lucide-react';
 import { get, post, patch, del } from '@/api/client';
 import { PageHeader, ModuleNav, Button, Badge, type Column } from '@/components/ui';
 import { KNOWLEDGE_MODULES } from '@/layouts/modules';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { ConfigTable, MonoCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { errorMessage } from '@/components/admin/api';
 import { fmtNumber } from '@/lib/format';
@@ -55,6 +57,13 @@ export default function KnowledgeCategoriesPage() {
     return out;
   }, [list.data]);
 
+  const f = useConfigFilter(rows, {
+    search: [(r) => r.name, (r) => r.key, (r) => r.description],
+    selects: [{ key: 'domain', label: 'Domain', options: DOMAIN_OPTIONS, predicate: (r, v) => r.domain === v }],
+    noun: ['category', 'categories'],
+    searchPlaceholder: 'Search categories',
+  });
+
   const invalidate = () => qc.invalidateQueries({ queryKey: KEY });
   const save = useMutation({
     mutationFn: ({ id, body }: { id: string | null; body: Record<string, unknown> }) => (id ? patch<KbCategory>(`/knowledge/categories/${id}`, body) : post<KbCategory>('/knowledge/categories', body)),
@@ -98,9 +107,10 @@ export default function KnowledgeCategoriesPage() {
     {
       key: 'name',
       header: 'Category',
+      // A filtered view is a flat list of matches (their parents may not match), so the tree indent only draws on the full tree.
       render: (r) => (
-        <div className="flex items-center gap-2 min-w-0" style={{ paddingLeft: r.depth * 18 }}>
-          {r.depth > 0 ? <CornerDownRight className="h-3.5 w-3.5 text-subtle shrink-0" /> : <Folder className="h-3.5 w-3.5 text-subtle shrink-0" />}
+        <div className="flex items-center gap-2 min-w-0" style={{ paddingLeft: f.filtered ? 0 : r.depth * 18 }}>
+          {r.depth > 0 && !f.filtered ? <CornerDownRight className="h-3.5 w-3.5 text-subtle shrink-0" /> : <Folder className="h-3.5 w-3.5 text-subtle shrink-0" />}
           <div className="min-w-0">
             <div className="font-medium truncate">{r.name}</div>
             {r.description && <div className="text-[11.5px] text-subtle truncate max-w-[48ch]">{r.description}</div>}
@@ -130,26 +140,22 @@ export default function KnowledgeCategoriesPage() {
     <div className="flex flex-col gap-4">
       <PageHeader title="Categories" subtitle="How articles are organised" actions={<Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New category</Button>} />
       <ModuleNav items={KNOWLEDGE_MODULES} />
+      <div>
+        <ConfigToolbar {...f.toolbar}>
+          {uncategorized > 0 && (
+            <Link to="/knowledge/articles" className="text-[12.5px] text-amber-700 hover:underline whitespace-nowrap">{fmtNumber(uncategorized)} uncategorised {uncategorized === 1 ? 'article' : 'articles'}</Link>
+          )}
+        </ConfigToolbar>
       <ConfigTable<TreeRow>
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={list.isLoading}
         error={list.isError ? list.error : undefined}
         retry={() => list.refetch()}
         onRowClick={editor.edit}
-        emptyTitle="No categories yet"
-        emptyDescription="Create the first category to start filing articles."
-        toolbar={
-          <span className="text-[12.5px] text-muted">
-            {fmtNumber(rows.length)} {rows.length === 1 ? 'category' : 'categories'}
-            {uncategorized > 0 && (
-              <>
-                {' · '}
-                <Link to="/knowledge/articles" className="text-amber-700 hover:underline">{fmtNumber(uncategorized)} uncategorised {uncategorized === 1 ? 'article' : 'articles'}</Link>
-              </>
-            )}
-          </span>
-        }
+        emptyTitle={f.filtered ? 'No categories match' : 'No categories yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Create the first category to start filing articles.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-3.5 w-3.5" />, inline: true, onClick: editor.edit },
           {
@@ -161,6 +167,7 @@ export default function KnowledgeCategoriesPage() {
           },
         ]}
       />
+      </div>
       <FormDialog<CategoryValues>
         open={editor.open}
         onClose={editor.close}

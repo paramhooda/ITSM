@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Copy, Ban } from 'lucide-react';
 import { get, post, del } from '@/api/client';
 import { Button, Badge, Dialog, type Column } from '@/components/ui';
 import { useCustomersLookup } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { fmtDateTime, fmtDate } from '@/lib/format';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MonoCell, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, type FieldSpec } from '@/components/admin/FormDialog';
 import { MultiSelect } from '@/components/admin/inputs';
 import { usePermissionCatalog } from '@/components/admin/PermissionMatrix';
@@ -34,6 +36,15 @@ const PRESETS: { label: string; permissions: string[] }[] = [
 
 type Values = Record<string, unknown>;
 
+/** A key is active until it is revoked or its expiry passes; the Status column and the Status pill read the same word. */
+const keyStatus = (r: ApiKey): 'active' | 'expired' | 'revoked' => (r.revokedAt ? 'revoked' : r.expiresAt && new Date(r.expiresAt) < new Date() ? 'expired' : 'active');
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'expired', label: 'Expired' },
+  { value: 'revoked', label: 'Revoked' },
+];
+
+/** API keys: the list with the search, status and customer filters in the URL (`q`, `status`, `customerId`); revoked keys stay listed, struck through. */
 export default function ApiKeysPage() {
   const q = useQuery({ queryKey: ['iam', 'api-keys'], queryFn: () => get<ApiKey[]>('/iam/api-keys') });
   const customers = useCustomersLookup();
@@ -43,6 +54,18 @@ export default function ApiKeysPage() {
   const invalidate = [['iam', 'api-keys']];
   const create = useAdminMutation((body: Values) => post<{ id: string; name: string; key: string }>('/iam/api-keys', body), { invalidate, onSuccess: (r) => setCreated({ name: r.name, key: r.key }) });
   const revoke = useAdminMutation((id: string) => del(`/iam/api-keys/${id}`), { invalidate, success: 'API key revoked' });
+
+  const all = useMemo(() => q.data ?? [], [q.data]);
+  const customerOpts = useMemo(() => [{ value: 'msp', label: 'MSP-wide' }, ...(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))], [customers.data]);
+  const f = useConfigFilter(all, {
+    search: [(r) => r.name, (r) => r.keyPrefix, (r) => r.permissions, (r) => r.customerName],
+    selects: [
+      { key: 'status', label: 'Status', options: STATUS_OPTIONS, predicate: (r, v) => keyStatus(r) === v },
+      { key: 'customerId', label: 'Customer', options: customerOpts, predicate: (r, v) => (v === 'msp' ? r.customerId === null : r.customerId === v) },
+    ],
+    noun: ['API key', 'API keys'],
+    searchPlaceholder: 'Search keys, permissions',
+  });
 
   const permOptions = (catalog.data?.modules ?? []).flatMap((m) => m.permissions.filter((p) => !p.key.startsWith('portal:')).map((p) => ({ value: p.key, label: p.key, hint: m.module })));
   const fields: FieldSpec<Values>[] = [
@@ -75,18 +98,25 @@ export default function ApiKeysPage() {
     { key: 'customer', header: 'Customer', render: (r) => <MutedCell>{r.customerName ?? 'All (MSP)'}</MutedCell> },
     { key: 'lastUsedAt', header: 'Last used', render: (r) => <MutedCell>{r.lastUsedAt ? fmtDateTime(r.lastUsedAt) : 'Never'}</MutedCell> },
     { key: 'expiresAt', header: 'Expires', render: (r) => <MutedCell>{r.expiresAt ? fmtDate(r.expiresAt) : '—'}</MutedCell> },
-    { key: 'status', header: 'Status', render: (r) => (r.revokedAt ? <Badge color="gray">Revoked</Badge> : r.expiresAt && new Date(r.expiresAt) < new Date() ? <Badge color="amber">Expired</Badge> : <Badge color="green" dot>Active</Badge>) },
+    { key: 'status', header: 'Status', render: (r) => {
+      const s = keyStatus(r);
+      return s === 'revoked' ? <Badge color="gray">Revoked</Badge> : s === 'expired' ? <Badge color="amber">Expired</Badge> : <Badge color="green" dot>Active</Badge>;
+    } },
   ];
 
   return (
     <div>
       <SectionHeader title="API keys" description="Keys for monitoring, SIEM and automation integrations. Send them in the X-API-Key header; the raw key is shown only once." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreateOpen(true)}>New API key</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<ApiKey>
         columns={columns}
-        rows={q.data ?? []}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
+        emptyTitle={f.filtered ? 'No API keys match' : 'No API keys yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Create a key for a monitoring, SIEM or automation integration; the raw key is shown once.'}
         actions={[{ label: 'Revoke', icon: <Ban className="h-4 w-4" />, inline: true, danger: true, hidden: (r) => !!r.revokedAt, confirm: (r) => ({ title: `Revoke "${r.name}"?`, description: 'Integrations using it stop working immediately.', confirmLabel: 'Revoke key' }), onClick: (r) => revoke.mutate(r.id) }]}
       />
       <FormDialog<Values> open={createOpen} onClose={() => setCreateOpen(false)} title="New API key" fields={fields} initial={{ name: '', permissions: [], customerId: null, expiresAt: null }} onSubmit={(v) => create.mutateAsync({ name: v.name, permissions: v.permissions, customerId: v.customerId || null, expiresAt: v.expiresAt ? new Date(`${v.expiresAt}T23:59:59`).toISOString() : null })} submitLabel="Create key" />

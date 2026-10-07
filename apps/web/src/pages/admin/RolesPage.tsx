@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Save, Pencil } from 'lucide-react';
 import { post, patch, del } from '@/api/client';
 import { Button, Badge, Drawer, Field, Input, Select, Textarea, type Column } from '@/components/ui';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MonoCell, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { PermissionMatrix } from '@/components/admin/PermissionMatrix';
 import { useRoles, type RoleRow } from '@/components/admin/RoleAssignmentsEditor';
 import { useAdminMutation, slugify } from '@/components/admin/api';
@@ -18,6 +20,16 @@ export default function RolesPage() {
   const [selected, setSelected] = useState<RoleRow | 'new' | null>(null);
   const invalidate = [['iam', 'roles']];
   const remove = useAdminMutation((id: string) => del(`/iam/roles/${id}`), { invalidate, success: 'Role deleted' });
+  const all = useMemo(() => q.data ?? [], [q.data]);
+  const f = useConfigFilter(all, {
+    search: [(r) => r.name, (r) => r.key, (r) => r.description],
+    selects: [
+      { key: 'userType', label: 'Applies to', options: [{ value: 'msp', label: 'MSP staff' }, { value: 'customer', label: 'Customer portal users' }], predicate: (r, v) => r.userType === v },
+      { key: 'kind', label: 'Kind', options: [{ value: 'system', label: 'System roles' }, { value: 'custom', label: 'Custom roles' }], predicate: (r, v) => (v === 'system' ? r.isSystem : !r.isSystem) },
+    ],
+    noun: ['role', 'roles'],
+    searchPlaceholder: 'Search roles',
+  });
 
   const columns: Column<RoleRow>[] = [
     { key: 'name', header: 'Role', render: (r) => (
@@ -37,13 +49,17 @@ export default function RolesPage() {
   return (
     <div>
       <SectionHeader title="Roles" description="Bundles of permissions. System roles can be tuned (except Administrator); custom roles can be added for specific needs." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={() => setSelected('new')}>New role</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<RoleRow>
         columns={columns}
-        rows={q.data ?? []}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={setSelected}
+        emptyTitle={f.filtered ? 'No roles match' : 'No roles yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : undefined}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: setSelected },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, confirm: (r) => ({ title: `Delete role "${r.name}"?`, description: `${r.userCount} user(s) lose it.`, confirmLabel: 'Delete role' }), onClick: (r) => remove.mutate(r.id) },

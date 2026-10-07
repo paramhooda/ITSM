@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Pencil, Copy, Trash2, Eye, EyeOff } from 'lucide-react';
 import { get, post, patch, del } from '@/api/client';
 import { Button, Badge, Tabs, type Column } from '@/components/ui';
 import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MutedCell, MonoCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, FormFields, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { FormSchemaBuilder, type FormFieldDef } from '@/components/admin/FormSchemaBuilder';
 import { useAdminMutation, slugify } from '@/components/admin/api';
@@ -54,6 +56,27 @@ export default function CatalogPage() {
   const remove = useAdminMutation((id: string) => del(`/catalog/items/${id}`), { invalidate, success: 'Catalog item deleted' });
   const clone = useAdminMutation((id: string) => post<CatalogItem>(`/catalog/items/${id}/clone`, {}), { invalidate, success: 'Catalog item cloned (inactive until published)', onSuccess: (item) => editor.edit(item) });
   const [tab, setTab] = useState<'details' | 'form'>('details');
+
+  const all = useMemo(() => q.data?.items ?? [], [q.data]);
+  const distinct = (pick: (i: CatalogItem) => [string | null, string | null]) => {
+    const seen = new Map<string, string>();
+    for (const i of all) {
+      const [value, label] = pick(i);
+      if (value && label && !seen.has(value)) seen.set(value, label);
+    }
+    return [...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  };
+  const f = useConfigFilter(all, {
+    search: [(i) => i.name, (i) => i.key, (i) => i.description, (i) => i.categoryLabel, (i) => i.ticketCategoryLabel, (i) => i.teamName, (i) => i.slaPolicyName, (i) => i.approvalWorkflowName],
+    selects: [
+      { key: 'category', label: 'Category', options: distinct((i) => [i.categoryId, i.categoryLabel]), predicate: (i, v) => i.categoryId === v },
+      { key: 'team', label: 'Team', options: distinct((i) => [i.teamId, i.teamName]), predicate: (i, v) => i.teamId === v },
+      { key: 'portal', label: 'Portal', options: [{ value: 'visible', label: 'Visible in the portal' }, { value: 'hidden', label: 'Hidden from the portal' }], predicate: (i, v) => i.portalVisible === (v === 'visible') },
+    ],
+    active: (i) => i.isActive,
+    noun: ['item', 'items'],
+    searchPlaceholder: 'Search catalog items',
+  });
 
   const detailFields: FieldSpec<Values>[] = [
     { key: 'name', label: 'Name', type: 'text', required: true },
@@ -106,13 +129,17 @@ export default function CatalogPage() {
   return (
     <div>
       <SectionHeader title="Service request catalog" description="Request types customers and engineers can raise, each with its own form, approval, team and SLA." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={() => { setTab('details'); editor.create(); }}>New item</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<CatalogItem>
         columns={columns}
-        rows={q.data?.items ?? []}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={(r) => { setTab('details'); editor.edit(r); }}
+        emptyTitle={f.filtered ? 'No items match' : 'No catalog items yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Add the request types customers and engineers can raise.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: (r) => { setTab('details'); editor.edit(r); } },
           { label: 'Clone', icon: <Copy className="h-4 w-4" />, inline: true, onClick: (r) => clone.mutate(r.id) },

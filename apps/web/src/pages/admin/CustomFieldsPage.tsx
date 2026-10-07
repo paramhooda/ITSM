@@ -1,11 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { Button, Tabs, Badge, type Column } from '@/components/ui';
 import { titleCase } from '@/lib/format';
+import { useListState } from '@/hooks/useListState';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MonoCell, ActiveDot } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
-import { useConfigKind, useConfigMutations, moveInList } from '@/components/admin/api';
+import { useConfigKind, useConfigMutations, moveNextTo } from '@/components/admin/api';
 
 interface CustomField {
   id: string;
@@ -26,13 +29,25 @@ const FIELD_TYPES = ['text', 'textarea', 'number', 'select', 'multiselect', 'dat
 
 type Values = Record<string, unknown>;
 
+type Entity = (typeof ENTITIES)[number];
+
 export default function CustomFieldsPage() {
-  const [entity, setEntity] = useState<(typeof ENTITIES)[number]>('ticket');
+  // The entity tab is part of the URL (`entity`, default ticket) like the conditions under it.
+  const { state, set } = useListState();
+  const entity: Entity = (ENTITIES as readonly string[]).includes(state.entity ?? '') ? (state.entity as Entity) : 'ticket';
+  const setEntity = (e: Entity) => set({ entity: e === 'ticket' ? undefined : e });
   const q = useConfigKind<CustomField>('custom-fields');
-  const all = q.data ?? [];
+  const all = useMemo(() => q.data ?? [], [q.data]);
   const rows = useMemo(() => all.filter((f) => f.entity === entity).sort((a, b) => a.sortOrder - b.sortOrder), [all, entity]);
   const { create, update, remove } = useConfigMutations('custom-fields', { label: 'Custom field' });
   const editor = useEditor<CustomField>();
+  const f = useConfigFilter(rows, {
+    search: [(r) => r.label, (r) => r.key, (r) => r.helpText, (r) => r.options.map((o) => o.label)],
+    selects: [{ key: 'type', label: 'Type', options: FIELD_TYPES, predicate: (r, v) => r.fieldType === v }],
+    active: (r) => r.isActive,
+    noun: ['field', 'fields'],
+    searchPlaceholder: 'Search fields',
+  });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'label', label: 'Label', type: 'text', required: true },
@@ -70,25 +85,31 @@ export default function CustomFieldsPage() {
   ];
 
   const move = async (row: CustomField, dir: -1 | 1) => {
-    const changes = moveInList(rows, row.id, dir);
-    for (const c of changes) if (rows.find((r) => r.id === c.id)?.sortOrder !== c.sortOrder) await update.mutateAsync(c);
+    // Past the row shown next to it: an inactive row hidden from the view keeps its place.
+    const neighbour = f.matching[f.matching.findIndex((r) => r.id === row.id) + dir];
+    if (!neighbour) return;
+    for (const c of moveNextTo(rows, row.id, neighbour.id, dir)) if (rows.find((r) => r.id === c.id)?.sortOrder !== c.sortOrder) await update.mutateAsync(c);
   };
 
   return (
     <div>
       <SectionHeader title="Custom fields" description="Extend core records with additional fields. Values are stored on each record and shown in forms and detail views." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New field</Button>} />
-      <Tabs tabs={ENTITIES.map((e) => ({ key: e, label: titleCase(e), count: all.filter((f) => f.entity === e).length }))} value={entity} onChange={setEntity} className="mb-3" />
+      <Tabs tabs={ENTITIES.map((e) => ({ key: e, label: titleCase(e), count: all.filter((x) => x.entity === e).length }))} value={entity} onChange={setEntity} className="mb-3" />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<CustomField>
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
-        emptyDescription={`No custom fields for ${titleCase(entity).toLowerCase()} records yet.`}
+        emptyTitle={f.filtered ? 'No fields match' : 'Nothing configured yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : `No custom fields for ${titleCase(entity).toLowerCase()} records yet.`}
         actions={[
-          { label: 'Move up', icon: <ChevronUp className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, -1), disabled: (r) => rows[0]?.id === r.id },
-          { label: 'Move down', icon: <ChevronDown className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, 1), disabled: (r) => rows[rows.length - 1]?.id === r.id },
+          // The arrows wait while a search or a pill narrows the view; the row moves past the row shown next to it.
+          { label: 'Move up', icon: <ChevronUp className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, -1), disabled: (r) => f.narrowed || f.matching[0]?.id === r.id },
+          { label: 'Move down', icon: <ChevronDown className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, 1), disabled: (r) => f.narrowed || f.matching[f.matching.length - 1]?.id === r.id },
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete field "${r.label}"?`, description: 'Existing values stay on records but are no longer shown.', confirmLabel: 'Delete field' }), onClick: (r) => remove.mutate(r.id) },
         ]}

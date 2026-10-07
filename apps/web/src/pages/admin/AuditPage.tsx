@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Download, ChevronRight, ChevronDown } from 'lucide-react';
 import { get, download, buildQuery } from '@/api/client';
-import { Button, Badge, Input, Select, SearchInput, Pagination, EmptyState, ErrorBlock, LoadingBlock } from '@/components/ui';
+import { Button, Badge, Input, Pagination, EmptyState, ErrorBlock, LoadingBlock, FilterGroup, FilterDateRange } from '@/components/ui';
 import { useListState } from '@/hooks/useListState';
 import { useCustomersLookup } from '@/hooks/useLookups';
-import { fmtDateTime, titleCase } from '@/lib/format';
+import { serverToolbar } from '@/hooks/useConfigFilter';
+import { fmtDate, fmtDateTime, titleCase } from '@/lib/format';
 import { SectionHeader } from '@/components/admin/AdminLayout';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { isNotFound, errorMessage } from '@/components/admin/api';
 import { cn } from '@/lib/utils';
 
@@ -29,15 +31,45 @@ interface AuditRow {
 }
 
 const ENTITY_TYPES = ['ticket', 'customer', 'site', 'contact', 'contract', 'service', 'asset', 'ci', 'field_visit', 'pm_program', 'kb_article', 'user', 'role', 'team', 'api_key', 'config_option', 'sla_policy', 'catalog_item', 'business_calendar', 'holiday_calendar', 'notification_template', 'notification_rule', 'assignment_rule', 'escalation_rule', 'approval_workflow', 'custom_field', 'ci_type', 'ci_relationship_type', 'system_settings', 'priority_matrix', 'integration'];
+const SOURCES = [{ value: 'ui', label: 'UI' }, { value: 'api', label: 'API' }, { value: 'ai', label: 'AI' }, { value: 'integration', label: 'Integration' }, { value: 'system', label: 'System' }];
 const ACTION_COLOR: Record<string, string> = { create: 'green', update: 'blue', delete: 'red', deactivate: 'amber', login: 'slate', clone: 'violet' };
 
+/**
+ * The audit log filters on the server (`q`, `entityType`, `entityId`, `action`,
+ * `customerId`, `userId`, `source`, `from`, `to`, `page` in the URL) behind the same
+ * toolbar as every configuration page: pills for the entity, the customer and the
+ * source, a date-range pill, free text for the action and the user, and every
+ * condition in the URL (an entity id from a record's link too) as a breadcrumb chip.
+ */
 export default function AuditPage() {
   const { state, set, page, pageSize, setPage } = useListState({ pageSize: '50' });
   const customers = useCustomersLookup();
   const [open, setOpen] = useState<string | null>(null);
   const query = { ...state, page, pageSize };
   const q = useQuery({ queryKey: ['audit', query], queryFn: () => get<{ items: AuditRow[]; total: number }>('/audit', query), retry: false });
+  // The unfiltered total for the "12 of 1,204" count (one tiny page, refreshed with the list).
+  const everyone = useQuery({ queryKey: ['audit', 'total'], queryFn: () => get<{ items: AuditRow[]; total: number }>('/audit', { page: 1, pageSize: 1 }), staleTime: 60_000, retry: false });
   const unavailable = q.isError && isNotFound(q.error);
+  const customerOptions = (customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }));
+  const range = (from?: string, to?: string) => `Date: ${from ? fmtDate(from) : '…'} → ${to ? fmtDate(to) : '…'}`;
+  const toolbar = serverToolbar(state, set, {
+    selects: [
+      { key: 'entityType', label: 'Entity', options: ENTITY_TYPES.map((t) => ({ value: t, label: titleCase(t) })) },
+      { key: 'customerId', label: 'Customer', options: customerOptions },
+      { key: 'source', label: 'Source', options: SOURCES },
+    ],
+    extra: [
+      { key: 'entityId', label: (v) => `Entity id: ${v}` },
+      { key: 'action', label: (v) => `Action: ${v}` },
+      { key: 'userId', label: (v) => `User: ${v}` },
+      { key: 'from', keys: ['from', 'to'], label: (v, st) => range(v, st.to) },
+      { key: 'to', keys: ['from', 'to'], label: (v, st) => (st.from ? null : range(undefined, v)) },
+    ],
+    searchPlaceholder: 'Label, user, action…',
+    noun: ['entry', 'entries'],
+    matching: q.data?.total,
+    total: everyone.data?.total ?? q.data?.total,
+  });
 
   async function exportCsv() {
     try {
@@ -52,16 +84,19 @@ export default function AuditPage() {
   return (
     <div>
       <SectionHeader title="Audit log" description="Who changed what, when and from where. Every write across the platform is recorded in the same transaction as the change." actions={<Button variant="outline" icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={unavailable}>Export CSV</Button>} />
+      <ConfigToolbar
+        {...toolbar}
+        extra={
+          <>
+            <FilterGroup label="Date">
+              <FilterDateRange from={state.from} to={state.to} onChange={(r) => set({ from: r.from, to: r.to })} />
+            </FilterGroup>
+            <Input value={state.action ?? ''} onChange={(e) => set({ action: e.target.value || undefined })} className="w-32 h-8 py-0 text-[12.5px]" placeholder="Action" aria-label="Action" />
+            <Input value={state.userId ?? ''} onChange={(e) => set({ userId: e.target.value || undefined })} className="w-40 h-8 py-0 text-[12.5px]" placeholder="User id / email" aria-label="User" />
+          </>
+        }
+      />
       <div className="card overflow-hidden">
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-default">
-          <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} className="w-56" placeholder="Label, user, action…" />
-          <Select value={state.entityType ?? ''} onChange={(e) => set({ entityType: e.target.value })} className="w-44" placeholder="Any entity" options={ENTITY_TYPES.map((t) => ({ value: t, label: titleCase(t) }))} />
-          <Input value={state.action ?? ''} onChange={(e) => set({ action: e.target.value })} className="w-32" placeholder="Action" />
-          <Select value={state.customerId ?? ''} onChange={(e) => set({ customerId: e.target.value })} className="w-44" placeholder="Any customer" options={(customers.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))} />
-          <Input value={state.userId ?? ''} onChange={(e) => set({ userId: e.target.value })} className="w-40" placeholder="User id / email" />
-          <Input type="date" value={state.from ?? ''} onChange={(e) => set({ from: e.target.value })} className="w-36" title="From" />
-          <Input type="date" value={state.to ?? ''} onChange={(e) => set({ to: e.target.value })} className="w-36" title="To" />
-        </div>
         {q.isLoading ? (
           <LoadingBlock />
         ) : unavailable ? (
@@ -69,7 +104,7 @@ export default function AuditPage() {
         ) : q.error ? (
           <ErrorBlock error={q.error} retry={() => q.refetch()} />
         ) : !q.data?.items.length ? (
-          <EmptyState title="No audit entries" description="Try widening the filters." />
+          <EmptyState title={toolbar.applied.length ? 'No entries match' : 'No audit entries yet'} description={toolbar.applied.length ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Every write across the platform is recorded here as it happens.'} />
         ) : (
           <div className="overflow-auto">
             <table className="table [&_td]:py-1.5">
@@ -137,7 +172,7 @@ export default function AuditPage() {
             </table>
           </div>
         )}
-        {q.data && <Pagination page={page} pageSize={pageSize} total={q.data.total ?? 0} onPage={setPage} />}
+        {q.data && q.data.total > pageSize && <Pagination page={page} pageSize={pageSize} total={q.data.total} onPage={setPage} />}
       </div>
     </div>
   );

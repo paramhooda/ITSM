@@ -3,8 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Save, ClipboardPaste, X } from 'lucide-react';
 import { get, put } from '@/api/client';
 import { Button, Card, Dialog, Textarea, EmptyState, LoadingBlock, type Column } from '@/components/ui';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { useConfigKind, useConfigMutations, useAdminMutation } from '@/components/admin/api';
 import { cn } from '@/lib/utils';
@@ -22,6 +24,7 @@ interface Holiday {
 
 type Values = Record<string, unknown>;
 
+/** Holiday calendars: the list (searchable through `q` in the URL) beside the editor of the selected calendar's dates. */
 export default function HolidaysPage() {
   const q = useConfigKind<HolidayCalendar>('holiday-calendars');
   const { create, update, remove } = useConfigMutations('holiday-calendars', { label: 'Holiday calendar' });
@@ -31,6 +34,8 @@ export default function HolidaysPage() {
     if (!selectedId && q.data?.length) setSelectedId(q.data[0].id);
   }, [q.data, selectedId]);
   const selected = q.data?.find((c) => c.id === selectedId) ?? null;
+  const all = useMemo(() => q.data ?? [], [q.data]);
+  const f = useConfigFilter(all, { search: [(r) => r.name, (r) => r.country, (r) => r.description], noun: ['holiday calendar', 'holiday calendars'], searchPlaceholder: 'Search calendars' });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'name', label: 'Name', type: 'text', required: true },
@@ -56,13 +61,17 @@ export default function HolidaysPage() {
       <SectionHeader title="Holiday calendars" description="Public holidays excluded from business-hours SLA clocks. Link a holiday calendar to business calendars and SLA policies." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New holiday calendar</Button>} />
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <div className="lg:col-span-2">
+          <ConfigToolbar {...f.toolbar} />
           <ConfigTable<HolidayCalendar>
             columns={columns}
-            rows={q.data ?? []}
+            rows={f.rows}
+            pager={f.pager}
             loading={q.isLoading}
             error={q.error}
             retry={() => q.refetch()}
             onRowClick={(r) => setSelectedId(r.id)}
+            emptyTitle={f.filtered ? 'No calendars match' : 'No holiday calendars yet'}
+            emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Add a calendar of public holidays to exclude from business-hours SLA clocks.'}
             actions={[
               { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
               { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete "${r.name}"?`, description: 'All its holidays are removed. Business calendars and SLA policies linked to it fall back to no holidays.', confirmLabel: 'Delete calendar' }), onClick: (r) => { remove.mutate(r.id); if (selectedId === r.id) setSelectedId(null); } },

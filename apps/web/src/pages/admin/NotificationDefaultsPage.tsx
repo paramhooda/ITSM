@@ -1,9 +1,12 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { NOTIFICATION_CATEGORIES, type NotificationCategoryDef } from '@itsm/shared';
-import { Badge, Card, Toggle, EmptyState, LoadingBlock, ErrorBlock } from '@/components/ui';
+import { Badge, Card, Toggle, EmptyState, LoadingBlock, ErrorBlock, Pagination } from '@/components/ui';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { useAdminMutation } from '@/components/admin/api';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { useAuthStore } from '@/stores/auth';
 import { notificationPrefsApi, notificationPrefsKeys, type CategoryRow, type CategoryPatch } from '@/components/notifications/api';
 
@@ -32,14 +35,23 @@ const Dash = ({ label }: { label: string }) => (
   </div>
 );
 
-/** Administration → Notifications → Notification defaults: the default and the lock per category and channel. */
+/** Administration → Notifications → Notification defaults: the default and the lock per category and channel, with the search and audience filters in the URL (`q`, `audience`). */
 export default function NotificationDefaultsPage() {
   const can = useAuthStore((s) => s.can);
   const canWrite = can('admin:config');
   const q = useQuery({ queryKey: notificationPrefsKeys.categories, queryFn: () => notificationPrefsApi.categories() });
   const update = useAdminMutation(({ id, ...body }: CategoryPatch & { id: string }) => notificationPrefsApi.updateCategory(id, body), { invalidate: [notificationPrefsKeys.categories], success: 'Defaults saved' });
-  const byKey = new Map((q.data ?? []).map((r) => [r.key, r]));
-  const rows = NOTIFICATION_CATEGORIES.map((def) => ({ def, row: byKey.get(def.key) })).filter((x): x is { def: NotificationCategoryDef; row: CategoryRow } => !!x.row);
+  const rows = useMemo(() => {
+    const byKey = new Map((q.data ?? []).map((r) => [r.key, r]));
+    return NOTIFICATION_CATEGORIES.map((def) => ({ def, row: byKey.get(def.key) })).filter((x): x is { def: NotificationCategoryDef; row: CategoryRow } => !!x.row);
+  }, [q.data]);
+  // The matrix is a configuration list like the others: search and audience in the URL (`q`, `audience`).
+  const f = useConfigFilter(rows, {
+    search: [({ def }) => def.label, ({ def }) => def.description, ({ def }) => def.key, ({ def }) => AUDIENCE[def.audience].label],
+    selects: [{ key: 'audience', label: 'Audience', options: (Object.keys(AUDIENCE) as NotificationCategoryDef['audience'][]).map((a) => ({ value: a, label: AUDIENCE[a].label })), predicate: ({ def }, v) => def.audience === v }],
+    noun: ['category', 'categories'],
+    searchPlaceholder: 'Search categories',
+  });
   const readOnly = 'Requires the admin:config permission';
   const save = (row: CategoryRow, patch: CategoryPatch) => update.mutate({ id: row.id, ...patch });
 
@@ -51,12 +63,15 @@ export default function NotificationDefaultsPage() {
         Rules decide which channels an event may use; these defaults and each person&apos;s own choice only ever remove a channel. Account messages (welcome, password reset, verification codes) are always sent. Which channels an event may use at all is set under{' '}
         <Link to="/admin/notifications/rules" className="text-brand-700 hover:underline">Notification rules</Link>.
       </p>
+      <ConfigToolbar {...f.toolbar} />
       {q.isLoading ? (
         <LoadingBlock />
       ) : q.error ? (
         <ErrorBlock error={q.error} retry={() => void q.refetch()} />
       ) : rows.length === 0 ? (
         <EmptyState title="No notification categories yet" description="They are seeded when the API starts." />
+      ) : f.rows.length === 0 ? (
+        <Card><EmptyState title="No categories match" description="Try another search, or clear the conditions in the breadcrumb above." /></Card>
       ) : (
         <Card padded={false}>
           <div className={`hidden md:grid ${GRID} gap-3 border-b border-default px-4 py-2 text-[11px] uppercase tracking-wide text-subtle`}>
@@ -67,7 +82,7 @@ export default function NotificationDefaultsPage() {
             <div>WhatsApp locked</div>
           </div>
           <div className="divide-y divide-[var(--border)]">
-            {rows.map(({ def, row }) => {
+            {f.rows.map(({ def, row }) => {
               const audience = AUDIENCE[def.audience];
               const busy = update.isPending && update.variables?.id === row.id;
               return (
@@ -103,6 +118,7 @@ export default function NotificationDefaultsPage() {
               );
             })}
           </div>
+          {f.pager && <Pagination page={f.pager.page} pageSize={f.pager.pageSize} total={f.pager.total} onPage={f.pager.onPage} />}
         </Card>
       )}
       <p className="mt-3 text-[12px] text-subtle">A WhatsApp lock never overrides a person&apos;s opt-in: WhatsApp still needs their mobile number and consent. Every change is recorded in the audit log.</p>

@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Star, Copy, FileSignature } from 'lucide-react';
 import { post, del } from '@/api/client';
-import { Button, Badge, Checkbox, SearchInput, type Column } from '@/components/ui';
+import { Button, Badge, type Column } from '@/components/ui';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { useAdminMutation } from '@/components/admin/api';
 import { formatDuration } from '@/components/admin/DurationInput';
 import { PolicyDrawer } from '@/components/sla/PolicyDrawer';
@@ -15,13 +17,12 @@ import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
  * SLA policies are managed here like every other configuration list: the
  * table, "New policy" in the header and one drawer for create and edit.
  * `?new=1`, `?edit=<id>` (and `&tab=`) open the drawer so the Service levels
- * page, contracts and old links can deep-link into the editor.
+ * page, contracts and old links can deep-link into the editor; the search and
+ * "Include inactive" live in the URL too (`q`, `inactive`) beside them.
  */
 export default function SlaPoliciesPage() {
   const [params, setParams] = useSearchParams();
   const q = useSlaPolicies();
-  const [filter, setFilter] = useState('');
-  const [showInactive, setShowInactive] = useState(true);
   const editId = params.get('edit');
   const isNew = params.get('new') === '1';
   const tab = params.get('tab');
@@ -48,10 +49,13 @@ export default function SlaPoliciesPage() {
   const clone = useAdminMutation((id: string) => post<SlaPolicy>(`/sla/policies/${id}/clone`, {}), { invalidate, lookups: true, success: 'Policy cloned', onSuccess: (copy) => openEditor(copy.id) });
   const remove = useAdminMutation((id: string) => del(`/sla/policies/${id}`), { invalidate, lookups: true, success: 'Policy deleted' });
 
-  const rows = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    return (q.data?.items ?? []).filter((p) => (showInactive || p.isActive) && (!needle || p.name.toLowerCase().includes(needle) || (p.description ?? '').toLowerCase().includes(needle)));
-  }, [q.data, filter, showInactive]);
+  const all = useMemo(() => q.data?.items ?? [], [q.data]);
+  const f = useConfigFilter(all, {
+    search: [(p) => p.name, (p) => p.description, (p) => p.calendarName, (p) => p.holidayCalendarName, (p) => p.targetSummary?.map((t) => t.priorityLabel)],
+    active: (p) => p.isActive,
+    noun: ['policy', 'policies'],
+    searchPlaceholder: 'Search policies',
+  });
 
   const columns: Column<SlaPolicy>[] = [
     { key: 'name', header: 'Policy', render: (r) => (
@@ -94,21 +98,17 @@ export default function SlaPoliciesPage() {
   return (
     <div>
       <SectionHeader title="SLA policies" description="Response and resolution targets per ticket type and priority. Contracts, services and catalog items pick a policy; one policy is the platform default." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={() => openEditor(null)}>New policy</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<SlaPolicy>
-        toolbar={
-          <>
-            <SearchInput value={filter} onChange={setFilter} className="w-56" placeholder="Search policies" />
-            <Checkbox label="Show inactive" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-          </>
-        }
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={(r) => openEditor(r.id)}
-        emptyTitle="No SLA policies yet"
-        emptyDescription="Create a policy with targets per priority, then map contracts to it."
+        emptyTitle={f.filtered ? 'No policies match' : 'No SLA policies yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Create a policy with targets per priority, then map contracts to it.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: (r) => openEditor(r.id) },
           { label: 'Assign contracts', icon: <FileSignature className="h-4 w-4" />, onClick: (r) => openEditor(r.id, 'contracts') },

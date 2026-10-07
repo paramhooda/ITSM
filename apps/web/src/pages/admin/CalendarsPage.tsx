@@ -1,7 +1,10 @@
+import { useMemo } from 'react';
 import { Plus, Pencil, Trash2, Star } from 'lucide-react';
 import { Button, Badge, type Column } from '@/components/ui';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { WeeklyHoursEditor, summarizeHours, type WeeklyHours } from '@/components/admin/WeeklyHoursEditor';
 import { timezoneOptions } from '@/components/admin/inputs';
@@ -21,12 +24,21 @@ interface Calendar {
 type Values = Record<string, unknown>;
 const DEFAULT_HOURS: WeeklyHours = { mon: [['09:00', '18:00']], tue: [['09:00', '18:00']], wed: [['09:00', '18:00']], thu: [['09:00', '18:00']], fri: [['09:00', '18:00']] };
 
+/** Business calendars with the search and coverage filters in the URL (`q`, `coverage`). */
 export default function CalendarsPage() {
   const q = useConfigKind<Calendar>('calendars');
   const holidayCals = useConfigKind<{ id: string; name: string }>('holiday-calendars');
   const { create, update, remove } = useConfigMutations('calendars', { lookups: true, label: 'Calendar' });
   const editor = useEditor<Calendar>();
   const tz = timezoneOptions();
+  const holidayName = (id: string | null) => holidayCals.data?.find((h) => h.id === id)?.name;
+  const all = useMemo(() => q.data ?? [], [q.data]);
+  const f = useConfigFilter(all, {
+    search: [(r) => r.name, (r) => r.description, (r) => r.timezone, (r) => holidayName(r.holidayCalendarId), (r) => (r.is24x7 ? '24x7' : summarizeHours(r.hours))],
+    selects: [{ key: 'coverage', label: 'Coverage', options: [{ value: '24x7', label: '24x7' }, { value: 'hours', label: 'Business hours' }], predicate: (r, v) => (r.is24x7 ? '24x7' : 'hours') === v }],
+    noun: ['calendar', 'calendars'],
+    searchPlaceholder: 'Search calendars, timezones',
+  });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'name', label: 'Name', type: 'text', required: true },
@@ -55,19 +67,23 @@ export default function CalendarsPage() {
     ) },
     { key: 'timezone', header: 'Timezone', render: (r) => <MutedCell>{r.timezone}</MutedCell> },
     { key: 'hours', header: 'Working hours', render: (r) => (r.is24x7 ? <Badge color="green">24x7</Badge> : <MutedCell>{summarizeHours(r.hours)}</MutedCell>) },
-    { key: 'holidays', header: 'Holidays', render: (r) => <MutedCell>{holidayCals.data?.find((h) => h.id === r.holidayCalendarId)?.name ?? '—'}</MutedCell> },
+    { key: 'holidays', header: 'Holidays', render: (r) => <MutedCell>{holidayName(r.holidayCalendarId) ?? '—'}</MutedCell> },
   ];
 
   return (
     <div>
       <SectionHeader title="Business calendars" description="Working hours per timezone used by SLA policies, contracts and sites. Holidays come from the linked holiday calendar." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New calendar</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<Calendar>
         columns={columns}
-        rows={q.data ?? []}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
+        emptyTitle={f.filtered ? 'No calendars match' : 'No business calendars yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Add the working hours SLA policies, contracts and sites count against.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, disabled: (r) => r.isDefault, confirm: (r) => ({ title: `Delete calendar "${r.name}"?`, description: 'SLA policies using it fall back to the platform default.', confirmLabel: 'Delete calendar' }), onClick: (r) => remove.mutate(r.id) },

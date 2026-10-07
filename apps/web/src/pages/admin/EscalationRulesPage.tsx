@@ -4,13 +4,15 @@ import { Plus, Pencil, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { TICKET_TYPES, SLA_METRICS } from '@itsm/shared';
 import { Button, Badge, type Column } from '@/components/ui';
 import { useLookups, useEngineers } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { titleCase } from '@/lib/format';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { CheckboxGroup } from '@/components/admin/inputs';
 import { useRoles } from '@/components/admin/RoleAssignmentsEditor';
-import { useConfigKind, useConfigMutations, moveInList } from '@/components/admin/api';
+import { useConfigKind, useConfigMutations, moveNextTo } from '@/components/admin/api';
 import { oncallApi, oncallKeys } from '@/components/oncall/api';
 
 interface EscalationRule {
@@ -30,6 +32,7 @@ const NOTIFY_FLAGS = [
   { value: 'notifyOnCall', label: 'On-call engineer' },
 ];
 
+/** Escalation rules in order, with the search, trigger and include-inactive filters in the URL (`q`, `trigger`, `inactive`). */
 export default function EscalationRulesPage() {
   const q = useConfigKind<EscalationRule>('escalation-rules');
   const rows = useMemo(() => [...(q.data ?? [])].sort((a, b) => a.sortOrder - b.sortOrder), [q.data]);
@@ -42,6 +45,33 @@ export default function EscalationRulesPage() {
   const teams = (lookups.lookups?.teams ?? []).map((t) => ({ value: t.id, label: t.name }));
   const policies = useQuery({ queryKey: oncallKeys.policies, queryFn: oncallApi.policies, staleTime: 60_000 });
   const pageOptions = [{ value: 'team', label: "The assigned team's default policy" }, ...(policies.data ?? []).filter((p) => p.isActive).map((p) => ({ value: p.id, label: p.name }))];
+
+  const describeTrigger = (r: EscalationRule) => {
+    const c = r.conditions;
+    const metric = !c.metric || c.metric === 'any' ? 'any SLA' : titleCase(c.metric);
+    const when = c.onBreach ? 'breached' : `at ${c.thresholdPct ?? 75}%`;
+    const scope = [c.priorityKeys?.length ? c.priorityKeys.map((k) => k.toUpperCase()).join('/') : null, c.ticketTypes?.length ? c.ticketTypes.map(titleCase).join('/') : null].filter(Boolean).join(' · ');
+    return `${metric} ${when}${scope ? ` · ${scope}` : ''}`;
+  };
+  const describeActions = (r: EscalationRule) => {
+    const a = r.actions;
+    const parts: string[] = [];
+    const notify = [a.notifyAssignee && 'assignee', a.notifyTeam && 'team', a.notifyManager && 'manager', a.notifyOnCall && 'on-call', a.notifyRoles?.length && `${a.notifyRoles.length} role(s)`, a.notifyUserIds?.length && `${a.notifyUserIds.length} user(s)`, a.emails?.length && `${a.emails.length} email(s)`].filter(Boolean);
+    if (notify.length) parts.push(`notify ${notify.join(', ')}`);
+    if (a.raiseEscalationLevel) parts.push('raise level');
+    if (a.reassignTeamId) parts.push(`reassign → ${lookups.team(a.reassignTeamId)?.name ?? 'team'}`);
+    if (a.raisePriorityKey) parts.push(`priority → ${a.raisePriorityKey.toUpperCase()}`);
+    if (a.pageTeam) parts.push("page via the team's policy");
+    else if (a.pagePolicyId) parts.push(`page via ${policies.data?.find((p) => p.id === a.pagePolicyId)?.name ?? 'policy'}`);
+    return parts.join(' · ') || '—';
+  };
+  const f = useConfigFilter(rows, {
+    search: [(r) => r.name, (r) => describeTrigger(r), (r) => describeActions(r)],
+    selects: [{ key: 'trigger', label: 'Trigger', options: [{ value: 'breach', label: 'Breach' }, { value: 'warning', label: 'Warning' }], predicate: (r, v) => (r.conditions.onBreach ? 'breach' : 'warning') === v }],
+    active: (r) => r.isActive,
+    noun: ['rule', 'rules'],
+    searchPlaceholder: 'Search rules, triggers, actions',
+  });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'name', label: 'Rule name', type: 'text', required: true },
@@ -100,26 +130,6 @@ export default function EscalationRulesPage() {
     else await create.mutateAsync(body);
   }
 
-  const describeTrigger = (r: EscalationRule) => {
-    const c = r.conditions;
-    const metric = !c.metric || c.metric === 'any' ? 'any SLA' : titleCase(c.metric);
-    const when = c.onBreach ? 'breached' : `at ${c.thresholdPct ?? 75}%`;
-    const scope = [c.priorityKeys?.length ? c.priorityKeys.map((k) => k.toUpperCase()).join('/') : null, c.ticketTypes?.length ? c.ticketTypes.map(titleCase).join('/') : null].filter(Boolean).join(' · ');
-    return `${metric} ${when}${scope ? ` · ${scope}` : ''}`;
-  };
-  const describeActions = (r: EscalationRule) => {
-    const a = r.actions;
-    const parts: string[] = [];
-    const notify = [a.notifyAssignee && 'assignee', a.notifyTeam && 'team', a.notifyManager && 'manager', a.notifyOnCall && 'on-call', a.notifyRoles?.length && `${a.notifyRoles.length} role(s)`, a.notifyUserIds?.length && `${a.notifyUserIds.length} user(s)`, a.emails?.length && `${a.emails.length} email(s)`].filter(Boolean);
-    if (notify.length) parts.push(`notify ${notify.join(', ')}`);
-    if (a.raiseEscalationLevel) parts.push('raise level');
-    if (a.reassignTeamId) parts.push(`reassign → ${lookups.team(a.reassignTeamId)?.name ?? 'team'}`);
-    if (a.raisePriorityKey) parts.push(`priority → ${a.raisePriorityKey.toUpperCase()}`);
-    if (a.pageTeam) parts.push("page via the team's policy");
-    else if (a.pagePolicyId) parts.push(`page via ${policies.data?.find((p) => p.id === a.pagePolicyId)?.name ?? 'policy'}`);
-    return parts.join(' · ') || '—';
-  };
-
   const columns: Column<EscalationRule>[] = [
     { key: 'sortOrder', header: '#', width: '40px', render: (r) => <MutedCell>{rows.indexOf(r) + 1}</MutedCell> },
     { key: 'name', header: 'Rule', render: (r) => <span className="font-medium">{r.name}</span> },
@@ -129,22 +139,30 @@ export default function EscalationRulesPage() {
   ];
 
   const move = async (row: EscalationRule, dir: -1 | 1) => {
-    for (const c of moveInList(rows, row.id, dir)) if (rows.find((r) => r.id === c.id)?.sortOrder !== c.sortOrder) await update.mutateAsync(c);
+    // Past the row shown next to it: an inactive row hidden from the view keeps its place.
+    const neighbour = f.matching[f.matching.findIndex((r) => r.id === row.id) + dir];
+    if (!neighbour) return;
+    for (const c of moveNextTo(rows, row.id, neighbour.id, dir)) if (rows.find((r) => r.id === c.id)?.sortOrder !== c.sortOrder) await update.mutateAsync(c);
   };
 
   return (
     <div>
       <SectionHeader title="Escalation rules" description="What happens when SLA consumption crosses a threshold or a target is breached. All matching rules fire." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New rule</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<EscalationRule>
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
+        emptyTitle={f.filtered ? 'No rules match' : 'No escalation rules yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Add a rule for what happens when an SLA clock reaches a threshold or breaches.'}
         actions={[
-          { label: 'Move up', icon: <ChevronUp className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, -1), disabled: (r) => rows[0]?.id === r.id },
-          { label: 'Move down', icon: <ChevronDown className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, 1), disabled: (r) => rows[rows.length - 1]?.id === r.id },
+          // The arrows wait while a search or a pill narrows the view; the row moves past the row shown next to it.
+          { label: 'Move up', icon: <ChevronUp className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, -1), disabled: (r) => f.narrowed || f.matching[0]?.id === r.id },
+          { label: 'Move down', icon: <ChevronDown className="h-4 w-4" />, inline: true, onClick: (r) => void move(r, 1), disabled: (r) => f.narrowed || f.matching[f.matching.length - 1]?.id === r.id },
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete rule "${r.name}"?`, description: 'Tickets already escalated by this rule are not affected.', confirmLabel: 'Delete rule' }), onClick: (r) => remove.mutate(r.id) },
         ]}

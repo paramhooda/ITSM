@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
@@ -5,9 +6,11 @@ import { TICKET_TYPES } from '@itsm/shared';
 import { Button, Badge, Card, KeyValue, type Column } from '@/components/ui';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { useAdminMutation } from '@/components/admin/api';
 import { useCustomersLookup } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { useAuthStore } from '@/stores/auth';
 import { get } from '@/api/client';
 import { fmtDateTime, titleCase } from '@/lib/format';
@@ -22,7 +25,7 @@ const toInt = (v: unknown) => (v === '' || v === null || v === undefined ? null 
 const toText = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const TYPE_OPTIONS = TICKET_TYPES.map((t) => ({ value: t, label: titleCase(t) }));
 
-/** Survey policies: the global defaults from the settings and the overrides per customer or contract. */
+/** Survey policies: the global defaults from the settings and the overrides per customer or contract, with the search, scope and surveys filters in the URL (`q`, `scope`, `enabled`). */
 export default function SurveysPage() {
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.can);
@@ -37,6 +40,16 @@ export default function SurveysPage() {
   const update = useAdminMutation(({ id, ...body }: Partial<SurveyConfigInput> & { id: string }) => surveysApi.updateConfig(id, body), { invalidate, success: 'Survey override updated' });
   const remove = useAdminMutation((id: string) => surveysApi.deleteConfig(id), { invalidate, success: 'Survey override deleted' });
   const p = policy.data;
+  const all = useMemo(() => q.data?.items ?? [], [q.data]);
+  const f = useConfigFilter(all, {
+    search: [(r) => r.customerName, (r) => r.contractNumber, (r) => r.contractName, (r) => r.question, (r) => r.notes],
+    selects: [
+      { key: 'scope', label: 'Scope', options: [{ value: 'customer', label: 'Whole customer' }, { value: 'contract', label: 'One contract' }], predicate: (r, v) => (r.contractId ? 'contract' : 'customer') === v },
+      { key: 'enabled', label: 'Surveys', options: [{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }, { value: 'inherit', label: 'Inherit' }], predicate: (r, v) => (r.enabled === null ? 'inherit' : r.enabled ? 'on' : 'off') === v },
+    ],
+    noun: ['override', 'overrides'],
+    searchPlaceholder: 'Search customers, contracts',
+  });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'customerId', label: 'Customer', type: 'select', options: customerOpts, required: true, disabled: () => !!editor.row, span: canContracts ? 1 : 2 },
@@ -114,15 +127,17 @@ export default function SurveysPage() {
           <div className="text-[13px] text-muted">Loading the defaults…</div>
         )}
       </Card>
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<SurveyConfig>
         columns={columns}
-        rows={q.data?.items ?? []}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
-        emptyTitle="No overrides"
-        emptyDescription="Every customer follows the defaults above. Add an override to switch a customer off, change its sampling or its question."
+        emptyTitle={f.filtered ? 'No overrides match' : 'No overrides'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Every customer follows the defaults above. Add an override to switch a customer off, change its sampling or its question.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete the override for ${r.contractNumber ? `${r.customerName} · ${r.contractNumber}` : r.customerName}?`, description: 'The customer follows the defaults again.', confirmLabel: 'Delete' }), onClick: (r) => remove.mutate(r.id) },

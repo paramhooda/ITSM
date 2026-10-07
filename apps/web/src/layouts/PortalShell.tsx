@@ -41,7 +41,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
         </header>
         <div className="flex-1 flex min-h-0">
           <main className="flex-1 overflow-y-auto">
-            <div className="p-5 md:p-7 max-w-[1300px] mx-auto">
+            <div className="p-5 md:p-7 pb-20 md:pb-20 max-w-[1300px] mx-auto">
               <PortalBanners />
               {children}
             </div>

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { get, post, patch, del, ApiError } from '@/api/client';
+import { moveBeside } from '@/lib/configFilter';
 
 /** Friendly message for any thrown error (API errors carry the server message). */
 export function errorMessage(err: unknown, fallback = 'Something went wrong') {
@@ -54,14 +55,17 @@ export function useConfigMutations(kind: string, opts: { lookups?: boolean; labe
   return { create, update, remove };
 }
 
-/** Swaps sortOrder between two rows (used by up/down buttons on ordered config lists). */
-export function moveInList<T extends { id: string; sortOrder?: number }>(rows: T[], id: string, dir: -1 | 1): { id: string; sortOrder: number }[] {
-  const sorted = [...rows].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-  const i = sorted.findIndex((r) => r.id === id);
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= sorted.length) return [];
-  [sorted[i], sorted[j]] = [sorted[j], sorted[i]];
-  return sorted.map((r, idx) => ({ id: r.id, sortOrder: (idx + 1) * 10 }));
+/**
+ * The sortOrder of every row after `id` moves past `neighbourId` (the row shown next to it;
+ * `dir` -1 puts it before, 1 after), used by the up and down actions on ordered
+ * configuration lists. Rows hidden from the view keep their place (`moveBeside`); the
+ * result is empty when the order does not change.
+ */
+export function moveNextTo<T extends { id: string; sortOrder?: number }>(rows: T[], id: string, neighbourId: string, dir: -1 | 1): { id: string; sortOrder: number }[] {
+  const sorted = [...rows].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((r) => r.id);
+  const order = moveBeside(sorted, id, neighbourId, dir);
+  if (order.every((x, i) => x === sorted[i])) return [];
+  return order.map((rowId, idx) => ({ id: rowId, sortOrder: (idx + 1) * 10 }));
 }
 
 export const slugify = (s: string) =>

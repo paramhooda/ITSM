@@ -1,12 +1,15 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ShieldCheck } from 'lucide-react';
 import { Button, Badge, type Column } from '@/components/ui';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MonoCell, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { MultiSelect } from '@/components/admin/inputs';
 import { useAdminMutation } from '@/components/admin/api';
 import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { relativeTime } from '@/lib/format';
 import { changesApi, changeKeys, type ChangeTemplate } from '@/components/changes/api';
 
@@ -17,7 +20,7 @@ const TYPE_OPTIONS = [
   { value: 'emergency', label: 'Emergency' },
 ];
 
-/** Standard change templates: repeatable, low-risk changes raised from a pattern, pre-approved when the template says so. */
+/** Standard change templates: repeatable, low-risk changes raised from a pattern, pre-approved when the template says so; the search, type, approval and include-inactive filters live in the URL (`q`, `changeType`, `approval`, `inactive`). */
 export default function ChangeTemplatesPage() {
   const q = useQuery({ queryKey: changeKeys.templates({ all: true }), queryFn: () => changesApi.templates({ all: true }) });
   const editor = useEditor<ChangeTemplate>();
@@ -31,6 +34,17 @@ export default function ChangeTemplatesPage() {
   const categoryOpts = lookups.options('ticket_category').map((o) => ({ value: o.id, label: o.label }));
   const riskOpts = lookups.options('change_risk').map((o) => ({ value: o.id, label: o.label }));
   const serviceOpts = (lookups.lookups?.services ?? []).map((s) => ({ value: s.id, label: s.name }));
+  const all = useMemo(() => q.data?.items ?? [], [q.data]);
+  const f = useConfigFilter(all, {
+    search: [(r) => r.name, (r) => r.key, (r) => r.description, (r) => r.riskLabel, (r) => r.categoryLabel, (r) => r.serviceName, (r) => r.titleTemplate],
+    selects: [
+      { key: 'changeType', label: 'Type', options: TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label.split(' (')[0] })), predicate: (r, v) => r.changeType === v },
+      { key: 'approval', label: 'Approval', options: [{ value: 'pre', label: 'Pre-approved' }, { value: 'workflow', label: 'Workflow' }], predicate: (r, v) => (r.skipApproval ? 'pre' : 'workflow') === v },
+    ],
+    active: (r) => r.isActive,
+    noun: ['template', 'templates'],
+    searchPlaceholder: 'Search templates, services',
+  });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'Firewall firmware patch' },
@@ -79,15 +93,17 @@ export default function ChangeTemplatesPage() {
   return (
     <div>
       <SectionHeader title="Standard change templates" description="Repeatable, low-risk changes raised from a pattern: the plans are prefilled on the new-change form and a pre-approved template skips the approval workflow." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New template</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<ChangeTemplate>
         columns={columns}
-        rows={q.data?.items ?? []}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
-        emptyTitle="No templates yet"
-        emptyDescription="Add the standard changes your engineers raise every month."
+        emptyTitle={f.filtered ? 'No templates match' : 'No templates yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Add the standard changes your engineers raise every month.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete "${r.name}"?`, description: 'Changes already raised from it keep their details.', confirmLabel: 'Delete' }), onClick: (r) => remove.mutate(r.id) },

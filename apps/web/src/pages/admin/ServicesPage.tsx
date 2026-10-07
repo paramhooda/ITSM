@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, FolderTree } from 'lucide-react';
 import { get, post, patch, del } from '@/api/client';
-import { Button, Badge, Checkbox, SearchInput, Select, type Column } from '@/components/ui';
+import { Button, Badge, type Column } from '@/components/ui';
 import { useLookups } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MonoCell, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type Values } from '@/components/admin/FormDialog';
 import { useAdminMutation } from '@/components/admin/api';
 import { useServiceFields, serviceInitial, toServicePayload, flattenCatalog, DOMAIN_LABEL, type Catalog, type Service, type ServicePayload } from '@/components/admin/ServiceForm';
@@ -16,14 +18,12 @@ import { DOMAINS } from '@itsm/shared';
 
 /**
  * Service catalog management: the list of offerings with one drawer for create
- * and edit. `?new=1` opens the editor (the browse page links here).
+ * and edit. `?new=1` opens the editor (the browse page links here); the search,
+ * domain and service line filters live in the URL (`q`, `domain`, `line`, `inactive`).
  */
 export default function ServicesPage() {
   const [params, setParams] = useSearchParams();
   const { options } = useLookups();
-  const [q, setQ] = useState('');
-  const [domain, setDomain] = useState('');
-  const [showInactive, setShowInactive] = useState(true);
   const catalog = useQuery({ queryKey: ['services', 'catalog', { admin: true }], queryFn: () => get<Catalog>('/services/catalog', { includeInactive: 'true' }) });
   const editor = useEditor<Service>();
   const invalidate = [['services']];
@@ -49,10 +49,18 @@ export default function ServicesPage() {
 
   const fields = useServiceFields();
   const statuses = options('service_status');
-  const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return flattenCatalog(catalog.data).filter((s) => (showInactive || s.isActive) && (!domain || s.domain === domain) && (!needle || s.name.toLowerCase().includes(needle) || s.key.includes(needle) || (s.categoryLabel ?? '').toLowerCase().includes(needle)));
-  }, [catalog.data, q, domain, showInactive]);
+  const all = useMemo(() => flattenCatalog(catalog.data), [catalog.data]);
+  const lines = useMemo(() => (catalog.data?.categories ?? []).map((c) => ({ value: c.id, label: c.label })), [catalog.data]);
+  const f = useConfigFilter(all, {
+    search: [(s) => s.name, (s) => s.key, (s) => s.description, (s) => s.categoryLabel, (s) => s.subcategoryLabel, (s) => s.defaultTeamName, (s) => s.defaultSlaPolicyName],
+    selects: [
+      { key: 'domain', label: 'Domain', options: DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABEL[d] ?? d })), predicate: (s, v) => s.domain === v },
+      { key: 'line', label: 'Service line', options: lines, predicate: (s, v) => s.categoryId === v },
+    ],
+    active: (s) => s.isActive,
+    noun: ['service', 'services'],
+    searchPlaceholder: 'Search services',
+  });
 
   async function submit(v: Values) {
     const payload = toServicePayload(v, (categoryId) => options('service_subcategory', { parentId: categoryId }).map((o) => o.id));
@@ -87,22 +95,17 @@ export default function ServicesPage() {
           </>
         }
       />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<Service>
-        toolbar={
-          <>
-            <SearchInput value={q} onChange={setQ} className="w-56" placeholder="Search services" />
-            <Select value={domain} onChange={(e) => setDomain(e.target.value)} className="w-40" placeholder="All domains" options={DOMAINS.map((d) => ({ value: d, label: DOMAIN_LABEL[d] ?? d }))} />
-            <Checkbox label="Show inactive" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-          </>
-        }
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={catalog.isLoading}
         error={catalog.error}
         retry={() => catalog.refetch()}
         onRowClick={editor.edit}
-        emptyTitle="No services yet"
-        emptyDescription="Define the services you deliver; contracts reference them for coverage, SLA and scope."
+        emptyTitle={f.filtered ? 'No services match' : 'No services yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Define the services you deliver; contracts reference them for coverage, SLA and scope.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete "${r.name}"?`, description: 'Services referenced by contracts, tickets or catalog items are deactivated instead of removed.', confirmLabel: 'Delete service' }), onClick: (r) => remove.mutate(r) },

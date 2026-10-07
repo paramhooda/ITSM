@@ -1,8 +1,11 @@
+import { useMemo } from 'react';
 import { Plus, Pencil, Trash2, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { Button, Select, Input, Badge, type Column } from '@/components/ui';
 import { useLookups, useEngineers } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { useRoles } from '@/components/admin/RoleAssignmentsEditor';
 import { useConfigKind, useConfigMutations } from '@/components/admin/api';
@@ -31,6 +34,7 @@ const APPROVER_TYPES = [
 
 type Values = Record<string, unknown>;
 
+/** Approval workflows: the list with the search and the include-inactive switch in the URL (`q`, `inactive`). */
 export default function ApprovalsPage() {
   const q = useConfigKind<Workflow>('approval-workflows');
   const { create, update, remove } = useConfigMutations('approval-workflows', { label: 'Approval workflow' });
@@ -45,6 +49,13 @@ export default function ApprovalsPage() {
     if (s.approverType === 'user') return engineers.data?.find((e) => e.id === s.approverRef)?.name ?? 'user';
     return APPROVER_TYPES.find((t) => t.value === s.approverType)?.label ?? s.approverType;
   };
+  const all = useMemo(() => q.data ?? [], [q.data]);
+  const f = useConfigFilter(all, {
+    search: [(w) => w.name, (w) => w.description, (w) => w.steps.map((s) => `${s.name} ${refLabel(s) ?? ''}`)],
+    active: (w) => w.isActive,
+    noun: ['workflow', 'workflows'],
+    searchPlaceholder: 'Search workflows, approvers',
+  });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'name', label: 'Name', type: 'text', required: true },
@@ -86,13 +97,17 @@ export default function ApprovalsPage() {
   return (
     <div>
       <SectionHeader title="Approval workflows" description="Sequential approval steps for service requests and changes. Each step names who approves and whether all or any approver must agree." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New workflow</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<Workflow>
         columns={columns}
-        rows={q.data ?? []}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
+        emptyTitle={f.filtered ? 'No workflows match' : 'No approval workflows yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Add the steps a service request or a change must pass before work starts.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, confirm: (r) => ({ title: `Delete workflow "${r.name}"?`, description: 'Catalog items using it will no longer require approval.', confirmLabel: 'Delete workflow' }), onClick: (r) => remove.mutate(r.id) },

@@ -3,10 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Check, Copy, MessageCircle, RefreshCw, RotateCcw, Send, ShieldAlert, Stethoscope, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 import { get, post, put, ApiError } from '@/api/client';
+import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { Badge, Button, Card, Checkbox, ErrorBlock, Field, Input, LoadingBlock, Textarea, Toggle, type Column } from '@/components/ui';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MutedCell, MonoCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { fmtDateTime, relativeTime, titleCase } from '@/lib/format';
 import { WHATSAPP_INBOUND_COLORS } from '@/lib/statusColors';
 import { whatsappApi, whatsappKeys, INBOUND_OUTCOME_LABELS, type InboundRow } from '@/components/whatsapp/api';
@@ -142,6 +145,8 @@ const FINDING_TONE = { ok: 'text-emerald-600', warn: 'text-amber-600', error: 't
 const DELIVERY_LABEL: Record<string, string> = { accepted: 'Accepted by Meta, waiting for the delivery state…', sent: 'Sent: left Meta, not yet on the phone', delivered: 'Delivered to the phone', read: 'Read on the phone', failed: 'Failed' };
 /** How long the page waits for a delivery callback before saying none came. */
 const TRACK_MS = 120_000;
+/** How many of the latest inbound messages the log holds. */
+const INBOUND_RECENT = 200;
 
 /**
  * Administration > WhatsApp: the one place WhatsApp is configured. Everyone else only
@@ -217,7 +222,15 @@ export default function WhatsAppPage() {
 
   // The assistant on WhatsApp: its seven settings, the readiness list and the inbound log.
   const assistantQ = useQuery({ queryKey: whatsappKeys.status, queryFn: () => whatsappApi.assistantStatus(), refetchInterval: 30_000 });
-  const inboundQ = useQuery({ queryKey: whatsappKeys.inbound({ limit: 50 }), queryFn: () => whatsappApi.inbound({ limit: 50 }), refetchInterval: 30_000 });
+  const inboundQ = useQuery({ queryKey: whatsappKeys.inbound({ limit: INBOUND_RECENT }), queryFn: () => whatsappApi.inbound({ limit: INBOUND_RECENT }), refetchInterval: 30_000 });
+  const inboundRows = useMemo(() => inboundQ.data?.items ?? [], [inboundQ.data]);
+  // The inbound log is the page's one configuration list: search, outcome and paging in the URL (`q`, `outcome`, `page`).
+  const inbound = useConfigFilter(inboundRows, {
+    search: [(r) => r.phone, (r) => r.displayName, (r) => r.user?.name, (r) => r.text, (r) => (r.outcome ? INBOUND_OUTCOME_LABELS[r.outcome] ?? r.outcome : r.status), (r) => r.error],
+    selects: [{ key: 'outcome', label: 'Outcome', options: Object.entries(INBOUND_OUTCOME_LABELS).map(([value, label]) => ({ value, label })), predicate: (r, v) => r.outcome === v }],
+    noun: ['message', 'messages'],
+    searchPlaceholder: 'Number, name, text',
+  });
   const saveAssistant = useMutation({
     mutationFn: async () => {
       const problem = assistantProblem(assistant);
@@ -476,11 +489,25 @@ export default function WhatsAppPage() {
           </Card>
 
           <Card title="Recent inbound messages" actions={<span className="text-[11.5px] text-subtle">What people sent to the business number and what Grady did with it</span>} padded={false} data-testid="inbound-card">
-            <ConfigTable<InboundRow> columns={inboundColumns} rows={inboundQ.data?.items ?? []} loading={inboundQ.isLoading} error={inboundQ.error} retry={() => inboundQ.refetch()} emptyTitle="Nothing received yet" emptyDescription="Messages people send to the business number appear here with what Grady did with them." />
+            <div className="px-3 pt-3">
+              <ConfigToolbar {...inbound.toolbar} className="mb-0" />
+            </div>
+            <ConfigTable<InboundRow>
+              className="rounded-none border-0 border-t border-default shadow-none mt-3"
+              columns={inboundColumns}
+              rows={inbound.rows}
+              pager={inbound.pager}
+              loading={inboundQ.isLoading}
+              error={inboundQ.error}
+              retry={() => inboundQ.refetch()}
+              emptyTitle={inbound.filtered ? 'No messages match' : 'Nothing received yet'}
+              emptyDescription={inbound.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Messages people send to the business number appear here with what Grady did with them.'}
+            />
           </Card>
 
-          <Card title="Recent WhatsApp messages" actions={<span className="text-[11.5px] text-subtle">Delivery states arrive through the webhook</span>} padded={false}>
-            <ConfigTable<OutboxRow> columns={outboxColumns} rows={outboxQ.data?.recent ?? []} loading={outboxQ.isLoading} error={outboxQ.error} retry={() => outboxQ.refetch()} emptyTitle="Nothing sent yet" emptyDescription="Messages appear here once a notification rule includes WhatsApp and someone has opted in." />
+          {/* The latest sends, as a glance beside the inbound log; the Notification outbox page carries the full search and filters. */}
+          <Card title="Recent WhatsApp messages" actions={<Link to="/admin/outbox?channel=whatsapp" className="text-[12px] text-brand-700 hover:underline whitespace-nowrap">Open the outbox</Link>} padded={false}>
+            <ConfigTable<OutboxRow> className="rounded-none border-0 shadow-none" columns={outboxColumns} rows={outboxQ.data?.recent ?? []} loading={outboxQ.isLoading} error={outboxQ.error} retry={() => outboxQ.refetch()} emptyTitle="Nothing sent yet" emptyDescription="Messages appear here once a notification rule includes WhatsApp and someone has opted in." />
           </Card>
         </div>
 

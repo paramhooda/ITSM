@@ -1,7 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes, type ReactNode, useEffect, useId, useRef, useState, type HTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { X, Loader2, Search, ChevronLeft, ChevronRight, Inbox, AlertTriangle, Check, SlidersHorizontal } from 'lucide-react';
+import { X, Loader2, Search, ChevronLeft, ChevronRight, Inbox, AlertTriangle, Check } from 'lucide-react';
 import { cn, colorClass } from '@/lib/utils';
 
 // ------------------------------------------------------------------ Button
@@ -133,31 +133,8 @@ export function PageHeader({ title, subtitle, actions, breadcrumb }: { title: Re
   );
 }
 
-// ------------------------------------------------------------------ Filter bar
-/**
- * The filter strip that heads every module page: controls on the first row, optional
- * chips/secondary row, an active-filter count and a Clear action. Sits above the insights.
- */
-export function FilterBar({ children, chips, trailing, activeCount = 0, onClear, className }: { children: ReactNode; chips?: ReactNode; trailing?: ReactNode; activeCount?: number; onClear?: () => void; className?: string }) {
-  return (
-    <div className={cn('card p-2.5 flex flex-col gap-2', className)} role="search">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 pl-1 pr-1.5 text-[12.5px] font-medium text-muted select-none" title="Filters">
-          <SlidersHorizontal className="h-3.5 w-3.5 text-subtle" />
-          {activeCount > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[10.5px] font-semibold text-white tnum">{activeCount}</span>}
-        </span>
-        {children}
-        {activeCount > 0 && onClear && (
-          <Button variant="ghost" size="sm" onClick={onClear} icon={<X className="h-3.5 w-3.5" />}>
-            Clear
-          </Button>
-        )}
-        {trailing && <div className="ml-auto flex items-center gap-2">{trailing}</div>}
-      </div>
-      {chips && <div className="flex flex-wrap items-center gap-1.5 pl-1">{chips}</div>}
-    </div>
-  );
-}
+// ------------------------------------------------------------------ Filter chips
+// The filter bar itself is ListFilterBar (ListShell.tsx): the lists and the configuration toolbar share it.
 
 /** Pill used for quick status/category filters; shows the state colour as a dot. */
 export function FilterChip({ active, onClick, dot, count, children, className, testId }: { active: boolean; onClick: () => void; dot?: string | null; count?: number | null; children: ReactNode; className?: string; testId?: string }) {
@@ -382,7 +359,7 @@ export function Pagination({ page, pageSize, total, onPage }: { page: number; pa
 }
 
 // ------------------------------------------------------------------ Search input
-export function SearchInput({ value, onChange, placeholder = 'Search…', className, autoFocus }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean }) {
+export function SearchInput({ value, onChange, placeholder = 'Search…', className, autoFocus, testId, label }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean; /** `data-testid` on the input itself. */ testId?: string; /** Accessible name when the placeholder is not enough. */ label?: string }) {
   const [local, setLocal] = useState(value);
   const t = useRef<number | null>(null);
   useEffect(() => setLocal(value), [value]);
@@ -393,6 +370,8 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
         autoFocus={autoFocus}
         className="input pl-9"
         placeholder={placeholder}
+        aria-label={label ?? placeholder}
+        data-testid={testId}
         value={local}
         onChange={(e) => {
           setLocal(e.target.value);
@@ -499,4 +478,4 @@ export function Kbd({ children }: { children: ReactNode }) {
 export const CheckIcon = Check;
 
 export { ModuleNav } from './ModuleNav';
-export { ListShell, FilterGroup, FilterOptions, FilterSelect, FilterDateRange, FilterToggle, type AppliedFilter, type FilterOption, type ListShellProps } from './ListShell';
+export { ListShell, ListFilterBar, ResetButton, BreadcrumbRow, FilterGroup, FilterOptions, FilterSelect, FilterDateRange, FilterToggle, type AppliedFilter, type FilterOption, type ListShellProps, type BreadcrumbRowProps } from './ListShell';

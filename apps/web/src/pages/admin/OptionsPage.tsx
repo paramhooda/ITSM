@@ -7,12 +7,15 @@ import { OPTION_TYPES, OPTION_PARENT_TYPES, TICKET_TYPES, DOMAINS, STATUS_CATEGO
 import { get, post, patch, del } from '@/api/client';
 import { Button, Select, Badge, type Column } from '@/components/ui';
 import { useLookups, type ConfigOption } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { titleCase } from '@/lib/format';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MonoCell, ActiveDot } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { ColorSwatch } from '@/components/admin/inputs';
 import { useAdminMutation } from '@/components/admin/api';
+import { moveBeside } from '@/lib/configFilter';
 
 export const OPTION_GROUPS: { group: string; types: [string, string][] }[] = [
   { group: 'Tickets', types: [['ticket_category', 'Categories'], ['ticket_subcategory', 'Subcategories'], ['ticket_priority', 'Priorities'], ['ticket_impact', 'Impact'], ['ticket_urgency', 'Urgency'], ['ticket_status', 'Statuses'], ['ticket_source', 'Sources'], ['resolution_code', 'Resolution codes'], ['closure_code', 'Closure codes']] },
@@ -60,6 +63,18 @@ export default function OptionsPage() {
   const isStatus = type === 'ticket_status';
   const isSub = !!parentType;
 
+  const listLabel = optionTypeLabel(type);
+  const f = useConfigFilter(rows, {
+    search: [(r) => r.label, (r) => r.key, (r) => r.description, (r) => (isSub ? lookups.byId(r.parentId)?.label : null)],
+    selects: [
+      ...(hasDomain ? [{ key: 'domain', label: 'Domain', options: DOMAINS.map((d) => ({ value: d, label: d === 'general' ? 'General (all)' : d.toUpperCase().replace('_', ' ') })), predicate: (r: ConfigOption, v: string) => r.domain === v }] : []),
+      ...(isSub ? [{ key: 'parent', label: 'Parent', options: parentOptions, predicate: (r: ConfigOption, v: string) => r.parentId === v }] : []),
+    ],
+    active: (r) => r.isActive,
+    noun: [singular(listLabel), listLabel.toLowerCase()],
+    searchPlaceholder: `Search ${listLabel.toLowerCase()}`,
+  });
+
   const fields: FieldSpec<OptionValues>[] = [
     { key: 'label', label: 'Label', type: 'text', required: true },
     { key: 'key', label: 'Key', type: 'key', required: true, hint: 'Stable identifier used by rules and integrations', disabled: (v) => !!v.id },
@@ -93,13 +108,12 @@ export default function OptionsPage() {
     { key: 'isActive', header: 'Status', render: (r) => <ActiveDot active={r.isActive} /> },
   ];
 
+  // One call with the whole order; the row moves past the row shown next to it, so an
+  // inactive entry hidden from the view keeps its place and never swallows a move.
   const move = (row: ConfigOption, dir: -1 | 1) => {
-    const ids = rows.map((r) => r.id);
-    const i = ids.indexOf(row.id);
-    const j = i + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    reorder.mutate(ids);
+    const neighbour = f.matching[f.matching.findIndex((r) => r.id === row.id) + dir];
+    if (!neighbour) return;
+    reorder.mutate(moveBeside(rows.map((r) => r.id), row.id, neighbour.id, dir));
   };
 
   const initial: OptionValues = editor.row
@@ -128,32 +142,36 @@ export default function OptionsPage() {
         description="Pick-lists used across tickets, customers, contracts, services, assets and more. System entries can be renamed or deactivated but not removed."
         actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New entry</Button>}
       />
-      <ConfigTable<ConfigOption>
-        toolbar={
-          <>
-            <Select value={type} onChange={(e) => navigate(`/admin/options/${e.target.value}`)} className="max-w-xs">
-              {OPTION_GROUPS.map((g) => (
-                <optgroup key={g.group} label={g.group}>
-                  {g.types.map(([t, label]) => (
-                    <option key={t} value={t}>
-                      {label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </Select>
-            <span className="text-[12.5px] text-muted ml-auto">{rows.length} entries · {rows.filter((r) => r.isActive).length} active</span>
-          </>
+      <ConfigToolbar
+        {...f.toolbar}
+        lead={
+          <Select value={type} onChange={(e) => navigate(`/admin/options/${e.target.value}`)} className="w-auto max-w-xs h-8 py-0 text-[12.5px] shrink-0" aria-label="Option list" data-testid="option-list">
+            {OPTION_GROUPS.map((g) => (
+              <optgroup key={g.group} label={g.group}>
+                {g.types.map(([t, label]) => (
+                  <option key={t} value={t}>
+                    {label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </Select>
         }
+      />
+      <ConfigTable<ConfigOption>
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
+        emptyTitle={f.filtered ? `No ${listLabel.toLowerCase()} match` : `No ${listLabel.toLowerCase()} yet`}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : undefined}
         actions={[
-          { label: 'Move up', icon: <ChevronUp className="h-4 w-4" />, inline: true, onClick: (r) => move(r, -1), disabled: (r) => rows[0]?.id === r.id },
-          { label: 'Move down', icon: <ChevronDown className="h-4 w-4" />, inline: true, onClick: (r) => move(r, 1), disabled: (r) => rows[rows.length - 1]?.id === r.id },
+          // The arrows wait while a search or a pill narrows the view; the row moves past the row shown next to it.
+          { label: 'Move up', icon: <ChevronUp className="h-4 w-4" />, inline: true, onClick: (r) => move(r, -1), disabled: (r) => f.narrowed || f.matching[0]?.id === r.id },
+          { label: 'Move down', icon: <ChevronDown className="h-4 w-4" />, inline: true, onClick: (r) => move(r, 1), disabled: (r) => f.narrowed || f.matching[f.matching.length - 1]?.id === r.id },
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Deactivate', icon: <Ban className="h-4 w-4" />, hidden: (r) => !r.isSystem || !r.isActive, onClick: (r) => update.mutate({ id: r.id, isActive: false }) },
           { label: 'Activate', icon: <Star className="h-4 w-4" />, hidden: (r) => r.isActive, onClick: (r) => update.mutate({ id: r.id, isActive: true }) },

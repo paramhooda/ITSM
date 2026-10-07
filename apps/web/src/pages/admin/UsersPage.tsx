@@ -3,13 +3,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, KeyRound, Copy, UserX, UserCheck, Unlink } from 'lucide-react';
 import { get, post, patch, put } from '@/api/client';
-import { Button, Badge, Avatar, Dialog, ConfirmDialog, Select, SearchInput, Pagination, type Column } from '@/components/ui';
+import { Button, Badge, Avatar, Dialog, ConfirmDialog, type Column } from '@/components/ui';
 import { useLookups, useCustomersLookup } from '@/hooks/useLookups';
 import { useListState } from '@/hooks/useListState';
+import { serverToolbar } from '@/hooks/useConfigFilter';
 import { useAuthStore } from '@/stores/auth';
 import { fmtDateTime, relativeTime, titleCase } from '@/lib/format';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, type FieldSpec } from '@/components/admin/FormDialog';
 import { timezoneOptions } from '@/components/admin/inputs';
 import { RoleAssignmentsEditor, useRoles, type RoleAssignment } from '@/components/admin/RoleAssignmentsEditor';
@@ -48,7 +50,9 @@ const STATUS_COLOR: Record<string, string> = { active: 'green', invited: 'blue',
 /**
  * Users: list + one editor drawer used for both "New user" and editing an
  * existing user (same fields; sign-in details only on create, account actions
- * only on edit).
+ * only on edit). The list filters on the server (`q`, `userType`, `status`,
+ * `teamId`, `roleKey`, `page` in the URL) behind the same toolbar as every
+ * other configuration page.
  */
 export default function UsersPage() {
   const { state, set, page, pageSize, setPage } = useListState({ pageSize: '25' });
@@ -58,6 +62,20 @@ export default function UsersPage() {
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
   const q = useQuery({ queryKey: ['iam', 'users', state], queryFn: () => get<{ items: UserRow[]; total: number }>('/iam/users', { ...state, page, pageSize }) });
+  // The unfiltered total for the "12 of 48" count (one tiny page; refreshed with the list).
+  const everyone = useQuery({ queryKey: ['iam', 'users', 'total'], queryFn: () => get<{ items: UserRow[]; total: number }>('/iam/users', { page: 1, pageSize: 1 }), staleTime: 60_000 });
+  const toolbar = serverToolbar(state, set, {
+    selects: [
+      { key: 'userType', label: 'Type', options: [{ value: 'msp', label: 'MSP staff' }, { value: 'customer', label: 'Customer users' }] },
+      { key: 'status', label: 'Status', options: ['active', 'invited', 'disabled', 'locked'].map((v) => ({ value: v, label: titleCase(v) })) },
+      { key: 'teamId', label: 'Team', options: (lookups.lookups?.teams ?? []).map((t) => ({ value: t.id, label: t.name })) },
+      { key: 'roleKey', label: 'Role', options: (roles.data ?? []).map((r) => ({ value: r.key, label: r.name })) },
+    ],
+    searchPlaceholder: 'Name or email',
+    noun: ['user', 'users'],
+    matching: q.data?.total,
+    total: everyone.data?.total ?? q.data?.total,
+  });
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const detail = useQuery({ queryKey: ['iam', 'user', selectedId], queryFn: () => get<UserDetail>(`/iam/users/${selectedId}`), enabled: !!selectedId });
@@ -186,23 +204,17 @@ export default function UsersPage() {
   return (
     <div>
       <SectionHeader title="Users" description="MSP staff and customer portal users, their roles, teams and customer visibility." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreateOpen(true)}>New user</Button>} />
+      <ConfigToolbar {...toolbar} />
       <ConfigTable<UserRow>
-        toolbar={
-          <>
-            <SearchInput value={state.q ?? ''} onChange={(v) => set({ q: v })} className="w-56" placeholder="Name or email" />
-            <Select value={state.userType ?? ''} onChange={(e) => set({ userType: e.target.value })} className="w-36" placeholder="All types" options={[{ value: 'msp', label: 'MSP staff' }, { value: 'customer', label: 'Customer users' }]} />
-            <Select value={state.status ?? ''} onChange={(e) => set({ status: e.target.value })} className="w-32" placeholder="Any status" options={['active', 'invited', 'disabled', 'locked'].map((s) => ({ value: s, label: titleCase(s) }))} />
-            <Select value={state.teamId ?? ''} onChange={(e) => set({ teamId: e.target.value })} className="w-44" placeholder="Any team" options={(lookups.lookups?.teams ?? []).map((t) => ({ value: t.id, label: t.name }))} />
-            <Select value={state.roleKey ?? ''} onChange={(e) => set({ roleKey: e.target.value })} className="w-44" placeholder="Any role" options={(roles.data ?? []).map((r) => ({ value: r.key, label: r.name }))} />
-          </>
-        }
         columns={columns}
         rows={q.data?.items ?? []}
+        pager={q.data ? { page, pageSize, total: q.data.total, onPage: setPage } : null}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={(r) => setSelectedId(r.id)}
-        footer={<Pagination page={page} pageSize={pageSize} total={q.data?.total ?? 0} onPage={setPage} />}
+        emptyTitle={toolbar.applied.length ? 'No users match' : 'No users yet'}
+        emptyDescription={toolbar.applied.length ? 'Try another search, or clear the conditions in the breadcrumb above.' : undefined}
       />
       <FormDialog<Values>
         open={createOpen || !!u}

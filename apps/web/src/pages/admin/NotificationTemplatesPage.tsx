@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { NOTIFICATION_EVENTS } from '@itsm/shared';
 import { Button, Badge, type Column } from '@/components/ui';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MutedCell, MonoCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
+import { eventGroup, eventGroupOptions, channelLabel } from '@/components/admin/notificationEvents';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { useConfigKind, useConfigMutations } from '@/components/admin/api';
-import { cn } from '@/lib/utils';
 
 interface Template {
   id: string;
@@ -46,15 +48,24 @@ export function variablesFor(event: string) {
   return [...new Set([...COMMON_VARS, ...base, ...(EVENT_VARS[prefix] ?? []), ...(EVENT_VARS[event] ?? [])])];
 }
 
-const eventGroup = (e: string) => e.split('.')[0];
-
+/** Notification templates by event and channel, with the search, event-group, channel and include-inactive filters in the URL (`q`, `group`, `channel`, `inactive`). */
 export default function NotificationTemplatesPage() {
   const q = useConfigKind<Template>('notification-templates');
   const { create, update, remove } = useConfigMutations('notification-templates', { label: 'Template' });
   const editor = useEditor<Template>();
-  const [group, setGroup] = useState<string>('');
-  const rows = useMemo(() => [...(q.data ?? [])].filter((t) => !group || eventGroup(t.event) === group).sort((a, b) => a.event.localeCompare(b.event) || a.channel.localeCompare(b.channel)), [q.data, group]);
-  const groups = useMemo(() => [...new Set((q.data ?? []).map((t) => eventGroup(t.event)))].sort(), [q.data]);
+  const rows = useMemo(() => [...(q.data ?? [])].sort((a, b) => a.event.localeCompare(b.event) || a.channel.localeCompare(b.channel)), [q.data]);
+  const groups = useMemo(() => eventGroupOptions(rows.map((t) => t.event)), [rows]);
+  const channels = useMemo(() => [...new Set(rows.map((t) => t.channel))].sort().map((c) => ({ value: c, label: channelLabel(c) })), [rows]);
+  const f = useConfigFilter(rows, {
+    search: [(t) => t.event, (t) => t.name, (t) => t.subject, (t) => channelLabel(t.channel)],
+    selects: [
+      { key: 'group', label: 'Event group', options: groups, predicate: (t, v) => eventGroup(t.event) === v },
+      { key: 'channel', label: 'Channel', options: channels, predicate: (t, v) => t.channel === v },
+    ],
+    active: (t) => t.isActive,
+    noun: ['template', 'templates'],
+    searchPlaceholder: 'Search events, templates, subjects',
+  });
 
   const fields: FieldSpec<Values>[] = [
     { key: 'event', label: 'Event', type: 'select', required: true, options: NOTIFICATION_EVENTS.map((e) => ({ value: e, label: e })), disabled: (v) => !!v.id },
@@ -76,7 +87,7 @@ export default function NotificationTemplatesPage() {
   const columns: Column<Template>[] = [
     { key: 'event', header: 'Event', render: (r) => <MonoCell>{r.event}</MonoCell> },
     { key: 'name', header: 'Template', render: (r) => <span className="inline-flex items-center gap-2 font-medium">{r.name}{r.isSystem && <Badge color="slate">system</Badge>}</span> },
-    { key: 'channel', header: 'Channel', render: (r) => <Badge color={r.channel === 'email' ? 'blue' : 'violet'}>{r.channel}</Badge> },
+    { key: 'channel', header: 'Channel', render: (r) => <Badge color={r.channel === 'email' ? 'blue' : r.channel === 'whatsapp' ? 'green' : 'violet'}>{channelLabel(r.channel)}</Badge> },
     { key: 'subject', header: 'Subject', render: (r) => <MutedCell>{r.subject ?? '—'}</MutedCell> },
     { key: 'isActive', header: 'Status', render: (r) => <ActiveDot active={r.isActive} /> },
   ];
@@ -84,23 +95,17 @@ export default function NotificationTemplatesPage() {
   return (
     <div>
       <SectionHeader title="Notification templates" description="Email and in-app message templates per event, rendered with Handlebars. Who receives them is configured under notification rules." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New template</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<Template>
-        toolbar={
-          <div className="flex flex-wrap gap-1">
-            <button onClick={() => setGroup('')} className={cn('px-2.5 py-1 rounded-md text-[12.5px]', !group ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2')}>All</button>
-            {groups.map((g) => (
-              <button key={g} onClick={() => setGroup(g)} className={cn('px-2.5 py-1 rounded-md text-[12.5px]', group === g ? 'bg-brand-600/10 text-brand-700 font-medium' : 'text-muted hover:bg-surface-2')}>
-                {g.replace('_', ' ')}
-              </button>
-            ))}
-          </div>
-        }
         columns={columns}
-        rows={rows}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
+        emptyTitle={f.filtered ? 'No templates match' : 'No notification templates yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Templates are seeded when the API starts; add one for an event and channel here.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Delete', icon: <Trash2 className="h-4 w-4" />, danger: true, hidden: (r) => r.isSystem, confirm: (r) => ({ title: `Delete template "${r.name}"?`, description: 'Notification rules using it stop sending until they are pointed at another template.', confirmLabel: 'Delete template' }), onClick: (r) => remove.mutate(r.id) },

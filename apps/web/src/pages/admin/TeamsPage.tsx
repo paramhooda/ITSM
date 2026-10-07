@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, Star, Clock } from 'lucide-react';
 import { get, post, patch, put, del } from '@/api/client';
 import { Button, Badge, type Column } from '@/components/ui';
 import { useLookups, useEngineers } from '@/hooks/useLookups';
+import { useConfigFilter } from '@/hooks/useConfigFilter';
 import { SectionHeader } from '@/components/admin/AdminLayout';
 import { ConfigTable, ActiveDot, MonoCell, MutedCell } from '@/components/admin/ConfigTable';
+import { ConfigToolbar } from '@/components/admin/ConfigToolbar';
 import { FormDialog, useEditor, type FieldSpec } from '@/components/admin/FormDialog';
 import { MultiSelect } from '@/components/admin/inputs';
 import { useAdminMutation } from '@/components/admin/api';
@@ -40,6 +42,16 @@ export default function TeamsPage() {
   const update = useAdminMutation(({ id, ...body }: Values & { id: string }) => patch<Team>(`/iam/teams/${id}`, body), { invalidate, lookups: true });
   const setMembers = useAdminMutation(({ id, members }: { id: string; members: { userId: string; isLead: boolean }[] }) => put(`/iam/teams/${id}/members`, { members }), { invalidate, lookups: true });
   const remove = useAdminMutation((id: string) => del(`/iam/teams/${id}`), { invalidate, lookups: true, success: 'Team deleted' });
+
+  const all = useMemo(() => q.data ?? [], [q.data]);
+  const teamTypes = useMemo(() => lookups.options('team_type', { includeInactive: true }).map((o) => ({ value: o.key, label: o.label })), [lookups.lookups]); // eslint-disable-line react-hooks/exhaustive-deps
+  const f = useConfigFilter(all, {
+    search: [(t) => t.name, (t) => t.key, (t) => t.description, (t) => t.email, (t) => t.managerName, (t) => t.members.map((m) => m.name)],
+    selects: [{ key: 'teamType', label: 'Type', options: teamTypes, predicate: (t, v) => t.teamType === v }],
+    active: (t) => t.isActive,
+    noun: ['team', 'teams'],
+    searchPlaceholder: 'Search teams, members',
+  });
 
   const engineerOpts = (engineers.data ?? []).map((e) => ({ value: e.id, label: e.name, hint: e.email }));
   const fields: FieldSpec<Values>[] = [
@@ -108,13 +120,17 @@ export default function TeamsPage() {
   return (
     <div>
       <SectionHeader title="Teams" description="Operational groups (service desk, NOC, SOC, field...). Teams receive assignments, drive customer visibility and own CIs." actions={<Button icon={<Plus className="h-4 w-4" />} onClick={editor.create}>New team</Button>} />
+      <ConfigToolbar {...f.toolbar} />
       <ConfigTable<Team>
         columns={columns}
-        rows={q.data ?? []}
+        rows={f.rows}
+        pager={f.pager}
         loading={q.isLoading}
         error={q.error}
         retry={() => q.refetch()}
         onRowClick={editor.edit}
+        emptyTitle={f.filtered ? 'No teams match' : 'No teams yet'}
+        emptyDescription={f.filtered ? 'Try another search, or clear the conditions in the breadcrumb above.' : 'Create the operational groups that receive assignments and own CIs.'}
         actions={[
           { label: 'Edit', icon: <Pencil className="h-4 w-4" />, inline: true, onClick: editor.edit },
           { label: 'Shifts', icon: <Clock className="h-4 w-4" />, inline: true, onClick: (r) => setShiftsFor(r) },
