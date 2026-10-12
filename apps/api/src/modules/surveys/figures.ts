@@ -1,4 +1,4 @@
-import { sql, type SQL } from 'drizzle-orm';
+import { sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import type { Tx } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { isCustomerUser } from '@/modules/tickets/common';
@@ -160,11 +160,27 @@ export async function csatLowest(tx: Tx, f: CsatFilter, limit = 10): Promise<Csa
   return list.map((r) => ({ id: String(r.id), ticketId: String(r.ticket_id), number: String(r.number), title: String(r.title), customerId: String(r.customer_id), customerName: (r.customer_name as string | null) ?? null, rating: num(r.rating), comment: (r.comment as string | null) ?? null, channel: (r.channel as string | null) ?? null, answeredAt: new Date(String(r.answered_at)), assigneeName: (r.assignee_name as string | null) ?? null }));
 }
 
-const pendingCond = (customerId: string, userId?: string | null) => sql`s.customer_id = ${customerId}::uuid AND s.status = 'pending' AND s.expires_at > now() ${userId ? sql`AND s.recipient_user_id = ${userId}::uuid` : sql``}`;
+/** The statuses a ticket can be rated in: a survey on a ticket that was reopened is not "to rate" until it ends again. */
+const RATABLE_STATUS_IDS = sql`(SELECT id FROM config_options WHERE type = 'ticket_status' AND status_category IN ('resolved', 'closed'))`;
 
-/** Surveys still waiting for an answer for a customer (optionally one recipient). */
+/**
+ * "To rate", the one predicate: the ticket has a live pending survey (not
+ * answered, withdrawn or expired) and is still resolved or closed. The portal
+ * list's `csat=pending`, the list tiles' `surveyPending`, the portal home's
+ * banner and `GET /portal/surveys` all count through it, so the number is the
+ * same everywhere it appears. `ticket_surveys` holds one row per ticket
+ * (`ticket_surveys_ticket_uniq`), so a count of tickets is a count of surveys.
+ */
+export const surveyPendingCond = (ticketId: SQLWrapper): SQL =>
+  sql`EXISTS (SELECT 1 FROM ticket_surveys ps JOIN tickets pt ON pt.id = ps.ticket_id WHERE ps.ticket_id = ${ticketId} AND ps.status = 'pending' AND ps.expires_at > now() AND pt.status_id IN ${RATABLE_STATUS_IDS})`;
+
+/** The survey-row side of the same predicate (the row is joined to its ticket as `t`), scoped to a customer and optionally one recipient. */
+const pendingCond = (customerId: string, userId?: string | null) =>
+  sql`s.customer_id = ${customerId}::uuid AND s.status = 'pending' AND s.expires_at > now() AND t.status_id IN ${RATABLE_STATUS_IDS} ${userId ? sql`AND s.recipient_user_id = ${userId}::uuid` : sql``}`;
+
+/** Surveys still waiting for an answer for a customer (optionally one recipient), on tickets still resolved or closed. */
 export async function pendingSurveyCount(tx: Tx, customerId: string, userId?: string | null): Promise<number> {
-  const [row] = await rows(tx, sql`SELECT count(*)::int AS n FROM ticket_surveys s WHERE ${pendingCond(customerId, userId)}`);
+  const [row] = await rows(tx, sql`SELECT count(*)::int AS n ${FROM} WHERE ${pendingCond(customerId, userId)}`);
   return num(row?.n);
 }
 

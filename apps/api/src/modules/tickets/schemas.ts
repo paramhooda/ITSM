@@ -234,8 +234,8 @@ export const bulkSchema = z.object({
 });
 
 /** A comma-separated list (`?priorityId=a,b`): every element must satisfy `item`; the raw string is kept so `csv()` splits it once in `buildWhere`. */
-const csvOf = (item: z.ZodType<string>, max = 800) => z.string().max(max).refine((v) => v.split(',').map((x) => x.trim()).filter(Boolean).every((x) => item.safeParse(x).success), 'Invalid list value');
-const dateParam = z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date');
+export const csvOf = (item: z.ZodType<string>, max = 800) => z.string().max(max).refine((v) => v.split(',').map((x) => x.trim()).filter(Boolean).every((x) => item.safeParse(x).success), 'Invalid list value');
+export const dateParam = z.string().max(40).refine((v) => !Number.isNaN(Date.parse(v)), 'Invalid date');
 
 export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   q: z.string().max(200).optional(),

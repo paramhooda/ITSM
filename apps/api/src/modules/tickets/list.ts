@@ -13,6 +13,7 @@ import { TYPE_LABEL, csv, isCustomerUser, loadTicket, optionMap, toLabel } from 
 import type { ListQuery, StatsQuery } from './schemas';
 import { toDay, addDays, daysBetween } from '@/modules/reports/dates';
 import { loadSurveyDefaults } from '@/modules/surveys/policy';
+import { surveyPendingCond } from '@/modules/surveys/figures';
 
 const T = schema.tickets;
 const st = alias(schema.configOptions, 'st');
@@ -123,7 +124,7 @@ export function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL |
   // Customer satisfaction: the denormalised rating on the ticket, or the pending survey row.
   if (q.csat === 'rated') conds.push(isNotNull(T.csatRating));
   else if (q.csat === 'low') conds.push(sql`${T.csatRating} <= ${opts.lowThreshold ?? 2}`);
-  else if (q.csat === 'pending') conds.push(sql`EXISTS (SELECT 1 FROM ticket_surveys s WHERE s.ticket_id = ${T.id} AND s.status = 'pending' AND s.expires_at > now())`);
+  else if (q.csat === 'pending') conds.push(surveyPendingCond(T.id));
   else if (q.csat === 'unrated') conds.push(isNull(T.csatRating), statusIdsOfCategories(['resolved', 'closed']));
   const fts = searchFts(q.q, T.searchVector, T.number, T.title);
   if (fts) conds.push(fts);
@@ -285,10 +286,11 @@ function seriesWindow(q: StatsQuery): { from: string; to: string } {
 }
 
 /** The status dimension of the list: the category chips, an explicit status and the open flag. */
-const STATUS_KEYS = ['statusCategory', 'statusId', 'open'] as const;
-/** The quick-filter dimensions a tile or an assignee pill toggles. */
-const TILE_KEYS = ['slaState', 'breachRisk', 'knownError', 'mine', 'unassigned', 'watching', 'assigneeId'] as const;
-const strip = (q: StatsQuery, keys: readonly (keyof StatsQuery)[]): StatsQuery => {
+export const STATUS_KEYS = ['statusCategory', 'statusId', 'open'] as const;
+/** The quick-filter dimensions a tile or an assignee pill toggles on the staff list (`csat` is the staff Rating pill, base scope; the portal adds it through `tileKeys` because there it is the To rate tile). */
+export const TILE_KEYS = ['slaState', 'breachRisk', 'knownError', 'mine', 'unassigned', 'watching', 'assigneeId'] as const;
+/** The query without the given keys (the tile scope of a stats call). */
+export const strip = (q: StatsQuery, keys: readonly (keyof StatsQuery)[]): StatsQuery => {
   const out: StatsQuery = { ...q };
   for (const k of keys) delete out[k];
   return out;
@@ -309,11 +311,16 @@ const strip = (q: StatsQuery, keys: readonly (keyof StatsQuery)[]): StatsQuery =
  * any click; `byStatusCategory` strips the status and tile dimensions but keeps
  * the type, so the chips describe the current tab. `byPriority`, `byStatus`,
  * `byTeam` and the series describe exactly what is in the list (full query).
+ * `opts.tileKeys` replaces `TILE_KEYS` for a caller whose tiles differ (the
+ * portal strips `csat` as well); `awaitingCustomer` (open, status key
+ * `pending_customer`) and `surveyPending` (`surveyPendingCond`) sit in the tile
+ * set for the portal's Awaiting your reply and To rate tiles.
  */
-export async function ticketStats(ctx: Ctx, q: StatsQuery) {
+export async function ticketStats(ctx: Ctx, q: StatsQuery, opts: { tileKeys?: readonly (keyof StatsQuery)[] } = {}) {
   const wo = await whereOpts(ctx, q);
   const base = buildWhere(ctx, q, wo);
-  const tileScope = buildWhere(ctx, strip(q, [...STATUS_KEYS, ...TILE_KEYS]), wo);
+  const tileKeys = opts.tileKeys ?? TILE_KEYS;
+  const tileScope = buildWhere(ctx, strip(q, [...STATUS_KEYS, ...tileKeys]), wo);
   const openCond = statusIdsOfCategories(OPEN_CATEGORIES);
   const count = sql<number>`count(*)::int`;
   const total = await countRows(ctx.tx, sql`tickets`, base);
@@ -326,7 +333,7 @@ export async function ticketStats(ctx: Ctx, q: StatsQuery) {
   const byType = await ctx.tx
     .select({ type: T.type, count })
     .from(T)
-    .where(and(buildWhere(ctx, strip(q, [...STATUS_KEYS, ...TILE_KEYS, 'type']), wo), openCond))
+    .where(and(buildWhere(ctx, strip(q, [...STATUS_KEYS, ...tileKeys, 'type']), wo), openCond))
     .groupBy(T.type);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -346,6 +353,8 @@ export async function ticketStats(ctx: Ctx, q: StatsQuery) {
       createdToday: sql<number>`count(*) FILTER (WHERE ${T.createdAt} >= ${todayStart})::int`,
       resolvedToday: sql<number>`count(*) FILTER (WHERE ${T.resolvedAt} >= ${todayStart})::int`,
       knownErrors: sql<number>`count(*) FILTER (WHERE EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error))::int`,
+      awaitingCustomer: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${T.statusId} IN (SELECT id FROM config_options WHERE type = 'ticket_status' AND key = 'pending_customer'))::int`,
+      surveyPending: sql<number>`count(*) FILTER (WHERE ${surveyPendingCond(T.id)})::int`,
     })
     .from(T)
     .where(tileScope);

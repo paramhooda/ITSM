@@ -38,6 +38,8 @@ export default async function routes(app: FastifyInstance) {
     reply.status(201);
     return svc.createPortalTicket(ctx, req.body as S.CreateTicketBody);
   }));
+  // The list's tiles, chips and pills under the same scope as the list (static path ahead of /portal/tickets/:id).
+  r.get('/portal/tickets/stats', { preHandler: read, schema: { tags, querystring: S.portalTicketStatsQuery } }, h((ctx, req) => svc.portalTicketStats(ctx, req.query as S.PortalTicketStatsQuery)));
   r.get('/portal/tickets/:id', { preHandler: read, schema: { tags, params: idParam, querystring: S.previewQuery } }, h((ctx, req) => svc.getPortalTicket(ctx, (req.params as { id: string }).id, q(req).customerId)));
   r.get('/portal/tickets/:id/attachments', { preHandler: read, schema: { tags, params: idParam, querystring: S.previewQuery } }, h((ctx, req) => svc.portalTicketAttachments(ctx, (req.params as { id: string }).id, q(req).customerId)));
   r.post('/portal/tickets/:id/comments', { preHandler: act, schema: { tags, params: idParam, body: S.commentBody } }, h(async (ctx, req, reply) => {

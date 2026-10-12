@@ -23,6 +23,8 @@ export interface TicketListLink {
   domain?: TicketLinkDomain | null;
   /** `open` is the page default (new, open and pending); `any` lifts the status filter; `resolved` is the resolved category only. */
   status?: TicketLinkStatus | null;
+  /** An explicit list of status categories (`resolved,closed` for the tickets still to rate); when set it wins over `status`. */
+  statusCategories?: string[] | null;
   sla?: TicketLinkSla | TicketLinkSla[] | null;
   breachRisk?: 'high' | 'medium' | 'low' | null;
   /** `me`, `unassigned`, `watching` or a user id. */
@@ -59,7 +61,8 @@ export function ticketListQuery(link: TicketListLink): string {
   put('customerId', link.customerId);
   put('type', link.type);
   if (link.domain) put('domain', link.domain === 'not_soc' ? NOT_SOC : link.domain);
-  if (link.status === 'any') put('statusCategory', 'any');
+  if (link.statusCategories?.length) put('statusCategory', list(link.statusCategories));
+  else if (link.status === 'any') put('statusCategory', 'any');
   else if (link.status === 'resolved') put('statusCategory', 'resolved');
   // `open` (and unset) is the page default: nothing to carry.
   put('statusId', list(link.statusIds));
@@ -86,4 +89,31 @@ export function ticketListQuery(link: TicketListLink): string {
 export function ticketListPath(link: TicketListLink): string {
   const q = ticketListQuery(link);
   return q ? `/tickets?${q}` : '/tickets';
+}
+
+/**
+ * The keys the customer portal's ticket list accepts (`/portal/tickets`, its
+ * route schema and `GET /portal/tickets/stats`). A link into the portal emits
+ * only these: a staff-only key (customer, domain, team, assignee, risk, major,
+ * known error, severity, category) would be dropped by the route's schema while
+ * the breadcrumb still showed it, so the whitelist makes the leak impossible and
+ * lets the guard test reason about one key set.
+ */
+export const PORTAL_TICKET_LINK_KEYS = ['type', 'statusCategory', 'statusId', 'priorityId', 'siteId', 'serviceId', 'slaState', 'csat', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo'] as const;
+export type PortalTicketLinkKey = (typeof PORTAL_TICKET_LINK_KEYS)[number];
+
+/** The query string of a portal ticket list link: the same keys in the same fixed order as `ticketListQuery`, restricted to the portal-safe set. */
+export function portalTicketListQuery(link: TicketListLink): string {
+  const allowed = new Set<string>(PORTAL_TICKET_LINK_KEYS);
+  const p = new URLSearchParams();
+  new URLSearchParams(ticketListQuery(link)).forEach((v, k) => {
+    if (allowed.has(k)) p.set(k, v);
+  });
+  return p.toString();
+}
+
+/** `/portal/tickets?…` for a link (just `/portal/tickets` for the organisation's open tickets). */
+export function portalTicketListPath(link: TicketListLink): string {
+  const q = portalTicketListQuery(link);
+  return q ? `/portal/tickets?${q}` : '/portal/tickets';
 }

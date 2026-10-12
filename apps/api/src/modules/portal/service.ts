@@ -5,7 +5,8 @@ import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { createTicket, getTicket, reopenTicket } from '@/modules/tickets/service';
-import { listTickets } from '@/modules/tickets/list';
+import { countTickets, listTickets, ticketStats, TILE_KEYS } from '@/modules/tickets/list';
+import type { StatsQuery } from '@/modules/tickets/schemas';
 import { addComment, timeline } from '@/modules/tickets/activity';
 import * as approvalsSvc from '@/modules/tickets/approvals';
 import { changeStatusCore, statusByKey } from '@/modules/tickets/status';
@@ -33,8 +34,7 @@ import { windowOf } from '@/modules/changes/conflicts';
 import type { PortalKnownError } from '@/modules/known-errors/service';
 import { surveyRowFor, surveyView } from '@/modules/surveys/service';
 import { effectivePolicy, voluntaryRatingOpen } from '@/modules/surveys/policy';
-import { pendingSurveyCount } from '@/modules/surveys/figures';
-import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalInstallationQuery, type PortalLicenceQuery, type PortalRoleKey, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
+import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalInstallationQuery, type PortalLicenceQuery, type PortalRoleKey, type PortalTicketStatsQuery, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
 
 /**
  * Customer portal: a thin, customer-safe facade over the module services.
@@ -111,7 +111,8 @@ export async function me(ctx: Ctx, requested?: string | null) {
   }
   const assignedTeams = await ctx.tx.select({ id: schema.teams.id, name: schema.teams.name, teamType: schema.teams.teamType }).from(schema.customerTeams).innerJoin(schema.teams, eq(schema.teams.id, schema.customerTeams.teamId)).where(and(eq(schema.customerTeams.customerId, cid), eq(schema.teams.isActive, true))).orderBy(asc(schema.teams.name));
 
-  const counts = await ticketCounts(ctx, cid, {});
+  // The navigator badges read the same numbers as the list's tiles and chips (one function, one vocabulary).
+  const stats = scope.preview || ctx.can('portal:tickets', cid) ? await portalTicketStats(ctx, { customerId: scope.preview ? cid : undefined }) : null;
   const pendingApprovals = scope.preview ? 0 : (await approvalsSvc.listMine(ctx)).items.filter((a) => a.customerId === cid).length;
   const horizon = new Date(Date.now() + 90 * 86_400_000);
   const [visits] = await ctx.tx
@@ -119,7 +120,6 @@ export async function me(ctx: Ctx, requested?: string | null) {
     .from(schema.fieldVisits)
     .where(and(eq(schema.fieldVisits.customerId, cid), inArray(schema.fieldVisits.status, ['requested', 'scheduled', 'in_progress']), sql`${schema.fieldVisits.scheduledStart} >= now()`, sql`${schema.fieldVisits.scheduledStart} <= ${horizon}`));
   const permissions = scope.preview ? PORTAL_PERMISSIONS : PORTAL_PERMISSIONS.filter((p) => ctx.can(p, cid));
-  const surveysPending = await pendingSurveyCount(ctx.tx, cid);
 
   return {
     user: { id: ctx.user.id, name: ctx.user.name, email: ctx.user.email, phone: ctx.user.phone, timezone: ctx.user.timezone, roles: ctx.user.roles.filter((r) => !r.customerId || r.customerId === cid).map((r) => ({ key: r.key, name: r.name })) },
@@ -131,7 +131,7 @@ export async function me(ctx: Ctx, requested?: string | null) {
       teams: assignedTeams.map((t) => ({ id: t.id, name: t.name, teamType: t.teamType })),
     },
     permissions,
-    counts: { ...counts, pendingApprovals, upcomingVisits: visits?.count ?? 0, surveysPending },
+    counts: { open: stats?.open ?? 0, awaiting: stats?.awaiting ?? 0, resolved: stats?.resolved ?? 0, closed: stats?.closed ?? 0, toRate: stats?.toRate ?? 0, all: stats?.all ?? 0, pendingApprovals, upcomingVisits: visits?.count ?? 0 },
     preview: scope.preview,
   };
 }
@@ -139,69 +139,123 @@ export async function me(ctx: Ctx, requested?: string | null) {
 // ---------------------------------------------------------------- tickets
 
 const T = schema.tickets;
-const st = alias(schema.configOptions, 'portal_st');
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+/** The portal strips `csat` from the tile scope as well: there `csat=pending` is the To rate tile, not a base-scope pill. */
+const PORTAL_TILE_KEYS: readonly (keyof StatsQuery)[] = [...TILE_KEYS, 'csat'];
 
-async function ticketCounts(ctx: Ctx, customerId: string, f: { type?: 'incident' | 'request'; mine?: boolean }) {
-  const conds: SQL[] = [eq(T.customerId, customerId)];
-  if (f.type) conds.push(eq(T.type, f.type));
-  if (f.mine) conds.push(eq(T.requesterUserId, ctx.user.id));
-  const [row] = await ctx.tx
-    .select({
-      open: sql<number>`count(*) filter (where ${st.statusCategory} in ('new','open','pending'))::int`,
-      awaiting: sql<number>`count(*) filter (where ${st.key} = ${AWAITING_STATUS_KEY})::int`,
-      resolved: sql<number>`count(*) filter (where ${st.statusCategory} = 'resolved')::int`,
-      closed: sql<number>`count(*) filter (where ${st.statusCategory} in ('closed','cancelled'))::int`,
-      rate: sql<number>`count(*) filter (where ${st.statusCategory} in ('resolved','closed') and exists (select 1 from ticket_surveys s where s.ticket_id = ${T.id} and s.status = 'pending' and s.expires_at > now()))::int`,
-      all: sql<number>`count(*)::int`,
-    })
-    .from(T)
-    .innerJoin(st, eq(st.id, T.statusId))
-    .where(and(...conds));
-  return { open: row?.open ?? 0, awaiting: row?.awaiting ?? 0, resolved: row?.resolved ?? 0, closed: row?.closed ?? 0, rate: row?.rate ?? 0, all: row?.all ?? 0 };
-}
-
-export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
+/**
+ * The staff list parameters a portal query resolves to: the organisation
+ * pinned, the portal aliases mapped (`status` chip → `statusCategory` /
+ * `statusId` / `csat`; `priority` key → `priorityId`; `mine` → requester = me),
+ * the explicit staff keys layered on top (an explicit `statusCategory=any` lifts
+ * the status filter; without any status key the open categories apply) and
+ * every staff-only flag left unset. `listPortalTickets`, `countPortalTickets`
+ * and `portalTicketStats` all go through it, so the rows, the count a link
+ * reproduces and the tiles are one vocabulary.
+ */
+export async function portalListParams(ctx: Ctx, q: PortalTicketStatsQuery): Promise<StatsQuery> {
   const scope = resolvePortalCustomer(ctx, 'portal:tickets', q.customerId);
   const cid = scope.customerId;
   let statusCategory: string | undefined;
   let statusId: string | undefined;
+  let csat: 'pending' | undefined;
   if (q.status === 'open') statusCategory = OPEN_CATEGORIES.join(',');
   else if (q.status === 'resolved') statusCategory = 'resolved';
   else if (q.status === 'closed') statusCategory = 'closed,cancelled';
-  else if (q.status === 'rate') statusCategory = 'resolved,closed';
-  else if (q.status === 'awaiting') {
+  else if (q.status === 'rate') {
+    statusCategory = 'resolved,closed';
+    csat = 'pending';
+  } else if (q.status === 'awaiting') {
     const awaiting = await optionByKey(ctx.tx, 'ticket_status', AWAITING_STATUS_KEY);
     if (awaiting) statusId = awaiting.id;
     else statusCategory = 'pending';
   }
+  if (q.statusCategory) statusCategory = q.statusCategory === 'any' ? undefined : q.statusCategory;
+  if (q.statusId) statusId = q.statusId;
+  if (q.csat) csat = q.csat;
+  // Without any status key the open categories apply, except that `csat=pending` on its own is the To rate door: a pending survey lives on a
+  // resolved or closed ticket, so the open categories would hide every one of them while the To rate chip still showed its count.
+  if (q.status === undefined && q.statusCategory === undefined && q.statusId === undefined) statusCategory = csat === 'pending' ? 'resolved,closed' : OPEN_CATEGORIES.join(',');
   let priorityId: string | undefined;
   if (q.priority) {
     const prio = UUID_RE.test(q.priority) ? { id: q.priority } : await optionByKey(ctx.tx, 'ticket_priority', q.priority.toLowerCase());
-    priorityId = prio?.id ?? '00000000-0000-0000-0000-000000000000';
+    priorityId = prio?.id ?? NIL_UUID;
   }
-  const res = await listTickets(ctx, {
-    page: q.page,
-    pageSize: q.pageSize,
-    sort: q.sort ?? 'lastActivityAt',
-    order: q.order ?? 'desc',
+  if (q.priorityId) priorityId = q.priorityId;
+  return {
     customerId: cid,
     type: q.type,
     statusCategory,
     statusId,
     priorityId,
     siteId: q.siteId,
+    serviceId: q.serviceId,
+    slaState: q.slaState,
     createdFrom: q.createdFrom,
     createdTo: q.createdTo,
+    resolvedFrom: q.resolvedFrom,
+    resolvedTo: q.resolvedTo,
     q: q.q,
+    csat,
     requesterUserId: q.mine ? ctx.user.id : undefined,
-    // boolean flags of the MSP list (never set from the portal)
+    // boolean flags of the staff list (never set from the portal)
     unassigned: undefined,
     mine: undefined,
     watching: undefined,
     isMajor: undefined,
     open: undefined,
     knownError: undefined,
-    csat: q.status === 'rate' ? 'pending' : undefined,
+  };
+}
+
+/** The number the portal list shows for a query: the list's own predicates, so a dashboard door reproduces exactly. */
+export async function countPortalTickets(ctx: Ctx, q: PortalTicketStatsQuery): Promise<number> {
+  return countTickets(ctx, await portalListParams(ctx, q));
+}
+
+/**
+ * The portal list's tiles, chips and pills under the list's scope: `total` is
+ * the list's own count; `open`, `awaiting`, `breached`, `atRisk`, `toRate` and
+ * the chips (`resolved`, `closed`, `all`, `byStatusCategory`) are computed with
+ * the status and tile dimensions stripped (`csat` included), so a chip or a
+ * tile never moves another; `byType` and `allTypes` also ignore the type.
+ * Nothing staff-only leaves here (no teams, assignees, risk or mood).
+ */
+export async function portalTicketStats(ctx: Ctx, q: PortalTicketStatsQuery) {
+  const s = await ticketStats(ctx, await portalListParams(ctx, q), { tileKeys: PORTAL_TILE_KEYS });
+  const cat = (k: string) => s.byStatusCategory[k] ?? 0;
+  return {
+    total: s.total,
+    open: s.open,
+    awaiting: s.awaitingCustomer,
+    breached: s.breached,
+    atRisk: s.atRisk,
+    toRate: s.surveyPending,
+    resolved: cat('resolved'),
+    closed: cat('closed') + cat('cancelled'),
+    all: Object.values(s.byStatusCategory).reduce((n, v) => n + v, 0),
+    byStatusCategory: s.byStatusCategory,
+    byType: s.byType,
+    allTypes: s.allTypes,
+    series: s.series,
+  };
+}
+
+export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
+  const { page, pageSize, sort, order, ...filters } = q;
+  const params = await portalListParams(ctx, filters);
+  const res = await listTickets(ctx, {
+    ...params,
+    page,
+    pageSize,
+    sort: sort ?? 'lastActivityAt',
+    order: order ?? 'desc',
+    unassigned: undefined,
+    mine: undefined,
+    watching: undefined,
+    isMajor: undefined,
+    open: undefined,
+    knownError: undefined,
   });
   const requesterNames = await userNamesOnly(ctx, res.items.map((r) => r.requesterUserId));
   const items = res.items.map((r) => ({
@@ -233,7 +287,7 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     csatRating: r.csatRating,
     surveyPending: r.surveyStatus === 'pending',
   }));
-  const counts = await ticketCounts(ctx, cid, { type: q.type, mine: q.mine });
+  const counts = await portalTicketStats(ctx, filters);
   return { items, total: res.total, page: res.page, pageSize: res.pageSize, counts };
 }
 

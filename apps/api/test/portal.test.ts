@@ -7,14 +7,16 @@
  * isolation, permission limits and data shaping are verified end to end.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { withSystem, closeDb, schema, type Tx } from '@/db/client';
 import { runAs, type Ctx } from '@/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '@/core/principal';
 import { config } from '@/config';
-import { createTicket, changeStatus } from '@/modules/tickets/service';
+import { createTicket, changeStatus, resolveTicket } from '@/modules/tickets/service';
 import { addComment } from '@/modules/tickets/activity';
 import * as portal from '@/modules/portal/service';
+import { portalTicketStatsQuery } from '@/modules/portal/schemas';
+import { pendingForPortal } from '@/modules/surveys/portal';
 
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const ids = {
@@ -58,6 +60,13 @@ async function roleId(tx: Tx, key: string) {
 }
 
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
+/** A live pending survey on a ticket (replacing whatever the resolution hook issued), so "to rate" has something to count. */
+async function pendingSurveyOn(tx: Tx, ticketId: string) {
+  const [t] = await tx.select({ customerId: schema.tickets.customerId, type: schema.tickets.type }).from(schema.tickets).where(eq(schema.tickets.id, ticketId));
+  await tx.delete(schema.ticketSurveys).where(eq(schema.ticketSurveys.ticketId, ticketId));
+  await tx.insert(schema.ticketSurveys).values({ ticketId, customerId: t!.customerId, ticketType: t!.type, trigger: 'resolved', question: 'How did we do?', tokenHash: `portal-${suffix}-${ticketId}`, tokenPrefix: 'portal', tokenEnc: 'x', status: 'pending', expiresAt: new Date(Date.now() + 7 * 86_400_000) });
+}
 
 beforeAll(async () => {
   await withSystem(async (tx) => {
@@ -341,5 +350,178 @@ describe('customer portal', () => {
     expect(me.customer.id).toBe(ids.customerA);
     await expect(asAdmin((ctx) => portal.me(ctx))).rejects.toThrow(/customerId is required/);
     await expect(asAdmin((ctx) => portal.commentOnTicket(ctx, ids.ticketA, 'nope'))).rejects.toThrow(/only available to customer users/);
+  });
+});
+
+/**
+ * The portal list on the staff vocabulary: the explicit keys and the chip
+ * aliases resolve to the same predicates, the stats endpoint's tiles and chips
+ * never move each other, scope keys move them, staff-only keys are stripped,
+ * and the organisation's "open" and "to rate" numbers are the same in the
+ * navigator, on the list and on GET /portal/surveys.
+ */
+describe('portal ticket list vocabulary', () => {
+  let pendingCustomerId = '';
+  let resolved = '';
+  let reopened = '';
+  const stats = (q: Parameters<typeof portal.portalTicketStats>[1]) => asA((ctx) => portal.portalTicketStats(ctx, q));
+  const count = (q: Parameters<typeof portal.countPortalTickets>[1]) => asA((ctx) => portal.countPortalTickets(ctx, q));
+  const tiles = (x: Awaited<ReturnType<typeof portal.portalTicketStats>>) => ({ open: x.open, awaiting: x.awaiting, breached: x.breached, atRisk: x.atRisk, toRate: x.toRate, resolved: x.resolved, closed: x.closed, all: x.all, byStatusCategory: x.byStatusCategory, byType: x.byType, allTypes: x.allTypes });
+
+  beforeAll(async () => {
+    // Customer A so far: the incident (in progress), the approved request, "Portal raised" and "Portal request" (both raised by Alice). Add a resolved
+    // ticket with a live survey, a ticket reopened behind the hook with its survey still live, a breached clock and a ticket waiting on the customer.
+    await asAdmin(async (ctx) => {
+      const r = await createTicket(ctx, { type: 'incident', customerId: ids.customerA, title: `A resolved to rate ${suffix}`, description: 'done' });
+      const x = await createTicket(ctx, { type: 'incident', customerId: ids.customerA, title: `A reopened with a live survey ${suffix}`, description: 'not done' });
+      createdTickets.push(r.id, x.id);
+      resolved = r.id;
+      reopened = x.id;
+      await resolveTicket(ctx, r.id, { resolutionNotes: 'Fixed' });
+      await resolveTicket(ctx, x.id, { resolutionNotes: 'Fixed, or so we thought' });
+    });
+    await withSystem(async (tx) => {
+      pendingCustomerId = await optionId(tx, 'ticket_status', 'pending_customer');
+      await pendingSurveyOn(tx, resolved);
+      await pendingSurveyOn(tx, reopened);
+      await tx.update(schema.tickets).set({ statusId: await optionId(tx, 'ticket_status', 'in_progress') }).where(eq(schema.tickets.id, reopened));
+      await tx.execute(sql`UPDATE ticket_slas SET state = 'breached', breached_at = now() WHERE ticket_id = ${ids.ticketA}::uuid AND metric = 'resolution'`);
+      const [req] = await tx.select({ id: schema.tickets.id }).from(schema.tickets).where(and(eq(schema.tickets.customerId, ids.customerA), eq(schema.tickets.title, `Portal request ${suffix}`)));
+      await tx.update(schema.tickets).set({ statusId: pendingCustomerId }).where(eq(schema.tickets.id, req!.id));
+    });
+  });
+
+  it('accepts the staff keys and the chip aliases, and both resolve to the same list', async () => {
+    // Six tickets: five open (one of them waiting on the customer, one breached, one reopened), one resolved with a live survey.
+    expect(await count({})).toBe(5);
+    expect(await count({ statusCategory: 'any' })).toBe(6);
+    expect(await count({ status: 'all' })).toBe(6);
+    expect(await count({ status: 'open', statusCategory: 'any' })).toBe(6);
+    expect(await count({ statusCategory: 'resolved' })).toBe(1);
+    expect(await count({ status: 'resolved' })).toBe(1);
+    expect(await count({ statusCategory: 'resolved,closed', csat: 'pending' })).toBe(1);
+    expect(await count({ status: 'rate' })).toBe(1);
+    expect(await count({ statusId: pendingCustomerId })).toBe(1);
+    expect(await count({ status: 'awaiting' })).toBe(1);
+    expect(await count({ slaState: 'breached' })).toBe(1);
+    expect(await count({ slaState: 'at_risk,ok' })).toBe(4);
+    // A resolved range counts by resolution day whatever the current status (the reopened ticket keeps its resolution time).
+    expect(await count({ statusCategory: 'any', resolvedFrom: day(0), resolvedTo: day(0) })).toBe(2);
+    expect(await count({ statusCategory: 'any', resolvedFrom: day(-3), resolvedTo: day(-1) })).toBe(0);
+    expect(await count({ statusCategory: 'any', createdFrom: day(1) })).toBe(0);
+    expect(await count({ siteId: ids.siteA })).toBe(2);
+    expect(await count({ serviceId: ids.service })).toBe(3);
+    expect(await count({ mine: true })).toBe(2);
+    expect(await count({ type: 'request' })).toBe(2);
+    expect(await count({ priority: 'p9' })).toBe(0);
+    const list = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, statusCategory: 'any' }));
+    expect(list.total).toBe(6);
+    expect(list.counts.all).toBe(6);
+    expect(Object.keys(list.items[0]!)).not.toContain('customerName');
+    const toRate = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, status: 'rate' }));
+    expect(toRate.items.map((t) => t.id)).toEqual([resolved]);
+  });
+
+  it('the stats tiles and chips never move each other; the list total follows the condition', async () => {
+    const base = await stats({});
+    expect(tiles(base)).toEqual({ open: 5, awaiting: 1, breached: 1, atRisk: 0, toRate: 1, resolved: 1, closed: 0, all: 6, byStatusCategory: { open: 3, new: 1, pending: 1, resolved: 1 }, byType: { incident: 3, request: 2 }, allTypes: 5 });
+    expect(base.total).toBe(5);
+    expect(base.series).toHaveLength(14);
+    const cases: [Parameters<typeof portal.portalTicketStats>[1], number][] = [
+      [{ statusCategory: 'resolved' }, 1],
+      [{ status: 'resolved' }, 1],
+      [{ statusId: pendingCustomerId }, 1],
+      [{ status: 'awaiting' }, 1],
+      [{ statusCategory: 'resolved,closed', csat: 'pending' }, 1],
+      [{ status: 'rate' }, 1],
+      [{ slaState: 'breached' }, 1],
+      [{ statusCategory: 'any' }, 6],
+      [{ status: 'all' }, 6],
+    ];
+    for (const [q, total] of cases) {
+      const s = await stats(q);
+      expect(tiles(s), JSON.stringify(q)).toEqual(tiles(base));
+      expect(s.total, JSON.stringify(q)).toBe(total);
+    }
+    // The tiles reproduce on the list they open.
+    expect(await count({ slaState: 'breached' })).toBe(base.breached);
+    expect(await count({ statusId: pendingCustomerId })).toBe(base.awaiting);
+    expect(await count({ statusCategory: 'resolved,closed', csat: 'pending' })).toBe(base.toRate);
+    expect(await count({ statusCategory: 'resolved' })).toBe(base.resolved);
+    expect(await count({ statusCategory: 'closed,cancelled' })).toBe(base.closed);
+  });
+
+  it('scope keys (search, site, service, priority, created range, type, raised by me) move the tiles and chips with the list', async () => {
+    const mine = await stats({ mine: true });
+    expect([mine.open, mine.awaiting, mine.toRate, mine.all, mine.allTypes]).toEqual([2, 1, 0, 2, 2]);
+    expect(mine.byType).toEqual({ incident: 1, request: 1 });
+    const site = await stats({ siteId: ids.siteA });
+    expect([site.open, site.breached, site.total]).toEqual([2, 1, 2]);
+    const service = await stats({ serviceId: ids.service });
+    expect([service.open, service.total]).toEqual([3, 3]);
+    const nobody = await stats({ priorityId: '00000000-0000-0000-0000-000000000000' });
+    expect([nobody.open, nobody.all, nobody.allTypes, nobody.total]).toEqual([0, 0, 0, 0]);
+    const future = await stats({ createdFrom: day(1) });
+    expect([future.open, future.toRate, future.total]).toEqual([0, 0, 0]);
+    // The type pill keeps the tiles on its own scope while All and the per-type counts ignore it.
+    const requests = await stats({ type: 'request' });
+    expect([requests.open, requests.awaiting, requests.total, requests.allTypes]).toEqual([2, 1, 2, 5]);
+    expect(requests.byType).toEqual({ incident: 3, request: 2 });
+    expect(requests.byStatusCategory).toEqual({ open: 1, pending: 1 });
+    const found = await stats({ q: `reopened with a live survey ${suffix}` });
+    expect(found.open).toBe(await count({ q: `reopened with a live survey ${suffix}` }));
+    expect(found.open).toBeGreaterThanOrEqual(1);
+    expect(found.open).toBeLessThan(5);
+  });
+
+  it('staff-only keys from a customer user are stripped and never widen the scope; another organisation sees only its own', async () => {
+    const base = await stats({});
+    const smuggled = portalTicketStatsQuery.parse({ customerId: ids.customerB, assignee: 'me', assigneeId: ids.adminUser, teamId: ids.service, domain: 'soc', unassigned: 'true', isMajor: 'true', knownError: 'true', csat: 'pending' });
+    expect(Object.keys(smuggled).sort()).toEqual(['csat', 'customerId']);
+    const s = await stats(smuggled);
+    expect(tiles(s)).toEqual(tiles(base));
+    // `csat=pending` without a status key is the To rate door (the rateable categories stand in for the open default), so its list is the To rate number.
+    expect(s.total).toBe(base.toRate);
+    expect(await count({ csat: 'pending' })).toBe(base.toRate);
+    expect(await count({ csat: 'pending' })).toBe(await count({ statusCategory: 'resolved,closed', csat: 'pending' }));
+    expect(await count({ csat: 'pending' })).toBe(await count({ status: 'rate' }));
+    // An unknown category, or `any` combined with one, is refused rather than served as an empty or narrowed list.
+    expect(portalTicketStatsQuery.safeParse({ statusCategory: 'bogus' }).success).toBe(false);
+    expect(portalTicketStatsQuery.safeParse({ statusCategory: 'any,resolved' }).success).toBe(false);
+    expect(portalTicketStatsQuery.safeParse({ statusCategory: 'resolved,closed' }).success).toBe(true);
+    expect(portalTicketStatsQuery.safeParse({ statusCategory: 'any' }).success).toBe(true);
+    expect(await count(portalTicketStatsQuery.parse({ customerId: ids.customerB }))).toBe(5);
+    await expect(Promise.resolve().then(() => portalTicketStatsQuery.parse({ csat: 'rated' }))).rejects.toThrow();
+    await expect(Promise.resolve().then(() => portalTicketStatsQuery.parse({ createdFrom: 'yesterday' }))).rejects.toThrow();
+    const b = await asB((ctx) => portal.portalTicketStats(ctx, { statusCategory: 'any' }));
+    expect([b.open, b.all, b.toRate, b.total]).toEqual([1, 1, 0, 1]);
+    expect(await asB((ctx) => portal.countPortalTickets(ctx, { statusCategory: 'any', siteId: ids.siteA }))).toBe(0);
+    // An MSP administrator previewing the portal reads the same numbers for the organisation.
+    const preview = await asAdmin((ctx) => portal.portalTicketStats(ctx, { customerId: ids.customerA }));
+    expect(tiles(preview)).toEqual(tiles(base));
+  });
+
+  it('one "open" and one "to rate" number: the navigator, the list tiles and GET /portal/surveys agree, and a reopened ticket with a live survey counts nowhere', async () => {
+    const me = await asA((ctx) => portal.me(ctx));
+    const base = await stats({});
+    const surveys = await asA((ctx) => pendingForPortal(ctx));
+    expect(me.counts.open).toBe(base.open);
+    expect(me.counts.toRate).toBe(base.toRate);
+    expect(surveys.count).toBe(base.toRate);
+    expect(me.counts).toMatchObject({ open: 5, awaiting: 1, resolved: 1, closed: 0, toRate: 1, all: 6 });
+    expect(Object.keys(me.counts).sort()).toEqual(['all', 'awaiting', 'closed', 'open', 'pendingApprovals', 'resolved', 'toRate', 'upcomingVisits']);
+    expect(surveys.items.map((i) => i.ticketId)).toEqual([resolved]);
+    expect(await count({ status: 'rate' })).toBe(1);
+    const toRateRows = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, statusCategory: 'resolved,closed', csat: 'pending' }));
+    expect(toRateRows.items.map((t) => t.id)).not.toContain(reopened);
+    // Once the reopened ticket ends again its live survey is "to rate" everywhere at once.
+    await withSystem(async (tx) => {
+      await tx.update(schema.tickets).set({ statusId: await optionId(tx, 'ticket_status', 'resolved') }).where(eq(schema.tickets.id, reopened));
+    });
+    const after = await stats({});
+    expect(after.toRate).toBe(2);
+    expect((await asA((ctx) => portal.me(ctx))).counts.toRate).toBe(2);
+    expect((await asA((ctx) => pendingForPortal(ctx))).count).toBe(2);
+    expect(await count({ statusCategory: 'resolved,closed', csat: 'pending' })).toBe(2);
   });
 });

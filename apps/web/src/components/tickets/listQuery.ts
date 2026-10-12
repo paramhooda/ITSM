@@ -10,7 +10,7 @@
  * `any` lifts the filter), `assignee` (`me`, `unassigned`, `watching` or a
  * user id), the filter pills by their API name, and the date ranges.
  */
-import { TICKET_LIST_OPEN_CATEGORIES } from '@itsm/shared';
+import { TICKET_LIST_OPEN_CATEGORIES, PORTAL_TICKET_LINK_KEYS } from '@itsm/shared';
 
 export const TICKET_LIST_DEFAULTS: Record<string, string> = { statusCategory: TICKET_LIST_OPEN_CATEGORIES, sort: 'lastActivityAt', order: 'desc' };
 
@@ -48,3 +48,50 @@ export function listStateForLink(href: string): ListState {
 
 /** The stats/count parameters a link resolves to once the page has applied its defaults. */
 export const statsParamsForLink = (href: string): Record<string, string> => toStatsParams(listStateForLink(href));
+
+// ---------------------------------------------------------------- the customer portal list
+
+/** The portal ticket list's defaults: the organisation's open tickets, newest activity first, 25 a page. */
+export const PORTAL_LIST_DEFAULTS: Record<string, string> = { statusCategory: TICKET_LIST_OPEN_CATEGORIES, sort: 'lastActivityAt', order: 'desc', pageSize: '25' };
+/** The types the portal list's pills name and its route accepts; any other `type` in a link is not a condition the page can apply, so it is dropped. */
+export const PORTAL_TICKET_TYPES = ['incident', 'request'] as const;
+/** The statuses a ticket can be rated in: `csat=pending` on its own is the To rate door, so these categories stand in when a link carries no status key. */
+export const PORTAL_RATE_CATEGORIES = 'resolved,closed';
+
+/**
+ * The portal page state → `GET /portal/tickets` and `GET /portal/tickets/stats`
+ * parameters: the portal-safe link keys (`PORTAL_TICKET_LINK_KEYS`) plus `q`,
+ * `type` and `mine` (raised by me, a scope like a filter pill). Unlike the
+ * staff list, `statusCategory=any` is carried: the portal API applies the open
+ * categories when no status key is given, so "Any status" must say so.
+ */
+export function toPortalParams(state: ListState): Record<string, string> {
+  const p: Record<string, string> = {};
+  if (state.q) p.q = state.q;
+  // The All pill is no filter, and a type the portal has no pill for (a problem or a change) is not sent: the route would refuse it.
+  if (state.type && (PORTAL_TICKET_TYPES as readonly string[]).includes(state.type)) p.type = state.type;
+  for (const k of PORTAL_TICKET_LINK_KEYS) if (k !== 'type' && state[k]) p[k] = state[k]!;
+  if (state.mine === 'true') p.mine = 'true';
+  return p;
+}
+
+/**
+ * The page state a `/portal/tickets?…` link (or bare query string) opens: the
+ * portal defaults, then the link's keys. `csat=pending` without a status key is
+ * the To rate door (the page rewrites the URL the same way on arrival, and the
+ * portal API applies the same categories), so the defaults' open categories
+ * never hide the tickets still to rate.
+ */
+export function portalStateForLink(href: string): ListState {
+  const query = href.includes('?') ? href.slice(href.indexOf('?') + 1) : href.startsWith('/') ? '' : href;
+  const state: ListState = { ...PORTAL_LIST_DEFAULTS };
+  const link = new URLSearchParams(query);
+  link.forEach((v, k) => {
+    state[k] = v;
+  });
+  if (link.get('csat') === 'pending' && !link.has('statusCategory') && !link.has('statusId')) state.statusCategory = PORTAL_RATE_CATEGORIES;
+  return state;
+}
+
+/** The portal stats/count parameters a link resolves to once the page has applied its defaults. */
+export const portalParamsForLink = (href: string): Record<string, string> => toPortalParams(portalStateForLink(href));

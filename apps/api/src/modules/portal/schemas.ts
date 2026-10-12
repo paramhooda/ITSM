@@ -1,10 +1,12 @@
 import { z } from 'zod';
-import { ASSET_LIFECYCLE, LICENCE_STATUSES } from '@itsm/shared';
+import { ASSET_LIFECYCLE, LICENCE_STATUSES, STATUS_CATEGORIES } from '@itsm/shared';
 import { paginationSchema } from '@/core/pagination';
-import { boolQ } from '@/modules/tickets/schemas';
+import { boolQ, csvOf, dateParam } from '@/modules/tickets/schemas';
+import { SLA_STATES } from '@/modules/sla/predicates';
 import { answerBody } from '@/modules/surveys/schemas';
 
 const uuid = z.string().uuid();
+const parts = (v: string) => v.split(',').map((x) => x.trim()).filter(Boolean);
 const nullableUuid = uuid.nullable().optional();
 
 /** `?customerId=` is only honoured for MSP users previewing a customer's portal (see service `resolvePortalCustomer`). */
@@ -13,21 +15,50 @@ export const previewQuery = z.object({ customerId: uuid.optional() });
 export const PORTAL_STATUS_CHIPS = ['open', 'awaiting', 'resolved', 'closed', 'rate', 'all'] as const;
 export type PortalStatusChip = (typeof PORTAL_STATUS_CHIPS)[number];
 
+/**
+ * The portal ticket list on the staff list's vocabulary (`statusCategory`,
+ * `statusId`, `priorityId`, `serviceId`, `slaState`, `csat`, the created and
+ * resolved ranges), so a dashboard number links into it with exactly the
+ * predicate it was counted with. The portal's own chip (`status`) and priority
+ * key (`priority`) stay as aliases; the service maps them (`portalListParams`).
+ * Without any status key the open categories apply; `statusCategory=any`
+ * lifts the status filter. Every staff-only key (customer, assignee, team,
+ * domain, risk, major, known error) is unknown here and stripped by the route.
+ * Kept unrefined: `portalTicketStatsQuery` derives from it with `.omit()`.
+ */
 export const ticketListQuery = paginationSchema.extend({
   customerId: uuid.optional(),
-  status: z.enum(PORTAL_STATUS_CHIPS).default('open'),
+  /** The portal status chip (alias): open, awaiting (status key pending_customer), resolved, closed, rate (resolved or closed with a live survey) or all. */
+  status: z.enum(PORTAL_STATUS_CHIPS).optional(),
   type: z.enum(['incident', 'request']).optional(),
   q: z.string().max(200).optional(),
   siteId: uuid.optional(),
-  /** Priority key (p1..p5) or id, as the portal home's "by priority" bars link to it. */
+  /** Priority key (p1..p5) or id (alias), as the portal home's "by priority" bars linked to it. */
   priority: z.string().max(40).optional(),
-  createdFrom: z.string().max(30).optional(),
-  createdTo: z.string().max(30).optional(),
   mine: boolQ.optional(),
+  /** Comma list of status categories; `any` lifts the status filter and stands alone (an unknown category is refused rather than an empty list). */
+  statusCategory: csvOf(z.enum([...STATUS_CATEGORIES, 'any']), 120)
+    .refine((v) => !(parts(v).includes('any') && parts(v).length > 1), '"any" lifts the status filter and cannot be combined with a category')
+    .optional(),
+  statusId: csvOf(uuid).optional(),
+  priorityId: csvOf(uuid).optional(),
+  serviceId: uuid.optional(),
+  slaState: csvOf(z.enum(SLA_STATES), 40).optional(),
+  /** `pending`: the tickets still to rate (a live survey on a resolved or closed ticket). */
+  csat: z.enum(['pending']).optional(),
+  /** Date ranges: a date-only value covers the whole day; a timestamp is exact. */
+  createdFrom: dateParam.optional(),
+  createdTo: dateParam.optional(),
+  resolvedFrom: dateParam.optional(),
+  resolvedTo: dateParam.optional(),
   sort: z.enum(['createdAt', 'updatedAt', 'lastActivityAt', 'dueAt', 'priority', 'number', 'status']).optional(),
   order: z.enum(['asc', 'desc']).optional(),
 });
 export type TicketListQuery = z.infer<typeof ticketListQuery>;
+
+/** `GET /portal/tickets/stats` takes every list filter (paging and sort are meaningless for aggregates). */
+export const portalTicketStatsQuery = ticketListQuery.omit({ page: true, pageSize: true, sort: true, order: true });
+export type PortalTicketStatsQuery = z.infer<typeof portalTicketStatsQuery>;
 
 export const createTicketBody = z.object({
   type: z.enum(['incident', 'request']),

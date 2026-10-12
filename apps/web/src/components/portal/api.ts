@@ -24,11 +24,33 @@ export interface PortalMe {
     teams: { id: string; name: string; teamType: string }[];
   };
   permissions: string[];
-  counts: { open: number; awaiting: number; resolved: number; closed: number; all: number; pendingApprovals: number; upcomingVisits: number; surveysPending: number };
+  /** The navigator badges: the same numbers as the ticket list's tiles and chips (`GET /portal/tickets/stats` over the whole organisation). */
+  counts: { open: number; awaiting: number; resolved: number; closed: number; toRate: number; all: number; pendingApprovals: number; upcomingVisits: number };
   preview: boolean;
 }
 
-export type StatusChip = 'open' | 'awaiting' | 'resolved' | 'closed' | 'rate' | 'all';
+/**
+ * `GET /portal/tickets/stats`: the list's tiles, chips and pills under the list's
+ * scope. `total` is the list's own count; `open`, `awaiting`, `breached`,
+ * `atRisk`, `toRate`, `resolved`, `closed`, `all` and `byStatusCategory` are
+ * counted with the status keys and the tile keys stripped, so a tile or a chip
+ * never moves another; `byType` and `allTypes` also ignore the type pill.
+ */
+export interface PortalTicketStats {
+  total: number;
+  open: number;
+  awaiting: number;
+  breached: number;
+  atRisk: number;
+  toRate: number;
+  resolved: number;
+  closed: number;
+  all: number;
+  byStatusCategory: Record<string, number>;
+  byType: Record<string, number>;
+  allTypes: number;
+  series: { day: string; opened: number; resolved: number }[];
+}
 
 export interface PortalTicketRow {
   id: string;
@@ -62,7 +84,8 @@ export interface PortalTicketRow {
 }
 
 export interface PortalTicketList extends Paginated<PortalTicketRow> {
-  counts: { open: number; awaiting: number; resolved: number; closed: number; rate: number; all: number };
+  /** The same figures as `GET /portal/tickets/stats` for the list's filters. */
+  counts: PortalTicketStats;
 }
 
 export interface PortalApproval {
@@ -544,6 +567,7 @@ export const pk = {
   me: ['portal', 'me'] as const,
   catalog: ['portal', 'catalog'] as const,
   tickets: (params: Record<string, unknown>) => ['portal', 'tickets', params] as const,
+  ticketStats: (params: Record<string, unknown>) => ['portal', 'tickets', 'stats', params] as const,
   ticket: (id: string) => ['portal', 'ticket', id] as const,
   approvals: ['portal', 'approvals'] as const,
   services: ['portal', 'services'] as const,
@@ -566,6 +590,8 @@ export const portalApi = {
   me: () => get<PortalMe>('/portal/me'),
   catalog: () => get<{ items: PortalCatalogItem[] }>('/portal/catalog'),
   tickets: (params: Record<string, unknown>) => get<PortalTicketList>('/portal/tickets', params),
+  /** The list's tiles, chips and pills for the same filters (paging and sort left out). */
+  ticketStats: (params: Record<string, unknown>) => get<PortalTicketStats>('/portal/tickets/stats', params),
   ticket: (id: string) => get<PortalTicket>(`/portal/tickets/${id}`),
   createTicket: (body: Record<string, unknown>) => post<PortalTicket>('/portal/tickets', body),
   comment: (id: string, body: string) => post(`/portal/tickets/${id}/comments`, { body }),

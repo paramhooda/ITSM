@@ -27,17 +27,21 @@ import { createTicket, resolveTicket } from '@/modules/tickets/service';
 import { countTickets, ticketStats, groupTickets } from '@/modules/tickets/list';
 import { statsQuerySchema } from '@/modules/tickets/schemas';
 import { management, noc, soc, amc, engineer, customer, overview } from '@/modules/dashboards/service';
+import { countPortalTickets } from '@/modules/portal/service';
+import { portalTicketStatsQuery } from '@/modules/portal/schemas';
 import { toDay, addDays } from '@/modules/reports/dates';
 import { computeRollups } from '@/jobs/processors/metrics';
-import { ticketListPath, type TicketListLink } from '@itsm/shared';
-import { statsParamsForLink } from '../../web/src/components/tickets/listQuery';
+import { ticketListPath, ticketListQuery, portalTicketListPath, portalTicketListQuery, PORTAL_TICKET_LINK_KEYS, type TicketListLink } from '@itsm/shared';
+import { statsParamsForLink, portalParamsForLink } from '../../web/src/components/tickets/listQuery';
 
 const S = Math.random().toString(36).slice(2, 8);
-const ids = { adminId: '', noah: '', nocManager: '', a: '', b: '', siteA: '', nocSvc: '', socSvc: '', amcSvc: '', team: '', p1: '', p4: '', pendingCustomer: '', awaitingApproval: '', critical: '', high: '' };
+const ids = { adminId: '', noah: '', nocManager: '', portalA: '', a: '', b: '', siteA: '', nocSvc: '', socSvc: '', amcSvc: '', team: '', p1: '', p4: '', pendingCustomer: '', awaitingApproval: '', critical: '', high: '' };
 let admin: Principal;
 let noah: Principal;
 /** Holds `dashboards:management` and `customers:read` but not `soc:read`: the security fence applies to every dashboard they open. */
 let nocManager: Principal;
+/** A customer user of A: the portal home's doors are counted through the portal list as this principal. */
+let portalA: Principal;
 const created: string[] = [];
 const meta = { requestId: `dash-consistency-${S}` };
 
@@ -59,6 +63,8 @@ const snapshot = <T>(p: Principal, fn: (ctx: Ctx) => Promise<T>) => runAs(p, met
 /** The number the list shows for a link: parse as the page does, validate as the route does, count with the list's predicates. */
 const listCountIn = (ctx: Ctx, link: TicketListLink) => countTickets(ctx, statsQuerySchema.parse(statsParamsForLink(ticketListPath(link))));
 const listCount = (p: Principal, link: TicketListLink) => as(p, (ctx) => listCountIn(ctx, link));
+/** The same through the customer portal: the portal link builder (portal-safe keys only), the portal page's defaults, the portal route's schema and the portal list's own count. */
+const portalListCountIn = (ctx: Ctx, link: TicketListLink) => countPortalTickets(ctx, portalTicketStatsQuery.parse(portalParamsForLink(portalTicketListPath(link))));
 
 interface Row { label: string; value: number; link: TicketListLink }
 const row = (label: string, value: number, link: TicketListLink): Row => ({ label, value, link });
@@ -69,6 +75,14 @@ async function reproducesIn(ctx: Ctx, rows: Row[]) {
   for (const r of rows) {
     const n = await listCountIn(ctx, r.link);
     expect(n, `${r.label} = ${r.value} → ${ticketListPath(r.link)}`).toBe(r.value);
+  }
+}
+/** Every row through the portal list as the portal principal of the transaction. */
+async function reproducesInPortal(ctx: Ctx, rows: Row[]) {
+  expect(rows.length).toBeGreaterThan(0);
+  for (const r of rows) {
+    const n = await portalListCountIn(ctx, r.link);
+    expect(n, `${r.label} = ${r.value} → ${portalTicketListPath(r.link)}`).toBe(r.value);
   }
 }
 /** The same over one fresh transaction per count (the dashboards of commit 1, whose fixtures are their own). */
@@ -176,11 +190,16 @@ beforeAll(async () => {
     const [nm] = await tx.insert(schema.users).values({ email: `dc-nm-${S}@example.test`, name: 'Nadia Consistency', userType: 'msp', status: 'active' }).returning();
     ids.nocManager = nm!.id;
     await tx.insert(schema.userRoles).values({ userId: nm!.id, roleId: await roleId(tx, 'noc_manager'), customerId: null });
+    const [pu] = await tx.insert(schema.users).values({ email: `dc-portal-${S}@example.test`, name: 'Pat Portal', userType: 'customer', customerId: a!.id, status: 'active' }).returning();
+    ids.portalA = pu!.id;
+    await tx.insert(schema.userRoles).values({ userId: pu!.id, roleId: await roleId(tx, 'customer_user'), customerId: a!.id });
   });
   invalidatePrincipal();
   admin = (await loadPrincipal(ids.adminId))!;
   noah = (await loadPrincipal(ids.noah))!;
   nocManager = (await loadPrincipal(ids.nocManager))!;
+  portalA = (await loadPrincipal(ids.portalA))!;
+  expect(portalA.userType).toBe('customer');
   expect(noah.globalPermissions.has('soc:read')).toBe(false);
   expect(nocManager.globalPermissions.has('dashboards:management')).toBe(true);
   expect(nocManager.globalPermissions.has('soc:read')).toBe(false);
@@ -216,6 +235,9 @@ beforeAll(async () => {
     for (const id of [t.a2, t.a6]) await tx.execute(sql`UPDATE ticket_slas SET warned_at = now() WHERE ticket_id = ${id}::uuid AND metric = 'resolution'`);
     await tx.execute(sql`UPDATE ticket_slas SET due_at = now() - interval '1 hour' WHERE ticket_id = ${t.a3}::uuid AND metric = 'resolution'`);
     await tx.update(schema.tickets).set({ statusId: ids.pendingCustomer }).where(eq(schema.tickets.id, t.a4!));
+    // A7 (resolved) carries a live survey: the portal home's "to rate" banner has a number to reproduce.
+    await tx.delete(schema.ticketSurveys).where(eq(schema.ticketSurveys.ticketId, t.a7!));
+    await tx.insert(schema.ticketSurveys).values({ ticketId: t.a7!, customerId: ids.a, ticketType: 'incident', trigger: 'resolved', question: 'How did we do?', tokenHash: `dc-${S}`, tokenPrefix: 'dc', tokenEnc: 'x', status: 'pending', expiresAt: new Date(Date.now() + 7 * 86_400_000) });
     const [a5] = await tx.select({ assigneeId: schema.tickets.assigneeId }).from(schema.tickets).where(eq(schema.tickets.id, t.a5!));
     expect(a5?.assigneeId).toBe(ids.noah);
     // Yesterday's rollups exist, so a 30-day management view reads the snapshot for its charts; the tiles must still count live.
@@ -229,6 +251,7 @@ afterAll(async () => {
     if (ids.noah) await tx.delete(schema.users).where(eq(schema.users.id, ids.noah));
     if (ids.team) await tx.delete(schema.teams).where(eq(schema.teams.id, ids.team));
     if (ids.nocManager) await tx.delete(schema.users).where(eq(schema.users.id, ids.nocManager));
+    if (ids.portalA) await tx.delete(schema.users).where(eq(schema.users.id, ids.portalA));
     const customers = [ids.a, ids.b].filter(Boolean);
     if (customers.length) await tx.delete(schema.metricRollupsDaily).where(inArray(schema.metricRollupsDaily.customerId, customers));
     if (customers.length) await tx.delete(schema.customers).where(inArray(schema.customers.id, customers));
@@ -636,6 +659,61 @@ describe('dashboard numbers reproduce on the list they open', () => {
       await reproduces(p, rows);
     });
   }
+});
+
+describe("today's portal doors as a portal user", () => {
+  it('the portal home numbers reproduce through the portal list (organisation pinned, portal-safe keys only)', async () => {
+    await snapshot(portalA, async (ctx) => {
+      const d = await customer(ctx, { days: 7 });
+      const t = d.tickets;
+      const open: TicketListLink = { status: 'open' };
+      const rows = [
+        row('tickets.open', t.open, open),
+        row('tickets.awaitingReply', t.awaitingReply, { ...open, statusIds: [ids.pendingCustomer] }),
+        ...t.byPriority.filter((p) => p.id).map((p) => row(`byPriority[${p.label}]`, Number(p.count), { ...open, priorityIds: [String(p.id)] })),
+        row('csat.pending.count', d.csat.pending.count, { statusCategories: ['resolved', 'closed'], csat: 'pending' }),
+      ];
+      // A portal user is never fenced by domain: the security ticket A5 is theirs to see, as on the list.
+      expect(t.open).toBe(6);
+      expect(t.awaitingReply).toBe(1);
+      expect(d.csat.pending.count).toBe(1);
+      expect(t.byPriority.filter((p) => p.id).map((p) => Number(p.count))).toEqual([3, 3]);
+      await reproducesInPortal(ctx, rows);
+      // The same number the list's own tiles show for this organisation.
+      const st = await ticketStats(ctx, {});
+      expect(st.open).toBe(t.open);
+      expect(st.awaitingCustomer).toBe(t.awaitingReply);
+      expect(st.surveyPending).toBe(d.csat.pending.count);
+    });
+  });
+
+  it('a portal link carries only portal-safe keys, and both builders emit the same statusCategory for statusCategories', () => {
+    const link: TicketListLink = { customerId: ids.b, domain: 'soc', assignee: 'me', teamId: 'x', isMajor: true, knownError: true, breachRisk: 'high', severityIds: ['y'], categoryId: 'z', status: 'open', statusIds: [ids.pendingCustomer], priorityIds: [ids.p1], siteId: ids.siteA, sla: 'breached', csat: 'pending', createdFrom: '2026-10-01', createdTo: '2026-10-07', resolvedFrom: '2026-10-01', resolvedTo: '2026-10-07', type: 'incident' };
+    const keys = [...new URLSearchParams(portalTicketListQuery(link)).keys()];
+    expect(keys).toEqual(['type', 'statusId', 'slaState', 'priorityId', 'siteId', 'csat', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo']);
+    expect(keys.every((k) => (PORTAL_TICKET_LINK_KEYS as readonly string[]).includes(k))).toBe(true);
+    expect(portalTicketListPath({ customerId: ids.b, domain: 'soc', assignee: 'me', status: 'open' })).toBe('/portal/tickets');
+    expect(portalTicketListPath({ statusCategories: ['resolved', 'closed'], csat: 'pending' })).toBe('/portal/tickets?statusCategory=resolved%2Cclosed&csat=pending');
+    const toRate: TicketListLink = { statusCategories: ['resolved', 'closed'], csat: 'pending' };
+    expect(ticketListQuery(toRate)).toBe('statusCategory=resolved%2Cclosed&csat=pending');
+    expect(portalTicketListQuery(toRate)).toBe(ticketListQuery(toRate));
+    // statusCategories wins over status in both emitters.
+    expect(ticketListQuery({ ...toRate, status: 'any' })).toBe(ticketListQuery(toRate));
+    expect(portalTicketListQuery({ ...toRate, status: 'any' })).toBe(portalTicketListQuery(toRate));
+    expect(ticketListQuery({ status: 'any' })).toBe('statusCategory=any');
+    // The portal page carries "any" to the API (the portal API defaults to the open categories), the staff page drops it.
+    expect(portalParamsForLink('/portal/tickets?statusCategory=any')).toEqual({ statusCategory: 'any' });
+    expect(portalParamsForLink('/portal/tickets')).toEqual({ statusCategory: 'new,open,pending' });
+    expect(statsParamsForLink('/tickets?statusCategory=any')).toEqual({});
+    // The All pill and a type the portal has no pill for are not sent (the portal route accepts incident and request only).
+    expect(portalParamsForLink('/portal/tickets?type=all')).toEqual({ statusCategory: 'new,open,pending' });
+    expect(portalParamsForLink('/portal/tickets?type=problem')).toEqual({ statusCategory: 'new,open,pending' });
+    expect(portalParamsForLink('/portal/tickets?type=request')).toEqual({ type: 'request', statusCategory: 'new,open,pending' });
+    expect(portalTicketStatsQuery.parse(portalParamsForLink('/portal/tickets?type=all')).type).toBeUndefined();
+    // `csat=pending` on its own is the To rate door: the page, the link parser and the portal API all read it with the rateable categories.
+    expect(portalParamsForLink('/portal/tickets?csat=pending')).toEqual({ statusCategory: 'resolved,closed', csat: 'pending' });
+    expect(portalParamsForLink('/portal/tickets?statusCategory=any&csat=pending')).toEqual({ statusCategory: 'any', csat: 'pending' });
+  });
 });
 
 describe('one SLA vocabulary', () => {

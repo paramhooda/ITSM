@@ -9,7 +9,7 @@ import { withSystem, closeDb, schema, type Tx } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { createTicket, resolveTicket } from '../src/modules/tickets/service';
-import { ticketStats, countTickets, groupTickets } from '../src/modules/tickets/list';
+import { ticketStats, countTickets, groupTickets, TILE_KEYS, STATUS_KEYS, strip } from '../src/modules/tickets/list';
 import { toDay, addDays } from '../src/modules/reports/dates';
 
 const suffix = Math.random().toString(36).slice(2, 8);
@@ -262,5 +262,45 @@ describe('ticket stats', () => {
     expect(s.pendingApprovals).toBe(0);
     expect(s.series).toHaveLength(14);
     await expect(asPortal((ctx) => ticketStats(ctx, { customerId: ids.otherCustomerId }))).rejects.toThrow();
+  });
+
+  it('awaitingCustomer and surveyPending sit in the tile set; csat stays base scope for staff and is stripped only through tileKeys', async () => {
+    // t2 waits on the customer; t3 (resolved above) carries a live pending survey.
+    await withSystem(async (tx) => {
+      await tx.update(schema.tickets).set({ statusId: await optionId(tx, 'ticket_status', 'pending_customer') }).where(eq(schema.tickets.id, ids.t2));
+      const [t3] = await tx.select({ customerId: schema.tickets.customerId, type: schema.tickets.type }).from(schema.tickets).where(eq(schema.tickets.id, ids.t3));
+      await tx.delete(schema.ticketSurveys).where(eq(schema.ticketSurveys.ticketId, ids.t3));
+      await tx.insert(schema.ticketSurveys).values({ ticketId: ids.t3, customerId: t3!.customerId, ticketType: t3!.type, trigger: 'resolved', question: 'How did we do?', tokenHash: `stats-${suffix}`, tokenPrefix: 'stats', tokenEnc: 'x', status: 'pending', expiresAt: new Date(Date.now() + 7 * 86_400_000) });
+    });
+    expect(strip({ customerId: ids.customerId, csat: 'rated', slaState: 'breached', statusCategory: 'resolved' }, [...STATUS_KEYS, ...TILE_KEYS])).toEqual({ customerId: ids.customerId, csat: 'rated' });
+    const base = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId }));
+    expect(base.awaitingCustomer).toBe(1);
+    expect(base.surveyPending).toBe(1);
+    expect(base.open).toBe(2);
+    // A status chip or a tile condition leaves both where they are (they are tiles).
+    const chip = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, statusCategory: 'resolved', slaState: 'breached' }));
+    expect([chip.awaitingCustomer, chip.surveyPending, chip.open]).toEqual([1, 1, 2]);
+    // Staff: the Rating pill (`csat`) is base scope, so csat=rated narrows the tiles (nothing is rated: every tile is zero).
+    const rated = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, csat: 'rated' }));
+    expect([rated.total, rated.open, rated.awaitingCustomer, rated.surveyPending, rated.allTypes]).toEqual([0, 0, 0, 0, 0]);
+    const pending = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, csat: 'pending', statusCategory: 'resolved,closed' }));
+    expect(pending.total).toBe(1);
+    expect(pending.open).toBe(0);
+    // With csat among the tile keys (the portal's To rate tile) the tiles keep the base scope while total follows.
+    const portalKeys = [...TILE_KEYS, 'csat'] as const;
+    const strippedRated = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, csat: 'rated' }, { tileKeys: portalKeys }));
+    expect([strippedRated.total, strippedRated.open, strippedRated.awaitingCustomer, strippedRated.surveyPending, strippedRated.allTypes]).toEqual([0, 2, 1, 1, 2]);
+    const strippedPending = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, csat: 'pending', statusCategory: 'resolved,closed' }, { tileKeys: portalKeys }));
+    expect([strippedPending.total, strippedPending.open, strippedPending.surveyPending, strippedPending.byStatusCategory.resolved]).toEqual([1, 2, 1, 1]);
+    expect(strippedPending.byStatusCategory).toEqual(base.byStatusCategory);
+    // The list's own csat=pending predicate is the same one the tile counts with.
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, csat: 'pending' }))).toBe(1);
+    // A ticket reopened with its survey still live is "to rate" nowhere until it ends again.
+    await withSystem(async (tx) => {
+      await tx.update(schema.tickets).set({ statusId: await optionId(tx, 'ticket_status', 'in_progress') }).where(eq(schema.tickets.id, ids.t3));
+    });
+    const reopened = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId }));
+    expect(reopened.surveyPending).toBe(0);
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, csat: 'pending' }))).toBe(0);
   });
 });

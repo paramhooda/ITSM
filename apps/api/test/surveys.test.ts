@@ -502,12 +502,13 @@ describe('customer satisfaction surveys', () => {
     expect(list.items.map((i) => i.id)).toContain(pending.id);
     expect(list.items.map((i) => i.id)).not.toContain(t.id);
     expect(list.items.every((i) => i.surveyPending)).toBe(true);
-    expect(list.counts.rate).toBe(list.total);
-    expect(list.counts.rate).toBeGreaterThanOrEqual(1);
+    // One "to rate" number: the list's chip, the navigator badge and GET /portal/surveys count through the same predicate.
+    expect(list.counts.toRate).toBe(list.total);
+    expect(list.counts.toRate).toBeGreaterThanOrEqual(1);
     const profile = await asAlpha((ctx) => me(ctx));
-    expect(profile.counts.surveysPending).toBe(list.counts.rate);
+    expect(profile.counts.toRate).toBe(list.counts.toRate);
     const toRate = await asAlpha((ctx) => pendingForPortal(ctx));
-    expect(toRate.count).toBe(list.counts.rate);
+    expect(toRate.count).toBe(list.counts.toRate);
     expect(toRate.items.some((i) => i.ticketId === pending.id)).toBe(true);
     expect(toRate.items.length).toBeLessThanOrEqual(5);
   });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { portalTicketListPath } from '@itsm/shared';
 import { ValidationError } from '@/core/errors';
 import type { TicketRow } from '@/modules/tickets/common';
 import { resolveRecipients } from '@/modules/tickets/notify';
@@ -18,7 +19,8 @@ import { isCustomerUser, ticketLink, iso, trunc, resolveTicket, resolveCustomerI
  */
 
 const short = (t: Pick<TicketRow, 'number' | 'title'>) => `${t.number} ("${t.title.slice(0, 80)}")`;
-const listLink = (ctx: Parameters<typeof isCustomerUser>[0]) => (isCustomerUser(ctx) ? '/portal/tickets?status=rate' : '/reports/csat');
+/** Customer users are sent to the tickets still to rate (the portal list's To rate door, built with the portal-safe keys); staff to the CSAT report. */
+const listLink = (ctx: Parameters<typeof isCustomerUser>[0]) => (isCustomerUser(ctx) ? portalTicketListPath({ statusCategories: ['resolved', 'closed'], csat: 'pending' }) : '/reports/csat');
 const pctText = (v: number | null) => (v === null ? 'n/a' : `${v}%`);
 
 export const SURVEYS: ReturnType<typeof define>[] = [
