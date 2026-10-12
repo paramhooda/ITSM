@@ -355,6 +355,10 @@ export interface ComplianceGroup {
 export interface PortalSla {
   days: number;
   from: string;
+  /** The dashboards' window: whole UTC days, the list's cut, so the donut's doors reproduce. */
+  period: { days: number; from: string; to: string };
+  /** The dashboard figure: resolution clocks that ended in the period (met and breached are doors through `slaOutcome` + `slaEndedFrom/To`). */
+  resolution: { met: number; breached: number; compliancePct: number | null };
   totals: { met: number; breached: number; running: number; paused: number; cancelled: number; overdueRunning: number; completed: number; compliancePct: number | null; avgElapsedMinutes: number | null };
   byMetric: ComplianceGroup[];
   byPriority: ComplianceGroup[];
@@ -580,9 +584,16 @@ export interface PortalLoadRow {
   atRisk: number;
 }
 
-interface PortalSlaBlock {
-  totals: { met: number; breached: number; running: number; compliancePct: number | null; avgElapsedMinutes: number | null };
-  groups: { key: string; label: string; met: number; breached: number; running: number; compliancePct: number | null }[];
+/** One priority's share of the home's compliance figure: the same two doors with `priorityIds` added. */
+export interface PortalSlaPriorityRow {
+  id: string | null;
+  key: string | null;
+  label: string;
+  color: string | null;
+  level: number;
+  met: number;
+  breached: number;
+  compliancePct: number | null;
 }
 
 /**
@@ -626,7 +637,7 @@ export interface PortalHome {
     bySite: PortalLoadRow[];
     byService: PortalLoadRow[];
   };
-  deltas: { open: PortalDelta; openedInPeriod: PortalDelta; resolvedInPeriod: PortalDelta };
+  deltas: { open: PortalDelta; openedInPeriod: PortalDelta; resolvedInPeriod: PortalDelta; slaCompliancePct: PortalDelta };
   ageing: { bucket: string; count: number; breached: number; createdFrom: string | null; createdTo: string | null }[];
   byPriorityResponsiveness: { id: string | null; priority: string; level: number; opened: number; resolved: number; mttaMinutes: number | null; mttrMinutes: number | null; fcrPct: number | null; reopenPct: number | null }[];
   /** Announcements aimed at customers (this organisation or every customer), pinned first. */
@@ -640,8 +651,8 @@ export interface PortalHome {
     changes: { id: string; number: string; title: string; changeType: string | null; state: PortalChangeState; scheduledStart: string | null; scheduledEnd: string | null; downtimeExpectedMinutes: number | null; service: { id: string; name: string | null } | null }[] | null;
     approvals: { id: string; step: number; stepName: string | null; createdAt: string; ticket: { id: string; number: string; title: string; type: string } }[] | null;
   };
-  /** Figures until the compliance donut lands: clocks started in the period, every metric, by priority. */
-  sla: { period: PortalSlaBlock & { days: number }; days30: PortalSlaBlock; days90: PortalSlaBlock };
+  /** SLA compliance · Nd: resolution clocks that ended in the period under the organisation (and site) fence, the previous period, the open clocks now and the same by priority; met and breached are doors. */
+  sla: { met: number; breached: number; compliancePct: number | null; previous: { met: number; breached: number; compliancePct: number | null }; open: { atRisk: number; breached: number }; byPriority: PortalSlaPriorityRow[] };
   contracts: { id: string; number: string; name: string; status: string; start_date: string; end_date: string; days_to_expiry: number; auto_renew: boolean; type: string | null; services: string | null }[];
   entitlements: { id: string; name: string; unit: string; period: string; contractNumber: string | null; quantity: number; used: number; remaining: number; pct: number; overThreshold: boolean; exhausted: boolean; periodEnd: string }[];
   reports: { id: string; name: string; report_key: string; format: string; created_at: string; attachment_id: string | null; filename: string | null; size: number | null; period: string | null }[];

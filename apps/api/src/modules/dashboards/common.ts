@@ -4,6 +4,7 @@ import { DOMAINS } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { toDay, addDays, daysBetween, isValidTimezone } from '@/modules/reports/dates';
 import { slaPredicates } from '@/modules/sla/predicates';
+import { resolutionComplianceByCustomer } from '@/modules/sla/compliance';
 
 export { toDay, addDays, daysBetween };
 
@@ -250,9 +251,12 @@ export interface AttentionRow {
 
 /**
  * The customers with the most tickets opened in the period, with their
- * resolved, out-of-scope and major counts and their resolution-SLA compliance
- * on those tickets: the "needs attention" list of the management dashboard and
- * of the overview's management section (one query, so both show the same rows).
+ * resolved, out-of-scope and major counts and their SLA compliance over the
+ * period (resolution clocks that ended in it, the one helper every dashboard
+ * shows, so a row's figure is the customer's own dashboard figure): the
+ * "needs attention" list of the management dashboard and of the overview's
+ * management section (one query, so both show the same rows). `slaMet` and
+ * `slaBreached` are doors (`slaOutcome` with the period as `slaEndedFrom/To`).
  */
 export async function attentionByCustomer(ctx: Ctx, opts: { from: string; to: string; customerId: string | null; limit?: number }): Promise<AttentionRow[]> {
   const range = sql`t.created_at >= ${opts.from}::date AND t.created_at < ${opts.to}::date + interval '1 day'`;
@@ -261,15 +265,10 @@ export async function attentionByCustomer(ctx: Ctx, opts: { from: string; to: st
     SELECT cu.id, cu.name, cu.code, count(*)::int AS tickets, count(*) FILTER (WHERE t.resolved_at IS NOT NULL)::int AS resolved, count(*) FILTER (WHERE t.scope_status = 'out_of_scope')::int AS out_of_scope, count(*) FILTER (WHERE t.is_major)::int AS major
     FROM tickets t JOIN customers cu ON cu.id = t.customer_id WHERE ${range} ${custCond(opts.customerId)} ${soc} GROUP BY cu.id, cu.name, cu.code ORDER BY tickets DESC LIMIT ${opts.limit ?? 10}`);
   const ids = top.map((c) => String(c.id));
-  const sla = ids.length
-    ? await q<Record<string, unknown>>(ctx, sql`
-      SELECT s.customer_id, count(*) FILTER (WHERE s.state = 'met')::int AS met, count(*) FILTER (WHERE s.state = 'breached')::int AS breached
-      FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.metric = 'resolution' AND s.customer_id = ANY(ARRAY[${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}]) AND ${range} ${soc} GROUP BY s.customer_id`)
-    : [];
-  const slaMap = new Map(sla.map((r) => [String(r.customer_id), r]));
+  const slaMap = ids.length ? await resolutionComplianceByCustomer(ctx, { from: opts.from, to: opts.to, fence: sql`AND t.customer_id = ANY(ARRAY[${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}]) ${soc}` }) : new Map();
   return top.map((c) => {
     const s = slaMap.get(String(c.id));
-    return { id: String(c.id), name: String(c.name), code: String(c.code), tickets: num(c.tickets), resolved: num(c.resolved), out_of_scope: num(c.out_of_scope), major: num(c.major), slaMet: num(s?.met), slaBreached: num(s?.breached), compliancePct: pct(num(s?.met), num(s?.met) + num(s?.breached)) };
+    return { id: String(c.id), name: String(c.name), code: String(c.code), tickets: num(c.tickets), resolved: num(c.resolved), out_of_scope: num(c.out_of_scope), major: num(c.major), slaMet: s?.met ?? 0, slaBreached: s?.breached ?? 0, compliancePct: s?.compliancePct ?? null };
   });
 }
 

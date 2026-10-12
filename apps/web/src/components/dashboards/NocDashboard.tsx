@@ -18,6 +18,7 @@ import { useLocalControl } from './localControls';
 import { AgeingPanel, ArrivalsPanel, EventsPanel, flowPointHref, HEAT_VIEWS, EVENTS_VIEWS, type HeatView, type EventsView } from './DeskPanels';
 import type { TicketRow, Breakdown } from './types';
 import type { AgeBucket, Arrivals, NocStrip } from './overviewApi';
+import { SlaComplianceDonut, SLA_PANEL_SUBTITLE, type SlaFigures } from './SlaComplianceDonut';
 
 /** Open tickets by team or service with the shared SLA vocabulary (id so the row drills down). */
 export interface NocLoadRow {
@@ -56,6 +57,8 @@ export interface Noc {
   /** Live and fenced like the tiles (domain, customer, team): opened, the incident share, resolved and breaches per day. */
   series: { day: string; opened: number; incidents: number; resolved: number; breaches: number }[];
   majorIncidents: { id: string; number: string; title: string; customerName: string; declaredAt: string; lastUpdateAt: string | null; nextUpdateDueAt: string | null; bridgeUrl: string | null; commander: string | null; overdue: boolean; children: number }[];
+  /** SLA compliance · Nd over the NOC scope (customer, every domain but security, the team): resolution clocks that ended in the period, and the open clocks now (= the tiles). */
+  sla: SlaFigures;
   onCall?: OnCallSummaryTeam[];
 }
 
@@ -163,11 +166,16 @@ export function NocDashboard({ days = 30, customerId = '', teamId = '' }: { days
         columns={5}
       />
       {(d.majorIncidents?.length ?? 0) > 0 && <MajorIncidentsPanel items={d.majorIncidents} />}
-      <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" to={criticalIds.length ? ticketListPath({ ...incidents, priorityIds: criticalIds }) : ticketListPath(incidents)} toLabel={criticalIds.length ? 'All P1 / P2' : 'All incidents'} padded={false} action={<Segmented size="sm" options={[{ value: 'all', label: 'All' }, { value: 'p1', label: 'P1' }, { value: 'major', label: 'Major' }]} value={criticalView} onChange={setCriticalView} />}>
-        <div className="px-5">
-          <TicketMiniTable rows={criticalRows} max={8} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee']} empty={criticalView === 'all' ? 'No P1/P2 or major incidents open' : criticalView === 'p1' ? 'No P1 incidents open' : 'No major incidents open'} />
-        </div>
-      </Panel>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <Panel title="Critical and major incidents" subtitle="P1, P2 and major tickets ordered by priority" className="xl:col-span-2" to={criticalIds.length ? ticketListPath({ ...incidents, priorityIds: criticalIds }) : ticketListPath(incidents)} toLabel={criticalIds.length ? 'All P1 / P2' : 'All incidents'} padded={false} action={<Segmented size="sm" options={[{ value: 'all', label: 'All' }, { value: 'p1', label: 'P1' }, { value: 'major', label: 'Major' }]} value={criticalView} onChange={setCriticalView} />}>
+          <div className="px-5">
+            <TicketMiniTable rows={criticalRows} max={8} columns={['customer', 'priority', 'ci', 'status', 'sla', 'assignee']} empty={criticalView === 'all' ? 'No P1/P2 or major incidents open' : criticalView === 'p1' ? 'No P1 incidents open' : 'No major incidents open'} />
+          </div>
+        </Panel>
+        <Panel title={`SLA compliance · ${days}d`} subtitle={SLA_PANEL_SUBTITLE}>
+          <SlaComplianceDonut sla={d.sla} period={d.period} link={scope} />
+        </Panel>
+      </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="Incident flow" subtitle={`Incidents opened and tickets resolved per day, ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}; a bar opens that day's tickets`} className="xl:col-span-2" to={ticketListPath({ ...scope, status: 'any', createdFrom: d.period.from, createdTo: d.period.to })} toLabel="Opened in the period">
           <TrendChart data={flow} x="day" kind="bar" height={230} series={[{ key: 'incidents', label: 'Incidents opened' }, { key: 'resolved', label: 'Resolved', color: STATUS_COLORS.good }]} pointHref={flowPointHref(scope, { incidents: 'created', resolved: 'resolved' })} />

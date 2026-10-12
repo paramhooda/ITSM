@@ -2,7 +2,9 @@ import { useState, type ReactNode } from 'react';
 import { Card, StatTile } from '@/components/ui';
 import { TrendChart } from '@/components/dashboards/TrendChart';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
-import { SlaGauge } from '@/components/dashboards/SlaGauge';
+import { OutcomeDonut, toneToKpi } from '@/components/dashboards/OutcomeDonut';
+import { Stat } from '@/components/dashboards/Panel';
+import type { ComplianceTone } from '@itsm/shared';
 import { HeatmapGrid } from '@/components/dashboards/HeatmapGrid';
 import { InsightsCard } from './InsightsCard';
 import { formatCell, fmtDelta, fmtTileValue, type Insight, type ReportColumn, type ReportChart, type ReportSection, type RunPreview, type SummaryTile } from './types';
@@ -43,6 +45,27 @@ function Heatmap({ chart }: { chart: ReportChart }) {
   return <HeatmapGrid cells={cells} rows={chart.rows} cols={chart.cols} unit={chart.unit === 'minutes' ? 'min' : chart.unit === 'pct' ? '%' : 'tickets'} />;
 }
 
+/** The report renderer's gauge rule: good at the target, a warning five points below it, critical under that. */
+const gaugeTone = (value: number, target: number): ComplianceTone => (value >= target ? 'good' : value >= target - 5 ? 'warning' : 'critical');
+
+/** A report gauge: a percentage renders as an outcome donut (the value against the rest, the centre in the tone the target gives); any other unit is a toned figure. */
+function Gauge({ chart }: { chart: ReportChart }) {
+  const keys = Array.isArray(chart.y) ? chart.y : [chart.y];
+  const raw = num(chart.data[0]?.[keys[0]!]);
+  const value = Number.isNaN(raw) ? null : raw;
+  const target = chart.target ?? 95;
+  const tone = value === null ? null : gaugeTone(value, target);
+  if (chart.unit === 'pct') {
+    const pct = value === null ? null : Math.max(0, Math.min(100, value));
+    return <OutcomeDonut title={chart.title} pct={pct} tone={tone} centerLabel={`target ${target}%`} emptyText="No data" good={{ label: chart.labels?.[keys[0]!] ?? 'Achieved', value: pct ?? 0 }} bad={{ label: 'Short of 100%', value: pct === null ? 0 : Math.round((100 - pct) * 10) / 10 }} />;
+  }
+  return (
+    <div className="py-2">
+      <Stat label={`target ${fmtTileValue({ value: target, unit: chart.unit })}`} value={fmtTileValue({ value, unit: chart.unit })} tone={toneToKpi(tone)} />
+    </div>
+  );
+}
+
 function Chart({ chart }: { chart: ReportChart }) {
   const keys = Array.isArray(chart.y) ? chart.y : [chart.y];
   const series = keys.map((k) => ({ key: k, label: chart.labels?.[k] ?? k }));
@@ -50,7 +73,7 @@ function Chart({ chart }: { chart: ReportChart }) {
   let body: ReactNode;
   if (!chart.data.length) body = <div className="text-[13px] text-subtle py-8 text-center">No data</div>;
   else if (chart.type === 'donut') body = <BreakdownBar items={chart.data.map((d) => ({ label: String(d[chart.x] ?? ''), value: num(d[keys[0]!]) || 0 }))} />;
-  else if (chart.type === 'gauge') body = <SlaGauge pct={num(chart.data[0]?.[keys[0]!])} target={chart.target ?? 95} label={chart.title} />;
+  else if (chart.type === 'gauge') body = <Gauge chart={chart} />;
   else if (chart.type === 'heatmap') body = <Heatmap chart={chart} />;
   else if (chart.type === 'stacked_bar') body = <TrendChart data={chart.data} x={chart.x} kind="bar" stacked series={series} height={200} valueFormatter={fmt} xFormatter={short} />;
   else body = <TrendChart data={chart.data} x={chart.x} kind={chart.type === 'line' ? 'line' : 'bar'} series={series} height={200} valueFormatter={fmt} xFormatter={short} />;

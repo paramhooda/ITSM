@@ -27,7 +27,13 @@ import { createTicket, resolveTicket } from '@/modules/tickets/service';
 import { countTickets, ticketStats, groupTickets } from '@/modules/tickets/list';
 import { statsQuerySchema } from '@/modules/tickets/schemas';
 import { management, noc, soc, amc, engineer, customer, overview } from '@/modules/dashboards/service';
-import { countPortalTickets, portalMaintenance, portalPlannedChanges, listPortalApprovals } from '@/modules/portal/service';
+import { countPortalTickets, portalMaintenance, portalPlannedChanges, listPortalApprovals, portalSla } from '@/modules/portal/service';
+import { customersOverview } from '@/modules/customers/overview';
+import { customerOverview } from '@/modules/customers/service';
+import { attentionByCustomer, socCond } from '@/modules/dashboards/common';
+import { resolutionCompliance } from '@/modules/sla/compliance';
+import { complianceOverview } from '@/modules/sla/policies';
+import { briefingDefinition } from '@/modules/briefings/definitions';
 import { portalTicketStatsQuery } from '@/modules/portal/schemas';
 import { toDay, addDays } from '@/modules/reports/dates';
 import { computeRollups } from '@/jobs/processors/metrics';
@@ -109,6 +115,20 @@ const expectScoped = (actual: number, scoped: number, customerId: string | null,
 
 const period = (d: { period: { from: string; to: string } }) => ({ createdFrom: d.period.from, createdTo: d.period.to });
 const resolvedIn = (d: { period: { from: string; to: string } }) => ({ resolvedFrom: d.period.from, resolvedTo: d.period.to });
+/** The two outcome keys of an SLA compliance door: the resolution clocks that ended in the window. */
+const ended = (outcome: 'met' | 'breached', w: { from: string; to: string }): Partial<TicketListLink> => ({ status: 'any', slaOutcome: outcome, slaEndedFrom: w.from, slaEndedTo: w.to });
+
+interface SlaBlock { met: number; breached: number; compliancePct: number | null; open: { atRisk: number; breached: number } }
+/**
+ * The SLA compliance donut of a dashboard: the met and breached segments open the list with the outcome and the period as the window
+ * (`status: 'any'`, since the tickets behind an ended clock may be resolved), the "open now" figures under it with the shared SLA states.
+ */
+const slaRows = (prefix: string, sla: SlaBlock, scope: Omit<TicketListLink, 'status'>, w: { from: string; to: string }): Row[] => [
+  row(`${prefix}.met`, sla.met, { ...scope, ...ended('met', w) }),
+  row(`${prefix}.breached`, sla.breached, { ...scope, ...ended('breached', w) }),
+  row(`${prefix}.open.atRisk`, sla.open.atRisk, { ...scope, status: 'open', sla: 'at_risk' }),
+  row(`${prefix}.open.breached`, sla.open.breached, { ...scope, status: 'open', sla: 'breached' }),
+];
 
 interface AgeRow { bucket: string; count: number; breached: number; createdFrom: string | null; createdTo: string | null }
 interface HeatCell { day: string; row: string; col: string; value: number; createdFrom: string; createdTo: string }
@@ -319,6 +339,9 @@ describe('dashboard numbers reproduce on the list they open', () => {
         row('kpis.ticketsOpened', d.kpis.ticketsOpened, { customerId, status: 'any', ...period(d) }),
         row('kpis.ticketsResolved', d.kpis.ticketsResolved, { customerId, status: 'any', ...resolvedIn(d) }),
         row('kpis.openedToday', d.kpis.openedToday, { customerId, status: 'any', createdFrom: toDay(new Date()) }),
+        ...slaRows('sla', d.sla, { customerId }, d.period),
+        // The "needs attention" rows: SLA met and breached per customer are doors (the customer, the outcome, the period as the window).
+        ...d.byCustomer.flatMap((c) => [row(`byCustomer[${c.name}].slaMet`, c.slaMet, { customerId: c.id, ...ended('met', d.period) }), row(`byCustomer[${c.name}].slaBreached`, c.slaBreached, { customerId: c.id, ...ended('breached', d.period) })]),
         ...d.byService.filter((s) => s.id).flatMap((s) => [
           row(`byService[${s.name}].tickets`, Number(s.tickets), { customerId, serviceId: String(s.id), status: 'any', ...period(d) }),
           row(`byService[${s.name}].breaches`, Number(s.breaches), { customerId, serviceId: String(s.id), status: 'any', sla: 'breached', ...period(d) }),
@@ -327,20 +350,28 @@ describe('dashboard numbers reproduce on the list they open', () => {
     };
 
     for (const days of [7, 30]) {
-      it(`management (${scope.name}, ${days} days)`, async () => {
+      // One snapshot per table: the compliance doors count clocks other suites end concurrently, so the dashboard and every list count read the same instant.
+      it(`management (${scope.name}, ${days} days)`, () => snapshot(admin, async (ctx) => {
         const customerId = cust();
-        const d = await as(admin, (ctx) => management(ctx, { days, customerId }));
+        const d = await management(ctx, { days, customerId });
         // Six open tickets of A plus the planned change C1 (open, without clocks).
         expectScoped(d.kpis.openNow, 7, customerId, 'openNow');
         expectScoped(d.kpis.breachedOpen, 2, customerId, 'breachedOpen');
         expectScoped(d.kpis.ticketsResolved, 1, customerId, 'ticketsResolved');
         expectScoped(d.kpis.ticketsOpened, 8, customerId, 'ticketsOpened');
-        await reproduces(admin, managementRows(d, customerId));
-      });
+        // A7 resolved within target; A1 and A5 flagged today: the compliance block is the helper's figure and the KPIs read it.
+        expectScoped(d.sla.met, 1, customerId, 'sla.met');
+        expectScoped(d.sla.breached, 2, customerId, 'sla.breached');
+        expect([d.kpis.slaCompliancePct, d.kpis.resolutionMet, d.kpis.resolutionBreached]).toEqual([d.sla.compliancePct, d.sla.met, d.sla.breached]);
+        // A's attention row carries A's own figure (the list keeps the ten customers with the most tickets, so unscoped A may rank below the demo customers).
+        const rowA = d.byCustomer.find((c) => c.id === ids.a);
+        if (customerId || rowA) expect(rowA).toMatchObject({ slaMet: 1, slaBreached: 2, compliancePct: 33.3 });
+        await reproducesIn(ctx, managementRows(d, customerId));
+      }));
 
-      it(`management as a NOC manager without soc:read (${scope.name}, ${days} days)`, async () => {
+      it(`management as a NOC manager without soc:read (${scope.name}, ${days} days)`, () => snapshot(nocManager, async (ctx) => {
         const customerId = cust();
-        const d = await as(nocManager, (ctx) => management(ctx, { days, customerId }));
+        const d = await management(ctx, { days, customerId });
         const a = await as(admin, (ctx) => management(ctx, { days, customerId }));
         // The security ticket (A5) is behind the fence on every tile, the period ones included.
         expectScoped(d.kpis.openNow, 6, customerId, 'openNow');
@@ -349,8 +380,12 @@ describe('dashboard numbers reproduce on the list they open', () => {
         expectScoped(d.kpis.ticketsResolved, 1, customerId, 'ticketsResolved');
         expect(d.kpis.openNow).toBeLessThan(a.kpis.openNow);
         expect(d.kpis.ticketsOpened).toBeLessThan(a.kpis.ticketsOpened);
-        await reproduces(nocManager, managementRows(d, customerId));
-      });
+        // The security clock (A5) is behind the fence on the compliance block and on the attention row alike.
+        expectScoped(d.sla.breached, 1, customerId, 'sla.breached');
+        const rowA = d.byCustomer.find((c) => c.id === ids.a);
+        if (customerId || rowA) expect(rowA).toMatchObject({ slaMet: 1, slaBreached: 1, compliancePct: 50 });
+        await reproducesIn(ctx, managementRows(d, customerId));
+      }));
     }
 
     it(`NOC (${scope.name}, 7 days)`, async () => {
@@ -384,8 +419,13 @@ describe('dashboard numbers reproduce on the list they open', () => {
         // The incident flow: "incidents opened" bars carry the type, "resolved" bars the resolved range.
         ...flowRows('noc', d.series.map((s) => ({ day: s.day, incidents: s.incidents })), { customerId, domain: 'not_soc', type: 'incident' }, { incidents: 'created' }),
         ...flowRows('noc', d.series.map((s) => ({ day: s.day, resolved: s.resolved })), { customerId, domain: 'not_soc' }, { resolved: 'resolved' }),
+        ...slaRows('sla', d.sla, { customerId, domain: 'not_soc' }, d.period),
       ];
       expectScoped(t.openIncidents, 4, customerId, 'openIncidents');
+      // A7 met, A1 breached (A5 is security, out of the NOC's domain).
+      expectScoped(d.sla.met, 1, customerId, 'sla.met');
+      expectScoped(d.sla.breached, 1, customerId, 'sla.breached');
+      expect(d.sla.open).toEqual({ atRisk: t.atRisk, breached: t.breached });
       expectScoped(t.atRisk, 2, customerId, 'atRisk');
       expectScoped(t.breached, 1, customerId, 'breached');
       // The unswept past-due clock (A3) is on track, not breached.
@@ -424,9 +464,11 @@ describe('dashboard numbers reproduce on the list they open', () => {
         ...loadRows('byService', d.byService, base, (id) => ({ serviceId: id })),
         ...ageingRows('noc', d.ageing, base),
         ...heatRows('noc', d.arrivals.week.cells, { customerId, domain: 'not_soc', teamId: ids.team }),
+        ...slaRows('sla', d.sla, { customerId, domain: 'not_soc', teamId: ids.team }, d.period),
       ];
       // A1, A2 and A6 are the team's tickets (A6 is AMC work carried by the NOC team; B1 has no team).
       expect(d.teamId).toBe(ids.team);
+      expect([d.sla.met, d.sla.breached]).toEqual([0, 1]);
       expect(d.teams.some((x) => x.id === ids.team)).toBe(true);
       expect(t.open).toBe(3);
       expect(t.atRisk).toBe(2);
@@ -470,9 +512,13 @@ describe('dashboard numbers reproduce on the list they open', () => {
         ...flowRows('soc', d.series.map((s) => ({ day: s.day, opened: s.opened, resolved: s.resolved })), { customerId, domain: 'soc' }, { opened: 'created', resolved: 'resolved' }),
         // The stacked severity bars: a day's count for one severity links with that severity's id and the day.
         ...d.severities.flatMap((sev) => flowRows(`soc.bySeverity[${sev.key}]`, (d.seriesBySeverity as Record<string, unknown>[]).map((r) => ({ day: r.day, [sev.key]: r[sev.key] })), { customerId, domain: 'soc', severityIds: [sev.id] }, { [sev.key]: 'created' })),
+        ...slaRows('sla', d.sla, { customerId, domain: 'soc' }, d.period),
       ];
       expectScoped(t.open, 1, customerId, 'open');
       expectScoped(t.breached, 1, customerId, 'breached');
+      // A5: the security clock flagged today.
+      expectScoped(d.sla.breached, 1, customerId, 'sla.breached');
+      expectScoped(d.sla.met, 0, customerId, 'sla.met');
       expect(d.criticalHighSeverityIds).toEqual(expect.arrayContaining([ids.critical, ids.high]));
       expect(d.severities.map((x) => x.key)).toContain('critical');
       // One stacked row per day keyed by severity; the keys add up to the flow's opened count.
@@ -505,9 +551,14 @@ describe('dashboard numbers reproduce on the list they open', () => {
           row(`bySite[${s.name}].breached`, s.breached, { customerId: s.customerId, domain: 'amc', status: 'open', siteId: s.id, sla: 'breached' }),
         ]),
         ...ageingRows('amc', d.ageing, base),
+        ...slaRows('sla', d.sla, { customerId, domain: 'amc' }, d.period),
       ];
       expectScoped(k.open, 1, customerId, 'open');
       expectScoped(k.atRisk, 1, customerId, 'atRisk');
+      // B2 (AMC, resolved within target) is the one clock that ended; A's AMC ticket is still running.
+      expectScoped(d.sla.met, 0, customerId, 'sla.met');
+      if (!customerId) expect(d.sla.met).toBeGreaterThanOrEqual(1);
+      expect(d.sla.open).toEqual({ atRisk: k.atRisk, breached: k.breached });
       expectScoped(k.unassigned, 1, customerId, 'unassigned');
       expect(d.byCustomer.some((c) => c.id === ids.a)).toBe(true);
       // A6 sits at customer A's HQ site, so the site row exists and links with the site and the customer.
@@ -560,7 +611,15 @@ describe('dashboard numbers reproduce on the list they open', () => {
           ]),
           row('desk.changes.open', (desk.changes as { open: number }).open, { ...base, type: 'change' }),
           ...flowRows('desk', desk.series as Record<string, unknown>[], { customerId }, { opened: 'created', resolved: 'resolved' }),
+          // The SLA compliance donut beside the desk: a sibling of `kpis` whose KPIs it feeds.
+          ...slaRows('desk.sla', desk.sla as SlaBlock, { customerId }, d.period),
         );
+        const sla = desk.sla as SlaBlock & { previous: { met: number; breached: number; compliancePct: number | null } };
+        expect([k.slaCompliancePct, k.resolutionMet, k.resolutionBreached]).toEqual([sla.compliancePct, sla.met, sla.breached]);
+        expect(sla.open).toEqual({ atRisk: k.atRisk, breached: k.breached });
+        expect(sla.previous).toMatchObject({ met: expect.any(Number), breached: expect.any(Number) });
+        expectScoped(sla.met, 1, customerId, 'desk.sla.met');
+        expectScoped(sla.breached, who === 'admin' ? 2 : 1, customerId, 'desk.sla.breached');
         // The fixture through each person's eyes: the security ticket A5 is behind the fence for the NOC manager and Noah.
         const socHidden = who !== 'admin';
         expectScoped(k.open!, socHidden ? 6 : 7, customerId, 'desk open');
@@ -631,10 +690,15 @@ describe('dashboard numbers reproduce on the list they open', () => {
         if (d.management) {
           // The "needs attention" rows are the management dashboard's own rows.
           const m = await management(ctx, { days: 7, customerId });
-          const attention = (d.management as { needsAttention: { id: string; tickets: number; major: number; slaBreached: number }[] }).needsAttention;
+          const attention = (d.management as { needsAttention: { id: string; tickets: number; major: number; slaMet: number; slaBreached: number }[] }).needsAttention;
           expect(attention.map((r) => r.id).sort()).toEqual(m.byCustomer.map((r) => r.id).sort());
-          // A row's ticket and major counts are doors (the period as the created range); its breached count is a clock count and stays a figure.
-          rows.push(...attention.flatMap((r) => [row(`management.needsAttention[${r.id}].tickets`, r.tickets, { customerId: r.id, status: 'any', ...period(d) }), row(`management.needsAttention[${r.id}].major`, r.major, { customerId: r.id, status: 'any', isMajor: true, ...period(d) })]));
+          // A row's ticket and major counts are doors (the period as the created range); its met and breached clocks are doors too (the outcome with the period as the window).
+          rows.push(...attention.flatMap((r) => [
+            row(`management.needsAttention[${r.id}].tickets`, r.tickets, { customerId: r.id, status: 'any', ...period(d) }),
+            row(`management.needsAttention[${r.id}].major`, r.major, { customerId: r.id, status: 'any', isMajor: true, ...period(d) }),
+            row(`management.needsAttention[${r.id}].slaMet`, r.slaMet, { customerId: r.id, ...ended('met', d.period) }),
+            row(`management.needsAttention[${r.id}].slaBreached`, r.slaBreached, { customerId: r.id, ...ended('breached', d.period) }),
+          ]));
         }
         expect(p.id).toBe(ctx.user.id);
         await reproducesIn(ctx, rows);
@@ -662,7 +726,11 @@ describe('dashboard numbers reproduce on the list they open', () => {
           ...weeklyRows('engineer', d.series, { customerId, assignee: 'me' }),
         ];
         if (d.teamQueues.length) rows.push(row('unassigned in your teams', d.teamQueues.reduce((n, q) => n + Number(q.unassigned), 0), { customerId, teamId: d.teamQueues.map((q) => String(q.id)), assignee: 'unassigned', status: 'open' }));
+        rows.push(...slaRows('sla', d.sla, { customerId, assignee: 'me' }, d.period));
         if (who === 'noah') {
+          // A7 (resolved within target) is Noah's; A5's breached clock is behind his fence.
+          expect([d.sla.met, d.sla.breached]).toEqual([1, 0]);
+          expect(d.sla.open).toEqual({ atRisk: 0, breached: 0 });
           expect(d.assigned.total).toBe(1);
           expect(d.teamQueues.map((q) => q.id)).toEqual([ids.team]);
           expect(d.teamQueues[0]!.unassigned).toBe(2);
@@ -700,9 +768,13 @@ describe('dashboard numbers reproduce on the list they open', () => {
         ...loadRows('byService', t.byService, base, (id) => ({ serviceId: id })),
         ...flowRows('customer', d.series, { customerId }, { opened: 'created', resolved: 'resolved' }),
         ...ageingRows('customer', d.ageing, base),
+        ...slaRows('sla', d.sla, { customerId }, d.period),
+        ...d.sla.byPriority.filter((p) => p.id).flatMap((p) => [row(`sla.byPriority[${p.label}].met`, p.met, { customerId, priorityIds: [p.id!], ...ended('met', d.period) }), row(`sla.byPriority[${p.label}].breached`, p.breached, { customerId, priorityIds: [p.id!], ...ended('breached', d.period) })]),
       ];
       // The staff view is fenced like the list it opens: the NOC manager does not see A5 (security).
       expect(t.open).toBe(which === 'B' ? 1 : who === 'admin' ? 7 : 6);
+      expect([d.sla.met, d.sla.breached]).toEqual(which === 'B' ? [1, 1] : who === 'admin' ? [1, 2] : [1, 1]);
+      expect(d.sla.byPriority.reduce((n, p) => n + p.met + p.breached, 0)).toBe(d.sla.met + d.sla.breached);
       expect(t.awaitingReply).toBe(which === 'A' ? 1 : 0);
       expect(t.resolvedInPeriod).toBe(1);
       expect(t.openedInPeriod).toBe(which === 'B' ? 2 : who === 'admin' ? 8 : 7);
@@ -747,9 +819,16 @@ describe('the portal home as a portal user (7 days; all sites and site HQ)', () 
             row(`byPriorityResponsiveness[${r.priority}].resolved`, r.resolved, { ...any, status: 'any', priorityIds: [r.id!], ...resolvedIn(d) }),
           ]),
           row('csat.pending.count', d.csat.pending.count, { ...any, statusCategories: ['resolved', 'closed'], csat: 'pending' }),
+          // The SLA compliance donut and its per-priority rows: doors through the portal list (the outcome, the period, the site when scoped, the priority on a row).
+          ...slaRows('sla', d.sla, any, d.period),
+          ...d.sla.byPriority.filter((p) => p.id).flatMap((p) => [row(`sla.byPriority[${p.label}].met`, p.met, { ...any, priorityIds: [p.id!], ...ended('met', d.period) }), row(`sla.byPriority[${p.label}].breached`, p.breached, { ...any, priorityIds: [p.id!], ...ended('breached', d.period) })]),
         ];
         // A portal user is never fenced by domain: the security ticket A5 is theirs to see, as on the list. Site HQ holds A1 (breached), A2 and A6 (at risk) and the change C1.
         expect(t.open).toBe(siteId ? 4 : 7);
+        // A7 met (no site), A1 (HQ) and A5 (no site) breached.
+        expect([d.sla.met, d.sla.breached]).toEqual(siteId ? [0, 1] : [1, 2]);
+        expect(d.sla.open).toEqual({ atRisk: t.atRisk, breached: t.breached });
+        expect(d.sla.byPriority.map((p) => [p.key, p.met, p.breached])).toEqual(siteId ? [['p1', 0, 1]] : [['p1', 0, 2], ['p4', 1, 0]]);
         expect([t.breached, t.atRisk]).toEqual(siteId ? [1, 2] : [2, 2]);
         expect(t.awaitingReply).toBe(siteId ? 0 : 1);
         expect(d.csat.pending.count).toBe(siteId ? 0 : 1);
@@ -812,6 +891,12 @@ describe('the portal home as a portal user (7 days; all sites and site HQ)', () 
     const link: TicketListLink = { customerId: ids.b, domain: 'soc', assignee: 'me', teamId: 'x', isMajor: true, knownError: true, breachRisk: 'high', severityIds: ['y'], categoryId: 'z', status: 'open', statusIds: [ids.pendingCustomer], priorityIds: [ids.p1], siteId: ids.siteA, sla: 'breached', csat: 'pending', createdFrom: '2026-10-01', createdTo: '2026-10-07', resolvedFrom: '2026-10-01', resolvedTo: '2026-10-07', type: 'incident' };
     const keys = [...new URLSearchParams(portalTicketListQuery(link)).keys()];
     expect(keys).toEqual(['type', 'statusId', 'slaState', 'priorityId', 'siteId', 'csat', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo']);
+    // The SLA outcome keys are portal-safe and come out after the resolved range in both builders.
+    const door: TicketListLink = { customerId: ids.a, status: 'any', slaOutcome: 'met', slaEndedFrom: '2026-10-01', slaEndedTo: '2026-10-07' };
+    expect(ticketListQuery(door)).toBe(`customerId=${ids.a}&statusCategory=any&slaOutcome=met&slaEndedFrom=2026-10-01&slaEndedTo=2026-10-07`);
+    expect(portalTicketListQuery(door)).toBe('statusCategory=any&slaOutcome=met&slaEndedFrom=2026-10-01&slaEndedTo=2026-10-07');
+    expect(portalParamsForLink(portalTicketListPath(door))).toEqual({ statusCategory: 'any', slaOutcome: 'met', slaEndedFrom: '2026-10-01', slaEndedTo: '2026-10-07' });
+    expect(statsParamsForLink(ticketListPath(door))).toEqual({ customerId: ids.a, slaOutcome: 'met', slaEndedFrom: '2026-10-01', slaEndedTo: '2026-10-07' });
     expect(keys.every((k) => (PORTAL_TICKET_LINK_KEYS as readonly string[]).includes(k))).toBe(true);
     expect(portalTicketListPath({ customerId: ids.b, domain: 'soc', assignee: 'me', status: 'open' })).toBe('/portal/tickets');
     expect(portalTicketListPath({ statusCategories: ['resolved', 'closed'], csat: 'pending' })).toBe('/portal/tickets?statusCategory=resolved%2Cclosed&csat=pending');
@@ -896,5 +981,89 @@ describe('one SLA vocabulary', () => {
     expect(e.activity.breachedAssigned).toBe(0);
     expect(await listCount(noah, { assignee: 'me', status: 'open', sla: 'breached' })).toBe(0);
     expect(await listCount(admin, { assignee: ids.noah, status: 'open', sla: 'breached' })).toBe(1);
+  });
+
+  it('one SLA compliance number: the Overview, management, the customer dashboard (staff and portal), the portal SLA page, the briefing, the attention row, the SLA route, the customer record and the customers overview all read the helper', async () => {
+    // Customer A at 7 days, one snapshot: A7 met, A1 and A5 breached → 33.3 % for the administrator.
+    await snapshot(admin, async (ctx) => {
+      const o = await overview(ctx, { days: 7, customerId: ids.a });
+      const desk = o.desk as { sla: SlaBlock };
+      const w = { from: o.period.from, to: o.period.to };
+      const helper = await resolutionCompliance(ctx, { ...w, fence: sql`AND t.customer_id = ${ids.a}::uuid ${socCond(ctx)}` });
+      expect(helper).toEqual({ met: 1, breached: 2, compliancePct: 33.3 });
+      const m = await management(ctx, { days: 7, customerId: ids.a });
+      const c = await customer(ctx, { days: 7, customerId: ids.a });
+      const attention = (await attentionByCustomer(ctx, { ...w, customerId: ids.a })).find((r) => r.id === ids.a)!;
+      const route = await complianceOverview(ctx, { customerId: ids.a, from: w.from, to: w.to });
+      const figures = (x: { met: number; breached: number; compliancePct: number | null }) => [x.met, x.breached, x.compliancePct];
+      expect(figures(desk.sla), 'overview desk.sla').toEqual(figures(helper));
+      expect([m.kpis.resolutionMet, m.kpis.resolutionBreached, m.kpis.slaCompliancePct], 'management kpis').toEqual(figures(helper));
+      expect(figures(m.sla), 'management sla').toEqual(figures(helper));
+      expect(figures(c.sla), 'customer() as staff').toEqual(figures(helper));
+      expect([attention.slaMet, attention.slaBreached, attention.compliancePct], 'attentionByCustomer row').toEqual(figures(helper));
+      expect(figures(route.resolution), 'GET /sla/compliance resolution').toEqual(figures(helper));
+      expect(route.period).toEqual({ days: 7, ...w });
+      // The service manager briefing's headline carries the same three figures over the last 7 whole days, unscoped: compare with the unscoped helper.
+      const all = await resolutionCompliance(ctx, { ...w, fence: socCond(ctx) });
+      const b = await briefingDefinition('service_manager')!.build(ctx, { day: w.to, timezone: 'UTC', now: new Date() });
+      const headline = b.headline[0]!;
+      expect(headline).toMatch(/^Resolution SLA compliance over the last 7 days is /);
+      expect(headline).toContain(`${all.compliancePct === null ? 'not measurable yet' : `${all.compliancePct}%`} (${all.met} met, ${all.breached} breached, clocks that ended in the period)`);
+      // Unscoped: the route without a customer is the Overview's unscoped block.
+      const unscoped = await overview(ctx, { days: 7 });
+      const unscopedRoute = await complianceOverview(ctx, { from: w.from, to: w.to });
+      expect(figures((unscoped.desk as { sla: SlaBlock }).sla)).toEqual(figures(unscopedRoute.resolution));
+      expect(figures(all)).toEqual(figures(unscopedRoute.resolution));
+    });
+    // The same number through the portal principal: the home, the SLA page and the route, with and without the site scope.
+    await snapshot(portalA, async (ctx) => {
+      const c = await customer(ctx, { days: 7 });
+      const page = await portalSla(ctx, { days: 7 });
+      const route = await complianceOverview(ctx, { from: c.period.from, to: c.period.to });
+      expect([c.sla.met, c.sla.breached, c.sla.compliancePct]).toEqual([1, 2, 33.3]);
+      expect([page.resolution.met, page.resolution.breached, page.resolution.compliancePct]).toEqual([1, 2, 33.3]);
+      expect(page.period).toEqual(c.period.days === 7 ? { days: 7, from: c.period.from, to: c.period.to } : page.period);
+      expect([route.resolution.met, route.resolution.breached, route.resolution.compliancePct]).toEqual([1, 2, 33.3]);
+      expect(route.customerId).toBe(ids.a);
+      // The policy tables of the SLA page (clocks started, every metric) stay beside the figure.
+      expect(Array.isArray(page.byMetric) && Array.isArray(page.byPriority)).toBe(true);
+    });
+    // The NOC manager (no soc:read) reads the fenced number everywhere: 50 %.
+    await snapshot(nocManager, async (ctx) => {
+      const o = await overview(ctx, { days: 7, customerId: ids.a });
+      const m = await management(ctx, { days: 7, customerId: ids.a });
+      const c = await customer(ctx, { days: 7, customerId: ids.a });
+      for (const x of [(o.desk as { sla: SlaBlock }).sla, m.sla, c.sla]) expect([x.met, x.breached, x.compliancePct]).toEqual([1, 1, 50]);
+    });
+  });
+
+  it('at 30 days the customer record, the customers overview and the attention door read the same helper figure, and their doors reproduce', async () => {
+    await snapshot(admin, async (ctx) => {
+      const record = await customerOverview(ctx, ids.a);
+      const w = record.sla30d.period;
+      expect(w.days).toBe(30);
+      const helper = await resolutionCompliance(ctx, { from: w.from, to: w.to, fence: sql`AND t.customer_id = ${ids.a}::uuid ${socCond(ctx)}` });
+      expect([record.sla30d.met, record.sla30d.breached, record.sla30d.compliancePct]).toEqual([helper.met, helper.breached, helper.compliancePct]);
+      expect(helper).toEqual({ met: 1, breached: 2, compliancePct: 33.3 });
+      const o = await customersOverview(ctx);
+      expect(o.slaWindow).toEqual(w);
+      const rowA = o.slaByCustomer.find((r) => r.id === ids.a)!;
+      expect([rowA.met, rowA.breached, rowA.compliancePct]).toEqual([helper.met, helper.breached, helper.compliancePct]);
+      const attentionA = o.attention.find((r) => r.id === ids.a);
+      if (attentionA) expect(attentionA.slaCompliance30d).toBe(helper.compliancePct);
+      const c = await customer(ctx, { days: 30, customerId: ids.a });
+      expect([c.sla.met, c.sla.breached, c.sla.compliancePct]).toEqual([helper.met, helper.breached, helper.compliancePct]);
+      const route = await complianceOverview(ctx, { customerId: ids.a });
+      expect(route.period).toEqual(w);
+      expect([route.resolution.met, route.resolution.breached, route.resolution.compliancePct]).toEqual([helper.met, helper.breached, helper.compliancePct]);
+      // The doors: the record's met and breached (the attention item's "N SLA breaches in the last 30 days"), the customers overview panel's breached clocks and each row.
+      await reproducesIn(ctx, [
+        row('customerOverview.sla30d.met', record.sla30d.met, { customerId: ids.a, ...ended('met', w) }),
+        row('customerOverview.sla30d.breached', record.sla30d.breached, { customerId: ids.a, ...ended('breached', w) }),
+        row('customersOverview.slaByCustomer[A].breached', rowA.breached, { customerId: ids.a, ...ended('breached', o.slaWindow) }),
+        row('customersOverview.slaByCustomer[A].met', rowA.met, { customerId: ids.a, ...ended('met', o.slaWindow) }),
+        row('customersOverview panel door (every customer, breached clocks)', o.slaByCustomer.reduce((n, r) => n + r.breached, 0), { ...ended('breached', o.slaWindow) }),
+      ]);
+    });
   });
 });

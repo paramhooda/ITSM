@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth';
 import { fmtNumber, fmtPct, fmtDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { fmtRating, ratingTone } from '@/components/surveys/api';
-import { ticketListPath, type TicketListLink } from '@itsm/shared';
+import { ticketListPath, complianceTone, type TicketListLink } from '@itsm/shared';
 import { dashboardPath } from './DashboardFrame';
 import { Panel, Stat } from './Panel';
 import { TrendChart } from './TrendChart';
@@ -14,6 +14,7 @@ import { DeltaBadge } from './KpiGrid';
 import { ExpiringContracts } from './ExpiringContracts';
 import { EntitlementAlerts } from './EntitlementAlerts';
 import { STATUS_COLORS } from './chartTheme';
+import { slaOutcomeLink } from './SlaComplianceDonut';
 import type { Overview, NocStrip, SocStrip, AmcStrip } from './overviewApi';
 
 /**
@@ -107,6 +108,8 @@ export function OperationsStrips({ d, scope, className }: { d: Overview; scope: 
   return <div className={cn('flex flex-col gap-3', className)}>{cards}</div>;
 }
 
+const BADGE_TONE = { good: 'green', warning: 'amber', critical: 'red' } as const;
+
 /** Customers with breaches, major incidents or out-of-scope work in the period: the name opens the account, the ticket count opens their list. */
 function NeedsAttentionPanel({ d, className }: { d: Overview; className?: string }) {
   const m = d.management!;
@@ -130,9 +133,9 @@ function NeedsAttentionPanel({ d, className }: { d: Overview; className?: string
                 </span>
               </span>
               <span className="shrink-0 inline-flex items-center gap-2 text-[12.5px] tnum">
-                {/* Resolution clocks breached on the period's tickets: a clock count, so a figure rather than a door. */}
-                {c.slaBreached > 0 && <span className="text-red-600 font-medium">{c.slaBreached} breached</span>}
-                {c.compliancePct !== null && <Badge color={c.compliancePct >= 95 ? 'green' : c.compliancePct >= 85 ? 'amber' : 'red'}>{c.compliancePct}%</Badge>}
+                {/* Resolution clocks breached in the period (the one compliance helper): a door into the tickets behind them. */}
+                {c.slaBreached > 0 && <Link to={ticketListPath(slaOutcomeLink({ customerId: c.id }, d.period, 'breached'))} className="text-red-600 font-medium hover:underline underline-offset-2">{c.slaBreached} breached</Link>}
+                {c.compliancePct !== null && <Badge color={BADGE_TONE[complianceTone(c.compliancePct) ?? 'good']}>{c.compliancePct}%</Badge>}
               </span>
             </li>
           ))}

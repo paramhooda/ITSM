@@ -1,3 +1,4 @@
+import { ticketListPath } from '@itsm/shared';
 /**
  * "Needs attention" rules for record pages, as pure functions over the detail payload each
  * page already loads: nothing here fetches, reads the clock or touches React, so the rules
@@ -219,7 +220,8 @@ export function customerAttention(c: CustomerDetail, overview: CustomerOverview 
       items.push({ key: 'entitlements', tone: 'warn', text: exhausted ? `${plural(exhausted, 'entitlement')} exhausted, ${hot.length - exhausted} near limit` : `${hot.length} entitlements near limit`, action: { label: 'Contracts', to: '?tab=contracts' } });
     }
 
-    if (overview.sla30d.breached > 0) items.push({ key: 'sla-30d', tone: 'warn', text: `${plural(overview.sla30d.breached, 'SLA breach', 'SLA breaches')} in the last 30 days`, action: { label: 'Tickets', to: `/tickets?customerId=${c.id}&slaState=breached` } });
+    // The same 30 whole days the record's compliance helper counted: the door opens the tickets whose resolution clock breached in that window (resolved ones included).
+    if (overview.sla30d.breached > 0) items.push({ key: 'sla-30d', tone: 'warn', text: `${plural(overview.sla30d.breached, 'SLA breach', 'SLA breaches')} in the last 30 days`, action: { label: 'Tickets', to: ticketListPath({ customerId: c.id, status: 'any', slaOutcome: 'breached', slaEndedFrom: overview.sla30d.period.from, slaEndedTo: overview.sla30d.period.to }) } });
   }
 
   if (sites && !sites.some((s) => s.isPrimary && s.isActive)) items.push({ key: 'no-primary-site', tone: 'info', text: 'No primary site', action: { label: 'Sites', to: '?tab=sites' } });

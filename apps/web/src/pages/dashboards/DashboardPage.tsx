@@ -6,7 +6,7 @@ import PortalHomePage from '@/pages/portal/PortalHomePage';
 import { DashboardFrame, useDashboardScope } from '@/components/dashboards/DashboardFrame';
 import { KpiSkeleton } from '@/components/dashboards/Panel';
 import { useOverview } from '@/components/dashboards/overviewApi';
-import { greeting, shiftLine, MyDayStrip, AnnouncementsPanel, UpcomingPanel, DeskKpiRow } from '@/components/dashboards/OverviewSections';
+import { greeting, shiftLine, MyDayStrip, AnnouncementsPanel, UpcomingPanel, DeskKpiRow, SlaCompliancePanel } from '@/components/dashboards/OverviewSections';
 import { TicketFlowPanel, OpenByTypePanel, OverviewAgeingPanel, OverviewArrivalsPanel, LoadPanel, ResponseByPriorityPanel, ChangesPanel } from '@/components/dashboards/OverviewDesk';
 import { OperationsStrips, ManagementExtras, SectionLabel } from '@/components/dashboards/OverviewExtras';
 import type { TicketListLink } from '@itsm/shared';
@@ -69,7 +69,10 @@ function OverviewPage() {
                   <TicketFlowPanel d={d} scope={link} className="xl:col-span-2 rise-in rise-in-3" />
                   <OpenByTypePanel desk={d.desk} open={open} className="rise-in rise-in-3" />
                 </div>
-                <OverviewArrivalsPanel desk={d.desk} scope={link} className="rise-in rise-in-4" />
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                  <OverviewArrivalsPanel desk={d.desk} scope={link} className="xl:col-span-2 rise-in rise-in-4" />
+                  <SlaCompliancePanel d={d} scope={link} className="rise-in rise-in-4" />
+                </div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                   <OverviewAgeingPanel desk={d.desk} open={open} className="rise-in rise-in-4" />
                   <LoadPanel desk={d.desk} open={open} className="rise-in rise-in-4" />

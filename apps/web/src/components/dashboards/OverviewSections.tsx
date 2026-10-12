@@ -6,10 +6,12 @@ import { useAuthStore } from '@/stores/auth';
 import { fmtNumber, fmtPct, fmtDateTime, relativeTime } from '@/lib/format';
 import { cn, truncate } from '@/lib/utils';
 import { ANNOUNCEMENT_TYPE_COLORS } from '@/lib/statusColors';
-import { ticketListPath, type TicketListLink } from '@itsm/shared';
+import { ticketListPath, complianceTone, type TicketListLink } from '@itsm/shared';
 import { KpiGrid, type KpiItem } from './KpiGrid';
 import { Panel, RowList } from './Panel';
 import { DonutChart } from './DonutChart';
+import { SlaComplianceDonut, slaOutcomeLink, SLA_PANEL_SUBTITLE } from './SlaComplianceDonut';
+import { toneToKpi } from './OutcomeDonut';
 import type { Overview, OverviewMe, OverviewAnnouncement, UpcomingItem, UpcomingKind } from './overviewApi';
 
 /** "Good morning, Rajesh": the hero title of the Overview and My work. */
@@ -143,14 +145,33 @@ export function deskKpis(d: Overview, customerId: string): KpiItem[] {
   const spark = desk.series.slice(Math.max(0, desk.series.length - (days <= 7 ? 7 : 14)));
   const sparkDays = spark.length;
   const compliance = k.slaCompliancePct;
-  const complianceTone = compliance === null ? 'default' : compliance >= 95 ? 'good' : compliance >= 85 ? 'warn' : 'bad';
+  const period = { from: d.period.from, to: d.period.to };
+  // The percentage is a figure; its met and breached counts are the donut's doors (the tickets whose resolution clock ended in the period).
+  const complianceHint = (
+    <>
+      <Link to={ticketListPath(slaOutcomeLink(scope, period, 'met'))} className="hover:text-default hover:underline underline-offset-2 tnum" data-testid="sla-met-door">{fmtNumber(k.resolutionMet)} met</Link>
+      {' · '}
+      <Link to={ticketListPath(slaOutcomeLink(scope, period, 'breached'))} className="hover:text-default hover:underline underline-offset-2 tnum" data-testid="sla-breached-door">{fmtNumber(k.resolutionBreached)} breached</Link>
+    </>
+  );
   return [
     { label: 'Open tickets', value: fmtNumber(k.open), icon: <Inbox className="h-4 w-4" />, delta: desk.deltas.open, lowerIsBetter: true, hint: `${fmtNumber(k.openedToday)} opened today · ${fmtNumber(k.major)} major`, spark: spark.map((s) => s.opened), sparkLabel: `Tickets opened per day, last ${sparkDays} days`, to: ticketListPath(open) },
     { label: 'Breached', value: fmtNumber(k.breached), icon: <AlertTriangle className="h-4 w-4" />, tone: k.breached > 0 ? 'bad' : 'good', delta: desk.deltas.breaches, lowerIsBetter: true, hint: `${fmtNumber(k.atRisk)} at risk`, spark: spark.map((s) => s.breaches), sparkLabel: `SLA breaches per day, last ${sparkDays} days`, to: ticketListPath({ ...open, sla: 'breached' }) },
     { label: 'Unassigned', value: fmtNumber(k.unassigned), icon: <UserX className="h-4 w-4" />, tone: k.unassigned > 0 ? 'warn' : 'default', hint: 'waiting for an owner', to: ticketListPath({ ...open, assignee: 'unassigned' }) },
     { label: `Resolved · ${days}d`, value: fmtNumber(k.resolvedInPeriod), icon: <CheckCircle2 className="h-4 w-4" />, delta: desk.deltas.resolvedInPeriod, hint: `${fmtNumber(k.openedInPeriod)} opened in the period`, spark: spark.map((s) => s.resolved), sparkLabel: `Tickets resolved per day, last ${sparkDays} days`, to: ticketListPath({ ...scope, status: 'any', resolvedFrom: d.period.from, resolvedTo: d.period.to }) },
-    { label: `SLA compliance · ${days}d`, value: fmtPct(compliance, 1), icon: <ShieldCheck className="h-4 w-4" />, tone: complianceTone, delta: desk.deltas.slaCompliancePct, hint: `${fmtNumber(k.resolutionMet)} met · ${fmtNumber(k.resolutionBreached)} breached`, spark: spark.map((s) => s.compliancePct), sparkLabel: `Daily resolution SLA compliance, last ${sparkDays} days` },
+    { label: `SLA compliance · ${days}d`, value: fmtPct(compliance, 1), icon: <ShieldCheck className="h-4 w-4" />, tone: toneToKpi(complianceTone(compliance)), delta: desk.deltas.slaCompliancePct, hint: complianceHint, spark: spark.map((s) => s.compliancePct), sparkLabel: `Daily resolution SLA compliance, last ${sparkDays} days` },
   ];
+}
+
+/** SLA compliance · Nd on the Overview: the desk's figure as a donut whose segments open the tickets behind them. */
+export function SlaCompliancePanel({ d, scope, className }: { d: Overview; scope: TicketListLink; className?: string }) {
+  const desk = d.desk;
+  if (!desk) return null;
+  return (
+    <Panel title={`SLA compliance · ${d.period.days}d`} subtitle={SLA_PANEL_SUBTITLE} className={className}>
+      <SlaComplianceDonut sla={desk.sla} period={d.period} link={scope} />
+    </Panel>
+  );
 }
 
 export function DeskKpiRow({ overview, customerId }: { overview: Overview; customerId: string }) {

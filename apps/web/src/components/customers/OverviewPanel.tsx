@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { SlaComplianceDonut, SLA_PANEL_SUBTITLE } from '@/components/dashboards/SlaComplianceDonut';
 import { Ticket, ShieldCheck, FileSignature, Boxes, Server, CalendarCheck } from 'lucide-react';
 import { Card, StatTile, Badge, EmptyState } from '@/components/ui';
 import { fmtDate, fmtDateTime, relativeTime, titleCase } from '@/lib/format';
@@ -11,16 +12,14 @@ export function OverviewPanel({ overview, customerId }: { overview: CustomerOver
   const navigate = useNavigate();
   const o = overview;
   const sla = o.sla30d;
-  const slaTone = sla.compliancePct === null ? 'default' : sla.compliancePct >= 95 ? 'good' : sla.compliancePct >= 85 ? 'warn' : 'bad';
   const next = o.next.visit?.scheduledStart ?? o.next.pm?.plannedDate ?? null;
   const nextLabel = o.next.visit ? `Visit ${o.next.visit.number}` : o.next.pm ? o.next.pm.programName : null;
   const liveContracts = o.contracts.filter((c) => c.status !== 'renewed' && c.status !== 'terminated');
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         <StatTile label="Open tickets" value={o.counts.openTickets} hint={`${o.counts.totalTickets} total`} icon={<Ticket className="h-4 w-4" />} onClick={() => navigate(`/tickets?customerId=${customerId}`)} />
-        <StatTile label="SLA compliance (30d)" value={sla.compliancePct === null ? '—' : `${sla.compliancePct}%`} hint={`${sla.met} met · ${sla.breached} breached`} tone={slaTone} icon={<ShieldCheck className="h-4 w-4" />} />
         <StatTile label="Active contracts" value={o.counts.activeContracts} hint={`${o.counts.contracts} total`} icon={<FileSignature className="h-4 w-4" />} onClick={() => navigate(`/contracts?customerId=${customerId}`)} />
         <StatTile label="Assets" value={o.counts.assets} icon={<Boxes className="h-4 w-4" />} onClick={() => navigate(`/assets?customerId=${customerId}`)} />
         <StatTile label="CIs" value={o.counts.cis} icon={<Server className="h-4 w-4" />} onClick={() => navigate(`/cmdb/cis?customerId=${customerId}`)} />
@@ -28,6 +27,10 @@ export function OverviewPanel({ overview, customerId }: { overview: CustomerOver
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card title={<span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted" /> SLA compliance · 30d</span>}>
+          <div className="text-[12px] text-muted -mt-1 mb-3">{SLA_PANEL_SUBTITLE}</div>
+          <SlaComplianceDonut sla={sla} period={sla.period} link={{ customerId }} />
+        </Card>
         <Card title="Open tickets by priority" actions={<Link to={`/tickets?customerId=${customerId}&open=true`} className="text-xs text-brand-600 hover:underline">View tickets</Link>}>
           <MiniBars rows={o.ticketsByPriority.map((p) => ({ label: p.label, count: p.count, color: p.color }))} />
           <div className="flex flex-wrap gap-1.5 mt-3">

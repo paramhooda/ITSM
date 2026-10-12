@@ -1,4 +1,4 @@
-import { CATEGORICAL, DEEMPHASIS, SEQUENTIAL, ORDINAL } from '@itsm/shared';
+import { CATEGORICAL, DEEMPHASIS, SEQUENTIAL, ORDINAL, STATUS } from '@itsm/shared';
 
 /**
  * Categorical slots: the brand blue keeps slot 1 (so every existing single-series
@@ -9,8 +9,13 @@ import { CATEGORICAL, DEEMPHASIS, SEQUENTIAL, ORDINAL } from '@itsm/shared';
  * de-emphasis gray.
  */
 const SERIES_LIGHT = ['#2563eb', ...CATEGORICAL.slice(1)];
-/** Status colours are reserved for state (good/warning/serious/critical), always paired with a label, never reused as a series colour. */
-export const STATUS_COLORS = { good: '#16a34a', warning: '#f59e0b', serious: '#ea580c', critical: '#dc2626' } as const;
+/**
+ * Status colours are reserved for state (good/warning/serious/critical), always
+ * paired with a label, never reused as a series colour. They are the validated
+ * shared `STATUS` scale, the same four hexes the printed documents use, so a
+ * breached series, the compliance donut and a report chart wear one red.
+ */
+export const STATUS_COLORS = STATUS;
 
 export interface ChartTheme {
   dark: boolean;

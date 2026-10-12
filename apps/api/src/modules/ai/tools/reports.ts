@@ -179,7 +179,7 @@ export const REPORTS: ReturnType<typeof define>[] = [
         ];
         if (d.upcoming.counts.changes !== null) facts.push(`planned changes coming up: ${d.upcoming.counts.changes}`);
         if (d.upcoming.counts.approvals !== null) facts.push(`approvals waiting for you: ${d.upcoming.counts.approvals}`);
-        if (d.sla.period.totals.compliancePct !== null) facts.push(`SLA compliance (${days} days): ${d.sla.period.totals.compliancePct}%`);
+        if (d.sla.compliancePct !== null) facts.push(`resolution SLA compliance (${days} days): ${d.sla.compliancePct}% (${d.sla.met} met, ${d.sla.breached} breached, clocks that ended in the period)`);
         return { view: 'customer', days, ...c.data, facts, link: `/${days !== 30 ? `?days=${days}` : ''}` };
       }
       const customerId = await resolveCustomerId(ctx, input.customer);
@@ -193,10 +193,10 @@ export const REPORTS: ReturnType<typeof define>[] = [
         const d = await dashboards.overview(ctx, { days, customerId });
         const c = compactDashboard(d as unknown as Record<string, unknown>);
         const facts: string[] = [];
-        const desk = d.desk as { kpis: Record<string, number | null> } | null;
+        const desk = d.desk as { kpis: Record<string, number | null>; sla: { met: number; breached: number; compliancePct: number | null } } | null;
         if (desk) {
           facts.push(`open tickets now: ${desk.kpis.open}`, `breached SLA on open tickets: ${desk.kpis.breached}`, `at risk: ${desk.kpis.atRisk}`, `unassigned: ${desk.kpis.unassigned}`, `opened in the last ${days} days: ${desk.kpis.openedInPeriod}`, `resolved in the last ${days} days: ${desk.kpis.resolvedInPeriod}`);
-          if (desk.kpis.slaCompliancePct !== null) facts.push(`resolution SLA compliance (${days} days): ${desk.kpis.slaCompliancePct}%`);
+          if (desk.sla.compliancePct !== null) facts.push(`resolution SLA compliance (${days} days): ${desk.sla.compliancePct}% (${desk.sla.met} met, ${desk.sla.breached} breached, clocks that ended in the period)`);
         }
         facts.push(`assigned to me (open): ${d.me.assigned}`, `breached on my tickets: ${d.me.breached}`, `due today: ${d.me.dueToday}`, `approvals waiting for me: ${d.me.approvals}`);
         if (d.strips.noc) facts.push(`NOC open incidents: ${d.strips.noc.openIncidents}`, `NOC SLA at risk: ${d.strips.noc.atRisk}`, `NOC unassigned: ${d.strips.noc.unassigned}`);

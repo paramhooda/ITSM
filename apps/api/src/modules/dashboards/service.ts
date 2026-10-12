@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import type { Ctx } from '@/core/context';
 import { ForbiddenError, ValidationError } from '@/core/errors';
 import { slaSummariesFor, worstSla } from '@/modules/sla/engine';
-import { slaCompliance } from '@/modules/sla/policies';
+import { resolutionCompliance, resolutionComplianceByPriority } from '@/modules/sla/compliance';
 import { entitlementSummary, customerEntitlements } from '@/modules/contracts/entitlements';
 import { expiringContracts } from '@/modules/contracts/service';
 import { parseDay } from '@/modules/reports/dates';
@@ -65,8 +65,11 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
   const live = await one<Row>(ctx, sql`
     SELECT count(*) FILTER (WHERE ${openCond()})::int AS open_now, count(*) FILTER (WHERE t.created_at >= ${today}::date)::int AS opened_today, count(*) FILTER (WHERE t.resolved_at >= ${today}::date)::int AS resolved_today,
       count(*) FILTER (WHERE ${range})::int AS opened_period, count(*) FILTER (WHERE ${resolvedRange})::int AS resolved_period,
-      count(*) FILTER (WHERE ${openCond()} AND ${BREACHED})::int AS breached_open, count(*) FILTER (WHERE ${openCond()} AND t.assignee_id IS NULL)::int AS unassigned_open, count(*) FILTER (WHERE ${openCond()} AND t.is_major)::int AS major_open
+      count(*) FILTER (WHERE ${openCond()} AND ${BREACHED})::int AS breached_open, count(*) FILTER (WHERE ${openCond()} AND ${AT_RISK})::int AS at_risk_open, count(*) FILTER (WHERE ${openCond()} AND t.assignee_id IS NULL)::int AS unassigned_open, count(*) FILTER (WHERE ${openCond()} AND t.is_major)::int AS major_open
     FROM tickets t WHERE (t.created_at >= ${from}::date OR t.resolved_at >= ${from}::date OR ${openCond()}) ${custCond(customerId)} ${soc}`);
+  // SLA compliance: resolution clocks that ended in the period, by the one helper every dashboard shows, under the caller's security fence
+  // (the daily series, unfenced and from the rollups beyond seven days, keeps drawing the compliance chart only).
+  const sla = await resolutionCompliance(ctx, { from, to: today, fence: sql`${custCond(customerId)} ${soc}`, previous: { from: prevFrom, to: prevTo } });
   const counts = await accountCounts(ctx, customerId);
   const pm = await one<Row>(ctx, sql`
     SELECT count(*) FILTER (WHERE o.status = 'completed' AND o.completed_at IS NOT NULL AND o.completed_at::date <= o.planned_date + p.grace_days)::int AS on_time,
@@ -95,10 +98,6 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
   const entitlementAlerts = ents.items.filter((i) => i.utilization.overThreshold || i.utilization.exhausted).slice(0, 10);
   const expiring = canContracts ? await expiringContracts(ctx, 90, customerId ?? undefined) : { items: [], total: 0, days: 90 };
 
-  const resMet = sumOf(series, 'resolutionMet');
-  const resBreached = sumOf(series, 'resolutionBreached');
-  const pResMet = sumOf(previous, 'resolutionMet');
-  const pResBreached = sumOf(previous, 'resolutionBreached');
   const csatFilter = await csatWindow(ctx, from, today, { customerId });
   const csat = await csatFigures(ctx.tx, csatFilter);
   const csatPrevious = await csatFigures(ctx.tx, { ...csatFilter, from: new Date(`${prevFrom}T00:00:00.000Z`), to: new Date(`${prevTo}T23:59:59.999Z`) });
@@ -114,9 +113,9 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
     breachedOpen: num(live.breached_open),
     unassignedOpen: num(live.unassigned_open),
     majorOpen: num(live.major_open),
-    slaCompliancePct: pct(resMet, resMet + resBreached),
-    resolutionMet: resMet,
-    resolutionBreached: resBreached,
+    slaCompliancePct: sla.compliancePct,
+    resolutionMet: sla.met,
+    resolutionBreached: sla.breached,
     slaBreaches: sumOf(series, 'slaBreached'),
     mttrMinutes: weightedOf(series, 'mttrMinutes', 'resolved'),
     firstResponseMinutes: weightedOf(series, 'firstResponseMinutes', 'opened'),
@@ -140,6 +139,8 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
     period: { days, from, to: today, previousFrom: prevFrom, previousTo: prevTo },
     customerId,
     kpis,
+    /** SLA compliance · Nd: resolution clocks that ended in the period (met and breached are doors: `slaOutcome` with the period as `slaEndedFrom/To`) and the open clocks now. */
+    sla: { met: sla.met, breached: sla.breached, compliancePct: sla.compliancePct, previous: sla.previous, open: { atRisk: num(live.at_risk_open), breached: num(live.breached_open) } },
     series: series.map((d) => ({ day: d.day, opened: num(d.opened), resolved: num(d.resolved), closed: num(d.closed), breaches: num(d.slaBreached), outOfScope: num(d.outOfScope), mttrMinutes: d.mttrMinutes, resolutionMet: num(d.resolutionMet), resolutionBreached: num(d.resolutionBreached), compliancePct: pct(num(d.resolutionMet), num(d.resolutionMet) + num(d.resolutionBreached)) })),
     byService,
     byCustomer,
@@ -152,7 +153,7 @@ export async function management(ctx: Ctx, opts: { days?: number; customerId?: s
       opened: delta(sumOf(series, 'opened'), sumOf(previous, 'opened')),
       resolved: delta(sumOf(series, 'resolved'), sumOf(previous, 'resolved')),
       breaches: delta(kpis.slaBreaches, sumOf(previous, 'slaBreached')),
-      slaCompliancePct: delta(kpis.slaCompliancePct, pct(pResMet, pResMet + pResBreached)),
+      slaCompliancePct: delta(kpis.slaCompliancePct, sla.previous?.compliancePct ?? null),
       mttrMinutes: delta(kpis.mttrMinutes, weightedOf(previous, 'mttrMinutes', 'resolved')),
       outOfScope: delta(kpis.outOfScopeCount, sumOf(previous, 'outOfScope')),
       majorIncidents: delta(kpis.majorIncidents, sumOf(previous, 'major')),
@@ -244,11 +245,15 @@ export async function noc(ctx: Ctx, opts: { days?: number; customerId?: string |
   const arrivals = { timezone, week: await arrivalsWeek(ctx, sql`AND ${base} ${cust}`, { from, to: today, timezone }), pattern: { from, to: today, cells: await arrivalHeatmap(ctx, { customerId, from, to: today, timezone, domains: NOT_SOC_DOMAINS, teamId }) } };
   const onCall = await onCallFor(ctx, ['noc', 'infrastructure', 'network']);
   const bucket = (r: Row) => ({ id: (r.id as string | null) ?? null, name: String(r.name), open: num(r.open), breached: num(r.breached), atRisk: num(r.at_risk) });
+  // SLA compliance · Nd over the NOC's scope (every domain but security, the customer, the team): resolution clocks that ended in the period.
+  const sla = await resolutionCompliance(ctx, { from, to: today, fence: sql`AND ${base} ${cust}` });
   return {
     generatedAt: now,
     period: { days, from, to: today },
     customerId,
     teamId,
+    /** SLA compliance · Nd: met and breached are doors (`slaOutcome` with the period as `slaEndedFrom/To`, the NOC's domain and team); the open clocks now are the tiles. */
+    sla: { ...sla, open: { atRisk: totals.atRisk, breached: totals.breached } },
     /** The NOC-type teams the hero's team filter offers. */
     teams: teams.map((t) => ({ id: String(t.id), name: String(t.name), teamType: String(t.team_type) })),
     onCall,
@@ -345,11 +350,15 @@ export async function soc(ctx: Ctx, opts: { days?: number; customerId?: string |
   const ageing = await backlogAgeing(ctx, { customerId, domains: ['soc'] }, now);
   const arrivals = { timezone, week: await arrivalsWeek(ctx, sql`AND ${base} ${cust}`, { from: from30, to: today, timezone }), pattern: { from: from30, to: today, cells: await arrivalHeatmap(ctx, { customerId, from: from30, to: today, timezone, domains: ['soc'] }) } };
   const onCall = await onCallFor(ctx, ['soc', 'security']);
+  // SLA compliance · Nd over the security domain: resolution clocks that ended in the period.
+  const sla = await resolutionCompliance(ctx, { from: from30, to: today, fence: sql`AND ${base} ${cust}` });
   return {
     generatedAt: now,
     period: { days, from: from30, to: today },
     customerId,
     onCall,
+    /** SLA compliance · Nd: met and breached are doors (`slaOutcome` with the period as `slaEndedFrom/To`, the security domain); the open clocks now are the tiles. */
+    sla: { ...sla, open: { atRisk: totals.atRisk, breached: totals.breached } },
     series,
     /** Every security severity in level order (id, key, label, colour), the keys of `seriesBySeverity`. */
     severities: severities.map((s) => ({ id: String(s.id), key: String(s.key), label: String(s.label), color: (s.color as string | null) ?? null, level: num(s.level), isActive: s.is_active !== false })),
@@ -384,7 +393,7 @@ export async function engineer(ctx: Ctx, opts: { days?: number; customerId?: str
   const soc = socCond(ctx);
   const mine = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`SELECT ${TICKET_LIST_COLS_STAFF}, t.due_at, t.priority_id FROM tickets t ${TICKET_LIST_JOINS} WHERE t.assignee_id = ${me}::uuid AND ${openCond()} ${soc} ${cust} ORDER BY pr.level NULLS LAST, t.created_at LIMIT 100`));
   // The tile numbers are exact counts (the table above is capped), with the shared SLA vocabulary, so "Assigned to me" reproduces on the list.
-  const mineTotals = await one<Row>(ctx, sql`SELECT count(*)::int AS total, count(*) FILTER (WHERE ${BREACHED})::int AS breached FROM tickets t WHERE t.assignee_id = ${me}::uuid AND ${openCond()} ${soc} ${cust}`);
+  const mineTotals = await one<Row>(ctx, sql`SELECT count(*)::int AS total, count(*) FILTER (WHERE ${BREACHED})::int AS breached, count(*) FILTER (WHERE ${AT_RISK})::int AS at_risk FROM tickets t WHERE t.assignee_id = ${me}::uuid AND ${openCond()} ${soc} ${cust}`);
   // Grouped in the database (not over the capped table), so each "My queue by priority" row reproduces on the list it opens.
   const byPriority = (
     await q<Row>(ctx, sql`
@@ -426,6 +435,8 @@ export async function engineer(ctx: Ctx, opts: { days?: number; customerId?: str
   const today = toDay(new Date());
   const from14 = addDays(today, -(days - 1));
   const flow = await ticketFlowSeries(ctx, from14, today, sql`AND t.assignee_id = ${me}::uuid ${soc} ${cust}`);
+  // SLA compliance · Nd on my tickets: resolution clocks that ended in the period on tickets assigned to me now.
+  const sla = await resolutionCompliance(ctx, { from: from14, to: today, fence: sql`AND t.assignee_id = ${me}::uuid ${soc} ${cust}` });
   const csatFilter = await csatWindow(ctx, from14, today, { customerId, assigneeId: me });
   const csat = await csatFigures(ctx.tx, csatFilter);
   const recent = await q<Row>(ctx, sql`
@@ -436,6 +447,8 @@ export async function engineer(ctx: Ctx, opts: { days?: number; customerId?: str
     period: { days, from: from14, to: today },
     /** Tickets assigned to me resolved per day over the period. */
     series: flow.map((d) => ({ day: d.day, resolved: d.resolved })),
+    /** SLA compliance · Nd on my tickets: met and breached are doors (`assignee=me`, `slaOutcome` with the period as `slaEndedFrom/To`); the open clocks now are my queue's. */
+    sla: { ...sla, open: { atRisk: num(mineTotals.at_risk), breached: num(mineTotals.breached) } },
     assigned: { total: num(mineTotals.total), byPriority, breached: num(mineTotals.breached), items: mine.slice(0, 25), dueSoon },
     teamQueues,
     today: { dueTickets: todayRows, visits, pmOccurrences: pmToday, tasks },
@@ -459,8 +472,9 @@ export async function engineer(ctx: Ctx, opts: { days?: number; customerId?: str
  * predicates its door carries through the portal ticket list; the daily
  * series draws the chart and the deltas only. The site scope narrows
  * tickets, visits and maintenance; planned changes and approvals have no
- * site. Declared figures (no door): the SLA compliance block, the
- * satisfaction average and its sample, the responsiveness times, the
+ * site. Declared figures (no door): the SLA compliance percentage (its met
+ * and breached segments are doors), the satisfaction average and its sample,
+ * the responsiveness times, the
  * entitlement usage and the known-issues count. `majorOpen` is computed for
  * staff only (`isMajor` is not a portal-safe key); a portal principal reads
  * `null`.
@@ -561,12 +575,11 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
     approvals: approvals ? approvals.slice(0, 10).map((a) => ({ id: a.id, step: a.step, stepName: a.stepName, createdAt: a.createdAt, ticket: { id: a.ticket.id, number: a.ticket.number, title: a.ticket.title, type: a.ticket.type } })) : null,
   };
 
-  // ---- the figures: SLA compliance (clocks started in the period, by priority), contracts, entitlements, reports
-  const d30 = new Date(now.getTime() - 30 * 86_400_000).toISOString();
-  const d90 = new Date(now.getTime() - 90 * 86_400_000).toISOString();
-  const dPeriod = new Date(now.getTime() - days * 86_400_000).toISOString();
-  const [sla30, sla90] = [await slaCompliance(ctx, { customerId, from: d30, groupBy: 'priority' }), await slaCompliance(ctx, { customerId, from: d90, groupBy: 'priority' })];
-  const slaPeriod = days === 30 ? sla30 : days === 90 ? sla90 : await slaCompliance(ctx, { customerId, from: dPeriod, groupBy: 'priority' });
+  // ---- SLA compliance · Nd: resolution clocks that ended in the period under the fence (the organisation, the site, the staff caller's security fence),
+  // by the one helper every dashboard shows; met and breached (and each priority row) are doors through the portal list (`slaOutcome` + `slaEndedFrom/To`).
+  const sla = await resolutionCompliance(ctx, { from, to: today, fence: cust, previous: { from: prevFrom, to: prevTo } });
+  const slaByPriority = await resolutionComplianceByPriority(ctx, { from, to: today, fence: cust });
+  // ---- the figures: contracts, entitlements, reports
   const contracts = await q<Row>(ctx, sql`
     SELECT c.id, c.number, c.name, c.status, c.start_date, c.end_date, (c.end_date - current_date)::int AS days_to_expiry, c.auto_renew, ty.label AS type,
       (SELECT string_agg(s.name, ', ' ORDER BY s.name) FROM contract_services cs JOIN services s ON s.id = cs.service_id WHERE cs.contract_id = c.id) AS services
@@ -635,6 +648,7 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
       open: delta(num(live.open), num(live.open_at_start)),
       openedInPeriod: delta(num(live.opened_period), num(live.opened_previous)),
       resolvedInPeriod: delta(num(live.resolved_period), num(live.resolved_previous)),
+      slaCompliancePct: delta(sla.compliancePct, sla.previous?.compliancePct ?? null),
     },
     /** The five-bucket backlog ageing with the created window each bar drills down with. */
     ageing,
@@ -642,7 +656,8 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
     byPriorityResponsiveness,
     announcements,
     upcoming,
-    sla: { period: { days, totals: slaPeriod.totals, groups: slaPeriod.groups }, days30: { totals: sla30.totals, groups: sla30.groups }, days90: { totals: sla90.totals, groups: sla90.groups } },
+    /** SLA compliance · Nd: met and breached are doors (`slaOutcome` with the period as `slaEndedFrom/To`, the site when scoped), the per-priority rows too (`priorityId` added); the open clocks now are the tiles. */
+    sla: { met: sla.met, breached: sla.breached, compliancePct: sla.compliancePct, previous: sla.previous, open: { atRisk: num(live.at_risk), breached: num(live.breached) }, byPriority: slaByPriority },
     contracts,
     entitlements,
     reports,
@@ -747,10 +762,8 @@ export async function amc(ctx: Ctx, opts: { days?: number; customerId?: string |
   const visitRows = await q<Row>(ctx, sql`SELECT v.status, count(*)::int AS count FROM field_visits v WHERE v.scheduled_start >= ${window.from}::date AND v.scheduled_start < ${window.to}::date + interval '1 day' ${vcust} GROUP BY 1`);
   const pmRows = await q<Row>(ctx, sql`SELECT o.status, count(*)::int AS count FROM pm_occurrences o WHERE o.planned_date BETWEEN ${window.from}::date AND ${window.to}::date ${ocust} GROUP BY 1`);
   const byStatus = (rows: Row[], order: string[]) => order.map((status) => ({ status, count: num(rows.find((r) => r.status === status)?.count) }));
-  // Resolution SLA on AMC tickets opened in the period (same clocks management() sums per customer).
-  const sla = await one<Row>(ctx, sql`
-    SELECT count(*) FILTER (WHERE s.state = 'met')::int AS met, count(*) FILTER (WHERE s.state = 'breached')::int AS breached
-    FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.metric = 'resolution' AND ${base} ${cust} AND t.created_at >= ${from30}::date`);
+  // SLA compliance · Nd over the AMC domain: resolution clocks that ended in the period, by the one helper every dashboard shows.
+  const sla = await resolutionCompliance(ctx, { from: from30, to: today, fence: sql`AND ${base} ${cust}` });
   const csat = await csatFigures(ctx.tx, await csatWindow(ctx, from30, today, { customerId, domain: 'amc' }));
   return {
     generatedAt: now,
@@ -762,7 +775,8 @@ export async function amc(ctx: Ctx, opts: { days?: number; customerId?: string |
     window,
     visitsByStatus: byStatus(visitRows, ['requested', 'scheduled', 'in_progress', 'completed', 'cancelled']),
     pmByStatus: byStatus(pmRows, ['planned', 'scheduled', 'rescheduled', 'completed', 'missed', 'cancelled']),
-    sla30d: { met: num(sla.met), breached: num(sla.breached), compliancePct: pct(num(sla.met), num(sla.met) + num(sla.breached)) },
+    /** SLA compliance · Nd: met and breached are doors (`slaOutcome` with the period as `slaEndedFrom/To`, the AMC domain); the open clocks now are the tiles. */
+    sla: { ...sla, open: { atRisk: kpis.atRisk, breached: kpis.breached } },
     kpis,
     byCustomer,
     bySite,

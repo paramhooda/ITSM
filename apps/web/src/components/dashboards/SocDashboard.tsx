@@ -15,6 +15,7 @@ import { useLocalControl } from './localControls';
 import { AgeingPanel, ArrivalsPanel, EventsPanel, RateTable, flowPointHref, HEAT_VIEWS, EVENTS_VIEWS, type HeatView, type EventsView } from './DeskPanels';
 import type { TicketRow, Breakdown } from './types';
 import type { AgeBucket, Arrivals, SocStrip } from './overviewApi';
+import { SlaComplianceDonut, SLA_PANEL_SUBTITLE, type SlaFigures } from './SlaComplianceDonut';
 
 /** `GET /dashboards/soc` (mirrors apps/api/src/modules/dashboards/service.ts soc()). */
 export interface Soc {
@@ -43,6 +44,8 @@ export interface Soc {
   period: { days: number; from: string; to: string };
   /** Security-domain tickets opened, resolved and SLA-breached per day over the period. */
   series: { day: string; opened: number; resolved: number; breaches: number }[];
+  /** SLA compliance · Nd over the security domain: resolution clocks that ended in the period, and the open clocks now (= the tiles). */
+  sla: SlaFigures;
   onCall?: OnCallSummaryTeam[];
 }
 
@@ -120,7 +123,8 @@ export function SocDashboard({ days = 30, customerId = '' }: { days?: number; cu
           <DonutChart size={140} centerLabel="open" emptyText="No open security incidents" slices={d.bySeverity.map((s) => ({ key: s.id ?? s.label, label: s.label, value: s.count, color: s.color, href: s.id ? ticketListPath({ ...open, severityIds: [s.id] }) : undefined }))} />
         </Panel>
       </div>
-      <Panel title="Response by severity" subtitle={`Security incidents opened or resolved ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}: time to first response and to resolve, and the breaches among them`} to={ticketListPath({ ...soc, ...resolvedIn })} toLabel="Resolved in the period">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <Panel title="Response by severity" subtitle={`Security incidents opened or resolved ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}: time to first response and to resolve, and the breaches among them`} className="xl:col-span-2" to={ticketListPath({ ...soc, ...resolvedIn })} toLabel="Resolved in the period">
         <RateTable
           columns={['Severity', 'Opened', 'Resolved', 'First response', 'Resolution', 'Breached']}
           empty="No security incidents opened or resolved in this period"
@@ -140,6 +144,10 @@ export function SocDashboard({ days = 30, customerId = '' }: { days?: number; cu
             }))}
         />
       </Panel>
+      <Panel title={`SLA compliance · ${d.period.days}d`} subtitle={SLA_PANEL_SUBTITLE}>
+        <SlaComplianceDonut sla={d.sla} period={d.period} link={scope} />
+      </Panel>
+      </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="Recent security incidents" subtitle="Newest first" to={ticketListPath(soc)} toLabel="All security incidents" padded={false} className="xl:col-span-2">
           <div className="px-5">

@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Star, CalendarClock, FileSignature, Layers, ShieldCheck, Settings2, ChevronDown, Pencil } from 'lucide-react';
-import { SLA_METRICS, TICKET_TYPES } from '@itsm/shared';
+import { SLA_METRICS, TICKET_TYPES, complianceTone } from '@itsm/shared';
 import { get } from '@/api/client';
 import { Button, Badge, ErrorBlock, EmptyState, Card, PageHeader, ListShell, FilterGroup, FilterOptions, FilterToggle, type AppliedFilter } from '@/components/ui';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { KpiSkeleton, Panel } from '@/components/dashboards/Panel';
-import { SlaGauge } from '@/components/dashboards/SlaGauge';
+import { SlaComplianceDonut, SLA_PANEL_SUBTITLE } from '@/components/dashboards/SlaComplianceDonut';
+import { toneToKpi } from '@/components/dashboards/OutcomeDonut';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
 import { useAuthStore } from '@/stores/auth';
 import { useListState } from '@/hooks/useListState';
@@ -17,11 +18,13 @@ import { cn } from '@/lib/utils';
 import { useSlaPolicies, usageSummary, slaAdminPath, METRIC_LABEL, type SlaPolicy, type Compliance } from '@/components/sla/api';
 import { PRIORITY_LEVEL_COLORS } from '@/lib/statusColors';
 
-function daysAgo(n: number) {
-  return new Date(Date.now() - n * 86_400_000).toISOString();
+/** The first day of the last `n` whole UTC days (today included): the API reads a day as the dashboards' window, so the page's 30 days are every dashboard's 30 days. */
+function firstDay(n: number) {
+  return new Date(Date.now() - (n - 1) * 86_400_000).toISOString().slice(0, 10);
 }
 
 const FILTER_KEYS = ['q', 'active', 'clock', 'unused'];
+const BAR_TONE = { good: 'green', warning: 'amber', critical: 'red', none: null } as const;
 
 /**
  * Service levels: a browse view of the SLA policies the MSP commits to and how
@@ -33,7 +36,8 @@ export default function ServiceLevelsPage() {
   const can = useAuthStore((s) => s.can);
   const canEdit = can('admin:config');
   const q = useSlaPolicies();
-  const compliance = useQuery({ queryKey: ['sla', 'compliance', 'overview'], queryFn: () => get<Compliance>('/sla/compliance', { from: daysAgo(30), groupBy: 'metric' }), enabled: can('tickets:read') || can('dashboards:management') || can('reports:run') });
+  const from = firstDay(30);
+  const compliance = useQuery({ queryKey: ['sla', 'compliance', 'overview', from], queryFn: () => get<Compliance>('/sla/compliance', { from, groupBy: 'metric' }), enabled: can('tickets:read') || can('dashboards:management') || can('reports:run') });
   const items = useMemo(() => q.data?.items ?? [], [q.data]);
   const totals = useMemo(() => ({
     policies: items.length,
@@ -42,7 +46,10 @@ export default function ServiceLevelsPage() {
     services: items.reduce((n, p) => n + p.usage.services, 0),
   }), [items]);
   const c = compliance.data?.totals;
-  const tone = c?.compliancePct === null || c?.compliancePct === undefined ? 'default' : c.compliancePct >= 95 ? 'good' : c.compliancePct >= 85 ? 'warn' : 'bad';
+  // The tile and the donut are the dashboards' figure (resolution clocks that ended in the last 30 whole days); the by-metric bars stay the policy definition (clocks started).
+  const r = compliance.data?.resolution;
+  const period = compliance.data?.period;
+  const tone = toneToKpi(complianceTone(r?.compliancePct));
   const focus = state.policy ?? null;
 
   const needle = (state.q ?? '').trim().toLowerCase();
@@ -97,23 +104,21 @@ export default function ServiceLevelsPage() {
           insights={
             <InsightBand
               id="sla"
-              summary={`${fmtNumber(totals.policies)} policies · compliance ${fmtPct(c?.compliancePct ?? null, 1)} over 30 days`}
+              summary={`${fmtNumber(totals.policies)} policies · resolution compliance ${fmtPct(r?.compliancePct ?? null, 1)} over 30 days`}
               kpis={[
                 { label: 'SLA policies', value: fmtNumber(totals.policies), hint: `${fmtNumber(totals.active)} active`, icon: <ShieldCheck className="h-4 w-4" /> },
                 { label: 'Contracts mapped', value: fmtNumber(totals.contracts), hint: 'contract and service-level mappings', icon: <FileSignature className="h-4 w-4" />, to: '/contracts' },
                 { label: 'Services with a default', value: fmtNumber(totals.services), hint: 'policy applied when a contract sets none', icon: <Layers className="h-4 w-4" />, to: '/services' },
-                { label: 'Compliance · 30 days', value: fmtPct(c?.compliancePct ?? null, 1), tone, hint: c ? `${fmtNumber(c.met)} met · ${fmtNumber(c.breached)} breached · ${fmtNumber(c.overdueRunning)} overdue now` : 'All metrics, all customers', icon: <CalendarClock className="h-4 w-4" /> },
+                { label: 'Compliance · 30 days', value: fmtPct(r?.compliancePct ?? null, 1), tone, hint: r ? `${fmtNumber(r.met)} met · ${fmtNumber(r.breached)} breached · resolution clocks that ended` : 'Resolution clocks that ended, all customers', icon: <CalendarClock className="h-4 w-4" /> },
               ]}
               panels={
                 compliance.data && (
                   <>
-                    <Panel title="Compliance by metric" subtitle="Last 30 days · met vs breached per SLA metric">
-                      <BreakdownBar dense items={compliance.data.groups.map((g) => ({ label: titleCase(g.label), value: g.met + g.breached, secondary: g.breached, secondaryLabel: 'breached', color: g.compliancePct === null ? null : g.compliancePct >= 95 ? 'green' : g.compliancePct >= 85 ? 'amber' : 'red' }))} emptyText="No SLA clocks completed in the last 30 days" />
+                    <Panel title="Compliance by metric" subtitle={`Clocks started in the last 30 days, every metric; ${c ? `${fmtNumber(c.overdueRunning)} overdue now` : 'met against breached'}`}>
+                      <BreakdownBar dense items={compliance.data.groups.map((g) => ({ label: titleCase(g.label), value: g.met + g.breached, secondary: g.breached, secondaryLabel: 'breached', color: BAR_TONE[complianceTone(g.compliancePct) ?? 'none'] }))} emptyText="No SLA clocks completed in the last 30 days" />
                     </Panel>
-                    <Panel title="Overall compliance" subtitle="Share of SLA clocks met in the last 30 days">
-                      <div className="flex items-center justify-center py-2">
-                        <SlaGauge pct={c?.compliancePct ?? null} met={c?.met} breached={c?.breached} label="Compliance" />
-                      </div>
+                    <Panel title="Overall compliance" subtitle={SLA_PANEL_SUBTITLE}>
+                      {r && period ? <SlaComplianceDonut sla={r} period={period} link={{}} /> : <div className="text-[13px] text-subtle py-6 text-center">Nothing measured yet</div>}
                     </Panel>
                   </>
                 )

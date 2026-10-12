@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { eq, and, asc, gte, lte } from 'drizzle-orm';
+import { eq, and, asc, gte, lte, sql } from 'drizzle-orm';
 import type { TicketType } from '@itsm/shared';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
@@ -8,6 +8,9 @@ import { listContracts, getContract } from '@/modules/contracts/service';
 import { customerEntitlements, recordConsumption } from '@/modules/contracts/entitlements';
 import { customerScope } from '@/modules/contracts/scope';
 import { slaCompliance, listPolicies, type ComplianceGroupBy } from '@/modules/sla/policies';
+import { resolutionCompliance } from '@/modules/sla/compliance';
+import { custCond, socCond } from '@/modules/dashboards/common';
+import { toDay, addDays } from '@/modules/reports/dates';
 import { define } from './types';
 import { ticketRef } from './core';
 import { isCustomerUser, period, resolveCustomerId, resolveContract, resolveTicket, customerName, forCustomer } from '../helpers';
@@ -175,17 +178,32 @@ export const CONTRACTS: ReturnType<typeof define>[] = [
   define({
     name: 'sla_compliance',
     toolset: 'contracts',
-    description: 'SLA compliance figures (met/breached/running, compliance %) for a period, grouped by metric, priority, customer, service, policy or ticket type.',
+    description: 'SLA compliance figures for a period: the dashboards\' resolution compliance (resolution clocks that ended in the last N whole days, met and breached, the number every dashboard and the portal home show) and the policy tables (clocks started in the period, every metric: met, breached, running, compliance %) grouped by metric, priority, customer, service, policy or ticket type. Answers "what is our SLA compliance", "how many clocks breached this month".',
     inputSchema: z.object({ customer: z.string().max(200).optional(), days: z.number().int().min(1).max(365).optional().describe('Look-back window in days (default 30)'), groupBy: z.enum(['metric', 'priority', 'customer', 'service', 'policy', 'ticketType']).optional(), ticketType: z.enum(['incident', 'request', 'problem', 'change']).optional() }),
     requires: ['tickets:read'],
     portal: ['portal:access'],
     action: false,
     run: async (ctx, input) => {
+      // A portal principal is pinned to their own organisation whatever they named (`resolveCustomerId` refuses a foreign one); a staff caller's customer is checked by `requireCustomer`.
       const customerId = await resolveCustomerId(ctx, input.customer);
       const days = input.days ?? 30;
       const res = await slaCompliance(ctx, { customerId, from: period(days).toISOString(), groupBy: (input.groupBy ?? 'metric') as ComplianceGroupBy, ticketType: input.ticketType as TicketType | undefined });
+      const today = toDay(new Date());
+      const window = { days, from: addDays(today, -(days - 1)), to: today };
+      const resolution = await resolutionCompliance(ctx, { from: window.from, to: window.to, fence: sql`${custCond(customerId)} ${socCond(ctx)}` });
       const t = res.totals as { met?: number; breached?: number; running?: number; compliancePct?: number | null };
-      return { days, groupBy: res.groupBy, totals: res.totals, facts: [`SLA compliance over ${days} days: ${t.met ?? 0} met, ${t.breached ?? 0} breached, ${t.running ?? 0} still running${t.compliancePct !== undefined && t.compliancePct !== null ? ` (${t.compliancePct}% compliant)` : ''}`], groups: res.groups.slice(0, 40).map((g) => ({ label: g.label, met: g.met, breached: g.breached, running: g.running, compliancePct: g.compliancePct, avgElapsedMinutes: g.avgElapsedMinutes })) };
+      return {
+        days,
+        groupBy: res.groupBy,
+        /** The dashboards' figure: resolution clocks that ended in the window (the number on every dashboard and the portal home). */
+        resolution: { ...resolution, period: window },
+        totals: res.totals,
+        facts: [
+          `resolution SLA compliance (${days} days): ${resolution.compliancePct === null ? 'no resolution clock ended' : `${resolution.compliancePct}%`} (${resolution.met} met, ${resolution.breached} breached, clocks that ended in the period; the dashboards' figure)`,
+          `SLA by metric over ${days} days (clocks started in the period, every metric): ${t.met ?? 0} met, ${t.breached ?? 0} breached, ${t.running ?? 0} still running${t.compliancePct !== undefined && t.compliancePct !== null ? ` (${t.compliancePct}% compliant)` : ''}`,
+        ],
+        groups: res.groups.slice(0, 40).map((g) => ({ label: g.label, met: g.met, breached: g.breached, running: g.running, compliancePct: g.compliancePct, avgElapsedMinutes: g.avgElapsedMinutes })),
+      };
     },
     summary: (input) => `Computed SLA compliance (${input.days ?? 30} days, by ${input.groupBy ?? 'metric'})`,
   }),

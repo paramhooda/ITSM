@@ -13,7 +13,9 @@ import { ServiceTeamCard } from '@/components/portal/ServiceTeamCard';
 import { ScopeTable } from '@/components/portal/ScopeTable';
 import { SlaTargetsTable } from '@/components/portal/SlaTargetsTable';
 import { EntitlementBars } from '@/components/portal/EntitlementBars';
-import { SlaGauge } from '@/components/dashboards/SlaGauge';
+import { SlaComplianceDonut, SLA_PANEL_SUBTITLE } from '@/components/dashboards/SlaComplianceDonut';
+import { useListState } from '@/hooks/useListState';
+import { portalTicketListPath } from '@itsm/shared';
 import { Segmented } from '@/components/dashboards/Panel';
 import { portalApi, pk, type PortalContract, type PortalServices } from '@/components/portal/api';
 import { CONTRACT_STATUS_COLORS } from '@/lib/statusColors';
@@ -170,8 +172,13 @@ function ServicesSection({ data, contract, onContract, canRaise }: { data: Porta
 
 // ---------------------------------------------------------------- Service levels
 
+const SLA_DAYS = [30, 90] as const;
+
 function SlaSection({ data, contract, onContract }: { data: PortalServices; contract: PortalContract | null; onContract: (id: string) => void }) {
-  const [days, setDays] = useState(30);
+  // The period is a page filter (never a local control): it lives in the URL under the page's declared `days` key, so the view can be bookmarked and shared.
+  const { state, set } = useListState();
+  const days = (SLA_DAYS as readonly number[]).includes(Number(state.days)) ? Number(state.days) : 30;
+  const setDays = (v: number) => set({ days: v === 30 ? undefined : v }, false);
   const sla = useQuery({ queryKey: pk.sla(days), queryFn: () => portalApi.sla(days), staleTime: 60_000 });
   if (!contract) return <Card>{NO_CONTRACT}</Card>;
   return (
@@ -190,14 +197,18 @@ function SlaSection({ data, contract, onContract }: { data: PortalServices; cont
         ) : sla.isError ? (
           <ErrorBlock error={sla.error} retry={() => sla.refetch()} />
         ) : sla.data ? (
-          <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-1 md:grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-4 items-start">
-              <div className="flex flex-col gap-3">
-                <SlaGauge pct={sla.data.totals.compliancePct} met={sla.data.totals.met} breached={sla.data.totals.breached} label={`Targets met · ${days} days`} breachedLabel="missed" />
-                <div className="text-[12px] text-muted tabular-nums">
-                  {sla.data.totals.completed} completed · {sla.data.totals.running} in progress
-                  {sla.data.totals.overdueRunning ? <span className="text-red-600"> · {sla.data.totals.overdueRunning} overdue</span> : null}
-                </div>
+          <div className="flex flex-col gap-5">
+            <div>
+              <div className="text-[13.5px] font-semibold text-default">SLA compliance · {days}d</div>
+              <div className="text-[12px] text-muted mb-3">{SLA_PANEL_SUBTITLE}</div>
+              <SlaComplianceDonut sla={sla.data.resolution} period={sla.data.period} link={{}} path={portalTicketListPath} />
+            </div>
+            <div className="pt-4 border-t border-default">
+              <div className="text-[13.5px] font-semibold text-default">Every target · {days}d</div>
+              <div className="text-[12px] text-muted mb-3">Clocks started in the period, every metric (response, resolution and the rest): the same count a printed report gives, so it stays reproducible after the period closes</div>
+              <div className="text-[12px] text-muted tabular-nums mb-3">
+                {sla.data.totals.met} met · {sla.data.totals.breached} missed · {sla.data.totals.completed} completed · {sla.data.totals.running} in progress
+                {sla.data.totals.overdueRunning ? <span className="text-red-600"> · {sla.data.totals.overdueRunning} overdue</span> : null}
               </div>
               {sla.data.byPriority.length > 0 ? (
                 <div className="overflow-auto">
@@ -227,7 +238,7 @@ function SlaSection({ data, contract, onContract }: { data: PortalServices; cont
                   </table>
                 </div>
               ) : (
-                <div className="text-[12.5px] text-muted self-center">No targets were completed in this period yet.</div>
+                <div className="text-[12.5px] text-muted">No targets were completed in this period yet.</div>
               )}
             </div>
             {sla.data.byMetric.length > 0 && (

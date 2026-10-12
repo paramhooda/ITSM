@@ -115,6 +115,8 @@ export const tickets = pgTable('tickets', {
   index('tickets_primary_ci_idx').on(t.primaryCiId),
   index('tickets_search_idx').using('gin', t.searchVector),
   index('tickets_last_activity_idx').on(t.lastActivityAt),
+  /** The resolved range of the list and the dashboards' "resolved in the period" counts (resolved tickets only). */
+  index('tickets_resolved_at_idx').on(t.resolvedAt).where(sql`${t.resolvedAt} IS NOT NULL`),
 ]);
 
 export const ticketComments = pgTable('ticket_comments', {

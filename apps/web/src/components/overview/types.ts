@@ -65,8 +65,10 @@ export interface CustomersOverview {
   byIndustry: Bucket[];
   /** Customers with the most open P1/P2 work, worst first. */
   attention: { id: string; name: string; code: string; openTickets: number; openP1: number; breached: number; slaCompliance30d: number | null; contractsExpiring60d: number; entitlementsOverThreshold: number }[];
-  /** 30-day SLA compliance per customer, lowest first (null when nothing measured). */
+  /** 30-day SLA compliance per customer, lowest first (null when nothing measured): resolution clocks that ended in `slaWindow`. */
   slaByCustomer: { id: string; name: string; met: number; breached: number; compliancePct: number | null }[];
+  /** The 30 whole days the compliance figures count over, so the panel's breached door reproduces. */
+  slaWindow: { days: number; from: string; to: string };
   contractsExpiring60d: number;
   entitlementsOverThreshold: number;
 }

@@ -66,5 +66,5 @@ export default async function routes(app: FastifyInstance) {
   r.get('/sla/compliance', {
     preHandler: app.auth('tickets:read', 'dashboards:management', 'dashboards:noc', 'dashboards:soc', 'reports:run', 'admin:config', 'portal:contracts'),
     schema: { tags: ['sla'], querystring: z.object({ customerId: z.string().uuid().optional(), from: z.string().optional(), to: z.string().optional(), groupBy: z.enum(['metric', 'priority', 'customer', 'service', 'policy', 'ticketType']).optional(), ticketType: z.enum(TICKET_TYPES).optional(), metric: z.enum(SLA_METRICS).optional() }) },
-  }, h((ctx, req) => policies.slaCompliance(ctx, req.query as policies.ComplianceParams)));
+  }, h((ctx, req) => policies.complianceOverview(ctx, req.query as policies.ComplianceParams)));
 }

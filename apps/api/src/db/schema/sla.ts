@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { pgTable, text, boolean, uuid, jsonb, index, integer, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { id, timestamps, slaMetricEnum, slaStateEnum, ticketTypeEnum } from './_common';
 import { configOptions, businessCalendars, holidayCalendars } from './config';
@@ -60,6 +61,10 @@ export const ticketSlas = pgTable('ticket_slas', {
   uniqueIndex('ticket_slas_ticket_metric_idx').on(t.ticketId, t.metric),
   index('ticket_slas_state_due_idx').on(t.state, t.dueAt),
   index('ticket_slas_customer_idx').on(t.customerId),
+  // Date-leading partial indexes for "clocks that ended in the period" (`modules/sla/compliance.ts`): the helper's WHERE is a range on
+  // these two columns OR-ed, which the planner serves with a BitmapOr over the pair; a metric-led index could not be range-scanned on the date.
+  index('ticket_slas_completed_at_idx').on(t.completedAt).where(sql`${t.completedAt} IS NOT NULL`),
+  index('ticket_slas_breached_at_idx').on(t.breachedAt).where(sql`${t.breachedAt} IS NOT NULL`),
 ]);
 
 export const ticketSlaEvents = pgTable('ticket_sla_events', {

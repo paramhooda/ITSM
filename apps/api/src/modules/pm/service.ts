@@ -789,6 +789,8 @@ export async function pmSummary(ctx: Ctx, q: PmSummaryQuery) {
   return {
     range: { from, to },
     counts: c,
+    /** Completed occurrences done within the grace window, and the rest (late): the on-time ring's two segments. */
+    onTime: { onTime: ot.onTime, late: ot.completed - ot.onTime },
     onTimePct: pct(ot.onTime, ot.completed),
     completionPct: pct(c.completed, c.completed + c.missed),
     perCustomer: perCustomer.map((r) => ({ ...r, onTimePct: pct(r.onTime, r.completed) })),

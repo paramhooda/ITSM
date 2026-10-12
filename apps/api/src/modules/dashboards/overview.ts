@@ -9,6 +9,7 @@ import { expiringContracts } from '@/modules/contracts/service';
 import { csatFigures, hidesSoc } from '@/modules/surveys/figures';
 import { loadSurveyDefaults } from '@/modules/surveys/policy';
 import { arrivalHeatmap, backlogAgeing, responsiveness, changeOutcomes, scopeTimezone } from '@/modules/reports/analytics';
+import { resolutionCompliance } from '@/modules/sla/compliance';
 import { q, one, num, pct, isCustomerUser, openCond, custCond, socCond, BREACHED, AT_RISK, EMPTY, delta, toDay, addDays, clampDays, arrivalsWeek, attentionByCustomer, accountCounts } from './common';
 import { nocTotals, socTotals, amcTotals, type NocTotals, type SocTotals, type AmcTotals } from './totals';
 
@@ -223,12 +224,12 @@ export async function overview(ctx: Ctx, opts: { days?: number; customerId?: str
         count(*) FILTER (WHERE t.created_at < ${from}::date AND (t.resolved_at IS NULL OR t.resolved_at >= ${from}::date) AND (t.closed_at IS NULL OR t.closed_at >= ${from}::date))::int AS open_at_start,
         count(*) FILTER (WHERE t.created_at >= current_date)::int AS opened_today
       FROM tickets t WHERE (${openCond()} OR t.created_at >= ${prevFrom}::date OR t.resolved_at >= ${prevFrom}::date OR t.closed_at >= ${prevFrom}::date OR (t.resolved_at IS NULL AND t.closed_at IS NULL)) ${fence}`);
-    // Resolution clocks met or breached in the period (compliance) and every clock breached in the period (the breaches delta), this period and the previous one.
-    const sla = await one<Row>(ctx, sql`
-      SELECT count(*) FILTER (WHERE s.metric = 'resolution' AND s.state = 'met' AND ${inRange(sql`s.completed_at`, from, today)})::int AS met, count(*) FILTER (WHERE s.metric = 'resolution' AND s.state = 'breached' AND ${inRange(sql`s.breached_at`, from, today)})::int AS breached,
-        count(*) FILTER (WHERE s.metric = 'resolution' AND s.state = 'met' AND ${inRange(sql`s.completed_at`, prevFrom, prevTo)})::int AS met_previous, count(*) FILTER (WHERE s.metric = 'resolution' AND s.state = 'breached' AND ${inRange(sql`s.breached_at`, prevFrom, prevTo)})::int AS breached_previous,
-        count(*) FILTER (WHERE s.state = 'breached' AND ${inRange(sql`s.breached_at`, from, today)})::int AS breaches, count(*) FILTER (WHERE s.state = 'breached' AND ${inRange(sql`s.breached_at`, prevFrom, prevTo)})::int AS breaches_previous
-      FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE (s.completed_at >= ${prevFrom}::date OR s.breached_at >= ${prevFrom}::date) ${fence}`);
+    // SLA compliance: resolution clocks that ended in the period, by the one helper every dashboard shows (this period and the previous one).
+    const sla = await resolutionCompliance(ctx, { from, to: today, fence, previous: { from: prevFrom, to: prevTo } });
+    // Every clock breached in the period, whatever the metric (the breaches delta), this period and the previous one.
+    const breaches = await one<Row>(ctx, sql`
+      SELECT count(*) FILTER (WHERE ${inRange(sql`s.breached_at`, from, today)})::int AS breaches, count(*) FILTER (WHERE ${inRange(sql`s.breached_at`, prevFrom, prevTo)})::int AS breaches_previous
+      FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.state = 'breached' AND s.breached_at >= ${prevFrom}::date ${fence}`);
     const series = await deskSeries(ctx, from, today, fence);
     const byType = await q<Row>(ctx, sql`SELECT t.type, count(*)::int AS count, count(*) FILTER (WHERE ${BREACHED})::int AS breached FROM tickets t WHERE ${openCond()} ${fence} GROUP BY 1 ORDER BY 2 DESC, 1`);
     const ageing = await backlogAgeing(ctx, { customerId }, now);
@@ -243,8 +244,6 @@ export async function overview(ctx: Ctx, opts: { days?: number; customerId?: str
     const byPriority = await responsiveness(ctx, { customerId, from, to: today });
     const changes = await one<Row>(ctx, sql`SELECT count(*)::int AS open FROM tickets t WHERE t.type = 'change' AND ${openCond()} ${fence}`);
     const outcomes = await changeOutcomes(ctx, { customerId, from, to: today });
-    const compliance = pct(num(sla.met), num(sla.met) + num(sla.breached));
-    const compliancePrevious = pct(num(sla.met_previous), num(sla.met_previous) + num(sla.breached_previous));
     desk = {
       kpis: {
         open: num(live.open),
@@ -255,17 +254,19 @@ export async function overview(ctx: Ctx, opts: { days?: number; customerId?: str
         openedInPeriod: num(live.opened_period),
         resolvedInPeriod: num(live.resolved_period),
         openedToday: num(live.opened_today),
-        slaCompliancePct: compliance,
-        resolutionMet: num(sla.met),
-        resolutionBreached: num(sla.breached),
+        slaCompliancePct: sla.compliancePct,
+        resolutionMet: sla.met,
+        resolutionBreached: sla.breached,
       },
+      /** SLA compliance · Nd: resolution clocks that ended in the period (met and breached are doors: `slaOutcome` with `slaEndedFrom/To` = the period) and the open clocks now. */
+      sla: { met: sla.met, breached: sla.breached, compliancePct: sla.compliancePct, previous: sla.previous, open: { atRisk: num(live.at_risk), breached: num(live.breached) } },
       /** Period-over-period movement: open against the backlog at the start of the period, the period counts against the previous period. */
       deltas: {
         open: delta(num(live.open), num(live.open_at_start)),
         openedInPeriod: delta(num(live.opened_period), num(live.opened_previous)),
         resolvedInPeriod: delta(num(live.resolved_period), num(live.resolved_previous)),
-        slaCompliancePct: delta(compliance, compliancePrevious),
-        breaches: delta(num(sla.breaches), num(sla.breaches_previous)),
+        slaCompliancePct: delta(sla.compliancePct, sla.previous?.compliancePct ?? null),
+        breaches: delta(num(breaches.breaches), num(breaches.breaches_previous)),
       },
       series,
       byType: byType.map((r) => ({ type: String(r.type), count: num(r.count), breached: num(r.breached) })),

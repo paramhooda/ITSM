@@ -4,3 +4,4 @@ export * from './types.js';
 export * from './appmap.js';
 export * from './ticketLinks.js';
 export * from './palette.js';
+export * from './sla.js';

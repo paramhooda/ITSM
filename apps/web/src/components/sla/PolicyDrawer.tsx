@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { complianceTone } from '@itsm/shared';
+import { toneToKpi } from '@/components/dashboards/OutcomeDonut';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -466,13 +468,15 @@ export function AssignContractsDialog({ open, onClose, policy, already, onDone }
 
 // ---------------------------------------------------------------- compliance
 
+const BAR_TONE = { good: 'good', warning: 'warn', critical: 'bad', none: 'neutral' } as const;
+
 function ComplianceTab({ policyId }: { policyId: string }) {
   const [days, setDays] = useState(30);
   const q = useQuery({ queryKey: ['sla', 'policy', policyId, 'compliance', days], queryFn: () => get<Compliance>(`/sla/policies/${policyId}/compliance`, { days }) });
   if (q.isLoading) return <LoadingBlock />;
   if (q.isError || !q.data) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
   const t = q.data.totals;
-  const tone = t.compliancePct === null ? 'default' : t.compliancePct >= 95 ? 'good' : t.compliancePct >= 85 ? 'warn' : 'bad';
+  const tone = toneToKpi(complianceTone(t.compliancePct));
   return (
     <Card title="Compliance by metric" actions={<Segmented size="sm" options={[{ value: 7, label: '7 days' }, { value: 30, label: '30 days' }, { value: 90, label: '90 days' }]} value={days} onChange={setDays} />}>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
@@ -488,7 +492,7 @@ function ComplianceTab({ policyId }: { policyId: string }) {
           {q.data.groups.map((g) => (
             <div key={g.key} className="grid grid-cols-[120px_1fr_auto] items-center gap-4">
               <div className="text-[13px] font-medium text-default">{METRIC_LABEL[g.label] ?? titleCase(g.label)}</div>
-              <ProgressBar pct={g.compliancePct ?? 0} tone={g.compliancePct === null ? 'neutral' : g.compliancePct >= 95 ? 'good' : g.compliancePct >= 85 ? 'warn' : 'bad'} />
+              <ProgressBar pct={g.compliancePct ?? 0} tone={BAR_TONE[complianceTone(g.compliancePct) ?? 'none']} />
               <div className="text-[12.5px] text-muted tnum text-right whitespace-nowrap">
                 <span className="text-default font-medium">{fmtPct(g.compliancePct, 1)}</span> · {g.met} met · {g.breached} breached · {g.running} running
                 {g.avgElapsedMinutes !== null && <span className="text-subtle"> · avg {formatDuration(g.avgElapsedMinutes)}</span>}

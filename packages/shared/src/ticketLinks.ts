@@ -1,5 +1,6 @@
 import type { TicketType } from './constants.js';
 import { DOMAINS } from './constants.js';
+import type { SlaOutcome } from './sla.js';
 
 /**
  * The one way a dashboard number becomes a link: every tile, chart segment,
@@ -44,6 +45,15 @@ export interface TicketListLink {
   createdTo?: string | null;
   resolvedFrom?: string | null;
   resolvedTo?: string | null;
+  /**
+   * The outcome of the ticket's resolution clock (`met` or `breached`) with the
+   * window it ended in (`completed_at` for met, `breached_at` for breached), as
+   * YYYY-MM-DD days: the doors of the SLA compliance donut. The window needs the
+   * outcome; the list refuses the window on its own.
+   */
+  slaOutcome?: SlaOutcome | null;
+  slaEndedFrom?: string | null;
+  slaEndedTo?: string | null;
 }
 
 /** The ticket list page's default status filter (the "All open" root of its breadcrumb). */
@@ -82,6 +92,9 @@ export function ticketListQuery(link: TicketListLink): string {
   put('createdTo', link.createdTo);
   put('resolvedFrom', link.resolvedFrom);
   put('resolvedTo', link.resolvedTo);
+  put('slaOutcome', link.slaOutcome);
+  put('slaEndedFrom', link.slaEndedFrom);
+  put('slaEndedTo', link.slaEndedTo);
   return p.toString();
 }
 
@@ -99,7 +112,7 @@ export function ticketListPath(link: TicketListLink): string {
  * the breadcrumb still showed it, so the whitelist makes the leak impossible and
  * lets the guard test reason about one key set.
  */
-export const PORTAL_TICKET_LINK_KEYS = ['type', 'statusCategory', 'statusId', 'priorityId', 'siteId', 'serviceId', 'slaState', 'csat', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo'] as const;
+export const PORTAL_TICKET_LINK_KEYS = ['type', 'statusCategory', 'statusId', 'priorityId', 'siteId', 'serviceId', 'slaState', 'csat', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'] as const;
 export type PortalTicketLinkKey = (typeof PORTAL_TICKET_LINK_KEYS)[number];
 
 /** The query string of a portal ticket list link: the same keys in the same fixed order as `ticketListQuery`, restricted to the portal-safe set. */

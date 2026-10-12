@@ -25,6 +25,8 @@ import { complianceFor, licenceStatus, licenceStatusCond, loadSoftwareSettings }
 import { searchFts } from '@/core/query';
 import { todayStr as civilToday, addDays as addCivilDays, daysBetween } from '@/core/overview';
 import { slaCompliance } from '@/modules/sla/policies';
+import { resolutionCompliance } from '@/modules/sla/compliance';
+import { custCond, socCond } from '@/modules/dashboards/common';
 import * as iam from '@/modules/iam/service';
 import { acknowledgeVisit } from '@/modules/field/service';
 import { revokeNumber } from '@/modules/whatsapp/link';
@@ -196,6 +198,9 @@ export async function portalListParams(ctx: Ctx, q: PortalTicketStatsQuery): Pro
     createdTo: q.createdTo,
     resolvedFrom: q.resolvedFrom,
     resolvedTo: q.resolvedTo,
+    slaOutcome: q.slaOutcome,
+    slaEndedFrom: q.slaEndedFrom,
+    slaEndedTo: q.slaEndedTo,
     q: q.q,
     csat,
     requesterUserId: q.mine ? ctx.user.id : undefined,
@@ -660,11 +665,22 @@ export async function portalServices(ctx: Ctx, requested?: string | null) {
   };
 }
 
+/**
+ * The portal SLA page: `resolution` is the dashboard figure (resolution
+ * clocks that ended in the last N whole days, the one helper the home shows,
+ * so the two agree; met and breached are doors through the portal list),
+ * `byMetric`/`byPriority` are the policy tables (clocks started in the
+ * period, every metric: figures by name). A staff preview is fenced like the
+ * customer dashboard (the organisation and the caller's security fence).
+ */
 export async function portalSla(ctx: Ctx, q: { customerId?: string; days: number }) {
   const scope = resolvePortalCustomer(ctx, 'portal:contracts', q.customerId);
   const from = new Date(Date.now() - q.days * 86_400_000).toISOString();
   const [byMetric, byPriority] = [await slaCompliance(ctx, { customerId: scope.customerId, from, groupBy: 'metric' }), await slaCompliance(ctx, { customerId: scope.customerId, from, groupBy: 'priority' })];
-  return { days: q.days, from, totals: byMetric.totals, byMetric: byMetric.groups, byPriority: byPriority.groups };
+  const today = todayStr();
+  const period = { days: q.days, from: addDays(today, -(q.days - 1)), to: today };
+  const resolution = await resolutionCompliance(ctx, { from: period.from, to: period.to, fence: sql`${custCond(scope.customerId)} ${socCond(ctx)}` });
+  return { days: q.days, from, period, resolution, totals: byMetric.totals, byMetric: byMetric.groups, byPriority: byPriority.groups };
 }
 
 // ---------------------------------------------------------------- assets & CIs

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSET_LIFECYCLE, LICENCE_STATUSES, STATUS_CATEGORIES, TICKET_TYPES } from '@itsm/shared';
+import { ASSET_LIFECYCLE, LICENCE_STATUSES, SLA_OUTCOMES, STATUS_CATEGORIES, TICKET_TYPES } from '@itsm/shared';
 import { paginationSchema } from '@/core/pagination';
 import { boolQ, csvOf, dateParam } from '@/modules/tickets/schemas';
 import { SLA_STATES } from '@/modules/sla/predicates';
@@ -18,7 +18,7 @@ export type PortalStatusChip = (typeof PORTAL_STATUS_CHIPS)[number];
 /**
  * The portal ticket list on the staff list's vocabulary (`statusCategory`,
  * `statusId`, `priorityId`, `serviceId`, `slaState`, `csat`, the created and
- * resolved ranges), so a dashboard number links into it with exactly the
+ * resolved ranges, the SLA outcome with its window), so a dashboard number links into it with exactly the
  * predicate it was counted with. The portal's own chip (`status`) and priority
  * key (`priority`) stay as aliases; the service maps them (`portalListParams`).
  * Without any status key the open categories apply; `statusCategory=any`
@@ -52,6 +52,10 @@ export const ticketListQuery = paginationSchema.extend({
   createdTo: dateParam.optional(),
   resolvedFrom: dateParam.optional(),
   resolvedTo: dateParam.optional(),
+  /** The resolution clock's outcome and the day window it ended in: the home's SLA compliance doors (the window needs the outcome, the service refuses it alone). */
+  slaOutcome: z.enum(SLA_OUTCOMES).optional(),
+  slaEndedFrom: dateParam.optional(),
+  slaEndedTo: dateParam.optional(),
   sort: z.enum(['createdAt', 'updatedAt', 'lastActivityAt', 'dueAt', 'priority', 'number', 'status']).optional(),
   order: z.enum(['asc', 'desc']).optional(),
 });

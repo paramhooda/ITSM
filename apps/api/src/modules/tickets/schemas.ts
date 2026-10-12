@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TICKET_TYPES, LINK_TYPES, CHANGE_TYPES, SCOPE_STATUSES } from '@itsm/shared';
+import { TICKET_TYPES, LINK_TYPES, CHANGE_TYPES, SCOPE_STATUSES, SLA_OUTCOMES } from '@itsm/shared';
 import { paginationSchema, sortSchema } from '@/core/pagination';
 import { knownErrorPatchSchema } from '@/modules/known-errors/schemas';
 import { SLA_STATES } from '@/modules/sla/predicates';
@@ -260,6 +260,10 @@ export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   createdTo: dateParam.optional(),
   resolvedFrom: dateParam.optional(),
   resolvedTo: dateParam.optional(),
+  /** The resolution clock's outcome (met or breached) and the day window it ended in (the SLA compliance donut's doors); the window needs the outcome, `buildWhere` refuses it alone. */
+  slaOutcome: z.enum(SLA_OUTCOMES).optional(),
+  slaEndedFrom: dateParam.optional(),
+  slaEndedTo: dateParam.optional(),
   unassigned: boolQ,
   mine: boolQ,
   watching: boolQ,

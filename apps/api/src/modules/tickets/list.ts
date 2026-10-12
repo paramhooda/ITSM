@@ -3,7 +3,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type { TicketType } from '@itsm/shared';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
-import { ForbiddenError } from '@/core/errors';
+import { ForbiddenError, ValidationError } from '@/core/errors';
 import { countRows, searchFts } from '@/core/query';
 import { slaSummariesFor, worstSla, slaStateFilterSql } from '@/modules/sla/engine';
 import { slaStateCond } from '@/modules/sla/predicates';
@@ -64,6 +64,20 @@ function dateRange(col: typeof T.createdAt | typeof T.resolvedAt, from?: string,
   return conds;
 }
 
+/** The same inclusive range over a raw column (the SLA outcome window on `ticket_slas`). */
+function rawDateRange(col: SQL, from?: string, to?: string): SQL[] {
+  const conds: SQL[] = [];
+  if (from && !Number.isNaN(Date.parse(from))) conds.push(sql`${col} >= ${new Date(from)}`);
+  if (to && !Number.isNaN(Date.parse(to))) {
+    const end = new Date(to);
+    if (to.length <= 10) {
+      end.setUTCDate(end.getUTCDate() + 1);
+      conds.push(sql`${col} < ${end}`);
+    } else conds.push(sql`${col} <= ${end}`);
+  }
+  return conds;
+}
+
 /** The list predicates for one filter set; exported so the task boards count lanes over exactly what the list shows. */
 export function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL | undefined {
   const conds: SQL[] = visibilityConds(ctx);
@@ -95,6 +109,14 @@ export function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL |
   else if (q.sentiment) conds.push(eq(T.lastSentiment, q.sentiment));
   conds.push(...dateRange(T.createdAt, q.createdFrom, q.createdTo));
   conds.push(...dateRange(T.resolvedAt, q.resolvedFrom, q.resolvedTo));
+  // The resolution clock's outcome, with the window it ended in (`completed_at` for met, `breached_at` for breached): the SLA compliance
+  // donut's doors. The pair rule lives here, shared by the staff and the portal list and stats routes alike, because the zod objects
+  // stay unrefined (other schemas derive from them with `.omit()`); a window without an outcome is a condition no number was counted with.
+  if ((q.slaEndedFrom || q.slaEndedTo) && !q.slaOutcome) throw new ValidationError('slaEndedFrom and slaEndedTo need slaOutcome (met or breached)');
+  if (q.slaOutcome) {
+    const ended = q.slaOutcome === 'met' ? sql`s.state = 'met' AND ${sql.join([sql`true`, ...rawDateRange(sql`s.completed_at`, q.slaEndedFrom, q.slaEndedTo)], sql` AND `)}` : sql`s.state = 'breached' AND ${sql.join([sql`true`, ...rawDateRange(sql`s.breached_at`, q.slaEndedFrom, q.slaEndedTo)], sql` AND `)}`;
+    conds.push(sql`EXISTS (SELECT 1 FROM ticket_slas s WHERE s.ticket_id = ${T.id} AND s.metric = 'resolution' AND ${ended})`);
+  }
   if (q.unassigned) conds.push(isNull(T.assigneeId));
   if (q.mine) conds.push(eq(T.assigneeId, ctx.user.id));
   if (q.watching) conds.push(sql`EXISTS (SELECT 1 FROM ticket_watchers w WHERE w.ticket_id = ${T.id} AND w.user_id = ${ctx.user.id}::uuid)`);

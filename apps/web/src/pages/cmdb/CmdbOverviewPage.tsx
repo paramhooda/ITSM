@@ -5,7 +5,6 @@ import { PageHeader, Button, Select, ErrorBlock, Badge } from '@/components/ui';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { Panel, RowList, Stat } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
-import { SlaGauge } from '@/components/dashboards/SlaGauge';
 import { useListState } from '@/hooks/useListState';
 import { useCustomersLookup } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
@@ -67,8 +66,8 @@ export default function CmdbOverviewPage() {
               </Panel>
               <Panel title="Data health" subtitle="How trustworthy the CMDB is right now">
                 <div className="flex flex-wrap items-center gap-5">
-                  <SlaGauge pct={d.health.completenessPct} label="Completeness" target={90} size={112} stroke={10} />
                   <div className="grid grid-cols-1 gap-3 min-w-[150px] flex-1">
+                    <Stat label="Completeness" value={fmtPct(d.health.completenessPct, 0)} tone={tone(d.health.completenessPct, 90, 75)} />
                     <Stat label="Freshness" value={fmtPct(d.health.freshnessPct, 0)} tone={tone(d.health.freshnessPct, 90, 75)} />
                     <Stat label="Relationships" value={fmtPct(d.health.relationshipCoveragePct, 0)} tone={tone(d.health.relationshipCoveragePct, 80, 60)} />
                     <Stat label="No owner · no site" value={`${fmtNumber(d.totals.unowned)} · ${fmtNumber(d.totals.noSite)}`} tone={d.totals.unowned + d.totals.noSite > 0 ? 'warn' : 'good'} />

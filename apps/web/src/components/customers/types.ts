@@ -116,7 +116,8 @@ export interface CustomerOverview {
   recentTickets: OverviewTicket[];
   contracts: { id: string; number: string; name: string; status: string; statusLabel: string; statusColor: string; typeLabel: string | null; startDate: string; endDate: string; renewalDate: string | null; daysToExpiry: number; covering: boolean }[];
   entitlements: import('@/components/contracts/types').Entitlement[];
-  sla30d: { met: number; breached: number; compliancePct: number | null };
+  /** The dashboards' figure for the customer over the last 30 whole days (resolution clocks that ended), with the window so met and breached are doors. */
+  sla30d: { met: number; breached: number; compliancePct: number | null; period: { days: number; from: string; to: string } };
   /** Customer satisfaction over the last 90 days (null average until a rating exists). */
   csat90d?: { avg: number | null; responses: number; satisfiedPct: number | null };
   recentActivity: { id: string; occurredAt: string; userName: string | null; entityType: string; entityId: string | null; entityLabel: string | null; action: string }[];

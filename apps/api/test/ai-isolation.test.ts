@@ -14,7 +14,10 @@ import { eq, inArray, like } from 'drizzle-orm';
 import { withSystem, closeDb, schema } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
-import { AppError } from '../src/core/errors';
+import { AppError, ForbiddenError } from '../src/core/errors';
+import { sql } from 'drizzle-orm';
+import { resolutionCompliance } from '../src/modules/sla/compliance';
+import { complianceOverview } from '../src/modules/sla/policies';
 import { createTicket, resolveTicket } from '../src/modules/tickets/service';
 import * as kb from '../src/modules/knowledge/service';
 import { systemText, type AiProvider, type ChatOptions, type ChatResponse } from '../src/lib/ai';
@@ -242,9 +245,20 @@ describe('every portal-reachable tool answers for the user’s own organisation 
     expect(ents.customerId).toBe(ids.a);
     expect(ents.items.map((e) => e.name)).toEqual([`Alpha visits ${S}`]);
 
-    const sla = (await asAlpha((ctx) => toolByName('sla_compliance')!.run(ctx, { customer: BETA, groupBy: 'customer', days: 30 }))) as { groups: { label: string }[] };
+    const sla = (await asAlpha((ctx) => toolByName('sla_compliance')!.run(ctx, { customer: BETA, groupBy: 'customer', days: 30 }))) as { groups: { label: string }[]; resolution: { met: number; breached: number; compliancePct: number | null; period: { days: number; from: string; to: string } }; facts: string[] };
     expect(sla.groups.every((g) => g.label === ALPHA)).toBe(true);
     expect(text(sla)).not.toContain(BETA);
+    // The dashboards' figure beside the policy tables, pinned to Alpha (A2's resolution clock closed within target today; Beta's clocks never count).
+    expect(sla.resolution).toMatchObject({ met: 1, breached: 0, compliancePct: 100, period: { days: 30 } });
+    const own = await asAlpha((ctx) => resolutionCompliance(ctx, { from: sla.resolution.period.from, to: sla.resolution.period.to, fence: sql`` }));
+    expect([sla.resolution.met, sla.resolution.breached, sla.resolution.compliancePct]).toEqual([own.met, own.breached, own.compliancePct]);
+    expect(sla.facts.some((f) => f.startsWith('resolution SLA compliance (30 days): 100%'))).toBe(true);
+    expect(sla.facts.some((f) => f.includes('clocks started in the period'))).toBe(true);
+    // The SLA route pins a customer principal the same way: Beta's id is refused, no id reads Alpha.
+    await expect(asAlpha((ctx) => complianceOverview(ctx, { customerId: ids.b }))).rejects.toBeInstanceOf(ForbiddenError);
+    const route = await asAlpha((ctx) => complianceOverview(ctx, {}));
+    expect(route.customerId).toBe(ids.a);
+    expect([route.resolution.met, route.resolution.breached]).toEqual([1, 0]);
 
     const maint = (await asAlpha((ctx) => toolByName('upcoming_maintenance')!.run(ctx, { customer: BETA, days: 60 }))) as { maintenance: { program: string }[]; visits: { title: string }[] };
     expect(maint.maintenance.map((m) => m.program)).toEqual([`Alpha firewall PM ${S}`]);
@@ -256,7 +270,7 @@ describe('every portal-reachable tool answers for the user’s own organisation 
     expect(d.view).toBe('customer');
     expect(d.link).toBe('/?days=7');
     expect(d.customer.id).toBe(ids.a);
-    expect(d.facts).toEqual(expect.arrayContaining(['open tickets now: 1', 'awaiting your reply: 0', 'opened in the last 7 days: 2', 'resolved in the last 7 days: 1', 'upcoming site visits (next 90 days): 0', 'upcoming maintenance (next 90 days): 1']));
+    expect(d.facts).toEqual(expect.arrayContaining(['open tickets now: 1', 'awaiting your reply: 0', 'opened in the last 7 days: 2', 'resolved in the last 7 days: 1', 'upcoming site visits (next 90 days): 0', 'upcoming maintenance (next 90 days): 1', 'resolution SLA compliance (7 days): 100% (1 met, 0 breached, clocks that ended in the period)']));
     for (const prefix of ['tickets to rate:', 'planned changes coming up:']) expect(d.facts.some((f) => f.startsWith(prefix)), prefix).toBe(true);
     for (const needle of [BETA, BETA_CODE, ids.b, numbers.b1!, `Beta firewall PM ${S}`, `Beta site visit ${S}`]) expect(text(d)).not.toContain(needle);
     const month = (await asAlpha((ctx) => toolByName('dashboard_kpis')!.run(ctx, { days: 30 }))) as { link: string };

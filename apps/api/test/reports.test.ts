@@ -17,6 +17,7 @@ import { computeNextRun } from '@/modules/reports/schedules';
 import { executeSchedule } from '@/jobs/processors/reports';
 import { resolveDateRange } from '@/modules/reports/dates';
 import { ticketKpis, breakdown, responsiveness, backlogAgeing, arrivalHeatmap, AGE_ORDER } from '@/modules/reports/analytics';
+import { SLA_COMPLIANCE_TARGET } from '@itsm/shared';
 
 const suffix = Math.random().toString(36).slice(2, 8);
 const ids = { adminUser: '', customerA: '', customerB: '', service: '', contract: '', entitlement: '', p1: '', p2: '', p3: '', p4: '', customerUser: '', schedule: '', mspSchedule: '', customerC: '', amcService: '', amcTicket: '' };
@@ -228,7 +229,9 @@ describe('dashboards', () => {
     expect(c.contracts.length).toBe(1);
     expect(c.entitlements[0]?.used).toBe(6.5);
     expect(c.serviceTeam.accountManager?.name).toBe(admin.name);
-    expect(c.sla.days30.totals).toBeDefined();
+    // The SLA block is the dashboards' figure (resolution clocks that ended in the period) with its per-priority rows.
+    expect(typeof c.sla.met).toBe('number');
+    expect(Array.isArray(c.sla.byPriority)).toBe(true);
     // trends for a portal user are pinned to their customer
     const t = await asPortal((ctx) => dash.trends(ctx, { customerId: ids.customerB, from: today, to: today }));
     expect(t.customerId).toBe(ids.customerA);
@@ -244,6 +247,9 @@ describe('report definitions', () => {
     expect(out.result.rows[0]).toHaveProperty('priority');
     expect(out.result.rows[0]).toHaveProperty('metric');
     expect(out.result.summary?.find((s) => s.label === 'Overall compliance')).toBeTruthy();
+    // The printed documents keep their own definition (clocks started in the period, every metric) and colour it with the shared thresholds.
+    expect(out.result.summary?.find((s) => s.label === 'Overall compliance')?.target).toBe(SLA_COMPLIANCE_TARGET);
+    expect(out.result.charts?.find((c) => c.type === 'gauge')).toMatchObject({ target: SLA_COMPLIANCE_TARGET, subtitle: `Target ${SLA_COMPLIANCE_TARGET}%` });
     const resolution = out.result.rows.filter((r) => r.metric === 'Resolution');
     expect(resolution.reduce((s, r) => s + Number(r.met), 0)).toBe(2);
   });

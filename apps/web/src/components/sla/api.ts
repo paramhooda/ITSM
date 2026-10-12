@@ -76,8 +76,13 @@ export interface ComplianceGroup {
 }
 
 export interface Compliance {
+  /** Clocks started in the period, every metric (the policy screens' and the reports' definition). */
   totals: { met: number; breached: number; running: number; paused: number; cancelled: number; overdueRunning: number; completed: number; compliancePct: number | null; avgElapsedMinutes: number | null };
   groups: ComplianceGroup[];
+  /** `GET /sla/compliance` only: the dashboards' figure (resolution clocks that ended in the period) over whole days, so its doors reproduce. */
+  resolution?: { met: number; breached: number; compliancePct: number | null };
+  period?: { days: number; from: string; to: string };
+  customerId?: string | null;
 }
 
 export function usageSummary(u: SlaPolicyUsage) {

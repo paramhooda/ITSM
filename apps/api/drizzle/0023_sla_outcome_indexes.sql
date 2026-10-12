@@ -1,0 +1,3 @@
+CREATE INDEX "ticket_slas_completed_at_idx" ON "ticket_slas" USING btree ("completed_at") WHERE "ticket_slas"."completed_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "ticket_slas_breached_at_idx" ON "ticket_slas" USING btree ("breached_at") WHERE "ticket_slas"."breached_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "tickets_resolved_at_idx" ON "tickets" USING btree ("resolved_at") WHERE "tickets"."resolved_at" IS NOT NULL;

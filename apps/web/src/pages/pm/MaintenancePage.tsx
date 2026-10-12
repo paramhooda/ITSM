@@ -8,7 +8,8 @@ import { FIELD_MODULES } from '@/layouts/modules';
 import { InsightBand } from '@/components/dashboards/InsightBand';
 import { Panel, Segmented } from '@/components/dashboards/Panel';
 import { BreakdownBar } from '@/components/dashboards/BreakdownBar';
-import { SlaGauge } from '@/components/dashboards/SlaGauge';
+import { OutcomeDonut, toneToKpi } from '@/components/dashboards/OutcomeDonut';
+import type { ComplianceTone } from '@itsm/shared';
 import { Menu } from '@/components/Menu';
 import { useListState } from '@/hooks/useListState';
 import { useLookups, useEngineers, useCustomersLookup } from '@/hooks/useLookups';
@@ -26,6 +27,10 @@ import { CompleteOccurrenceDialog, RescheduleOccurrenceDialog, CancelOccurrenceD
 import { ProgramForm } from '@/components/pm/ProgramForm';
 import { ProgramDrawer } from '@/components/pm/ProgramDrawer';
 import { PM_STATUSES, PM_STATUS_LABELS, FREQUENCY_LABELS, type OccurrenceRow, type ProgramRow, type PmStatus, type PmFrequency } from '@/components/pm/types';
+
+/** On-time completion target of the maintenance schedule: 90 % reads as good, the band ten points below as a warning. */
+const ON_TIME_TARGET = 90;
+const onTimeTone = (pct: number | null | undefined): ComplianceTone | null => (pct === null || pct === undefined ? null : pct >= ON_TIME_TARGET ? 'good' : pct >= ON_TIME_TARGET - 10 ? 'warning' : 'critical');
 
 type Tab = 'schedule' | 'programs' | 'performance';
 const TABS: { value: Tab; label: string }[] = [
@@ -237,7 +242,7 @@ export default function MaintenancePage() {
                       { label: 'Due in 30 days', value: fmtNumber(s.upcoming.length), icon: <CalendarDays className="h-4 w-4" />, hint: 'coming up next', onClick: () => set({ tab: 'schedule', view: undefined, overdue: undefined, status: 'planned,scheduled,rescheduled', from: ymd(new Date()), to: ymd(new Date(Date.now() + 30 * 86_400_000)) }) },
                       { label: 'Missed · 12 mo', value: fmtNumber(s.counts.missed), tone: s.counts.missed ? 'bad' : 'good', icon: <CalendarX2 className="h-4 w-4" />, hint: 'never completed', onClick: () => set({ tab: 'schedule', view: undefined, status: 'missed', from: undefined, to: undefined, overdue: undefined }), active: state.status === 'missed' },
                       { label: 'Completed · 12 mo', value: fmtNumber(s.counts.completed), tone: 'good', icon: <BadgeCheck className="h-4 w-4" />, hint: `completion ${fmtPct(s.completionPct, 0)}`, onClick: () => set({ tab: 'schedule', view: undefined, status: 'completed', from: undefined, to: undefined, overdue: undefined }), active: state.status === 'completed' },
-                      { label: 'On time', value: fmtPct(s.onTimePct, 0), tone: s.onTimePct === null ? 'default' : s.onTimePct >= 90 ? 'good' : s.onTimePct >= 80 ? 'warn' : 'bad', icon: <CheckCircle2 className="h-4 w-4" />, hint: 'completed within the grace window', onClick: () => set({ tab: 'performance' }, false) },
+                      { label: 'On time', value: fmtPct(s.onTimePct, 0), tone: toneToKpi(onTimeTone(s.onTimePct)), icon: <CheckCircle2 className="h-4 w-4" />, hint: 'completed within the grace window', onClick: () => set({ tab: 'performance' }, false) },
                     ]
                   : []
               }
@@ -249,7 +254,7 @@ export default function MaintenancePage() {
                     </Panel>
                     <Panel title="On-time completion" subtitle="Share of completed occurrences done within the grace window">
                       <div className="flex items-center justify-center py-2">
-                        <SlaGauge pct={s.onTimePct} met={s.counts.completed} breached={s.counts.missed} label="On time" target={90} metLabel="completed" breachedLabel="missed" />
+                        <OutcomeDonut title="On-time completion" pct={s.onTimePct} digits={0} tone={onTimeTone(s.onTimePct)} centerLabel={`of ${fmtNumber(s.onTime.onTime + s.onTime.late)} completed`} emptyText="No occurrence completed yet" good={{ label: 'On time', value: s.onTime.onTime }} bad={{ label: 'Late', value: s.onTime.late }} />
                       </div>
                     </Panel>
                   </>

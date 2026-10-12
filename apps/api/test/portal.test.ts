@@ -17,6 +17,7 @@ import { addComment } from '@/modules/tickets/activity';
 import * as portal from '@/modules/portal/service';
 import { portalTicketStatsQuery } from '@/modules/portal/schemas';
 import { pendingForPortal } from '@/modules/surveys/portal';
+import { ValidationError } from '@/core/errors';
 
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const ids = {
@@ -426,6 +427,27 @@ describe('portal ticket list vocabulary', () => {
     expect(Object.keys(list.items[0]!)).not.toContain('customerName');
     const toRate = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, status: 'rate' }));
     expect(toRate.items.map((t) => t.id)).toEqual([resolved]);
+  });
+
+  it('accepts the SLA outcome keys (the home\'s compliance doors), refuses the window alone, and the rows stay the portal\'s own', async () => {
+    // The resolved ticket and the reopened one (reopened behind the engine, its clock still reads met) ended their resolution clocks today; ticket A carries the breached flag.
+    expect(await count({ statusCategory: 'any', slaOutcome: 'met', slaEndedFrom: day(0), slaEndedTo: day(0) })).toBe(2);
+    expect(await count({ statusCategory: 'any', slaOutcome: 'breached', slaEndedFrom: day(0), slaEndedTo: day(0) })).toBe(1);
+    expect(await count({ statusCategory: 'any', slaOutcome: 'met', slaEndedFrom: day(-3), slaEndedTo: day(-1) })).toBe(0);
+    // Without `statusCategory=any` the open categories apply: a met clock on a resolved ticket is hidden, the reopened one shows.
+    expect(await count({ slaOutcome: 'met', slaEndedFrom: day(0), slaEndedTo: day(0) })).toBe(1);
+    await expect(count({ statusCategory: 'any', slaEndedFrom: day(0) })).rejects.toBeInstanceOf(ValidationError);
+    await expect(stats({ slaEndedTo: day(0) })).rejects.toBeInstanceOf(ValidationError);
+    const s = await stats({ statusCategory: 'any', slaOutcome: 'breached', slaEndedFrom: day(0), slaEndedTo: day(0) });
+    expect(s.total).toBe(1);
+    expect(s.breached).toBe(1);
+    const list = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, statusCategory: 'any', slaOutcome: 'breached', slaEndedFrom: day(0), slaEndedTo: day(0) }));
+    expect(list.items.map((t) => t.id)).toEqual([ids.ticketA]);
+    expect(Object.keys(list.items[0]!)).not.toContain('customerName');
+    expect(portalTicketStatsQuery.parse({ slaOutcome: 'met', slaEndedFrom: day(0), slaEndedTo: day(0) })).toMatchObject({ slaOutcome: 'met' });
+    expect(portalTicketStatsQuery.safeParse({ slaOutcome: 'late' }).success).toBe(false);
+    // Another organisation reads nothing through the same door.
+    expect(await asB((ctx) => portal.countPortalTickets(ctx, { statusCategory: 'any', slaOutcome: 'breached', slaEndedFrom: day(0), slaEndedTo: day(0) }))).toBe(0);
   });
 
   it('the stats tiles and chips never move each other; the list total follows the condition', async () => {

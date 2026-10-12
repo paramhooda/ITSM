@@ -11,7 +11,9 @@
  * customer (B) owns one asset that must never leak into A's portal.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
+import { resolutionCompliance } from '@/modules/sla/compliance';
+import { todayStr, addDays } from '@/core/overview';
 import { withSystem, closeDb, schema, type Tx } from '@/db/client';
 import { runAs, type Ctx } from '@/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '@/core/principal';
@@ -180,9 +182,15 @@ describe.skipIf(!hasDb)('module overviews (database)', () => {
     expect(o.attention.length).toBeLessThanOrEqual(10);
     // The list keeps the ten customers that need attention most; on a database other suites populated, A may rank below them.
     const a = o.attention.find((r) => r.id === ids.customerA);
+    // The 30-day compliance figures are the one helper's (resolution clocks that ended in the window the payload names).
+    expect(o.slaWindow).toEqual({ days: 30, from: addDays(todayStr(), -29), to: todayStr() });
+    const helperA = await asAdmin((ctx) => resolutionCompliance(ctx, { from: o.slaWindow.from, to: o.slaWindow.to, fence: sql`AND t.customer_id = ${ids.customerA}::uuid` }));
+    const rowA = o.slaByCustomer.find((r) => r.id === ids.customerA);
+    if (helperA.met + helperA.breached > 0) expect(rowA).toMatchObject({ met: helperA.met, breached: helperA.breached, compliancePct: helperA.compliancePct });
+    else expect(rowA).toBeUndefined();
     if (a) {
       expect(a).toMatchObject({ name: `Overview Customer A ${suffix}`, code: `OVWA${suffix}`.toUpperCase(), openTickets: 1, openP1: 1, breached: 0, contractsExpiring60d: 1, entitlementsOverThreshold: 1 });
-      expect(a.slaCompliance30d === null || typeof a.slaCompliance30d === 'number').toBe(true);
+      expect(a.slaCompliance30d).toBe(helperA.compliancePct);
     } else {
       expect(o.attention).toHaveLength(10);
     }

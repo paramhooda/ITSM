@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { complianceTone } from '@itsm/shared';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ExternalLink, Boxes, Server, Ticket, Users, Mail, Phone, MessageSquare, Info, Building2, Link2, Power } from 'lucide-react';
@@ -13,7 +14,7 @@ import { useListState } from '@/hooks/useListState';
 import { useLookups } from '@/hooks/useLookups';
 import { useAuthStore } from '@/stores/auth';
 import { useUiStore } from '@/stores/ui';
-import { fmtDate, fmtDateTime, relativeTime, titleCase, fmtBytes } from '@/lib/format';
+import { fmtDate, fmtDateTime, relativeTime, titleCase, fmtBytes, fmtPct } from '@/lib/format';
 import { CustomerForm, type CustomerPayload } from '@/components/customers/CustomerForm';
 import { SiteForm, type SitePayload } from '@/components/customers/SiteForm';
 import { ContactForm, type ContactPayload } from '@/components/customers/ContactForm';
@@ -238,14 +239,16 @@ export default function CustomerDetailPage() {
 
 // ---------------------------------------------------------------- at a glance
 
+const GLANCE_TONE: Record<'good' | 'warning' | 'critical' | 'none', 'good' | 'warn' | 'bad' | undefined> = { good: 'good', warning: 'warn', critical: 'bad', none: undefined };
+
 /** What an account manager checks first: open work, service levels, coverage, footprint. */
 function glance(c: CustomerDetail, o: CustomerOverview | undefined, loading: boolean): { label: string; value: string; tone?: 'good' | 'warn' | 'bad'; hint?: string }[] {
   const sla = o?.sla30d;
   return [
     { label: 'Open tickets', value: String(c.counts.openTickets), tone: c.counts.openTickets > 0 ? 'warn' : undefined, hint: `${c.counts.totalTickets} total` },
     sla
-      ? { label: 'SLA breached · 30d', value: String(sla.breached), tone: sla.breached > 0 ? 'bad' : sla.met > 0 ? 'good' : undefined, hint: sla.compliancePct === null ? 'No SLA targets closed in the last 30 days' : `${sla.compliancePct}% compliance · ${sla.met} met` }
-      : { label: 'SLA breached · 30d', value: loading ? '…' : '—' },
+      ? { label: 'SLA compliance · 30d', value: fmtPct(sla.compliancePct, 1), tone: GLANCE_TONE[complianceTone(sla.compliancePct) ?? 'none'], hint: sla.compliancePct === null ? 'No resolution clock ended in the last 30 days' : `${sla.met} met · ${sla.breached} breached` }
+      : { label: 'SLA compliance · 30d', value: loading ? '…' : '—' },
     { label: 'Active contracts', value: String(c.counts.activeContracts), tone: c.counts.activeContracts === 0 && c.isActive ? 'warn' : undefined, hint: `${c.counts.contracts} total` },
     { label: 'Sites', value: String(c.counts.sites) },
     { label: 'Contacts', value: String(c.counts.contacts) },

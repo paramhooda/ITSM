@@ -9,6 +9,8 @@ import { withSystem, closeDb, schema, type Tx } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { createTicket, resolveTicket } from '../src/modules/tickets/service';
+import { statsQuerySchema } from '../src/modules/tickets/schemas';
+import { ValidationError } from '../src/core/errors';
 import { ticketStats, countTickets, groupTickets, TILE_KEYS, STATUS_KEYS, strip } from '../src/modules/tickets/list';
 import { toDay, addDays } from '../src/modules/reports/dates';
 
@@ -252,6 +254,30 @@ describe('ticket stats', () => {
     expect(s.total).toBe(1);
     expect(s.open).toBe(2);
     expect(s.byStatusCategory).toEqual({ new: 2, resolved: 1 });
+  });
+
+  it('slaOutcome with slaEndedFrom/To is a scope key of the list: it narrows total, the tiles and the chips with it, and the window alone is refused', async () => {
+    const today = toDay(new Date());
+    // t1 carries the breached flag (open, breached_at today); t3 was past due when it was resolved above, so the engine closed its clock
+    // as breached (late, completed_at and breached_at today); no clock of this customer was met.
+    const met = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, slaOutcome: 'met', slaEndedFrom: today, slaEndedTo: today }));
+    expect(met.total).toBe(0);
+    expect([met.open, met.breached, met.atRisk]).toEqual([0, 0, 0]);
+    const breached = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, slaOutcome: 'breached', slaEndedFrom: today, slaEndedTo: today }));
+    expect(breached.total).toBe(2);
+    // The tiles and the chips follow the outcome like any scope key: one of the two is still open and flagged, the other is resolved.
+    expect([breached.open, breached.breached, breached.atRisk]).toEqual([1, 1, 0]);
+    expect(breached.byStatusCategory).toEqual({ new: 1, resolved: 1 });
+    // Yesterday's window holds neither; the outcome without a window is every clock that ever ended that way.
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, slaOutcome: 'breached', slaEndedFrom: addDays(today, -1), slaEndedTo: addDays(today, -1) }))).toBe(0);
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, slaOutcome: 'breached' }))).toBe(2);
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, slaOutcome: 'met' }))).toBe(0);
+    // The pair rule lives in buildWhere, so the list, the count and the stats refuse the window alone the same way.
+    await expect(asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, slaEndedFrom: today }))).rejects.toBeInstanceOf(ValidationError);
+    await expect(asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, slaEndedTo: today }))).rejects.toBeInstanceOf(ValidationError);
+    // The route schema accepts the three keys and keeps the stats schema derivable (the objects stay unrefined).
+    expect(statsQuerySchema.parse({ slaOutcome: 'met', slaEndedFrom: today, slaEndedTo: today })).toEqual({ slaOutcome: 'met', slaEndedFrom: today, slaEndedTo: today });
+    expect(statsQuerySchema.safeParse({ slaOutcome: 'late' }).success).toBe(false);
   });
 
   it('a portal user only sees their own customer and cannot name another one', async () => {

@@ -101,6 +101,8 @@ export interface ProgramDetail extends ProgramRow {
 export interface PmSummary {
   range: { from: string; to: string };
   counts: { planned: number; scheduled: number; rescheduled: number; completed: number; missed: number; cancelled: number; total: number };
+  /** Completed occurrences done within the grace window, and the rest (late): the two segments of the on-time ring. */
+  onTime: { onTime: number; late: number };
   onTimePct: number | null;
   completionPct: number | null;
   perCustomer: { customerId: string; customerName: string | null; programs: number; planned: number; completed: number; missed: number; onTime: number; onTimePct: number | null }[];

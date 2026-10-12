@@ -183,6 +183,9 @@ describe('dashboards', () => {
     expect(d.deltas.open).toEqual({ current: 2, previous: 0, deltaPct: null });
     expect(d.deltas.openedInPeriod.current).toBe(4);
     expect(d.deltas.resolvedInPeriod.current).toBe(2);
+    // The compliance delta reads the sla block (current) against its previous window, as the Overview's does.
+    expect(d.deltas.slaCompliancePct.current).toBe(d.sla.compliancePct);
+    expect(d.deltas.slaCompliancePct.previous).toBe(d.sla.previous?.compliancePct ?? null);
     // Open tickets by priority carry the option key the older portal links used, ordered by level; by type carries the breached share.
     expect(t.byPriority.map((p) => [p.key, p.count, p.breached])).toEqual([['p1', 2, 0]]);
     expect(t.byType).toEqual([{ type: 'incident', count: 2, breached: 0 }]);
@@ -192,10 +195,10 @@ describe('dashboards', () => {
     expect(d.ageing.map((a) => a.bucket)).toEqual([...AGE_ORDER]);
     expect(d.ageing.reduce((n, a) => n + a.count, 0)).toBe(2);
     expect(d.byPriorityResponsiveness.map((r) => [r.priority, r.opened, r.resolved])).toEqual([['P1 - Critical', 2, 0], ['P4 - Low', 2, 2]]);
-    expect(Array.isArray(d.sla.days30.groups)).toBe(true);
-    expect(Array.isArray(d.sla.days90.groups)).toBe(true);
-    expect(typeof d.sla.days30.totals.met).toBe('number');
-    expect(d.sla.period.days).toBe(30);
+    // SLA compliance · Nd is the one helper's figure (resolution clocks that ended in the period) with the previous window, the open clocks now and the
+    // per-priority rows: the two tickets resolved today (both P4) closed their resolution clocks within target.
+    expect(d.sla).toMatchObject({ met: 2, breached: 0, compliancePct: 100, previous: { met: 0, breached: 0, compliancePct: null }, open: { atRisk: 0, breached: 0 } });
+    expect(d.sla.byPriority.map((r) => [r.key, r.met, r.breached, r.compliancePct])).toEqual([['p4', 2, 0, 100]]);
     // Upcoming: the visits coming up (two scheduled ahead and the requested one without a date), the occurrences planned today and in twelve days.
     expect(d.upcoming.horizonDays).toBe(90);
     expect(d.upcoming.counts).toEqual({ visits: 3, maintenance: 2, changes: 0, approvals: null });
@@ -258,7 +261,7 @@ describe('dashboards', () => {
     expect(d.series.at(-1)!.opened).toBeGreaterThanOrEqual(1);
   });
 
-  it('amc(): completed-work series, status breakdowns in lifecycle order and the 30-day resolution SLA', async () => {
+  it('amc(): completed-work series, status breakdowns in lifecycle order and the SLA compliance block', async () => {
     const d = await asAdmin((ctx) => amc(ctx));
     expect(d.series).toHaveLength(30);
     expect(d.series.at(-1)?.day).toBe(today);
@@ -266,9 +269,10 @@ describe('dashboards', () => {
     expect(d.visitsByStatus.map((r) => r.status)).toEqual(['requested', 'scheduled', 'in_progress', 'completed', 'cancelled']);
     expect(d.pmByStatus.map((r) => r.status)).toEqual(['planned', 'scheduled', 'rescheduled', 'completed', 'missed', 'cancelled']);
     expect(d.visitsByStatus.every((r) => typeof r.count === 'number')).toBe(true);
-    expect(typeof d.sla30d.met).toBe('number');
-    expect(typeof d.sla30d.breached).toBe('number');
-    expect(d.sla30d.compliancePct === null || typeof d.sla30d.compliancePct === 'number').toBe(true);
+    expect(typeof d.sla.met).toBe('number');
+    expect(typeof d.sla.breached).toBe('number');
+    expect(d.sla.compliancePct === null || typeof d.sla.compliancePct === 'number').toBe(true);
+    expect(d.sla.open).toEqual({ atRisk: d.kpis.atRisk, breached: d.kpis.breached });
   });
 
   it('staff views honour the customer scope: every row belongs to the chosen customer', async () => {

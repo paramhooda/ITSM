@@ -7,7 +7,7 @@ import { fmtNumber, fmtDate, fmtDateTime, fmtDuration, fmtPct, relativeTime } fr
 import { cn, truncate } from '@/lib/utils';
 import { fmtRating, ratingTone } from '@/components/surveys/api';
 import { PRIORITY_LEVEL_COLORS, ANNOUNCEMENT_TYPE_COLORS } from '@/lib/statusColors';
-import { portalTicketListPath, type TicketListLink } from '@itsm/shared';
+import { portalTicketListPath, complianceTone, type TicketListLink } from '@itsm/shared';
 import { portalApi, pk, type PortalHome, type PortalLoadRow } from '@/components/portal/api';
 import { PORTAL_KE_STATUS_LABELS } from '@/components/known-errors/api';
 import { KpiGrid, type KpiItem } from './KpiGrid';
@@ -17,6 +17,8 @@ import { DonutChart } from './DonutChart';
 import { TicketMiniTable } from './TicketMiniTable';
 import { Panel, KpiSkeleton, Skeleton, RowList, Segmented, Stat, type RowItem } from './Panel';
 import { STATUS_COLORS } from './chartTheme';
+import { SlaComplianceDonut, slaOutcomeLink, SLA_PANEL_SUBTITLE } from './SlaComplianceDonut';
+import { toneToKpi } from './OutcomeDonut';
 import { useLocalControl } from './localControls';
 import { AgeingPanel, RateTable, flowPointHref } from './DeskPanels';
 
@@ -30,7 +32,9 @@ import { AgeingPanel, RateTable, flowPointHref } from './DeskPanels';
  * controls in a panel header (`flow`, `by`, `upcoming`) live in the URL and
  * change that panel alone. A number that cannot reproduce on a list (the SLA
  * compliance percentage, the satisfaction average and its sample, response and
- * resolution times, entitlement usage) is a figure.
+ * resolution times, entitlement usage) is a figure; the percentage's met and
+ * breached counts, and the same by priority, are doors (`slaOutcome` with the
+ * period as `slaEndedFrom/To`).
  */
 
 const TYPE_PLURAL: Record<string, string> = { incident: 'Incidents', request: 'Requests', problem: 'Problems', change: 'Changes' };
@@ -57,7 +61,7 @@ export function useCustomerHome(scope: { days: number; siteId: string }, enabled
 }
 
 const plural = (n: number, word: string, words = `${word}s`) => (n === 1 ? word : words);
-const complianceTone = (pct: number | null): 'default' | 'good' | 'warn' | 'bad' => (pct === null ? 'default' : pct >= 95 ? 'good' : pct >= 85 ? 'warn' : 'bad');
+const BADGE_TONE = { good: 'green', warning: 'amber', critical: 'red' } as const;
 
 export function CustomerDashboard({ days, siteId, sites }: { days: number; siteId: string; sites: { id: string; name: string }[] }) {
   const can = useAuthStore((s) => s.can);
@@ -90,8 +94,8 @@ export function CustomerDashboard({ days, siteId, sites }: { days: number; siteI
   const resolvedInPeriod = path({ ...any, status: 'any', resolvedFrom: d.period.from, resolvedTo: d.period.to });
   const toRate = path({ ...any, statusCategories: ['resolved', 'closed'], csat: 'pending' });
   const periodLabel = `${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}`;
-  const slaBlock = d.sla.period;
-  const sla = slaBlock.totals.compliancePct;
+  const sla = d.sla.compliancePct;
+  const period = { from: d.period.from, to: d.period.to };
   const spark = d.series.slice(Math.max(0, d.series.length - (days <= 7 ? 7 : 14)));
   const sparkDays = spark.length;
   // "5 incidents · 1 request · 1 change": every type the organisation has open, largest first as the API orders them.
@@ -109,7 +113,23 @@ export function CustomerDashboard({ days, siteId, sites }: { days: number; siteI
     },
     { label: 'Breached', value: fmtNumber(t.breached), icon: <Timer className="h-4 w-4" />, tone: t.breached > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.atRisk)} at risk`, spark: spark.map((s) => s.breaches), sparkLabel: `SLA breaches per day, last ${sparkDays} days`, to: path({ ...open, sla: 'breached' }), hintTo: path({ ...open, sla: 'at_risk' }) },
     { label: `Resolved · ${days}d`, value: fmtNumber(t.resolvedInPeriod), icon: <CheckCircle2 className="h-4 w-4" />, delta: d.deltas.resolvedInPeriod, hint: `${fmtNumber(t.openedInPeriod)} opened in the period`, spark: spark.map((s) => s.resolved), sparkLabel: `Tickets resolved per day, last ${sparkDays} days`, to: resolvedInPeriod, hintTo: openedInPeriod },
-    { label: `SLA compliance · ${days}d`, value: sla === null ? '—' : `${sla}%`, icon: <ShieldCheck className="h-4 w-4" />, tone: complianceTone(sla), hint: `${fmtNumber(slaBlock.totals.met)} met · ${fmtNumber(slaBlock.totals.breached)} breached` },
+    // The percentage is a figure with its delta and sparkline; its met and breached counts are doors (the same the donut's segments open).
+    {
+      label: `SLA compliance · ${days}d`,
+      value: fmtPct(sla, 1),
+      icon: <ShieldCheck className="h-4 w-4" />,
+      tone: toneToKpi(complianceTone(sla)),
+      delta: d.deltas.slaCompliancePct,
+      spark: spark.map((s) => s.compliancePct),
+      sparkLabel: `Daily resolution SLA compliance, last ${sparkDays} days`,
+      hint: (
+        <>
+          <Link to={path(slaOutcomeLink(any, period, 'met'))} className="hover:text-default hover:underline underline-offset-2 tnum" data-testid="sla-met-door">{fmtNumber(d.sla.met)} met</Link>
+          {' · '}
+          <Link to={path(slaOutcomeLink(any, period, 'breached'))} className="hover:text-default hover:underline underline-offset-2 tnum" data-testid="sla-breached-door">{fmtNumber(d.sla.breached)} breached</Link>
+        </>
+      ),
+    },
   ];
 
   // ---- ticket flow: the period's days (UTC, the list's cut); a bar opens that day's tickets
@@ -152,12 +172,18 @@ export function CustomerDashboard({ days, siteId, sites }: { days: number; siteI
     .slice(0, 8);
   const upcomingOptions = [{ value: 'all' as const, label: 'All' }, { value: 'visits' as const, label: 'Visits' }, { value: 'maintenance' as const, label: 'Maintenance' }, ...(u.changes ? [{ value: 'changes' as const, label: 'Changes' }] : [])];
 
-  // ---- figures: SLA by priority (clocks started in the period, every metric)
-  const slaGroups: RowItem[] = slaBlock.groups.slice(0, 6).map((g) => ({
-    key: g.key || g.label,
-    primary: g.label,
-    secondary: `${fmtNumber(g.met)} met · ${fmtNumber(g.breached)} breached${g.running ? ` · ${fmtNumber(g.running)} running` : ''}`,
-    right: g.compliancePct === null ? <span className="text-subtle">no clock ended</span> : <Badge color={g.compliancePct >= 95 ? 'green' : g.compliancePct >= 85 ? 'amber' : 'red'}>{g.compliancePct}%</Badge>,
+  // ---- SLA compliance by priority: the same two doors per priority (a "No priority" row is a figure)
+  const slaRows: RowItem[] = d.sla.byPriority.slice(0, 6).map((g) => ({
+    key: g.id ?? g.label,
+    leading: <Badge color={PRIORITY_LEVEL_COLORS[g.level] ?? g.color ?? 'slate'}>{g.label}</Badge>,
+    primary: (
+      <span className="text-[12.5px] text-muted tnum">
+        {g.id ? <Link to={path({ ...slaOutcomeLink(any, period, 'met'), priorityIds: [g.id] })} className="hover:text-default hover:underline underline-offset-2">{fmtNumber(g.met)} met</Link> : `${fmtNumber(g.met)} met`}
+        {' · '}
+        {g.id ? <Link to={path({ ...slaOutcomeLink(any, period, 'breached'), priorityIds: [g.id] })} className={cn('hover:underline underline-offset-2', g.breached > 0 ? 'text-red-600' : 'hover:text-default')}>{fmtNumber(g.breached)} breached</Link> : `${fmtNumber(g.breached)} breached`}
+      </span>
+    ),
+    right: g.compliancePct === null ? <span className="text-subtle">—</span> : <Badge color={BADGE_TONE[complianceTone(g.compliancePct) ?? 'good']}>{g.compliancePct}%</Badge>,
   }));
   const pending = d.csat.pending.count;
   const contractsPath = '/portal/services/contracts';
@@ -287,8 +313,14 @@ export function CustomerDashboard({ days, siteId, sites }: { days: number; siteI
             )}
           </div>
         </Panel>
-        <Panel title={`SLA by priority · ${days}d`} subtitle="Clocks started in the period, every metric" className="rise-in rise-in-4">
-          <RowList dense items={slaGroups} empty={`No clock started in the last ${days} days`} />
+        <Panel title={`SLA compliance · ${days}d`} subtitle={SLA_PANEL_SUBTITLE} className="rise-in rise-in-4" to={can('portal:contracts') ? '/portal/services/sla' : undefined} toLabel="Service levels">
+          <SlaComplianceDonut sla={d.sla} period={period} link={any} path={path} />
+          {slaRows.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-default" data-testid="sla-by-priority">
+              <div className="text-[12px] text-muted mb-1">By priority</div>
+              <RowList dense items={slaRows} />
+            </div>
+          )}
         </Panel>
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

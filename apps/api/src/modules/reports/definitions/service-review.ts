@@ -1,3 +1,4 @@
+import { SLA_COMPLIANCE_TARGET, SLA_COMPLIANCE_WARNING } from '@itsm/shared';
 import { ValidationError } from '@/core/errors';
 import { registerReport, findReport, isCustomerUser, type ReportParams, type ReportResult, type ReportSection, type ReportChart, type ReportColumn, type SummaryTile, type Insight } from '../registry';
 import { ticketKpis, breakdown, backlogAgeing, responsiveness, changeOutcomes, csatPart, knownErrorsPart, softwarePart, cabPart, runPart, previousRange, attachDeltas, afterHoursShare, scopeTimezone, type TicketKpis, type ChangeOutcomes, type KnownErrorsPart, type SoftwarePart } from '../analytics';
@@ -20,7 +21,9 @@ import { col, num, customerParam, dateRangeParam, boolParam, AGE_ORDER } from '.
  */
 
 const EXPIRING_DAYS = 90;
-const SLA_TARGET = 95;
+/** The compliance commitment and its warning band: the shared constants every dashboard colours with (the review counts clocks started in the period, every metric). */
+const SLA_TARGET = SLA_COMPLIANCE_TARGET;
+const SLA_WARNING = SLA_COMPLIANCE_WARNING;
 const CSAT_TARGET = 4;
 const FCR_TARGET = 70;
 const CHANGE_TARGET = 95;
@@ -237,9 +240,9 @@ registerReport({
     const licenceIssues = software ? software.overDeployed + software.unlicensed : 0;
 
     const card: Scorecard[] = [
-      { area: 'Service levels', metric: 'Overall SLA compliance', value: compliance === null ? 'n/a' : `${compliance}%`, note: `${summaryHint(sla, 'Overall compliance')}${complianceBefore !== null ? `; ${complianceBefore}% in the previous period` : ''}`, status: pctStatus(compliance, SLA_TARGET, 90) },
-      { area: 'Service levels', metric: 'Resolution compliance', value: resolution === null ? 'n/a' : `${resolution}%`, note: '', status: pctStatus(resolution, SLA_TARGET, 90) },
-      { area: 'Service levels', metric: 'Response compliance', value: response === null ? 'n/a' : `${response}%`, note: '', status: pctStatus(response, SLA_TARGET, 90) },
+      { area: 'Service levels', metric: 'Overall SLA compliance', value: compliance === null ? 'n/a' : `${compliance}%`, note: `${summaryHint(sla, 'Overall compliance')}${complianceBefore !== null ? `; ${complianceBefore}% in the previous period` : ''}`, status: pctStatus(compliance, SLA_TARGET, SLA_WARNING) },
+      { area: 'Service levels', metric: 'Resolution compliance', value: resolution === null ? 'n/a' : `${resolution}%`, note: '', status: pctStatus(resolution, SLA_TARGET, SLA_WARNING) },
+      { area: 'Service levels', metric: 'Response compliance', value: response === null ? 'n/a' : `${response}%`, note: '', status: pctStatus(response, SLA_TARGET, SLA_WARNING) },
       { area: 'Service levels', metric: 'SLA breaches', value: breaches, note: `${summaryValue(sla, 'Breached tickets') ?? 0} tickets`, status: breaches === 0 ? 'good' : breaches <= 3 ? 'watch' : 'attention' },
       { area: 'Responsiveness', metric: 'MTTA', value: fmtMin(kpis.mttaMinutes), note: 'mean time to first response, resolved tickets', status: lowStatus(kpis.mttaMinutes, 30, 60) },
       { area: 'Responsiveness', metric: 'MTTR', value: fmtMin(kpis.mttrMinutes), note: previous.mttrMinutes === null ? 'mean time to resolve' : `${previous.mttrMinutes} min in the previous period`, status: kpis.mttrMinutes === null || previous.mttrMinutes === null ? 'good' : kpis.mttrMinutes <= previous.mttrMinutes ? 'good' : kpis.mttrMinutes <= previous.mttrMinutes * 1.2 ? 'watch' : 'attention' },
@@ -265,7 +268,7 @@ registerReport({
     // ---- tiles: the six headline figures first, then the compact ones; every figure with a previous-period twin gains a delta
     const weekly = [...volume.rows].sort((a, b) => String(a.period).localeCompare(String(b.period))).slice(-12);
     const spark = (key: string) => weekly.map((r) => (r[key] === null || r[key] === undefined ? null : num(r[key])));
-    const complianceTone = compliance === null ? undefined : compliance >= SLA_TARGET ? 'good' : compliance >= 90 ? 'warn' : 'bad';
+    const complianceTone = compliance === null ? undefined : compliance >= SLA_TARGET ? 'good' : compliance >= SLA_WARNING ? 'warn' : 'bad';
     const summary: SummaryTile[] = [
       { label: 'SLA compliance', value: compliance ?? 'n/a', hint: `${plural(breaches, 'breach', 'breaches')}`, unit: 'pct', target: SLA_TARGET, tone: complianceTone },
       { label: 'Tickets opened', value: kpis.opened, spark: spark('opened') },

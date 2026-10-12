@@ -71,7 +71,7 @@ const ASSIGNEE_VIEWS = [
 ];
 const DOMAIN_LABELS: Record<string, string> = { general: 'General', noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk' };
 /** Every filter the page owns; sort/order/page live beside them in the URL but are not filters. */
-const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'statusId', 'priorityId', 'assignee', 'teamId', 'serviceId', 'siteId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat'];
+const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'statusId', 'priorityId', 'assignee', 'teamId', 'serviceId', 'siteId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'];
 /** The customer's satisfaction rating after resolution: rated, low, awaiting a reply, never surveyed. */
 const CSAT_OPTIONS: { value: string; label: string; dot: string | null }[] = [
   { value: 'rated', label: 'Rated', dot: 'green' },
@@ -389,6 +389,9 @@ export default function TicketListPage() {
       case 'createdTo': return (state.createdFrom || state.createdTo) && addApplied('created', `Created: ${dateRangeLabel(state.createdFrom, state.createdTo)}`, ['createdFrom', 'createdTo']);
       case 'resolvedFrom':
       case 'resolvedTo': return (state.resolvedFrom || state.resolvedTo) && addApplied('resolved', `Resolved: ${dateRangeLabel(state.resolvedFrom, state.resolvedTo)}`, ['resolvedFrom', 'resolvedTo']);
+      case 'slaOutcome':
+      case 'slaEndedFrom':
+      case 'slaEndedTo': return state.slaOutcome && addApplied('slaOutcome', `Resolution SLA ${state.slaOutcome === 'met' ? 'met' : 'breached'}: ${dateRangeLabel(state.slaEndedFrom, state.slaEndedTo)}`, ['slaOutcome', 'slaEndedFrom', 'slaEndedTo']);
       case 'isMajor': return state.isMajor === 'true' && addApplied('isMajor', 'Major incidents');
       case 'knownError': return state.knownError === 'true' && addApplied('knownError', 'Known errors');
       case 'changeType': return state.changeType && addApplied('changeType', `Change type: ${CHANGE_TYPE_OPTIONS.find((o) => o.value === state.changeType)?.label ?? state.changeType}`);

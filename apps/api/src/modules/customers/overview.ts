@@ -1,11 +1,13 @@
 import { eq, sql } from 'drizzle-orm';
 import type { Ctx } from '@/core/context';
 import { schema } from '@/db/client';
-import { type Bucket, countBuckets, num, pct1, todayStr, addDays } from '@/core/overview';
+import { type Bucket, countBuckets, num, todayStr, addDays } from '@/core/overview';
 import { optionLabels, sequential } from '@/modules/contracts/common';
 import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 import { entitlementSummary } from '@/modules/contracts/entitlements';
 import { slaPredicates } from '@/modules/sla/predicates';
+import { resolutionComplianceByCustomer } from '@/modules/sla/compliance';
+import { socCond } from '@/modules/dashboards/common';
 
 const cu = schema.customers;
 
@@ -26,10 +28,15 @@ export interface CustomerAttention {
 /**
  * GET /customers/overview: the customer base at a glance plus the accounts that
  * need attention (open P1/P2 work, SLA breaches, expiring contracts, hot entitlements).
+ * `slaCompliance30d` and `slaByCustomer` are the dashboard figure at 30 days
+ * (resolution clocks that ended in the last 30 whole days, the one helper every
+ * dashboard shows, under the caller's security fence); `slaWindow` carries the
+ * days so the breached count links with `slaOutcome=breached` and that window.
  */
 export async function customersOverview(ctx: Ctx) {
   ctx.require('customers:read');
   const today = todayStr();
+  const slaWindow = { days: 30, from: addDays(today, -29), to: today };
   const count = sql<number>`count(*)::int`;
   const open = sql`EXISTS (SELECT 1 FROM config_options o WHERE o.id = t.status_id AND o.status_category IN ('new', 'open', 'pending'))`;
   const breached = slaPredicates(sql`t.id`).breached;
@@ -44,10 +51,7 @@ export async function customersOverview(ctx: Ctx) {
       (await ctx.tx.execute(sql`
         SELECT t.customer_id AS id, count(*)::int AS open, count(*) FILTER (WHERE pr.level = 1)::int AS p1, count(*) FILTER (WHERE pr.level <= 2)::int AS p12, count(*) FILTER (WHERE ${breached})::int AS breached
         FROM tickets t LEFT JOIN config_options pr ON pr.id = t.priority_id WHERE ${open} GROUP BY t.customer_id`)).rows as Row[],
-    async () =>
-      (await ctx.tx.execute(sql`
-        SELECT s.customer_id AS id, count(*) FILTER (WHERE s.state = 'met')::int AS met, count(*) FILTER (WHERE s.state = 'breached')::int AS breached
-        FROM ticket_slas s WHERE s.metric = 'resolution' AND s.state IN ('met', 'breached') AND s.started_at >= now() - interval '30 days' GROUP BY s.customer_id`)).rows as Row[],
+    () => resolutionComplianceByCustomer(ctx, { from: slaWindow.from, to: slaWindow.to, fence: socCond(ctx) }),
     async () =>
       (await ctx.tx.execute(sql`
         SELECT k.customer_id AS id, count(*)::int AS expiring FROM contracts k
@@ -63,7 +67,7 @@ export async function customersOverview(ctx: Ctx) {
     }));
 
   const tickets = new Map(ticketRows.map((r) => [String(r.id), r]));
-  const sla = new Map(slaRows.map((r) => [String(r.id), r]));
+  const sla = slaRows;
   const contracts = new Map(contractRows.map((r) => [String(r.id), num(r.expiring)]));
   const hotEntitlements = new Map<string, number>();
   for (const e of ents.items) if (e.utilization.overThreshold || e.utilization.exhausted) hotEntitlements.set(e.customerId, (hotEntitlements.get(e.customerId) ?? 0) + 1);
@@ -71,8 +75,8 @@ export async function customersOverview(ctx: Ctx) {
   const rows = customersList.map((c) => {
     const t = tickets.get(c.id);
     const s = sla.get(c.id);
-    const met = num(s?.met);
-    const slaBreached = num(s?.breached);
+    const met = s?.met ?? 0;
+    const slaBreached = s?.breached ?? 0;
     return {
       id: c.id,
       name: c.name,
@@ -83,7 +87,7 @@ export async function customersOverview(ctx: Ctx) {
       breached: num(t?.breached),
       met,
       slaBreached,
-      slaCompliance30d: pct1(met, met + slaBreached),
+      slaCompliance30d: s?.compliancePct ?? null,
       contractsExpiring60d: contracts.get(c.id) ?? 0,
       entitlementsOverThreshold: hotEntitlements.get(c.id) ?? 0,
     };
@@ -109,6 +113,8 @@ export async function customersOverview(ctx: Ctx) {
     byType: bucket(typeRows),
     byIndustry: bucket(industryRows),
     attention,
+    /** The 30 whole days the compliance figures were counted over (the window of the breached-clocks door). */
+    slaWindow,
     slaByCustomer,
     contractsExpiring60d: contractRows.reduce((s, r) => s + num(r.expiring), 0),
     entitlementsOverThreshold: [...hotEntitlements.values()].reduce((s, n) => s + n, 0),

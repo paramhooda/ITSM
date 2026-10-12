@@ -8,7 +8,7 @@ import { KpiGrid } from './KpiGrid';
 import { TrendChart } from './TrendChart';
 import { BreakdownBar } from './BreakdownBar';
 import { DonutChart } from './DonutChart';
-import { SlaGauge } from './SlaGauge';
+import { SlaComplianceDonut, SLA_PANEL_SUBTITLE, type SlaFigures } from './SlaComplianceDonut';
 import { TicketMiniTable } from './TicketMiniTable';
 import { EntitlementAlerts, type EntitlementAlert } from './EntitlementAlerts';
 import { Panel, KpiSkeleton, Skeleton, Segmented, Stat, RowList } from './Panel';
@@ -45,7 +45,8 @@ export interface Amc {
   /** Fixed lifecycle order from the API; zero rows are dropped before rendering. */
   visitsByStatus: { status: string; count: number }[];
   pmByStatus: { status: string; count: number }[];
-  sla30d: { met: number; breached: number; compliancePct: number | null };
+  /** SLA compliance · Nd over the AMC domain: resolution clocks that ended in the period, and the open clocks now (= the tiles). */
+  sla: SlaFigures;
   /** Customer satisfaction on AMC tickets rated in the period. */
   csat30d?: { avg: number | null; responses: number; satisfiedPct: number | null };
 }
@@ -166,8 +167,8 @@ export function AmcDashboard({ days = 30, customerId = '' }: { days?: number; cu
         <Panel title="Completed work" subtitle={`${workView === 'visits' ? 'Site visits' : workView === 'pm' ? 'Preventive maintenance' : 'Site visits and preventive maintenance'} completed per day, ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}`} className="xl:col-span-2" to="/reports?tab=run&report=amc_utilization" toLabel="Utilization report" action={<Segmented size="sm" options={[{ value: 'both', label: 'Both' }, { value: 'visits', label: 'Visits' }, { value: 'pm', label: 'Maintenance' }]} value={workView} onChange={setWorkView} />}>
           <TrendChart data={work} x="day" kind="bar" stacked={false} series={[...(workView !== 'pm' ? [{ key: 'visitsCompleted', label: 'Visits completed' }] : []), ...(workView !== 'visits' ? [{ key: 'pmCompleted', label: 'Maintenance completed', color: STATUS_COLORS.good }] : [])]} height={220} />
         </Panel>
-        <Panel title={`Service levels · ${days} days`} subtitle="Resolution targets on AMC tickets opened in the period">
-          <SlaGauge pct={d.sla30d.compliancePct} met={d.sla30d.met} breached={d.sla30d.breached} label="Targets met" />
+        <Panel title={`SLA compliance · ${days}d`} subtitle={SLA_PANEL_SUBTITLE}>
+          <SlaComplianceDonut sla={d.sla} period={d.period} link={{ customerId: customerId || null, domain: 'amc' }} />
           <div className="mt-5 pt-4 border-t border-default grid grid-cols-2 gap-x-4 gap-y-4">
             <Stat label="Resolved this week" value={fmtNumber(k.resolvedThisWeek)} />
             <Stat label="Awaiting customer" value={fmtNumber(k.awaitingCustomer)} tone={k.awaitingCustomer > 0 ? 'warn' : 'default'} />

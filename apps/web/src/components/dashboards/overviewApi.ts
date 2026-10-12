@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { get } from '@/api/client';
 import type { Delta } from './types';
+import type { SlaFigures } from './SlaComplianceDonut';
 import type { ExpiringContract } from './ExpiringContracts';
 import type { EntitlementAlert } from './EntitlementAlerts';
 
@@ -148,6 +149,8 @@ export interface DeskKpis {
 
 export interface OverviewDesk {
   kpis: DeskKpis;
+  /** SLA compliance · Nd: resolution clocks that ended in the period (met and breached are doors) and the open clocks now; `kpis.slaCompliancePct` reads the same figure. */
+  sla: SlaFigures & { previous: { met: number; breached: number; compliancePct: number | null } };
   /** Open against the backlog at the start of the period; the period counts against the previous period. */
   deltas: { open: Delta; openedInPeriod: Delta; resolvedInPeriod: Delta; slaCompliancePct: Delta; breaches: Delta };
   /** Live and fenced; draws sparklines and charts only (the tiles are counted live). */

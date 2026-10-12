@@ -45,7 +45,7 @@ const SLA_LABELS: Record<string, string> = { breached: 'Breached', at_risk: 'At 
 const DEFAULTS = PORTAL_LIST_DEFAULTS;
 /** The status keys a chip writes exclusively. */
 const STATUS_KEYS = ['statusCategory', 'statusId', 'csat'];
-const FILTER_KEYS = ['q', 'type', ...STATUS_KEYS, 'priorityId', 'siteId', 'serviceId', 'slaState', 'mine', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo'];
+const FILTER_KEYS = ['q', 'type', ...STATUS_KEYS, 'priorityId', 'siteId', 'serviceId', 'slaState', 'mine', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'];
 /** The portal's older link keys (the home's "by priority" bars, the assistant, bookmarks): rewritten into the list keys on arrival. */
 const LEGACY_KEYS = ['status', 'priority'];
 const RATE_CATEGORIES = PORTAL_RATE_CATEGORIES;
@@ -200,6 +200,9 @@ export default function PortalTicketsPage() {
       case 'createdTo': return (state.createdFrom || state.createdTo) && addApplied('created', `Created: ${dateRangeLabel(state.createdFrom, state.createdTo)}`, ['createdFrom', 'createdTo']);
       case 'resolvedFrom':
       case 'resolvedTo': return (state.resolvedFrom || state.resolvedTo) && addApplied('resolved', `Resolved: ${dateRangeLabel(state.resolvedFrom, state.resolvedTo)}`, ['resolvedFrom', 'resolvedTo']);
+      case 'slaOutcome':
+      case 'slaEndedFrom':
+      case 'slaEndedTo': return state.slaOutcome && addApplied('slaOutcome', `Resolution SLA ${state.slaOutcome === 'met' ? 'met' : 'breached'}: ${dateRangeLabel(state.slaEndedFrom, state.slaEndedTo)}`, ['slaOutcome', 'slaEndedFrom', 'slaEndedTo']);
       default: return undefined;
     }
   };

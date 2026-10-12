@@ -9,7 +9,9 @@ import { expiringContracts } from '@/modules/contracts/service';
 import { entitlementSummary } from '@/modules/contracts/entitlements';
 import { buildDigest } from '@/modules/ai/digest';
 import { listQuery } from '@/modules/ai/helpers';
-import { BREACHED } from '@/modules/dashboards/common';
+import { BREACHED, socCond } from '@/modules/dashboards/common';
+import { resolutionCompliance } from '@/modules/sla/compliance';
+import { toDay, addDays } from '@/modules/reports/dates';
 
 /**
  * What each role's morning briefing is made of. Every definition reads
@@ -144,6 +146,11 @@ const serviceManager: BriefingDefinition = {
   allowed: (ctx) => ctx.can('dashboards:management'),
   async build(ctx, { now }) {
     const from = new Date(now.getTime() - 7 * DAY);
+    // The headline is the dashboards' figure (resolution clocks that ended in the last 7 whole days, the caller's security fence);
+    // the per-priority section keeps the policy tables' definition (clocks started in the period, every metric) and says so.
+    const today = toDay(now);
+    const window = { from: addDays(today, -6), to: today };
+    const resolution = await resolutionCompliance(ctx, { ...window, fence: socCond(ctx) });
     const compliance = await slaCompliance(ctx, { from: from.toISOString(), to: now.toISOString(), groupBy: 'priority' });
     const escalated = (await ctx.tx.execute(sql`
       SELECT t.id, t.number, t.title, t.escalation_level, cu.name AS customer, pr.label AS priority, u.name AS assignee
@@ -155,10 +162,10 @@ const serviceManager: BriefingDefinition = {
     const risky = await listTickets(ctx, listQuery({ open: true, breachRisk: 'high', sort: 'dueAt', order: 'asc', pageSize: 8 }));
     const major = await listMajor(ctx, { status: 'active', pageSize: 10 });
     const unhappy = await listTickets(ctx, listQuery({ open: true, sentiment: 'unhappy', sort: 'updatedAt', order: 'desc', pageSize: 6 }));
-    const pct = compliance.totals.compliancePct;
+    const pct = resolution.compliancePct;
     const worst = [...compliance.groups].filter((g) => g.compliancePct !== null).sort((a, b) => (a.compliancePct ?? 0) - (b.compliancePct ?? 0))[0];
     const headline = [
-      `SLA compliance over the last 7 days is ${pct === null ? 'not measurable yet' : `${pct}%`} (${compliance.totals.met} met, ${compliance.totals.breached} breached)${worst ? `; lowest ${worst.label} at ${worst.compliancePct}%` : ''}.`,
+      `Resolution SLA compliance over the last 7 days is ${pct === null ? 'not measurable yet' : `${pct}%`} (${resolution.met} met, ${resolution.breached} breached, clocks that ended in the period)${worst ? `; lowest by clocks started: ${worst.label} at ${worst.compliancePct}%` : ''}.`,
       `${plural(n(esc?.n), 'ticket')} ${n(esc?.n) === 1 ? 'is' : 'are'} escalated and ${plural(risky.total, 'ticket')} ${risky.total === 1 ? 'is' : 'are'} likely to breach.`,
       major.summary.active ? `${plural(major.summary.active, 'major incident')} ${major.summary.active === 1 ? 'is' : 'are'} active${major.summary.overdue ? `, ${major.summary.overdue} with an overdue stakeholder update` : ''}.` : 'No major incident is active.',
       ...(unhappy.total ? [`${plural(unhappy.total, 'customer')} sounded unhappy in their last message.`] : []),
@@ -166,7 +173,7 @@ const serviceManager: BriefingDefinition = {
     return {
       headline,
       sections: [
-        section('sla', 'SLA by priority (7 days)', compliance.groups.map((g) => ({ ref: g.label, title: g.compliancePct === null ? 'no completed clocks' : `${g.compliancePct}% compliance`, meta: `${g.met} met · ${g.breached} breached`, link: '/reports?report=sla_performance' }))),
+        section('sla', 'SLA by priority (7 days, clocks started in the period, every metric)', compliance.groups.map((g) => ({ ref: g.label, title: g.compliancePct === null ? 'no completed clocks' : `${g.compliancePct}% compliance`, meta: `${g.met} met · ${g.breached} breached`, link: '/reports?report=sla_performance' }))),
         section('escalated', 'Escalated', escalated.map((t) => ({ ref: t.number, title: t.title, meta: [`level ${t.escalation_level}`, t.priority, t.customer, t.assignee ?? 'unassigned'].filter(Boolean).join(' · '), link: `/tickets/${t.id}` })), n(esc?.n) ? null : 'No open ticket is escalated.'),
         section('risk', 'Likely to breach', risky.items.map((t) => ticketItem(t)), risky.total ? null : 'No open ticket is at high risk of breaching.'),
         ...(major.items.length ? [section('major', 'Major incidents', major.items.map((m) => ({ ref: m.number, title: m.title, meta: [m.customerName, m.commanderName ? `commander ${m.commanderName}` : null, m.overdue ? 'update overdue' : m.nextUpdateDueAt ? `next update ${fmt(m.nextUpdateDueAt)}` : null].filter(Boolean).join(' · '), link: `/tickets/${m.ticketId}?tab=major` })))] : []),

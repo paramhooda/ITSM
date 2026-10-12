@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { MAX_SLICES } from '@itsm/shared';
@@ -13,6 +13,8 @@ export interface DonutSlice {
   value: number;
   /** Option colour name (priority, severity, status) when the category owns a colour; otherwise the categorical slot by position. */
   color?: string | null;
+  /** An explicit hex (a status colour from the shared palette for a slice that means a state); wins over `color`. */
+  hex?: string;
   /** The list this slice drills down to (the same predicates the number was counted with). */
   href?: string;
 }
@@ -21,6 +23,10 @@ export interface DonutChartProps {
   slices: DonutSlice[];
   /** Caption under the centre total. */
   centerLabel?: string;
+  /** What the centre prints instead of the summed total (a percentage, in a text tone class); the legend keeps the counts. */
+  centerValue?: ReactNode;
+  /** The ring's accessible name (`role="img"` on the ring and `<title>` on its svg); defaults to the centre total and its caption ("24 open"). */
+  ariaLabel?: string;
   /** Diameter of the ring in pixels. */
   size?: number;
   emptyText?: string;
@@ -77,15 +83,18 @@ function DonutTooltip({ active, payload, valueFormatter }: { active?: boolean; p
  * most six slices then "Other"; colours come from the categorical slots in a
  * fixed order (or the category's own option colour); a slice or legend row
  * with an `href` is a door into the list it was counted on. When the largest
- * slices are too close to read, the same data renders as bars instead.
+ * slices are too close to read, the same data renders as bars instead. A slice
+ * that means a state carries its status hex (`hex`) and the centre can print a
+ * figure of its own (`centerValue`, a percentage in a text tone) while the
+ * legend keeps the counts.
  */
-export function DonutChart({ slices, centerLabel = 'total', size = 168, emptyText = 'Nothing to show', valueFormatter = (v) => fmtNumber(v), maxSlices = MAX_SLICES, otherHref, layout = 'auto', className }: DonutChartProps) {
+export function DonutChart({ slices, centerLabel = 'total', centerValue, ariaLabel, size = 168, emptyText = 'Nothing to show', valueFormatter = (v) => fmtNumber(v), maxSlices = MAX_SLICES, otherHref, layout = 'auto', className }: DonutChartProps) {
   const t = useChartTheme();
   const navigate = useNavigate();
   const shown = useMemo<Shown[]>(() => {
     const folded = foldSlices(slices.filter((s) => s.value > 0), maxSlices);
     const total = folded.reduce((n, s) => n + s.value, 0);
-    return folded.map((s, i) => ({ ...s, href: s.other ? otherHref : s.href, hex: s.other ? t.deemphasis : optionHex(s.color, t.dark, t.series[Math.min(i, t.series.length - 1)]!), pct: total ? Math.round((s.value / total) * 100) : 0 }));
+    return folded.map((s, i) => ({ ...s, href: s.other ? otherHref : s.href, hex: s.other ? t.deemphasis : s.hex ?? optionHex(s.color, t.dark, t.series[Math.min(i, t.series.length - 1)]!), pct: total ? Math.round((s.value / total) * 100) : 0 }));
   }, [slices, maxSlices, otherHref, t]);
   const total = shown.reduce((n, s) => n + s.value, 0);
   if (!shown.length || total === 0) return <div className="text-[13px] text-subtle py-6 text-center">{emptyText}</div>;
@@ -98,11 +107,13 @@ export function DonutChart({ slices, centerLabel = 'total', size = 168, emptyTex
       </div>
     );
   }
+  // `role="img"` hides the ring's children from assistive technology, so the name carries the figure the centre shows.
+  const name = ariaLabel ?? `${valueFormatter(total)} ${centerLabel}`;
   return (
     <div className={cn('flex flex-col sm:flex-row items-center gap-5', className)}>
-      <div className="relative shrink-0" style={{ width: size, height: size }} data-testid="donut">
+      <div className="relative shrink-0" style={{ width: size, height: size }} data-testid="donut" role="img" aria-label={name}>
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
+          <PieChart title={name} aria-label={name}>
             <Pie
               data={shown}
               dataKey="value"
@@ -126,8 +137,9 @@ export function DonutChart({ slices, centerLabel = 'total', size = 168, emptyTex
           </PieChart>
         </ResponsiveContainer>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-[22px] leading-none font-semibold tracking-[-0.03em] tnum text-default">{valueFormatter(total)}</span>
-          <span className="text-[11px] text-subtle mt-1 max-w-[70%] text-center truncate">{centerLabel}</span>
+          {centerValue ?? <span className="text-[22px] leading-none font-semibold tracking-[-0.03em] tnum text-default">{valueFormatter(total)}</span>}
+          {/* The caption stays inside the ring's hole (66 % of the diameter): it wraps to two lines before it reaches the ring. */}
+          <span className="text-[11px] text-subtle mt-1 max-w-[62%] text-center leading-tight line-clamp-2">{centerLabel}</span>
         </div>
       </div>
       <ul className="min-w-0 flex-1 w-full flex flex-col gap-1 text-[12.5px]" aria-label="Legend">

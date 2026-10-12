@@ -18,6 +18,7 @@ import { truncate } from '@/lib/utils';
 import { fmtRating, ratingTone } from '@/components/surveys/api';
 import { RatingBadge } from '@/components/surveys/RatingBadge';
 import { ticketListPath, type TicketListLink } from '@itsm/shared';
+import { SlaComplianceDonut, SLA_PANEL_SUBTITLE, type SlaFigures } from './SlaComplianceDonut';
 
 /** `GET /dashboards/engineer` (mirrors apps/api/src/modules/dashboards/service.ts engineer()). */
 export interface Engineer {
@@ -35,6 +36,8 @@ export interface Engineer {
   };
   approvalsPending: number;
   activity: { comments: number; minutes: number; resolved: number; breachedAssigned: number };
+  /** SLA compliance · Nd on the tickets assigned to me: resolution clocks that ended in the period, and my open clocks now. */
+  sla: SlaFigures;
   knowledge: { id: string; number: string; title: string; article_type: string; published_at: string | null; service_name: string | null }[];
   watched: TicketRow[];
   /** Ratings customers gave on tickets this engineer resolved in the period, with the latest comments. */
@@ -118,19 +121,22 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
             </div>
           )}
         </Panel>
+        <Panel title={`SLA compliance · ${days}d`} subtitle={SLA_PANEL_SUBTITLE}>
+          <SlaComplianceDonut sla={d.sla} period={d.period} link={{ ...scope, assignee: 'me' }} />
+        </Panel>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="Today" subtitle="Visits, maintenance and deadlines" to="/tickets/boards?board=tasks&scope=mine" toLabel="My board">
           <RowList items={todayItems.slice(0, 8)} empty="Nothing scheduled for today" dense />
         </Panel>
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="Resolved by me" subtitle={`Tickets you resolved per ${resolvedView === 'weekly' ? 'week' : 'day'}, ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}; a bar opens them`} className="xl:col-span-2" to={ticketListPath({ ...scope, assignee: 'me', status: 'any', resolvedFrom: d.period.from, resolvedTo: d.period.to })} toLabel="Resolved tickets" action={<Segmented size="sm" options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }]} value={resolvedView} onChange={setResolvedView} />}>
           <TrendChart data={resolvedFlow} x="day" kind="bar" series={[{ key: 'resolved', label: 'Resolved', color: STATUS_COLORS.good }]} height={170} pointHref={resolvedHref} />
         </Panel>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="My queue by priority" subtitle="Open tickets assigned to you; a slice opens them" to={ticketListPath(mine)} toLabel="All my tickets">
           <DonutChart size={130} centerLabel="assigned" emptyText="Nothing assigned to you" slices={queueByPriority} />
         </Panel>
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Panel title="Team queues" subtitle="Unassigned tickets in teams you belong to; a row opens the team's unassigned list" action={d.teamQueues.length > 1 ? <Select className="h-7 py-0 text-[12px] w-40" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} placeholder="All my teams" options={d.teamQueues.map((t) => ({ value: t.id, label: t.name }))} aria-label="Team" /> : undefined}>
           <RowList
             dense
@@ -143,6 +149,8 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
             <TicketMiniTable rows={d.watched} max={6} columns={['status', 'activity']} empty="No updates on tickets you watch" />
           </div>
         </Panel>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {d.knowledge.length > 0 ? (
           <Panel title="Knowledge for your work" subtitle="Recently published for services on your tickets" to="/knowledge" toLabel="Knowledge base">
             <RowList dense items={d.knowledge.map((a) => ({ key: a.id, href: `/knowledge/${a.id}`, primary: a.title, secondary: `${a.number} · ${a.article_type}${a.service_name ? ` · ${a.service_name}` : ''}` }))} />
@@ -152,21 +160,21 @@ export function EngineerDashboard({ days = 30, customerId = '' }: { days?: numbe
             <RowList dense items={[{ key: 'c', primary: 'Updates posted', right: fmtNumber(d.activity.comments) }, { key: 't', primary: 'Time logged', right: fmtDuration(d.activity.minutes) }, { key: 'r', primary: 'Resolved', right: <Badge color="green">{fmtNumber(d.activity.resolved)}</Badge> }]} />
           </Panel>
         )}
+        {d.csat && (
+          <Panel title="Customer feedback for you" subtitle={`Ratings on tickets you resolved, ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}`} to={ticketListPath({ ...scope, assignee: 'me', status: 'any', csat: 'rated' })} toLabel="Rated tickets" className="xl:col-span-2">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-3 lg:grid-cols-1 gap-4 content-start">
+                <Stat label="Average rating" value={fmtRating(d.csat.avg)} tone={ratingTone(d.csat.avg)} />
+                <Stat label="Responses" value={fmtNumber(d.csat.responses)} />
+                <Stat label="Satisfied" value={fmtPct(d.csat.satisfiedPct)} />
+              </div>
+              <div className="lg:col-span-2">
+                <RowList dense empty="No ratings yet" items={d.csat.recent.map((r) => ({ key: r.ticketId, href: `/tickets/${r.ticketId}`, primary: `${r.number} · ${r.title}`, secondary: r.comment ? `${r.customerName ? `${r.customerName} · ` : ''}“${truncate(r.comment, 110)}”` : (r.customerName ?? 'No comment left'), right: <RatingBadge rating={r.rating} /> }))} />
+              </div>
+            </div>
+          </Panel>
+        )}
       </div>
-      {d.csat && (
-        <Panel title="Customer feedback for you" subtitle={`Ratings on tickets you resolved, ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}`} to={ticketListPath({ ...scope, assignee: 'me', status: 'any', csat: 'rated' })} toLabel="Rated tickets">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="grid grid-cols-3 lg:grid-cols-1 gap-4 content-start">
-              <Stat label="Average rating" value={fmtRating(d.csat.avg)} tone={ratingTone(d.csat.avg)} />
-              <Stat label="Responses" value={fmtNumber(d.csat.responses)} />
-              <Stat label="Satisfied" value={fmtPct(d.csat.satisfiedPct)} />
-            </div>
-            <div className="lg:col-span-2">
-              <RowList dense empty="No ratings yet" items={d.csat.recent.map((r) => ({ key: r.ticketId, href: `/tickets/${r.ticketId}`, primary: `${r.number} · ${r.title}`, secondary: r.comment ? `${r.customerName ? `${r.customerName} · ` : ''}“${truncate(r.comment, 110)}”` : (r.customerName ?? 'No comment left'), right: <RatingBadge rating={r.rating} /> }))} />
-            </div>
-          </div>
-        </Panel>
-      )}
     </div>
   );
 }

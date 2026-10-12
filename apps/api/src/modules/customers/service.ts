@@ -10,6 +10,8 @@ import { contractStatusOptions, statusDisplay, daysToExpiry, optionLabels, userN
 import { COVERING_STATUSES } from '@/modules/contracts/schemas';
 import { customerEntitlements } from '@/modules/contracts/entitlements';
 import { slaStateFilterSql } from '@/modules/sla/engine';
+import { resolutionCompliance } from '@/modules/sla/compliance';
+import { custCond, socCond } from '@/modules/dashboards/common';
 import { csatFigures, hidesSoc } from '@/modules/surveys/figures';
 import { loadSurveyDefaults } from '@/modules/surveys/policy';
 import type { CustomerCreate, CustomerPatch, CustomerListQuery, CustomerSummaryQuery } from './schemas';
@@ -290,6 +292,7 @@ export async function customerOverview(ctx: Ctx, id: string) {
   const now = new Date();
   const today = todayStr(now);
   const in30 = addDays(today, 30);
+  const slaWindow = { days: 30, from: addDays(today, -29), to: today };
 
   const [byCategory, byPriority, recentTickets, contracts, entitlements, sla, activity, visits, pm, counts, statusMap] = await sequential([
     () => ctx.tx
@@ -313,13 +316,8 @@ export async function customerOverview(ctx: Ctx, id: string) {
       .where(eq(schema.contracts.customerId, id))
       .orderBy(asc(schema.contracts.endDate)),
     () => customerEntitlements(ctx, id),
-    () => ctx.tx
-      .select({
-        met: sql<number>`count(*) filter (where ${schema.ticketSlas.state} = 'met')::int`,
-        breached: sql<number>`count(*) filter (where ${schema.ticketSlas.state} = 'breached')::int`,
-      })
-      .from(schema.ticketSlas)
-      .where(and(eq(schema.ticketSlas.customerId, id), sql`${schema.ticketSlas.completedAt} >= now() - interval '30 days'`)),
+    // SLA compliance · 30d: resolution clocks that ended in the last 30 whole days, the one helper every dashboard shows (met and breached are doors).
+    () => resolutionCompliance(ctx, { from: slaWindow.from, to: slaWindow.to, fence: sql`${custCond(id)} ${socCond(ctx)}` }),
     () => ctx.tx
       .select({ id: schema.auditLog.id, occurredAt: schema.auditLog.occurredAt, userName: schema.auditLog.userName, entityType: schema.auditLog.entityType, entityId: schema.auditLog.entityId, entityLabel: schema.auditLog.entityLabel, action: schema.auditLog.action })
       .from(schema.auditLog)
@@ -346,8 +344,6 @@ export async function customerOverview(ctx: Ctx, id: string) {
     () => contractStatusOptions(ctx.tx),
   ]);
   const typeLabels = await optionLabels(ctx.tx, contracts.map((k) => k.typeId));
-  const met = sla[0]?.met ?? 0;
-  const breached = sla[0]?.breached ?? 0;
   const nextVisit = visits[0] ?? null;
   const nextPm = pm[0] ?? null;
   const thresholds = await loadSurveyDefaults(ctx.tx);
@@ -360,7 +356,7 @@ export async function customerOverview(ctx: Ctx, id: string) {
     recentTickets: recentTickets.rows,
     contracts: contracts.map((k) => ({ ...k, ...statusDisplay(k.status, statusMap), typeLabel: k.typeId ? typeLabels.get(k.typeId)?.label ?? null : null, daysToExpiry: daysToExpiry(k.endDate, now), covering: (COVERING_STATUSES as string[]).includes(k.status) })),
     entitlements,
-    sla30d: { met, breached, compliancePct: met + breached > 0 ? Math.round((met / (met + breached)) * 1000) / 10 : null },
+    sla30d: { met: sla.met, breached: sla.breached, compliancePct: sla.compliancePct, period: slaWindow },
     csat90d: { avg: csat.avg, responses: csat.responses, satisfiedPct: csat.satisfiedPct },
     recentActivity: activity,
     upcomingVisits: visits,

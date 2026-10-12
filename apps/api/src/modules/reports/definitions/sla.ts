@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import { SLA_COMPLIANCE_TARGET, SLA_COMPLIANCE_WARNING } from '@itsm/shared';
 import { registerReport, type ReportResult } from '../registry';
 import { slaCompliance } from '@/modules/sla/policies';
 import { csatFigures, hidesSoc } from '@/modules/surveys/figures';
@@ -6,8 +7,9 @@ import { loadSurveyDefaults } from '@/modules/surveys/policy';
 import { rows, customerCond, rangeCond, socCond, limitSql, pct, num, round1, col, totals, ticketJoins, minutesBetween, customerParam, dateRangeParam } from './helpers';
 
 const METRIC_LABEL: Record<string, string> = { acknowledgement: 'Acknowledgement', response: 'Response', restoration: 'Restoration', resolution: 'Resolution' };
-const SLA_TARGET = 95;
-const toneFor = (v: number | null, target = SLA_TARGET): 'good' | 'warn' | 'bad' | undefined => (v === null ? undefined : v >= target ? 'good' : v >= target - 5 ? 'warn' : 'bad');
+/** The compliance commitment and its warning band are the shared constants every dashboard colours with (the screen and the paper agree). These documents count clocks STARTED in the period, every metric, and say so. */
+const SLA_TARGET = SLA_COMPLIANCE_TARGET;
+const toneFor = (v: number | null): 'good' | 'warn' | 'bad' | undefined => (v === null ? undefined : v >= SLA_COMPLIANCE_TARGET ? 'good' : v >= SLA_COMPLIANCE_WARNING ? 'warn' : 'bad');
 
 // ---------------------------------------------------------------- sla_performance
 registerReport({

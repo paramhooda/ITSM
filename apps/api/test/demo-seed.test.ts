@@ -8,6 +8,8 @@ import { listQuerySchema } from '../src/modules/tickets/schemas';
 import { loadDemoData } from '../src/seed/demo-data';
 import { listResponses } from '../src/modules/surveys/service';
 import { responsesQuery } from '../src/modules/surveys/schemas';
+import { resolutionCompliance } from '../src/modules/sla/compliance';
+import { toDay, addDays } from '../src/modules/reports/dates';
 
 /**
  * Loads the demonstration dataset into the test database when it is empty
@@ -167,6 +169,22 @@ describe('demo dataset', () => {
     expect(await count('sites', `where customer_id = '${abc.id}' and is_active`)).toBe(4);
     // Pinned for every customer and inside its window, so the Announcements panel of the demo portal home is never empty.
     expect(await count('announcements', "where audience = 'customers' and is_active and cardinality(customer_ids) = 0 and starts_at <= now() and (ends_at is null or ends_at > now())")).toBeGreaterThanOrEqual(1);
+  });
+
+  it('gives ABC Manufacturing a resolution compliance donut that is never empty and equals a direct count of the seeded clocks', async () => {
+    const abc = await withSystem(async (tx) => (await tx.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.code, 'ABC')))[0]!);
+    const adminUser = await withSystem(async (tx) => (await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, 'admin@msp.local')))[0]!);
+    invalidatePrincipal(adminUser.id);
+    const principal = await loadPrincipal(adminUser.id);
+    const today = toDay(new Date());
+    const w = { from: addDays(today, -29), to: today };
+    const r = await runAs(principal!, { requestId: 'demo-seed-test', source: 'ui' }, (ctx) => resolutionCompliance(ctx, { ...w, fence: sql`AND t.customer_id = ${abc.id}::uuid` }));
+    // Closed tickets are spread over 120 days and drift with the reset date: no fixed minimum, only "something ended" and the direct count.
+    expect(r.met + r.breached).toBeGreaterThanOrEqual(1);
+    const win = (col: string) => `${col} >= ('${w.from}'::date)::timestamp at time zone 'UTC' and ${col} < ('${w.to}'::date + interval '1 day')::timestamp at time zone 'UTC'`;
+    expect(r.met).toBe(await count('ticket_slas s join tickets t on t.id = s.ticket_id', `where t.customer_id = '${abc.id}' and s.metric = 'resolution' and s.state = 'met' and ${win('s.completed_at')}`));
+    expect(r.breached).toBe(await count('ticket_slas s join tickets t on t.id = s.ticket_id', `where t.customer_id = '${abc.id}' and s.metric = 'resolution' and s.state = 'breached' and ${win('s.breached_at')}`));
+    expect(r.compliancePct).toBe(Math.round((r.met / (r.met + r.breached)) * 1000) / 10);
   });
 
   it('gives a field engineer visibility limited to granted customers', async () => {

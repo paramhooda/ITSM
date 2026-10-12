@@ -2,10 +2,13 @@ import { eq, and, asc, sql, inArray, gte, lte, desc } from 'drizzle-orm';
 import { SLA_METRICS, TICKET_TYPES, type SlaMetric, type TicketType } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { schema } from '@/db/client';
-import { NotFoundError, ValidationError, ConflictError } from '@/core/errors';
+import { NotFoundError, ValidationError, ConflictError, ForbiddenError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { addWorkingMinutes, CALENDAR_24X7, type CalendarDef } from '@/lib/calendar';
 import { contractStatusOptions, statusDisplay, sequential } from '@/modules/contracts/common';
+import { resolutionCompliance } from './compliance';
+import { toDay, addDays, daysBetween } from '@/modules/reports/dates';
+import { custCond, socCond, isCustomerUser } from '@/modules/dashboards/common';
 
 /**
  * SLA policy administration: policies, targets (ticket type x priority x metric),
@@ -588,3 +591,33 @@ export async function unusedPolicies(ctx: Ctx) {
   return items.filter((p) => !p.isDefault && p.usage.contracts + p.usage.contractServices + p.usage.catalogItems + p.usage.services === 0);
 }
 
+/**
+ * `GET /sla/compliance`: the policy figures (`slaCompliance`, clocks started in
+ * the period, every metric) plus `resolution`, the dashboards' figure over the
+ * request's `from`/`to` as whole days (the last 30 days by default). The
+ * customer is pinned: a customer principal reads their own organisation and a
+ * foreign `customerId` is refused; a staff caller's `customerId` goes through
+ * `requireCustomer` and their security fence applies.
+ */
+export async function complianceOverview(ctx: Ctx, params: ComplianceParams = {}) {
+  let customerId = params.customerId;
+  if (isCustomerUser(ctx)) {
+    const own = ctx.user.customerId;
+    if (!own) throw new ForbiddenError('Your account is not linked to a customer organisation');
+    if (customerId && customerId !== own) throw new ForbiddenError('You do not have access to this customer');
+    customerId = own;
+  } else if (customerId) ctx.requireCustomer(customerId);
+  const policy = await slaCompliance(ctx, { ...params, customerId });
+  const dayOf = (v: string | undefined, fallback: string) => {
+    if (!v) return fallback;
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) throw new ValidationError(`Invalid date: ${v}`);
+    return toDay(d);
+  };
+  const to = dayOf(params.to, toDay(new Date()));
+  const from = dayOf(params.from, addDays(to, -29));
+  if (from > to) throw new ValidationError('from must be on or before to');
+  const period = { days: daysBetween(from, to) + 1, from, to };
+  const resolution = await resolutionCompliance(ctx, { from, to, fence: sql`${custCond(customerId)} ${socCond(ctx)}` });
+  return { ...policy, customerId: customerId ?? null, period, resolution };
+}
