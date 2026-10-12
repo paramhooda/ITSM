@@ -84,6 +84,8 @@ export interface Scope {
   domains?: string[];
   /** Tickets assigned to one team (the NOC dashboard's team filter). */
   teamId?: string | null;
+  /** Tickets raised for one site of the customer (the portal home's site scope; the caller validates it belongs to the customer). */
+  siteId?: string | null;
 }
 
 export interface TicketKpis {
@@ -108,8 +110,9 @@ const typeCond = (s: Pick<Scope, 'type'>) => (s.type ? sql`AND t.type = ${s.type
 /** `AND t.domain IN (…)` when the scope names domains (an empty list keeps every domain). */
 export const domainCond = (s: Pick<Scope, 'domains'>) => (s.domains && s.domains.length ? sql`AND t.domain IN (${sql.join(s.domains.map((d) => sql`${d}`), sql`, `)})` : sql``);
 const teamCond = (s: Pick<Scope, 'teamId'>) => (s.teamId ? sql`AND t.assigned_team_id = ${s.teamId}::uuid` : sql``);
-/** Every scope condition but the period: customer, security fence, type, domains and team. */
-const scopeCond = (ctx: Ctx, s: Pick<Scope, 'customerId' | 'type' | 'domains' | 'teamId'>) => sql`${customerCond(s.customerId)} ${socCond(ctx)} ${typeCond(s)} ${domainCond(s)} ${teamCond(s)}`;
+const siteCond = (s: Pick<Scope, 'siteId'>) => (s.siteId ? sql`AND t.site_id = ${s.siteId}::uuid` : sql``);
+/** Every scope condition but the period: customer, security fence, type, domains, team and site. */
+const scopeCond = (ctx: Ctx, s: Pick<Scope, 'customerId' | 'type' | 'domains' | 'teamId' | 'siteId'>) => sql`${customerCond(s.customerId)} ${socCond(ctx)} ${typeCond(s)} ${domainCond(s)} ${teamCond(s)} ${siteCond(s)}`;
 const within = (col: ReturnType<typeof sql>, s: Scope) => sql`${col} >= ${s.from}::date AND ${col} < ${s.to}::date + interval '1 day'`;
 /** Assignments of a ticket resolved in the period; CASE keeps the subquery from running for the rest of the history the backlog counts need. */
 const assignmentsInRange = (s: Scope) => sql`CASE WHEN ${within(sql`t.resolved_at`, s)} THEN (SELECT count(*)::int FROM ticket_activities a WHERE a.ticket_id = t.id AND a.activity_type = 'assignment') ELSE 0 END`;
@@ -230,7 +233,7 @@ const msBefore = (d: Date) => new Date(d.getTime() - 1);
  * `createdFrom`/`createdTo` pair, so each bar carries the window it was counted
  * with and reproduces on the list.
  */
-export async function backlogAgeing(ctx: Ctx, s: Pick<Scope, 'customerId' | 'type' | 'domains' | 'teamId'>, at = new Date()): Promise<AgeBucket[]> {
+export async function backlogAgeing(ctx: Ctx, s: Pick<Scope, 'customerId' | 'type' | 'domains' | 'teamId' | 'siteId'>, at = new Date()): Promise<AgeBucket[]> {
   const edges = AGE_EDGES_DAYS.map((d) => new Date(at.getTime() - d * 86_400_000));
   const [e1, e3, e7, e30] = edges as [Date, Date, Date, Date];
   // lower bound inclusive, upper bound inclusive and one millisecond before the next bucket's lower bound

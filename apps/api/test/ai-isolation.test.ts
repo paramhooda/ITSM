@@ -251,6 +251,18 @@ describe('every portal-reachable tool answers for the user’s own organisation 
     expect(maint.visits).toEqual([]);
   });
 
+  it('dashboard_kpis in the portal reads the organisation’s home (never Beta’s), links to it with the period and states its tiles as facts', async () => {
+    const d = (await asAlpha((ctx) => toolByName('dashboard_kpis')!.run(ctx, { customer: BETA, view: 'management', days: 7 }))) as { view: string; link: string; facts: string[]; customer: { id: string } };
+    expect(d.view).toBe('customer');
+    expect(d.link).toBe('/?days=7');
+    expect(d.customer.id).toBe(ids.a);
+    expect(d.facts).toEqual(expect.arrayContaining(['open tickets now: 1', 'awaiting your reply: 0', 'opened in the last 7 days: 2', 'resolved in the last 7 days: 1', 'upcoming site visits (next 90 days): 0', 'upcoming maintenance (next 90 days): 1']));
+    for (const prefix of ['tickets to rate:', 'planned changes coming up:']) expect(d.facts.some((f) => f.startsWith(prefix)), prefix).toBe(true);
+    for (const needle of [BETA, BETA_CODE, ids.b, numbers.b1!, `Beta firewall PM ${S}`, `Beta site visit ${S}`]) expect(text(d)).not.toContain(needle);
+    const month = (await asAlpha((ctx) => toolByName('dashboard_kpis')!.run(ctx, { days: 30 }))) as { link: string };
+    expect(month.link).toBe('/');
+  });
+
   it('knowledge_search returns public and Alpha articles, never Beta’s or internal ones', async () => {
     const res = (await asAlpha((ctx) => toolByName('knowledge_search')!.run(ctx, { q: `Firewall ${S}`, customer: BETA, limit: 10, includeBody: true }))) as { items: { title: string; body?: string }[] };
     const titles = res.items.map((a) => a.title);

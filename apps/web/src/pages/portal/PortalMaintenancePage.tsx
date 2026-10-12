@@ -153,7 +153,8 @@ export default function PortalMaintenancePage({ section = 'upcoming' }: { sectio
     const d = view.data;
     if (section === 'upcoming') {
       const visits = d.upcoming.visits.map((v) => ({ kind: 'visit' as const, date: v.scheduledStart ?? new Date().toISOString(), visit: v, siteId: v.siteId, siteName: v.siteName }));
-      const pm = d.upcoming.occurrences.filter((o) => !o.fieldVisitId || !d.upcoming.visits.some((v) => v.id === o.fieldVisitId)).map((o) => ({ kind: 'pm' as const, date: o.date, occurrence: o, siteId: o.siteId, siteName: o.siteName }));
+      // An occurrence with an upcoming visit booked for it arrives as that visit (the API folds it, the same predicate the home's "N maintenance" counts with).
+      const pm = d.upcoming.occurrences.map((o) => ({ kind: 'pm' as const, date: o.date, occurrence: o, siteId: o.siteId, siteName: o.siteName }));
       return [...visits, ...pm].sort((a, b) => a.date.localeCompare(b.date));
     }
     const visits = d.past.visits.map((v) => ({ kind: 'visit' as const, date: v.actualEnd ?? v.scheduledStart ?? '', visit: v, siteId: v.siteId, siteName: v.siteName }));

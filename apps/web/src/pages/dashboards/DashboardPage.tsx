@@ -1,9 +1,8 @@
 import { Navigate } from 'react-router-dom';
-import { EmptyState, ErrorBlock } from '@/components/ui';
-import { DashboardHero, PeriodPicker } from '@/components/dashboards/Hero';
+import { ErrorBlock } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useListState } from '@/hooks/useListState';
-import { CustomerDashboard } from '@/components/dashboards/CustomerDashboard';
+import PortalHomePage from '@/pages/portal/PortalHomePage';
 import { DashboardFrame, useDashboardScope } from '@/components/dashboards/DashboardFrame';
 import { KpiSkeleton } from '@/components/dashboards/Panel';
 import { useOverview } from '@/components/dashboards/overviewApi';
@@ -92,23 +91,12 @@ function OverviewPage() {
   );
 }
 
-/** Role-aware landing page: customer users get their portal overview, staff the Overview; old `?view=` links redirect to the dashboard pages. */
+/** Role-aware landing page: customer users get the portal home (the organisation's dashboard on the same frame), staff the Overview; old `?view=` links redirect to the dashboard pages. */
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
-  const can = useAuthStore((s) => s.can);
-  const { state, set } = useListState();
+  const { state } = useListState();
   if (!user) return null;
-  if (user.userType === 'customer') {
-    const days = Number(state.days ?? 30) || 30;
-    return (
-      <div>
-        <DashboardHero title={greeting(user.name)} subtitle="Your tickets, service levels, contracts and upcoming work">
-          <PeriodPicker days={days} onChange={(d) => set({ days: d }, false)} />
-        </DashboardHero>
-        {can('portal:access') ? <CustomerDashboard days={days} /> : <EmptyState title="Portal access required" description="Ask your administrator to grant portal access." />}
-      </div>
-    );
-  }
+  if (user.userType === 'customer') return <PortalHomePage />;
   if (state.view) return <Navigate replace to={legacyViewPath(state)} />;
   return <OverviewPage />;
 }

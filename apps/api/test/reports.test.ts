@@ -221,8 +221,9 @@ describe('dashboards', () => {
     const c = await asPortal((ctx) => dash.customer(ctx));
     expect(c.customer.id).toBe(ids.customerA);
     expect(c.tickets.open).toBe(2);
-    expect(c.tickets.resolved30d).toBe(2);
-    expect(c.recentTickets.length).toBe(4);
+    expect(c.tickets.resolvedInPeriod).toBe(2);
+    // Your open tickets: the open ones only (two of the four are resolved).
+    expect(c.recentTickets.length).toBe(2);
     expect(c.recentTickets.every((t) => t.customer_id === ids.customerA)).toBe(true);
     expect(c.contracts.length).toBe(1);
     expect(c.entitlements[0]?.used).toBe(6.5);

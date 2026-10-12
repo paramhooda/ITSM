@@ -53,8 +53,8 @@ export const statsParamsForLink = (href: string): Record<string, string> => toSt
 
 /** The portal ticket list's defaults: the organisation's open tickets, newest activity first, 25 a page. */
 export const PORTAL_LIST_DEFAULTS: Record<string, string> = { statusCategory: TICKET_LIST_OPEN_CATEGORIES, sort: 'lastActivityAt', order: 'desc', pageSize: '25' };
-/** The types the portal list's pills name and its route accepts; any other `type` in a link is not a condition the page can apply, so it is dropped. */
-export const PORTAL_TICKET_TYPES = ['incident', 'request'] as const;
+/** The types the portal list's pills name and its route accepts (every type the organisation can see, so the All pill is the sum of the pills); any other `type` in a link is not a condition the page can apply, so it is dropped. */
+export const PORTAL_TICKET_TYPES = ['incident', 'request', 'problem', 'change'] as const;
 /** The statuses a ticket can be rated in: `csat=pending` on its own is the To rate door, so these categories stand in when a link carries no status key. */
 export const PORTAL_RATE_CATEGORIES = 'resolved,closed';
 
@@ -68,7 +68,7 @@ export const PORTAL_RATE_CATEGORIES = 'resolved,closed';
 export function toPortalParams(state: ListState): Record<string, string> {
   const p: Record<string, string> = {};
   if (state.q) p.q = state.q;
-  // The All pill is no filter, and a type the portal has no pill for (a problem or a change) is not sent: the route would refuse it.
+  // The All pill is no filter, and a type outside the portal's four is not sent: the route would refuse it.
   if (state.type && (PORTAL_TICKET_TYPES as readonly string[]).includes(state.type)) p.type = state.type;
   for (const k of PORTAL_TICKET_LINK_KEYS) if (k !== 'type' && state[k]) p[k] = state[k]!;
   if (state.mine === 'true') p.mine = 'true';

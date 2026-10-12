@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSET_LIFECYCLE, LICENCE_STATUSES, STATUS_CATEGORIES } from '@itsm/shared';
+import { ASSET_LIFECYCLE, LICENCE_STATUSES, STATUS_CATEGORIES, TICKET_TYPES } from '@itsm/shared';
 import { paginationSchema } from '@/core/pagination';
 import { boolQ, csvOf, dateParam } from '@/modules/tickets/schemas';
 import { SLA_STATES } from '@/modules/sla/predicates';
@@ -30,7 +30,8 @@ export const ticketListQuery = paginationSchema.extend({
   customerId: uuid.optional(),
   /** The portal status chip (alias): open, awaiting (status key pending_customer), resolved, closed, rate (resolved or closed with a live survey) or all. */
   status: z.enum(PORTAL_STATUS_CHIPS).optional(),
-  type: z.enum(['incident', 'request']).optional(),
+  /** Every ticket type: the organisation sees its problems and changes as well, so the list's type pills (and the home's open-by-type slices) cover all four. */
+  type: z.enum(TICKET_TYPES).optional(),
   q: z.string().max(200).optional(),
   siteId: uuid.optional(),
   /** Priority key (p1..p5) or id (alias), as the portal home's "by priority" bars linked to it. */

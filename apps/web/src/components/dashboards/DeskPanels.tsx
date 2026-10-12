@@ -29,8 +29,11 @@ export const AGEING_VIEWS: readonly AgeingView[] = ['all', 'breached'];
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 export const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
 
+/** How a link becomes a path: the staff list by default, the portal list (`portalTicketListPath`) on the portal home. */
+export type LinkPath = (link: TicketListLink) => string;
+
 /** The five-bucket backlog: within SLA and breached stacked per bucket, each segment opening the bucket's exact created window with its SLA state. */
-export function AgeingPanel({ ageing, link, view = 'all', onView, title = 'Backlog ageing', className, footer }: { ageing: AgeBucket[]; link: TicketListLink; view?: AgeingView; onView?: (v: AgeingView) => void; title?: string; className?: string; footer?: ReactNode }) {
+export function AgeingPanel({ ageing, link, view = 'all', onView, title = 'Backlog ageing', className, footer, path = ticketListPath }: { ageing: AgeBucket[]; link: TicketListLink; view?: AgeingView; onView?: (v: AgeingView) => void; title?: string; className?: string; footer?: ReactNode; path?: LinkPath }) {
   const open = ageing.reduce((n, a) => n + a.count, 0);
   const breached = ageing.reduce((n, a) => n + a.breached, 0);
   const old = ageing.filter((a) => a.bucket === '7-30 days' || a.bucket === '> 30 days').reduce((n, a) => n + a.count, 0);
@@ -38,7 +41,7 @@ export function AgeingPanel({ ageing, link, view = 'all', onView, title = 'Backl
   const window = (p: Record<string, unknown>) => ({ createdFrom: (p.createdFrom as string | null) ?? null, createdTo: (p.createdTo as string | null) ?? null });
   const subtitle = open === 0 ? 'Nothing open' : `${fmtNumber(open)} open · ${fmtNumber(breached)} breached · ${fmtNumber(old)} older than a week`;
   return (
-    <Panel title={title} subtitle={subtitle} to={ticketListPath(link)} toLabel="All open" className={className} action={onView ? <Segmented size="sm" options={[{ value: 'all', label: 'All open' }, { value: 'breached', label: 'Breached' }]} value={view} onChange={onView} /> : undefined}>
+    <Panel title={title} subtitle={subtitle} to={path(link)} toLabel="All open" className={className} action={onView ? <Segmented size="sm" options={[{ value: 'all', label: 'All open' }, { value: 'breached', label: 'Breached' }]} value={view} onChange={onView} /> : undefined}>
       <TrendChart
         data={open ? data : []}
         x="bucket"
@@ -48,7 +51,7 @@ export function AgeingPanel({ ageing, link, view = 'all', onView, title = 'Backl
         xFormatter={(v) => v}
         xInterval={0}
         series={view === 'breached' ? [{ key: 'breached', label: 'Breached', color: STATUS_COLORS.critical }] : [{ key: 'withinSla', label: 'Within SLA' }, { key: 'breached', label: 'Breached', color: STATUS_COLORS.critical }]}
-        pointHref={(p, key) => ticketListPath({ ...link, ...window(p), sla: key === 'breached' ? 'breached' : ['ok', 'at_risk'] })}
+        pointHref={(p, key) => path({ ...link, ...window(p), sla: key === 'breached' ? 'breached' : ['ok', 'at_risk'] })}
       />
       {footer}
     </Panel>
@@ -165,12 +168,19 @@ export function RateTable({ columns, rows, empty = 'Nothing in this period', min
 
 // ---------------------------------------------------------------- daily flow drill-down
 
-/** The list a bar of a daily flow chart opens: that day as the created range for an "opened" series, as the resolved range for "resolved"; nothing for a series without a list predicate (breaches). */
-export function flowPointHref(link: TicketListLink, kinds: Record<string, 'created' | 'resolved' | null>) {
+/**
+ * The list a bar of a daily flow chart opens: that day as the created range for an "opened" series, as the resolved range
+ * for "resolved"; nothing for a series without a list predicate (breaches). A kind may carry the ticket type the series
+ * was counted with (`{ kind: 'created', type: 'incident' }`), and `path` turns the link into the staff or the portal list.
+ */
+export type FlowKind = 'created' | 'resolved' | { kind: 'created' | 'resolved'; type: TicketListLink['type'] } | null;
+export function flowPointHref(link: TicketListLink, kinds: Record<string, FlowKind>, path: LinkPath = ticketListPath) {
   return (point: Record<string, unknown>, seriesKey: string): string | undefined => {
     const day = typeof point.day === 'string' ? point.day : undefined;
-    const kind = kinds[seriesKey];
-    if (!day || !kind) return undefined;
-    return kind === 'created' ? ticketListPath({ ...link, status: 'any', createdFrom: day, createdTo: day }) : ticketListPath({ ...link, status: 'any', resolvedFrom: day, resolvedTo: day });
+    const k = kinds[seriesKey];
+    if (!day || !k) return undefined;
+    const kind = typeof k === 'string' ? k : k.kind;
+    const typed = typeof k === 'string' ? link : { ...link, type: k.type };
+    return kind === 'created' ? path({ ...typed, status: 'any', createdFrom: day, createdTo: day }) : path({ ...typed, status: 'any', resolvedFrom: day, resolvedTo: day });
   };
 }

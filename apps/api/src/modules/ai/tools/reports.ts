@@ -153,7 +153,7 @@ export const REPORTS: ReturnType<typeof define>[] = [
   define({
     name: 'dashboard_kpis',
     toolset: 'reports',
-    description: 'The headline figures of a dashboard for a period and an optional customer scope: the Overview (the default: the desk\'s open, breached, unassigned, resolved and SLA compliance, the person\'s own day, and the NOC, SOC and AMC strips they may see), or the NOC, SOC, AMC or my-work dashboard; the customer overview in the portal. Answers "how are we doing", "how many open incidents do we have", "what is our SLA compliance this month".',
+    description: 'The headline figures of a dashboard for a period and an optional customer scope: the Overview (the default: the desk\'s open, breached, unassigned, resolved and SLA compliance, the person\'s own day, and the NOC, SOC and AMC strips they may see), or the NOC, SOC, AMC or my-work dashboard. In the portal, the organisation\'s home: open tickets, awaiting your reply, breached and at risk, opened and resolved in the period, tickets to rate, upcoming visits and maintenance. Answers "how are we doing", "how many open incidents do we have", "what is our SLA compliance this month", "what is waiting on us".',
     inputSchema: z.object({ view: z.enum(['overview', 'management', 'noc', 'soc', 'amc', 'engineer']).optional(), days: z.number().int().min(1).max(365).optional(), customer: z.string().max(200).optional() }),
     requires: [],
     portal: ['portal:access'],
@@ -161,9 +161,26 @@ export const REPORTS: ReturnType<typeof define>[] = [
     run: async (ctx, input) => {
       const days = input.days ?? 30;
       if (isCustomerUser(ctx)) {
-        const d = (await dashboards.customer(ctx, { days })) as unknown as Record<string, unknown>;
-        const c = compactDashboard(d);
-        return { view: 'customer', days, ...c.data, facts: c.facts, link: '/portal' };
+        // The portal home is the customer's dashboard: the link opens it with the period, the facts are its tiles and the Upcoming line.
+        const d = await dashboards.customer(ctx, { days });
+        const c = compactDashboard(d as unknown as Record<string, unknown>);
+        const t = d.tickets;
+        const facts = [
+          `open tickets now: ${t.open}`,
+          `awaiting your reply: ${t.awaitingReply}`,
+          `awaiting your approval: ${t.awaitingApproval}`,
+          `breached SLA on open tickets: ${t.breached}`,
+          `at risk: ${t.atRisk}`,
+          `opened in the last ${days} days: ${t.openedInPeriod}`,
+          `resolved in the last ${days} days: ${t.resolvedInPeriod}`,
+          `tickets to rate: ${d.csat.pending.count}`,
+          `upcoming site visits (next ${d.upcoming.horizonDays} days): ${d.upcoming.counts.visits}`,
+          `upcoming maintenance (next ${d.upcoming.horizonDays} days): ${d.upcoming.counts.maintenance}`,
+        ];
+        if (d.upcoming.counts.changes !== null) facts.push(`planned changes coming up: ${d.upcoming.counts.changes}`);
+        if (d.upcoming.counts.approvals !== null) facts.push(`approvals waiting for you: ${d.upcoming.counts.approvals}`);
+        if (d.sla.period.totals.compliancePct !== null) facts.push(`SLA compliance (${days} days): ${d.sla.period.totals.compliancePct}%`);
+        return { view: 'customer', days, ...c.data, facts, link: `/${days !== 30 ? `?days=${days}` : ''}` };
       }
       const customerId = await resolveCustomerId(ctx, input.customer);
       // `management` is the old name of the home dashboard: it reads as the Overview, which carries the management section for those who hold the right.

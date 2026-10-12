@@ -336,6 +336,12 @@ describe('customer portal', () => {
     expect(done.workSummary).toBe('All good');
     const viewB = await asB((ctx) => portal.portalMaintenance(ctx, { pastDays: 90, futureDays: 90 }));
     expect([...viewB.upcoming.visits, ...viewB.past.visits].map((v) => v.id)).toEqual([ids.visitB]);
+    // The navigator's visits badge is the length of the upcoming-visits list it opens (one predicate): A's visit is completed, B's is scheduled ahead.
+    expect(view.upcoming.visits).toEqual([]);
+    expect(viewB.upcoming.visits.map((v) => v.id)).toEqual([ids.visitB]);
+    expect((await asA((ctx) => portal.me(ctx))).counts.upcomingVisits).toBe(view.upcoming.visits.length);
+    expect((await asB((ctx) => portal.me(ctx))).counts.upcomingVisits).toBe(viewB.upcoming.visits.length);
+    expect((await asB((ctx) => portal.me(ctx))).counts.upcomingVisits).toBe(1);
     await expect(asB((ctx) => portal.acknowledgePortalVisit(ctx, ids.visitA, { name: 'Bob' }))).rejects.toThrow(/not found/i);
     const ack = await asA((ctx) => portal.acknowledgePortalVisit(ctx, ids.visitA, { name: 'Alice Admin', title: 'IT Manager', rating: 5 }));
     expect(ack.acknowledged).toBe(true);

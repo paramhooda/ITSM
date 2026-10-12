@@ -22,6 +22,8 @@ export interface KpiItem {
   onClick?: () => void;
   /** Link tile: opens the list that holds the matching records (overview pages and dashboards). */
   to?: string;
+  /** The hint's own door (a "N at risk" hint beside a Breached tile): the hint renders as a link beside the tile's link, never inside it. */
+  hintTo?: string;
   /** The tile's condition is in effect: ring and brand border, so the band and the breadcrumb agree. */
   active?: boolean;
 }
@@ -83,9 +85,11 @@ export function Sparkline({ data, color = '#2563eb', width = 96, height = 36, cl
   );
 }
 
-export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBetter, spark, sparkLabel, icon, onClick, to, active, className }: KpiItem & { className?: string }) {
+export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBetter, spark, sparkLabel, icon, onClick, to, hintTo, active, className }: KpiItem & { className?: string }) {
   const isLink = !!to;
   const clickable = isLink || !!onClick;
+  // A hint door sits beside the tile's own door: the tile becomes a card whose link covers it, and the hint link sits above that cover.
+  const hintDoor = isLink && !!hintTo && !!hint;
   const body = (
     <>
       <div className="flex items-center justify-between gap-2">
@@ -106,7 +110,7 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
       </div>
       <div className="flex items-center gap-2 text-[12px] text-subtle min-h-[18px] -mt-1">
         {delta !== undefined && <DeltaBadge delta={delta} lowerIsBetter={lowerIsBetter} compact />}
-        {hint && <span className="truncate">{hint}</span>}
+        {hint && (hintDoor ? <Link to={hintTo!} className="relative z-10 truncate hover:text-default hover:underline underline-offset-2" data-testid="kpi-hint-link">{hint}</Link> : <span className="truncate">{hint}</span>)}
       </div>
     </>
   );
@@ -116,6 +120,13 @@ export function KpiTile({ label, value, hint, tone = 'default', delta, lowerIsBe
     active && 'border-brand-400 ring-2 ring-brand-500/25 hover:border-brand-500',
     className,
   );
+  if (hintDoor)
+    return (
+      <div className={cls} data-testid="kpi-tile">
+        <Link to={to!} className="absolute inset-0 rounded-[inherit]" aria-label={typeof label === 'string' ? label : undefined} title={typeof hint === 'string' ? hint : undefined} />
+        {body}
+      </div>
+    );
   if (isLink) return <Link to={to!} className={cls} title={typeof hint === 'string' ? hint : undefined}>{body}</Link>;
   if (clickable) return <button type="button" className={cls} onClick={onClick} aria-pressed={active} data-active={active || undefined}>{body}</button>;
   return <div className={cls}>{body}</div>;

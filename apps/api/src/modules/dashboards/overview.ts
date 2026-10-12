@@ -120,6 +120,7 @@ const DIMENSIONS = {
   service: { id: sql`sv.id`, label: sql`coalesce(sv.name, 'No service')`, join: sql`LEFT JOIN services sv ON sv.id = t.service_id` },
   customer: { id: sql`cu.id`, label: sql`coalesce(cu.name, 'No customer')`, join: sql`LEFT JOIN customers cu ON cu.id = t.customer_id` },
   category: { id: sql`cat.id`, label: sql`coalesce(cat.label, 'Uncategorised')`, join: sql`LEFT JOIN config_options cat ON cat.id = t.category_id` },
+  site: { id: sql`si.id`, label: sql`coalesce(si.name, 'No site')`, join: sql`LEFT JOIN sites si ON si.id = t.site_id` },
 } as const;
 export type LoadDimension = keyof typeof DIMENSIONS;
 
@@ -140,18 +141,41 @@ export async function openLoad(ctx: Ctx, by: LoadDimension, cond: ReturnType<typ
   return rows.map((r) => ({ id: r.id === null || r.id === undefined ? null : String(r.id), label: String(r.label), open: num(r.open), breached: num(r.breached), atRisk: num(r.at_risk) }));
 }
 
-/** Opened, resolved, breaches and resolution clocks met or breached per day for one slice (live, fenced like the tiles); every day of [from, to] is present. */
-async function deskSeries(ctx: Ctx, from: string, to: string, cond: ReturnType<typeof sql>) {
-  const win = (col: ReturnType<typeof sql>) => sql`${col} >= ${from}::date AND ${col} < ${to}::date + interval '1 day'`;
+export interface DeskDay {
+  day: string;
+  opened: number;
+  incidentsOpened: number;
+  requestsOpened: number;
+  problemsOpened: number;
+  changesOpened: number;
+  resolved: number;
+  breaches: number;
+  resolutionMet: number;
+  resolutionBreached: number;
+  compliancePct: number | null;
+}
+
+/**
+ * Opened (with the share of each ticket type), resolved, breaches and
+ * resolution clocks met or breached per day for one slice (live, fenced like
+ * the tiles); every day of [from, to] is present. `cond` is a leading-`AND`
+ * fragment over the alias `t`. The days are UTC days: the buckets cut each
+ * timestamp at UTC midnight and the window is the UTC day range, the very cut
+ * the ticket list applies to a date-only `createdFrom`/`resolvedFrom` bound, so
+ * a bar reproduces on the list whatever the database session's time zone.
+ */
+export async function deskSeries(ctx: Ctx, from: string, to: string, cond: ReturnType<typeof sql>): Promise<DeskDay[]> {
+  const win = (col: ReturnType<typeof sql>) => sql`${col} >= (${from}::date)::timestamp AT TIME ZONE 'UTC' AND ${col} < (${to}::date + interval '1 day')::timestamp AT TIME ZONE 'UTC'`;
+  const utcDay = (col: ReturnType<typeof sql>) => sql`(${col} AT TIME ZONE 'UTC')::date`;
   const rows = await q<Row>(ctx, sql`
     WITH d AS (SELECT generate_series(${from}::date, ${to}::date, interval '1 day')::date AS day),
-    o AS (SELECT t.created_at::date AS day, count(*)::int AS opened FROM tickets t WHERE ${win(sql`t.created_at`)} ${cond} GROUP BY 1),
-    r AS (SELECT t.resolved_at::date AS day, count(*)::int AS resolved FROM tickets t WHERE ${win(sql`t.resolved_at`)} ${cond} GROUP BY 1),
-    b AS (SELECT s.breached_at::date AS day, count(*)::int AS breaches, count(*) FILTER (WHERE s.metric = 'resolution')::int AS res_breached FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.state = 'breached' AND ${win(sql`s.breached_at`)} ${cond} GROUP BY 1),
-    m AS (SELECT s.completed_at::date AS day, count(*)::int AS res_met FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.state = 'met' AND s.metric = 'resolution' AND ${win(sql`s.completed_at`)} ${cond} GROUP BY 1)
-    SELECT d.day::text AS day, coalesce(o.opened, 0) AS opened, coalesce(r.resolved, 0) AS resolved, coalesce(b.breaches, 0) AS breaches, coalesce(b.res_breached, 0) AS res_breached, coalesce(m.res_met, 0) AS res_met
+    o AS (SELECT ${utcDay(sql`t.created_at`)} AS day, count(*)::int AS opened, count(*) FILTER (WHERE t.type = 'incident')::int AS incidents, count(*) FILTER (WHERE t.type = 'request')::int AS requests, count(*) FILTER (WHERE t.type = 'problem')::int AS problems, count(*) FILTER (WHERE t.type = 'change')::int AS changes FROM tickets t WHERE ${win(sql`t.created_at`)} ${cond} GROUP BY 1),
+    r AS (SELECT ${utcDay(sql`t.resolved_at`)} AS day, count(*)::int AS resolved FROM tickets t WHERE ${win(sql`t.resolved_at`)} ${cond} GROUP BY 1),
+    b AS (SELECT ${utcDay(sql`s.breached_at`)} AS day, count(*)::int AS breaches, count(*) FILTER (WHERE s.metric = 'resolution')::int AS res_breached FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.state = 'breached' AND ${win(sql`s.breached_at`)} ${cond} GROUP BY 1),
+    m AS (SELECT ${utcDay(sql`s.completed_at`)} AS day, count(*)::int AS res_met FROM ticket_slas s JOIN tickets t ON t.id = s.ticket_id WHERE s.state = 'met' AND s.metric = 'resolution' AND ${win(sql`s.completed_at`)} ${cond} GROUP BY 1)
+    SELECT d.day::text AS day, coalesce(o.opened, 0) AS opened, coalesce(o.incidents, 0) AS incidents, coalesce(o.requests, 0) AS requests, coalesce(o.problems, 0) AS problems, coalesce(o.changes, 0) AS changes, coalesce(r.resolved, 0) AS resolved, coalesce(b.breaches, 0) AS breaches, coalesce(b.res_breached, 0) AS res_breached, coalesce(m.res_met, 0) AS res_met
     FROM d LEFT JOIN o ON o.day = d.day LEFT JOIN r ON r.day = d.day LEFT JOIN b ON b.day = d.day LEFT JOIN m ON m.day = d.day ORDER BY d.day`);
-  return rows.map((r) => ({ day: String(r.day), opened: num(r.opened), resolved: num(r.resolved), breaches: num(r.breaches), resolutionMet: num(r.res_met), resolutionBreached: num(r.res_breached), compliancePct: pct(num(r.res_met), num(r.res_met) + num(r.res_breached)) }));
+  return rows.map((r) => ({ day: String(r.day), opened: num(r.opened), incidentsOpened: num(r.incidents), requestsOpened: num(r.requests), problemsOpened: num(r.problems), changesOpened: num(r.changes), resolved: num(r.resolved), breaches: num(r.breaches), resolutionMet: num(r.res_met), resolutionBreached: num(r.res_breached), compliancePct: pct(num(r.res_met), num(r.res_met) + num(r.res_breached)) }));
 }
 
 export async function overview(ctx: Ctx, opts: { days?: number; customerId?: string | null } = {}) {

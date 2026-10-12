@@ -1,4 +1,4 @@
-import { gte, sql } from 'drizzle-orm';
+import { eq, gte, sql } from 'drizzle-orm';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { customer, type DemoState } from './state';
@@ -87,5 +87,26 @@ export async function seedExtras(state: DemoState, tx: Tx) {
     { userId: rajesh.id, name: 'My NOC queue', entity: 'ticket', filters: { teamId: refs.team('noc'), statusCategory: 'new,open,pending', domain: 'noc' }, columns: ['number', 'title', 'customer', 'priority', 'status', 'assignee', 'sla'], sort: 'priority:asc', isShared: false, isDefault: true, sortOrder: 40 },
   ]);
   state.counts.savedViews = 4;
+
+  // ---------------------------------------------------------------- a customer-audience announcement
+  // Pinned for every customer and live for a fortnight around the load, so the portal home's Announcements panel is never
+  // empty on the demo. Inserted only when no announcement carries this title (the seed is re-entrant).
+  const title = 'Scheduled maintenance of the monitoring platform';
+  const [existing] = await tx.select({ id: schema.announcements.id }).from(schema.announcements).where(eq(schema.announcements.title, title)).limit(1);
+  if (!existing) {
+    await tx.insert(schema.announcements).values({
+      title,
+      body: 'Our monitoring platform receives a software update this weekend. Alerting continues throughout; the portal\'s service status page may show a short refresh delay between 02:00 and 04:00 IST on Sunday. No action is needed from your side.',
+      type: 'maintenance',
+      audience: 'customers',
+      customerIds: [],
+      startsAt: addDays(now, -2),
+      endsAt: addDays(now, 12),
+      pinned: true,
+      isActive: true,
+      createdBy: admin.id,
+    });
+  }
+  state.counts.announcements = 1;
   await tx.execute(sql`SELECT 1`);
 }

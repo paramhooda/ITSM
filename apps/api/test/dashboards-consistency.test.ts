@@ -27,7 +27,7 @@ import { createTicket, resolveTicket } from '@/modules/tickets/service';
 import { countTickets, ticketStats, groupTickets } from '@/modules/tickets/list';
 import { statsQuerySchema } from '@/modules/tickets/schemas';
 import { management, noc, soc, amc, engineer, customer, overview } from '@/modules/dashboards/service';
-import { countPortalTickets } from '@/modules/portal/service';
+import { countPortalTickets, portalMaintenance, portalPlannedChanges, listPortalApprovals } from '@/modules/portal/service';
 import { portalTicketStatsQuery } from '@/modules/portal/schemas';
 import { toDay, addDays } from '@/modules/reports/dates';
 import { computeRollups } from '@/jobs/processors/metrics';
@@ -35,13 +35,15 @@ import { ticketListPath, ticketListQuery, portalTicketListPath, portalTicketList
 import { statsParamsForLink, portalParamsForLink } from '../../web/src/components/tickets/listQuery';
 
 const S = Math.random().toString(36).slice(2, 8);
-const ids = { adminId: '', noah: '', nocManager: '', portalA: '', a: '', b: '', siteA: '', nocSvc: '', socSvc: '', amcSvc: '', team: '', p1: '', p4: '', pendingCustomer: '', awaitingApproval: '', critical: '', high: '' };
+const ids = { adminId: '', noah: '', nocManager: '', portalA: '', portalAdminA: '', a: '', b: '', siteA: '', nocSvc: '', socSvc: '', amcSvc: '', team: '', p1: '', p4: '', pendingCustomer: '', awaitingApproval: '', critical: '', high: '', visit1: '', foldedOccurrence: '' };
 let admin: Principal;
 let noah: Principal;
 /** Holds `dashboards:management` and `customers:read` but not `soc:read`: the security fence applies to every dashboard they open. */
 let nocManager: Principal;
 /** A customer user of A: the portal home's doors are counted through the portal list as this principal. */
 let portalA: Principal;
+/** A customer administrator of A (portal:approve): the Upcoming line's approvals count is held against the approvals page as this principal. */
+let portalAdminA: Principal;
 const created: string[] = [];
 const meta = { requestId: `dash-consistency-${S}` };
 
@@ -120,8 +122,9 @@ const ageingRows = (prefix: string, ageing: AgeRow[], base: TicketListLink): Row
     row(`${prefix}.ageing[${a.bucket}].withinSla`, a.count - a.breached, { ...base, sla: ['ok', 'at_risk'], createdFrom: a.createdFrom, createdTo: a.createdTo }),
   ]);
 /** The bars of a daily flow chart: a day's "opened" count links with that day as the created range, "resolved" with it as the resolved range (every day with activity plus the first quiet one). */
-const flowRows = (prefix: string, series: Record<string, unknown>[], base: Omit<TicketListLink, 'status'>, kinds: Record<string, 'created' | 'resolved'>): Row[] => {
+const flowRows = (prefix: string, points: object[], base: Omit<TicketListLink, 'status'>, kinds: Record<string, 'created' | 'resolved'>): Row[] => {
   const keys = Object.keys(kinds);
+  const series = points as Record<string, unknown>[];
   const active = series.filter((s) => keys.some((k) => Number(s[k]) > 0));
   const quiet = series.filter((s) => keys.every((k) => Number(s[k]) === 0)).slice(0, 1);
   return [...active, ...quiet].flatMap((s) =>
@@ -193,13 +196,18 @@ beforeAll(async () => {
     const [pu] = await tx.insert(schema.users).values({ email: `dc-portal-${S}@example.test`, name: 'Pat Portal', userType: 'customer', customerId: a!.id, status: 'active' }).returning();
     ids.portalA = pu!.id;
     await tx.insert(schema.userRoles).values({ userId: pu!.id, roleId: await roleId(tx, 'customer_user'), customerId: a!.id });
+    const [pa] = await tx.insert(schema.users).values({ email: `dc-portal-admin-${S}@example.test`, name: 'Ada Portal', userType: 'customer', customerId: a!.id, status: 'active' }).returning();
+    ids.portalAdminA = pa!.id;
+    await tx.insert(schema.userRoles).values({ userId: pa!.id, roleId: await roleId(tx, 'customer_admin'), customerId: a!.id });
   });
   invalidatePrincipal();
   admin = (await loadPrincipal(ids.adminId))!;
   noah = (await loadPrincipal(ids.noah))!;
   nocManager = (await loadPrincipal(ids.nocManager))!;
   portalA = (await loadPrincipal(ids.portalA))!;
+  portalAdminA = (await loadPrincipal(ids.portalAdminA))!;
   expect(portalA.userType).toBe('customer');
+  expect(portalAdminA.userType).toBe('customer');
   expect(noah.globalPermissions.has('soc:read')).toBe(false);
   expect(nocManager.globalPermissions.has('dashboards:management')).toBe(true);
   expect(nocManager.globalPermissions.has('soc:read')).toBe(false);
@@ -225,8 +233,40 @@ beforeAll(async () => {
     await mk('a7', { type: 'incident', customerId: ids.a, serviceId: ids.nocSvc, title: `DC A7 resolved ${S}`, priorityId: ids.p4, assigneeId: ids.noah });
     await mk('b1', { type: 'incident', customerId: ids.b, serviceId: ids.nocSvc, title: `DC B1 major breached ${S}`, priorityId: ids.p1, isMajor: true });
     await mk('b2', { type: 'incident', customerId: ids.b, serviceId: ids.amcSvc, title: `DC B2 resolved ${S}`, priorityId: ids.p4, assigneeId: ids.adminId });
+    // A change of A scheduled ahead: the portal home's Upcoming line counts it the way the planned-changes page does.
+    await mk('c1', { type: 'change', customerId: ids.a, siteId: ids.siteA, serviceId: ids.nocSvc, title: `DC C1 planned change ${S}`, priorityId: ids.p4 });
     await resolveTicket(ctx, t.a7!, { resolutionNotes: 'Resolved during the consistency test' });
     await resolveTicket(ctx, t.b2!, { resolutionNotes: 'Resolved during the consistency test' });
+  });
+  // Visits and maintenance of A for the portal home's Upcoming line: coming ones at site HQ and without a site, one past, one beyond the horizon.
+  await withSystem(async (tx) => {
+    const at = (days: number) => new Date(Date.now() + days * 86_400_000);
+    const visit = (n: number, v: Partial<typeof schema.fieldVisits.$inferInsert>) => ({ number: `FV-DC-${S}-${n}`, customerId: ids.a, title: `DC visit ${n} ${S}`, ...v });
+    const visits = await tx.insert(schema.fieldVisits).values([
+      visit(1, { status: 'scheduled', siteId: ids.siteA, engineerId: ids.adminId, scheduledStart: at(2) }),
+      visit(2, { status: 'requested', siteId: null, engineerId: ids.adminId, scheduledStart: null }),
+      visit(3, { status: 'scheduled', siteId: ids.siteA, engineerId: ids.adminId, scheduledStart: at(-4) }),
+      visit(4, { status: 'completed', siteId: ids.siteA, engineerId: ids.adminId, scheduledStart: at(1), actualStart: at(1), actualEnd: at(1) }),
+      visit(5, { status: 'scheduled', siteId: ids.siteA, engineerId: ids.adminId, scheduledStart: at(120) }),
+    ]).returning({ id: schema.fieldVisits.id, number: schema.fieldVisits.number });
+    ids.visit1 = visits.find((v) => v.number === `FV-DC-${S}-1`)!.id;
+    const today = toDay(new Date());
+    const [hq] = await tx.insert(schema.pmPrograms).values({ customerId: ids.a, siteId: ids.siteA, name: `DC PM HQ ${S}`, frequency: 'monthly', startDate: addDays(today, -60), assignedEngineerId: ids.adminId }).returning();
+    const [nosite] = await tx.insert(schema.pmPrograms).values({ customerId: ids.a, siteId: null, name: `DC PM no site ${S}`, frequency: 'monthly', startDate: addDays(today, -60), assignedEngineerId: ids.adminId }).returning();
+    const occurrences = await tx.insert(schema.pmOccurrences).values([
+      { programId: hq!.id, customerId: ids.a, plannedDate: today, status: 'planned' },
+      { programId: hq!.id, customerId: ids.a, plannedDate: addDays(today, 20), scheduledDate: addDays(today, 22), status: 'scheduled' },
+      { programId: hq!.id, customerId: ids.a, plannedDate: addDays(today, -30), status: 'completed' },
+      { programId: nosite!.id, customerId: ids.a, plannedDate: addDays(today, 5), status: 'rescheduled' },
+      { programId: nosite!.id, customerId: ids.a, plannedDate: addDays(today, 100), status: 'planned' },
+      // An occurrence at HQ with visit 1 booked for it: the maintenance page lists it as that visit, so the home counts it among the visits and not the maintenance.
+      { programId: hq!.id, customerId: ids.a, plannedDate: addDays(today, 2), scheduledDate: addDays(today, 2), status: 'scheduled', fieldVisitId: ids.visit1 },
+    ]).returning({ id: schema.pmOccurrences.id, fieldVisitId: schema.pmOccurrences.fieldVisitId });
+    ids.foldedOccurrence = occurrences.find((o) => o.fieldVisitId === ids.visit1)!.id;
+    // The change's window: tomorrow, two hours.
+    await tx.update(schema.changeDetails).set({ scheduledStart: at(1), scheduledEnd: new Date(at(1).getTime() + 2 * 3_600_000) }).where(eq(schema.changeDetails.ticketId, t.c1!));
+    // A pending approval of A4 addressed to the organisation's administrators: the home's "N approvals" for a customer_admin is the approvals page's total.
+    await tx.insert(schema.approvals).values({ ticketId: t.a4!, customerId: ids.a, step: 1, stepName: 'Customer approval', approverRoleKey: 'customer_admin', status: 'pending' });
   });
   // SLA states on the engine's own rows: breached is the engine flag, at risk is running and warned,
   // a clock past due that the sweep has not flagged yet (A3) is neither.
@@ -252,6 +292,7 @@ afterAll(async () => {
     if (ids.team) await tx.delete(schema.teams).where(eq(schema.teams.id, ids.team));
     if (ids.nocManager) await tx.delete(schema.users).where(eq(schema.users.id, ids.nocManager));
     if (ids.portalA) await tx.delete(schema.users).where(eq(schema.users.id, ids.portalA));
+    if (ids.portalAdminA) await tx.delete(schema.users).where(eq(schema.users.id, ids.portalAdminA));
     const customers = [ids.a, ids.b].filter(Boolean);
     if (customers.length) await tx.delete(schema.metricRollupsDaily).where(inArray(schema.metricRollupsDaily.customerId, customers));
     if (customers.length) await tx.delete(schema.customers).where(inArray(schema.customers.id, customers));
@@ -289,10 +330,11 @@ describe('dashboard numbers reproduce on the list they open', () => {
       it(`management (${scope.name}, ${days} days)`, async () => {
         const customerId = cust();
         const d = await as(admin, (ctx) => management(ctx, { days, customerId }));
-        expectScoped(d.kpis.openNow, 6, customerId, 'openNow');
+        // Six open tickets of A plus the planned change C1 (open, without clocks).
+        expectScoped(d.kpis.openNow, 7, customerId, 'openNow');
         expectScoped(d.kpis.breachedOpen, 2, customerId, 'breachedOpen');
         expectScoped(d.kpis.ticketsResolved, 1, customerId, 'ticketsResolved');
-        expectScoped(d.kpis.ticketsOpened, 7, customerId, 'ticketsOpened');
+        expectScoped(d.kpis.ticketsOpened, 8, customerId, 'ticketsOpened');
         await reproduces(admin, managementRows(d, customerId));
       });
 
@@ -301,9 +343,9 @@ describe('dashboard numbers reproduce on the list they open', () => {
         const d = await as(nocManager, (ctx) => management(ctx, { days, customerId }));
         const a = await as(admin, (ctx) => management(ctx, { days, customerId }));
         // The security ticket (A5) is behind the fence on every tile, the period ones included.
-        expectScoped(d.kpis.openNow, 5, customerId, 'openNow');
+        expectScoped(d.kpis.openNow, 6, customerId, 'openNow');
         expectScoped(d.kpis.breachedOpen, 1, customerId, 'breachedOpen');
-        expectScoped(d.kpis.ticketsOpened, 6, customerId, 'ticketsOpened');
+        expectScoped(d.kpis.ticketsOpened, 7, customerId, 'ticketsOpened');
         expectScoped(d.kpis.ticketsResolved, 1, customerId, 'ticketsResolved');
         expect(d.kpis.openNow).toBeLessThan(a.kpis.openNow);
         expect(d.kpis.ticketsOpened).toBeLessThan(a.kpis.ticketsOpened);
@@ -521,10 +563,10 @@ describe('dashboard numbers reproduce on the list they open', () => {
         );
         // The fixture through each person's eyes: the security ticket A5 is behind the fence for the NOC manager and Noah.
         const socHidden = who !== 'admin';
-        expectScoped(k.open!, socHidden ? 5 : 6, customerId, 'desk open');
+        expectScoped(k.open!, socHidden ? 6 : 7, customerId, 'desk open');
         expectScoped(k.breached!, socHidden ? 1 : 2, customerId, 'desk breached');
-        expectScoped(k.unassigned!, 3, customerId, 'desk unassigned');
-        expectScoped(k.openedInPeriod!, socHidden ? 6 : 7, customerId, 'desk opened');
+        expectScoped(k.unassigned!, 4, customerId, 'desk unassigned');
+        expectScoped(k.openedInPeriod!, socHidden ? 7 : 8, customerId, 'desk opened');
         expectScoped(k.resolvedInPeriod!, 1, customerId, 'desk resolved');
         expect((desk.ageing as AgeRow[]).reduce((n, a) => n + a.count, 0)).toBe(k.open);
         const arrivals = desk.arrivals as { week: { cells: HeatCell[]; from: string; to: string }; pattern: { cells: { value: number }[] }; timezone: string };
@@ -641,51 +683,130 @@ describe('dashboard numbers reproduce on the list they open', () => {
       const d = await as(p, (ctx) => customer(ctx, { days: 7, customerId }));
       const base: TicketListLink = { customerId, status: 'open' };
       const t = d.tickets;
+      // Staff read the major count (a staff-only key on the list); the rest of the rows are the portal's doors as a staff caller.
+      expect(typeof t.majorOpen).toBe('number');
       const rows = [
         row('tickets.open', t.open, base),
+        row('tickets.breached', t.breached, { ...base, sla: 'breached' }),
+        row('tickets.atRisk', t.atRisk, { ...base, sla: 'at_risk' }),
         row('tickets.awaitingReply', t.awaitingReply, { ...base, statusIds: [ids.pendingCustomer] }),
         row('tickets.awaitingApproval', t.awaitingApproval, { ...base, statusIds: [ids.awaitingApproval] }),
-        row('tickets.majorOpen', t.majorOpen, { ...base, isMajor: true }),
-        row('tickets.resolved30d', t.resolved30d, { customerId, status: 'any', ...resolvedIn(d) }),
-        row('tickets.opened30d', t.opened30d, { customerId, status: 'any', ...period(d) }),
-        ...t.byPriority.filter((p) => p.id).map((p) => row(`byPriority[${p.label}]`, Number(p.count), { ...base, priorityIds: [String(p.id)] })),
-        ...Object.entries(t.byType).map(([type, n]) => row(`byType[${type}]`, n, { ...base, type: type as TicketListLink['type'] })),
+        row('tickets.majorOpen', t.majorOpen!, { ...base, isMajor: true }),
+        row('tickets.resolvedInPeriod', t.resolvedInPeriod, { customerId, status: 'any', ...resolvedIn(d) }),
+        row('tickets.openedInPeriod', t.openedInPeriod, { customerId, status: 'any', ...period(d) }),
+        ...t.byPriority.filter((p) => p.id).flatMap((p) => [row(`byPriority[${p.label}]`, p.count, { ...base, priorityIds: [p.id!] }), row(`byPriority[${p.label}].breached`, p.breached, { ...base, priorityIds: [p.id!], sla: 'breached' })]),
+        ...t.byType.flatMap((b) => [row(`byType[${b.type}]`, b.count, { ...base, type: b.type as TicketListLink['type'] }), row(`byType[${b.type}].breached`, b.breached, { ...base, type: b.type as TicketListLink['type'], sla: 'breached' })]),
+        ...loadRows('bySite', t.bySite, base, (id) => ({ siteId: id })),
+        ...loadRows('byService', t.byService, base, (id) => ({ serviceId: id })),
+        ...flowRows('customer', d.series, { customerId }, { opened: 'created', resolved: 'resolved' }),
+        ...ageingRows('customer', d.ageing, base),
       ];
       // The staff view is fenced like the list it opens: the NOC manager does not see A5 (security).
-      expect(t.open).toBe(which === 'B' ? 1 : who === 'admin' ? 6 : 5);
+      expect(t.open).toBe(which === 'B' ? 1 : who === 'admin' ? 7 : 6);
       expect(t.awaitingReply).toBe(which === 'A' ? 1 : 0);
-      expect(t.resolved30d).toBe(1);
-      expect(t.opened30d).toBe(which === 'B' ? 2 : who === 'admin' ? 7 : 6);
+      expect(t.resolvedInPeriod).toBe(1);
+      expect(t.openedInPeriod).toBe(which === 'B' ? 2 : who === 'admin' ? 8 : 7);
+      expect(t.awaitingStatusId).toBe(ids.pendingCustomer);
+      expect(t.awaitingApprovalStatusId).toBe(ids.awaitingApproval);
       await reproduces(p, rows);
     });
   }
 });
 
-describe("today's portal doors as a portal user", () => {
-  it('the portal home numbers reproduce through the portal list (organisation pinned, portal-safe keys only)', async () => {
-    await snapshot(portalA, async (ctx) => {
-      const d = await customer(ctx, { days: 7 });
-      const t = d.tickets;
-      const open: TicketListLink = { status: 'open' };
-      const rows = [
-        row('tickets.open', t.open, open),
-        row('tickets.awaitingReply', t.awaitingReply, { ...open, statusIds: [ids.pendingCustomer] }),
-        ...t.byPriority.filter((p) => p.id).map((p) => row(`byPriority[${p.label}]`, Number(p.count), { ...open, priorityIds: [String(p.id)] })),
-        row('csat.pending.count', d.csat.pending.count, { statusCategories: ['resolved', 'closed'], csat: 'pending' }),
-      ];
-      // A portal user is never fenced by domain: the security ticket A5 is theirs to see, as on the list.
-      expect(t.open).toBe(6);
-      expect(t.awaitingReply).toBe(1);
-      expect(d.csat.pending.count).toBe(1);
-      expect(t.byPriority.filter((p) => p.id).map((p) => Number(p.count))).toEqual([3, 3]);
-      await reproducesInPortal(ctx, rows);
-      // The same number the list's own tiles show for this organisation.
-      const st = await ticketStats(ctx, {});
-      expect(st.open).toBe(t.open);
-      expect(st.awaitingCustomer).toBe(t.awaitingReply);
-      expect(st.surveyPending).toBe(d.csat.pending.count);
+describe('the portal home as a portal user (7 days; all sites and site HQ)', () => {
+  for (const scope of [{ name: 'all sites', siteId: null }, { name: 'site HQ', siteId: () => ids.siteA }] as const) {
+    it(`every number reproduces through the portal list and the Upcoming counts are the lengths of the lists they open (${scope.name})`, async () => {
+      const siteId = typeof scope.siteId === 'function' ? scope.siteId() : null;
+      await snapshot(portalA, async (ctx) => {
+        const d = await customer(ctx, { days: 7, siteId });
+        const t = d.tickets;
+        expect(d.siteId).toBe(siteId);
+        expect(d.site?.name ?? null).toBe(siteId ? 'HQ' : null);
+        // Nothing staff-only leaves for a portal principal.
+        expect(t.majorOpen).toBeNull();
+        const open: TicketListLink = { status: 'open', siteId };
+        const any: Omit<TicketListLink, 'status'> = { siteId };
+        const rows = [
+          row('tickets.open', t.open, open),
+          row('tickets.breached', t.breached, { ...open, sla: 'breached' }),
+          row('tickets.atRisk', t.atRisk, { ...open, sla: 'at_risk' }),
+          row('tickets.awaitingReply', t.awaitingReply, { ...open, statusIds: [t.awaitingStatusId!] }),
+          row('tickets.awaitingApproval', t.awaitingApproval, { ...open, statusIds: [t.awaitingApprovalStatusId!] }),
+          row('tickets.resolvedInPeriod', t.resolvedInPeriod, { ...any, status: 'any', ...resolvedIn(d) }),
+          row('tickets.openedInPeriod', t.openedInPeriod, { ...any, status: 'any', ...period(d) }),
+          ...t.byType.flatMap((b) => [row(`byType[${b.type}]`, b.count, { ...open, type: b.type as TicketListLink['type'] }), row(`byType[${b.type}].breached`, b.breached, { ...open, type: b.type as TicketListLink['type'], sla: 'breached' })]),
+          ...t.byPriority.filter((p) => p.id).flatMap((p) => [row(`byPriority[${p.label}]`, p.count, { ...open, priorityIds: [p.id!] }), row(`byPriority[${p.label}].breached`, p.breached, { ...open, priorityIds: [p.id!], sla: 'breached' })]),
+          ...loadRows('bySite', t.bySite, open, (id) => ({ siteId: id })),
+          ...loadRows('byService', t.byService, open, (id) => ({ serviceId: id })),
+          ...flowRows('portal', d.series, any, { opened: 'created', resolved: 'resolved' }),
+          // The by-type flow view: one stacked series per ticket type, each bar that day's tickets of that type (the four sum to the opened bars).
+          ...(['incident', 'request', 'problem', 'change'] as const).flatMap((type) => flowRows(`portal.byType[${type}]`, d.series.map((s) => ({ day: s.day, [`${type}sOpened`]: s[`${type}sOpened`] })), { ...any, type }, { [`${type}sOpened`]: 'created' })),
+          ...ageingRows('portal', d.ageing, open),
+          ...d.byPriorityResponsiveness.filter((r) => r.id).flatMap((r) => [
+            row(`byPriorityResponsiveness[${r.priority}].opened`, r.opened, { ...any, status: 'any', priorityIds: [r.id!], ...period(d) }),
+            row(`byPriorityResponsiveness[${r.priority}].resolved`, r.resolved, { ...any, status: 'any', priorityIds: [r.id!], ...resolvedIn(d) }),
+          ]),
+          row('csat.pending.count', d.csat.pending.count, { ...any, statusCategories: ['resolved', 'closed'], csat: 'pending' }),
+        ];
+        // A portal user is never fenced by domain: the security ticket A5 is theirs to see, as on the list. Site HQ holds A1 (breached), A2 and A6 (at risk) and the change C1.
+        expect(t.open).toBe(siteId ? 4 : 7);
+        expect([t.breached, t.atRisk]).toEqual(siteId ? [1, 2] : [2, 2]);
+        expect(t.awaitingReply).toBe(siteId ? 0 : 1);
+        expect(d.csat.pending.count).toBe(siteId ? 0 : 1);
+        expect(t.byPriority.filter((p) => p.id).map((p) => p.count)).toEqual(siteId ? [2, 2] : [3, 4]);
+        // Largest first, then the type in its enum order (incident, request, problem, change).
+        expect(t.byType.map((b) => [b.type, b.count])).toEqual(siteId ? [['incident', 3], ['change', 1]] : [['incident', 5], ['request', 1], ['change', 1]]);
+        await reproducesInPortal(ctx, rows);
+        // The fence row: the same number the list's own tiles show for this organisation (and site).
+        const st = await ticketStats(ctx, siteId ? { siteId } : {});
+        expect(st.open).toBe(t.open);
+        expect(st.breached).toBe(t.breached);
+        expect(st.awaitingCustomer).toBe(t.awaitingReply);
+        if (!siteId) expect(st.surveyPending).toBe(d.csat.pending.count);
+        // Upcoming: one predicate per number, so each count is the length of the list it opens (visits and maintenance follow the site; changes and approvals are organisation-wide).
+        const m = await portalMaintenance(ctx, { pastDays: 90, futureDays: 90 });
+        const visits = m.upcoming.visits.filter((v) => !siteId || v.siteId === siteId);
+        const occurrences = m.upcoming.occurrences.filter((o) => !siteId || o.siteId === siteId);
+        expect(d.upcoming.counts.visits, 'upcoming.counts.visits').toBe(visits.length);
+        expect(d.upcoming.counts.maintenance, 'upcoming.counts.maintenance').toBe(occurrences.length);
+        expect(d.upcoming.visits.map((v) => v.id)).toEqual(visits.map((v) => v.id));
+        expect(d.upcoming.maintenance.map((o) => o.id)).toEqual(occurrences.map((o) => o.id));
+        expect(d.upcoming.counts.visits).toBe(siteId ? 1 : 2);
+        expect(d.upcoming.counts.maintenance).toBe(siteId ? 2 : 3);
+        // The occurrence with visit 1 booked for it is listed as that visit on both: neither the page's maintenance list nor the home's count holds it, the visit does.
+        expect(d.upcoming.visits.map((v) => v.id)).toContain(ids.visit1);
+        expect(m.upcoming.occurrences.map((o) => o.id)).not.toContain(ids.foldedOccurrence);
+        expect(d.upcoming.maintenance.map((o) => o.id)).not.toContain(ids.foldedOccurrence);
+        const [folded] = await ctx.tx.select({ status: schema.pmOccurrences.status, fieldVisitId: schema.pmOccurrences.fieldVisitId }).from(schema.pmOccurrences).where(eq(schema.pmOccurrences.id, ids.foldedOccurrence));
+        expect(folded).toEqual({ status: 'scheduled', fieldVisitId: ids.visit1 });
+        // Every series point sums its type shares to the opened count.
+        expect(d.series.every((s) => s.incidentsOpened + s.requestsOpened + s.problemsOpened + s.changesOpened === s.opened)).toBe(true);
+        const changes = await portalPlannedChanges(ctx, { state: 'upcoming' });
+        expect(d.upcoming.counts.changes, 'upcoming.counts.changes').toBe(changes.counts.upcoming);
+        expect(d.upcoming.counts.changes).toBe(1);
+        expect(d.upcoming.changes!.map((c) => c.id)).toEqual(changes.items.map((c) => c.id));
+        // A customer_user holds no portal:approve: the approvals count is absent rather than zero.
+        expect(d.upcoming.counts.approvals).toBeNull();
+        await expect(listPortalApprovals(ctx)).rejects.toThrow(/portal:approve/);
+      });
     });
-  });
+
+    it(`the approvals count is the approvals page's total for a customer administrator, organisation-wide (${scope.name})`, async () => {
+      const siteId = typeof scope.siteId === 'function' ? scope.siteId() : null;
+      await snapshot(portalAdminA, async (ctx) => {
+        const d = await customer(ctx, { days: 7, siteId });
+        const page = await listPortalApprovals(ctx);
+        expect(d.upcoming.counts.approvals, 'upcoming.counts.approvals').toBe(page.total);
+        expect(d.upcoming.approvals!.map((a) => a.id)).toEqual(page.items.map((a) => a.id));
+        expect(d.upcoming.counts.approvals).toBe(1);
+        expect(d.upcoming.approvals![0]!.ticket.title).toContain('DC A4');
+        // The same organisation reads the same tiles whoever of its users opens the home.
+        const asUser = await customer(ctx, { days: 7, siteId });
+        expect(asUser.tickets.open).toBe(siteId ? 4 : 7);
+        expect(d.tickets.open).toBe(asUser.tickets.open);
+      });
+    });
+  }
 
   it('a portal link carries only portal-safe keys, and both builders emit the same statusCategory for statusCategories', () => {
     const link: TicketListLink = { customerId: ids.b, domain: 'soc', assignee: 'me', teamId: 'x', isMajor: true, knownError: true, breachRisk: 'high', severityIds: ['y'], categoryId: 'z', status: 'open', statusIds: [ids.pendingCustomer], priorityIds: [ids.p1], siteId: ids.siteA, sla: 'breached', csat: 'pending', createdFrom: '2026-10-01', createdTo: '2026-10-07', resolvedFrom: '2026-10-01', resolvedTo: '2026-10-07', type: 'incident' };
@@ -705,11 +826,14 @@ describe("today's portal doors as a portal user", () => {
     expect(portalParamsForLink('/portal/tickets?statusCategory=any')).toEqual({ statusCategory: 'any' });
     expect(portalParamsForLink('/portal/tickets')).toEqual({ statusCategory: 'new,open,pending' });
     expect(statsParamsForLink('/tickets?statusCategory=any')).toEqual({});
-    // The All pill and a type the portal has no pill for are not sent (the portal route accepts incident and request only).
+    // The All pill is no condition; every ticket type the organisation sees is a pill (problems and changes included), so the All pill is the sum of the pills.
     expect(portalParamsForLink('/portal/tickets?type=all')).toEqual({ statusCategory: 'new,open,pending' });
-    expect(portalParamsForLink('/portal/tickets?type=problem')).toEqual({ statusCategory: 'new,open,pending' });
+    expect(portalParamsForLink('/portal/tickets?type=problem')).toEqual({ type: 'problem', statusCategory: 'new,open,pending' });
+    expect(portalParamsForLink('/portal/tickets?type=change')).toEqual({ type: 'change', statusCategory: 'new,open,pending' });
     expect(portalParamsForLink('/portal/tickets?type=request')).toEqual({ type: 'request', statusCategory: 'new,open,pending' });
+    expect(portalParamsForLink('/portal/tickets?type=task')).toEqual({ statusCategory: 'new,open,pending' });
     expect(portalTicketStatsQuery.parse(portalParamsForLink('/portal/tickets?type=all')).type).toBeUndefined();
+    expect(portalTicketStatsQuery.parse(portalParamsForLink('/portal/tickets?type=change')).type).toBe('change');
     // `csat=pending` on its own is the To rate door: the page, the link parser and the portal API all read it with the rateable categories.
     expect(portalParamsForLink('/portal/tickets?csat=pending')).toEqual({ statusCategory: 'resolved,closed', csat: 'pending' });
     expect(portalParamsForLink('/portal/tickets?statusCategory=any&csat=pending')).toEqual({ statusCategory: 'any', csat: 'pending' });
@@ -736,9 +860,9 @@ describe('one SLA vocabulary', () => {
         expect(k.breached).toBe(mg.kpis.breachedOpen);
       });
     }
-    // Customer A: A1 and A5 breached, A2 and A6 at risk, A3 (past due, not swept) and A4 on track.
+    // Customer A: A1 and A5 breached, A2 and A6 at risk, A3 (past due, not swept), A4 and the change C1 (no clocks) on track.
     const g = await as(admin, (ctx) => groupTickets(ctx, { customerId: ids.a, open: true }, 'slaState'));
-    expect(g.groups).toEqual([{ label: 'Breached', count: 2 }, { label: 'At risk', count: 2 }, { label: 'On track', count: 2 }]);
+    expect(g.groups).toEqual([{ label: 'Breached', count: 2 }, { label: 'At risk', count: 2 }, { label: 'On track', count: 3 }]);
     const a = await as(admin, (ctx) => amc(ctx, { days: 7, customerId: ids.a }));
     expect([a.kpis.breached, a.kpis.atRisk]).toEqual([0, 1]);
     const onTrackP4 = await as(admin, (ctx) => countTickets(ctx, { customerId: ids.a, open: true, slaState: 'ok', type: 'incident', priorityId: ids.p4 }));

@@ -4,6 +4,7 @@ import type { PortalAssetsOverview } from '@/components/overview/types';
 import type { Announcement } from '@/components/announcements/api';
 import type { PortalKnownError, PortalKnownErrorList } from '@/components/known-errors/api';
 import type { PortalSurvey } from '@/components/surveys/api';
+import type { TicketRow } from '@/components/dashboards/types';
 
 /** API shapes of the customer portal module (apps/api/src/modules/portal). */
 
@@ -563,8 +564,98 @@ export interface PortalInstallation {
   lastSeenAt: string | null;
 }
 
+/** A period-over-period movement on the home's tiles. */
+export interface PortalDelta {
+  current: number;
+  previous: number | null;
+  deltaPct: number | null;
+}
+
+/** One row of "open by site" or "open by service" (`openLoad`): a null id is a figure ("No site"), never a door. */
+export interface PortalLoadRow {
+  id: string | null;
+  label: string;
+  open: number;
+  breached: number;
+  atRisk: number;
+}
+
+interface PortalSlaBlock {
+  totals: { met: number; breached: number; running: number; compliancePct: number | null; avgElapsedMinutes: number | null };
+  groups: { key: string; label: string; met: number; breached: number; running: number; compliancePct: number | null }[];
+}
+
+/**
+ * `GET /dashboards/customer?days=&siteId=` for a portal user (mirrors
+ * apps/api/src/modules/dashboards/service.ts customer()): every number counted
+ * live under the organisation (and site) fence with the predicates its door
+ * carries, the flow per UTC day, the backlog ageing and the response by
+ * priority, the customer-audience announcements, the upcoming work with one
+ * predicate per count, and the figures (SLA compliance, satisfaction, contracts,
+ * entitlements, reports).
+ */
+export interface PortalHome {
+  generatedAt: string;
+  customer: { id: string; name: string; code: string; timezone: string };
+  period: { days: number; from: string; to: string; previousFrom: string; previousTo: string };
+  timezone: string;
+  /** The site scope applied (null for all sites) and its name. */
+  siteId: string | null;
+  site: { id: string; name: string } | null;
+  series: { day: string; opened: number; incidentsOpened: number; requestsOpened: number; problemsOpened: number; changesOpened: number; resolved: number; breaches: number; resolutionMet: number; resolutionBreached: number; compliancePct: number | null }[];
+  tickets: {
+    open: number;
+    breached: number;
+    atRisk: number;
+    awaitingReply: number;
+    awaitingApproval: number;
+    awaitingStatusId: string | null;
+    awaitingApprovalStatusId: string | null;
+    openedInPeriod: number;
+    resolvedInPeriod: number;
+    openedPrevious: number;
+    resolvedPrevious: number;
+    openAtStart: number;
+    /** Staff only; null for a portal user. */
+    majorOpen: number | null;
+    byStatusCategory: Record<string, number>;
+    /** Largest first, ties in the ticket-type order (incident, request, problem, change). */
+    byType: { type: string; count: number; breached: number }[];
+    /** In level order; a null id is the "No priority" figure. */
+    byPriority: { id: string | null; key: string | null; label: string; color: string | null; level: number; count: number; breached: number }[];
+    bySite: PortalLoadRow[];
+    byService: PortalLoadRow[];
+  };
+  deltas: { open: PortalDelta; openedInPeriod: PortalDelta; resolvedInPeriod: PortalDelta };
+  ageing: { bucket: string; count: number; breached: number; createdFrom: string | null; createdTo: string | null }[];
+  byPriorityResponsiveness: { id: string | null; priority: string; level: number; opened: number; resolved: number; mttaMinutes: number | null; mttrMinutes: number | null; fcrPct: number | null; reopenPct: number | null }[];
+  /** Announcements aimed at customers (this organisation or every customer), pinned first. */
+  announcements: { id: string; title: string; body: string; type: string; pinned: boolean; startsAt: string | null; endsAt: string | null; sourceTicket: { id: string; number: string; title: string } | null }[];
+  upcoming: {
+    horizonDays: number;
+    /** Changes and approvals are null when the person may not open their pages. */
+    counts: { visits: number; maintenance: number; changes: number | null; approvals: number | null };
+    visits: { id: string; number: string; title: string; status: string; scheduledStart: string | null; scheduledEnd: string | null; siteId: string | null; site: string | null; engineer: string | null }[];
+    maintenance: { id: string; program: string; plannedDate: string; scheduledDate: string | null; status: string; siteId: string | null; site: string | null; engineer: string | null }[];
+    changes: { id: string; number: string; title: string; changeType: string | null; state: PortalChangeState; scheduledStart: string | null; scheduledEnd: string | null; downtimeExpectedMinutes: number | null; service: { id: string; name: string | null } | null }[] | null;
+    approvals: { id: string; step: number; stepName: string | null; createdAt: string; ticket: { id: string; number: string; title: string; type: string } }[] | null;
+  };
+  /** Figures until the compliance donut lands: clocks started in the period, every metric, by priority. */
+  sla: { period: PortalSlaBlock & { days: number }; days30: PortalSlaBlock; days90: PortalSlaBlock };
+  contracts: { id: string; number: string; name: string; status: string; start_date: string; end_date: string; days_to_expiry: number; auto_renew: boolean; type: string | null; services: string | null }[];
+  entitlements: { id: string; name: string; unit: string; period: string; contractNumber: string | null; quantity: number; used: number; remaining: number; pct: number; overThreshold: boolean; exhausted: boolean; periodEnd: string }[];
+  reports: { id: string; name: string; report_key: string; format: string; created_at: string; attachment_id: string | null; filename: string | null; size: number | null; period: string | null }[];
+  recentTickets: TicketRow[];
+  serviceTeam: { accountManager: { id: string; name: string; email: string; phone: string | null } | null; teams: { id: string; name: string; team_type: string; email: string | null; manager_name: string | null }[] };
+  /** Published known errors of the organisation (empty without portal:kedb). */
+  knownErrors: { published: number; items: { id: string; number: string; title: string; keStatus: string; publishedAt: string | null }[] };
+  /** The organisation's satisfaction over the period (figures) and the tickets still to rate (one predicate with the list). */
+  csat: { avg: number | null; responses: number; satisfiedPct: number | null; pending: { count: number; items: { ticketId: string; number: string; title: string; requestedAt: string; expiresAt: string }[] } };
+}
+
 export const pk = {
   me: ['portal', 'me'] as const,
+  home: (params: Record<string, unknown>) => ['dashboards', 'customer', 'portal', params] as const,
   catalog: ['portal', 'catalog'] as const,
   tickets: (params: Record<string, unknown>) => ['portal', 'tickets', params] as const,
   ticketStats: (params: Record<string, unknown>) => ['portal', 'tickets', 'stats', params] as const,
@@ -588,6 +679,8 @@ export const pk = {
 
 export const portalApi = {
   me: () => get<PortalMe>('/portal/me'),
+  /** The portal home's payload for a period and an optional site. */
+  home: (params: { days: number; siteId?: string }) => get<PortalHome>('/dashboards/customer', params),
   catalog: () => get<{ items: PortalCatalogItem[] }>('/portal/catalog'),
   tickets: (params: Record<string, unknown>) => get<PortalTicketList>('/portal/tickets', params),
   /** The list's tiles, chips and pills for the same filters (paging and sort left out). */

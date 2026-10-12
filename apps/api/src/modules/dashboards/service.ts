@@ -7,12 +7,16 @@ import { entitlementSummary, customerEntitlements } from '@/modules/contracts/en
 import { expiringContracts } from '@/modules/contracts/service';
 import { parseDay } from '@/modules/reports/dates';
 import { onCallSummary } from '@/modules/oncall/service';
-import { csatFigures, csatLowest, hidesSoc, pendingSurveyCount, pendingSurveyItems, type CsatFilter } from '@/modules/surveys/figures';
+import { csatFigures, csatLowest, hidesSoc, pendingSurveyCount, pendingSurveyItems, surveyPendingCond, type CsatFilter } from '@/modules/surveys/figures';
 import { loadSurveyDefaults } from '@/modules/surveys/policy';
-import { arrivalHeatmap, backlogAgeing } from '@/modules/reports/analytics';
-import { q, one, num, pct, isCustomerUser, openCond, custCond, socCond, BREACHED, AT_RISK, AGE_BUCKET, TICKET_LIST_COLS, TICKET_LIST_COLS_STAFF, TICKET_LIST_JOINS, EMPTY, dailySeries, ticketFlowSeries, domainFlowSeries, arrivalsWeek, attentionByCustomer, accountCounts, clampDays, NOT_SOC_DOMAINS, sumOf, weightedOf, delta, toDay, addDays, daysBetween, METRIC_KEYS, type MetricKey } from './common';
+import { arrivalHeatmap, backlogAgeing, responsiveness, scopeTimezone } from '@/modules/reports/analytics';
+import { visibleAnnouncements } from '@/modules/status/announcements';
+import { TICKET_TYPES } from '@itsm/shared';
+import * as approvalsSvc from '@/modules/tickets/approvals';
+import { plannedChangeBuckets, upcomingVisitCond, upcomingOccurrenceCond, occurrenceStandaloneCond, visitWindowCond, occurrenceWindowCond, visitDate, occurrenceDate, upcomingHorizon, PORTAL_UPCOMING_DAYS } from '@/modules/portal/upcoming';
+import { q, one, num, pct, asDate, isCustomerUser, openCond, custCond, socCond, BREACHED, AT_RISK, AGE_BUCKET, TICKET_LIST_COLS, TICKET_LIST_COLS_STAFF, TICKET_LIST_JOINS, EMPTY, dailySeries, ticketFlowSeries, domainFlowSeries, arrivalsWeek, attentionByCustomer, accountCounts, clampDays, NOT_SOC_DOMAINS, sumOf, weightedOf, delta, toDay, addDays, daysBetween, METRIC_KEYS, type MetricKey } from './common';
 import { nocTotals, socTotals, amcTotals, nocScope, socScope, amcScope } from './totals';
-import { scopeTimezone } from '@/modules/reports/analytics';
+import { deskSeries, openLoad } from './overview';
 
 export { overview } from './overview';
 
@@ -446,7 +450,22 @@ export async function engineer(ctx: Ctx, opts: { days?: number; customerId?: str
 
 // ---------------------------------------------------------------- customer
 
-export async function customer(ctx: Ctx, opts: { customerId?: string | null; days?: number } = {}) {
+/**
+ * The customer dashboard: the portal home for a customer user (pinned to
+ * their organisation), the same payload for staff with `customers:read` on
+ * one customer. Built on the Overview's recipe: every number that links is
+ * counted live under one fence (the organisation, the caller's security
+ * fence and, when asked, one site of the organisation) with exactly the
+ * predicates its door carries through the portal ticket list; the daily
+ * series draws the chart and the deltas only. The site scope narrows
+ * tickets, visits and maintenance; planned changes and approvals have no
+ * site. Declared figures (no door): the SLA compliance block, the
+ * satisfaction average and its sample, the responsiveness times, the
+ * entitlement usage and the known-issues count. `majorOpen` is computed for
+ * staff only (`isMajor` is not a portal-safe key); a portal principal reads
+ * `null`.
+ */
+export async function customer(ctx: Ctx, opts: { customerId?: string | null; days?: number; siteId?: string | null } = {}) {
   const days = clampDays(opts.days);
   let customerId: string;
   if (isCustomerUser(ctx)) {
@@ -459,79 +478,173 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
     ctx.requireCustomer(opts.customerId);
     customerId = opts.customerId;
   }
-  // Staff see this customer's tickets under their own security fence (the list the tiles open applies the same one);
-  // a portal user is never fenced here, their organisation's tickets are theirs to see.
-  const cust = sql`t.customer_id = ${customerId}::uuid ${socCond(ctx)}`;
-  const [info] = await q<Row>(ctx, sql`SELECT c.id, c.name, c.code, c.timezone, c.account_manager_id, am.name AS account_manager_name, am.email AS account_manager_email, am.phone AS account_manager_phone FROM customers c LEFT JOIN users am ON am.id = c.account_manager_id WHERE c.id = ${customerId}::uuid`);
-  const open = await q<Row>(ctx, sql`SELECT st.status_category AS category, count(*)::int AS count FROM tickets t JOIN config_options st ON st.id = t.status_id WHERE ${cust} AND ${openCond()} GROUP BY 1`);
-  const byPriority = await q<Row>(ctx, sql`SELECT pr.id, pr.key, coalesce(pr.label, 'No priority') AS label, pr.color, coalesce(pr.level, 99) AS level, count(*)::int AS count FROM tickets t LEFT JOIN config_options pr ON pr.id = t.priority_id WHERE ${cust} AND ${openCond()} GROUP BY 1, 2, 3, 4, 5 ORDER BY 5`);
-  const byType = await q<Row>(ctx, sql`SELECT t.type, count(*)::int AS count FROM tickets t WHERE ${cust} AND ${openCond()} GROUP BY 1`);
+  // A site scope must be one of this customer's active sites (the ones `me().sites` offers): a foreign or deactivated id is refused rather than silently narrowing the page to a site the control cannot name or clear.
+  const siteId = opts.siteId ?? null;
+  let site: { id: string; name: string } | null = null;
+  if (siteId) {
+    const [row] = await q<Row>(ctx, sql`SELECT s.id, s.name FROM sites s WHERE s.id = ${siteId}::uuid AND s.customer_id = ${customerId}::uuid AND s.is_active`);
+    if (!row) throw new ValidationError('siteId must be a site of this customer');
+    site = { id: String(row.id), name: String(row.name) };
+  }
   const now = new Date();
   const today = toDay(now);
-  const from30 = addDays(today, -(days - 1));
-  // Opened / resolved in the period use the same whole-day window as the series below, so the tile, the chart and the list it opens agree.
-  const counts = await one<Row>(ctx, sql`
-    SELECT count(*) FILTER (WHERE ${openCond()})::int AS open, count(*) FILTER (WHERE ${openCond()} AND st.key = 'pending_customer')::int AS awaiting_reply, count(*) FILTER (WHERE ${openCond()} AND st.key = 'awaiting_approval')::int AS awaiting_approval,
-      count(*) FILTER (WHERE t.resolved_at >= ${from30}::date)::int AS resolved_30d, count(*) FILTER (WHERE t.created_at >= ${from30}::date)::int AS opened_30d, count(*) FILTER (WHERE ${openCond()} AND t.is_major)::int AS major_open
-    FROM tickets t JOIN config_options st ON st.id = t.status_id WHERE ${cust} AND (${openCond()} OR t.created_at >= ${from30}::date OR t.resolved_at >= ${from30}::date)`);
+  const from = addDays(today, -(days - 1));
+  const prevFrom = addDays(from, -days);
+  const prevTo = addDays(from, -1);
+  const period = { days, from, to: today, previousFrom: prevFrom, previousTo: prevTo };
+  // Staff see this customer's tickets under their own security fence (the list the tiles open applies the same one);
+  // a portal user is never fenced here, their organisation's tickets are theirs to see. Both fragments are leading-AND,
+  // so the shared series, load and ageing helpers take them as they are.
+  const org = sql`${custCond(customerId)} ${socCond(ctx)}`;
+  const cust = sql`${org} ${siteId ? sql`AND t.site_id = ${siteId}::uuid` : EMPTY}`;
+  const timezone = await scopeTimezone(ctx, customerId);
+  const [info] = await q<Row>(ctx, sql`SELECT c.id, c.name, c.code, c.timezone, c.account_manager_id, am.name AS account_manager_name, am.email AS account_manager_email, am.phone AS account_manager_phone FROM customers c LEFT JOIN users am ON am.id = c.account_manager_id WHERE c.id = ${customerId}::uuid`);
+  // The two statuses the "awaiting" tiles count by id (the same id their doors carry as `statusId`).
+  const statusRows = await q<Row>(ctx, sql`SELECT id, key FROM config_options WHERE type = 'ticket_status' AND key IN ('pending_customer', 'awaiting_approval')`);
+  const awaitingStatusId = statusRows.find((r) => r.key === 'pending_customer')?.id ? String(statusRows.find((r) => r.key === 'pending_customer')!.id) : null;
+  const awaitingApprovalStatusId = statusRows.find((r) => r.key === 'awaiting_approval')?.id ? String(statusRows.find((r) => r.key === 'awaiting_approval')!.id) : null;
+  const byStatus = (id: string | null) => (id ? sql`t.status_id = ${id}::uuid` : sql`false`);
+  const inRange = (col: ReturnType<typeof sql>, f: string, t: string) => sql`${col} >= ${f}::date AND ${col} < ${t}::date + interval '1 day'`;
+
+  // ---- the tiles: one live statement over the fence
+  const live = await one<Row>(ctx, sql`
+    SELECT count(*) FILTER (WHERE ${openCond()})::int AS open, count(*) FILTER (WHERE ${openCond()} AND ${BREACHED})::int AS breached, count(*) FILTER (WHERE ${openCond()} AND ${AT_RISK})::int AS at_risk,
+      count(*) FILTER (WHERE ${openCond()} AND ${byStatus(awaitingStatusId)})::int AS awaiting_reply, count(*) FILTER (WHERE ${openCond()} AND ${byStatus(awaitingApprovalStatusId)})::int AS awaiting_approval,
+      count(*) FILTER (WHERE ${inRange(sql`t.created_at`, from, today)})::int AS opened_period, count(*) FILTER (WHERE ${inRange(sql`t.resolved_at`, from, today)})::int AS resolved_period,
+      count(*) FILTER (WHERE ${inRange(sql`t.created_at`, prevFrom, prevTo)})::int AS opened_previous, count(*) FILTER (WHERE ${inRange(sql`t.resolved_at`, prevFrom, prevTo)})::int AS resolved_previous,
+      count(*) FILTER (WHERE t.created_at < ${from}::date AND (t.resolved_at IS NULL OR t.resolved_at >= ${from}::date) AND (t.closed_at IS NULL OR t.closed_at >= ${from}::date))::int AS open_at_start,
+      count(*) FILTER (WHERE ${openCond()} AND t.is_major)::int AS major_open
+    FROM tickets t WHERE true ${cust} AND (${openCond()} OR t.created_at >= ${prevFrom}::date OR t.resolved_at >= ${prevFrom}::date OR t.closed_at >= ${prevFrom}::date OR (t.resolved_at IS NULL AND t.closed_at IS NULL))`);
+  const open = await q<Row>(ctx, sql`SELECT st.status_category AS category, count(*)::int AS count FROM tickets t JOIN config_options st ON st.id = t.status_id WHERE true ${cust} AND ${openCond()} GROUP BY 1`);
+  // Largest first, ties in the ticket-type order (incident, request, problem, change): the Open tile's hint and the donut legend read in that order.
+  const byType = await q<Row>(ctx, sql`SELECT t.type, count(*)::int AS count, count(*) FILTER (WHERE ${BREACHED})::int AS breached FROM tickets t WHERE true ${cust} AND ${openCond()} GROUP BY 1 ORDER BY 2 DESC, array_position(ARRAY[${sql.join(TICKET_TYPES.map((x) => sql`${x}`), sql`, `)}]::text[], t.type::text)`);
+  const byPriority = await q<Row>(ctx, sql`SELECT pr.id, pr.key, coalesce(pr.label, 'No priority') AS label, pr.color, coalesce(pr.level, 99) AS level, count(*)::int AS count, count(*) FILTER (WHERE ${BREACHED})::int AS breached FROM tickets t LEFT JOIN config_options pr ON pr.id = t.priority_id WHERE true ${cust} AND ${openCond()} GROUP BY 1, 2, 3, 4, 5 ORDER BY 5`);
+  const bySite = await openLoad(ctx, 'site', cust);
+  const byService = await openLoad(ctx, 'service', cust);
+  // The flow (UTC days, the list's cut), the backlog ageing and the response by priority share the fence.
+  const series = await deskSeries(ctx, from, today, cust);
+  const ageing = await backlogAgeing(ctx, { customerId, siteId }, now);
+  const byPriorityResponsiveness = await responsiveness(ctx, { customerId, siteId, from, to: today });
+
+  // ---- announcements aimed at customers (this organisation or every customer)
+  const announcements = (await visibleAnnouncements(ctx.tx, { staff: false, customerId, now, limit: 5 })).map((a) => ({ id: a.id, title: a.title, body: a.body, type: a.type, pinned: a.pinned, startsAt: a.startsAt, endsAt: a.endsAt, sourceTicket: a.sourceTicket }));
+
+  // ---- upcoming: one predicate per number, shared with the page each count opens (`portal/upcoming.ts`)
+  const horizon = upcomingHorizon(today);
+  const visitRows = await q<Row>(ctx, sql`
+    SELECT v.id, v.number, v.title, v.status, v.scheduled_start, v.scheduled_end, v.site_id, si.name AS site, u.name AS engineer, count(*) OVER ()::int AS total
+    FROM field_visits v LEFT JOIN users u ON u.id = v.engineer_id LEFT JOIN sites si ON si.id = v.site_id
+    WHERE v.customer_id = ${customerId}::uuid AND ${upcomingVisitCond(today)} AND ${visitWindowCond(horizon.from, horizon.to)} ${siteId ? sql`AND v.site_id = ${siteId}::uuid` : EMPTY}
+    ORDER BY ${visitDate()}, v.number LIMIT 10`);
+  const occurrenceRows = await q<Row>(ctx, sql`
+    SELECT o.id, p.name AS program, o.planned_date, o.scheduled_date, o.status, p.site_id, si.name AS site, u.name AS engineer, count(*) OVER ()::int AS total
+    FROM pm_occurrences o JOIN pm_programs p ON p.id = o.program_id LEFT JOIN sites si ON si.id = p.site_id LEFT JOIN users u ON u.id = coalesce(o.engineer_id, p.assigned_engineer_id)
+    WHERE o.customer_id = ${customerId}::uuid AND ${upcomingOccurrenceCond(today)} AND ${occurrenceWindowCond(horizon.from, horizon.to)} AND ${occurrenceStandaloneCond(today, horizon.to)} ${siteId ? sql`AND p.site_id = ${siteId}::uuid` : EMPTY}
+    ORDER BY ${occurrenceDate()}, p.name LIMIT 10`);
+  const canChanges = isCustomerUser(ctx) ? ctx.can('portal:status', customerId) : ctx.can('tickets:read', customerId);
+  const changeBuckets = canChanges ? await plannedChangeBuckets(ctx, customerId, { preview: !isCustomerUser(ctx), now }) : null;
+  const upcomingChanges = changeBuckets ? changeBuckets.all.filter((x) => x.bucket === 'upcoming').map((x) => x.item) : null;
+  const canApprovals = isCustomerUser(ctx) && ctx.can('portal:approve', customerId);
+  const approvals = canApprovals ? (await approvalsSvc.listMine(ctx)).items.filter((a) => a.customerId === customerId) : null;
+  const upcoming = {
+    /** Visits and maintenance are counted up to this many days ahead; changes follow the planned-changes horizon. */
+    horizonDays: PORTAL_UPCOMING_DAYS,
+    counts: {
+      visits: num(visitRows[0]?.total),
+      maintenance: num(occurrenceRows[0]?.total),
+      changes: changeBuckets ? changeBuckets.counts.upcoming : null,
+      approvals: approvals ? approvals.length : null,
+    },
+    visits: visitRows.map((v) => ({ id: String(v.id), number: String(v.number), title: String(v.title), status: String(v.status), scheduledStart: asDate(v.scheduled_start), scheduledEnd: asDate(v.scheduled_end), siteId: (v.site_id as string | null) ?? null, site: (v.site as string | null) ?? null, engineer: (v.engineer as string | null) ?? null })),
+    maintenance: occurrenceRows.map((o) => ({ id: String(o.id), program: String(o.program), plannedDate: String(o.planned_date), scheduledDate: o.scheduled_date ? String(o.scheduled_date) : null, status: String(o.status), siteId: (o.site_id as string | null) ?? null, site: (o.site as string | null) ?? null, engineer: (o.engineer as string | null) ?? null })),
+    changes: upcomingChanges ? upcomingChanges.slice(0, 10).map((c) => ({ id: c.id, number: c.number, title: c.title, changeType: c.changeType, state: c.state, scheduledStart: c.scheduledStart, scheduledEnd: c.scheduledEnd, downtimeExpectedMinutes: c.downtimeExpectedMinutes, service: c.service })) : null,
+    approvals: approvals ? approvals.slice(0, 10).map((a) => ({ id: a.id, step: a.step, stepName: a.stepName, createdAt: a.createdAt, ticket: { id: a.ticket.id, number: a.ticket.number, title: a.ticket.title, type: a.ticket.type } })) : null,
+  };
+
+  // ---- the figures: SLA compliance (clocks started in the period, by priority), contracts, entitlements, reports
   const d30 = new Date(now.getTime() - 30 * 86_400_000).toISOString();
   const d90 = new Date(now.getTime() - 90 * 86_400_000).toISOString();
   const dPeriod = new Date(now.getTime() - days * 86_400_000).toISOString();
   const [sla30, sla90] = [await slaCompliance(ctx, { customerId, from: d30, groupBy: 'priority' }), await slaCompliance(ctx, { customerId, from: d90, groupBy: 'priority' })];
   const slaPeriod = days === 30 ? sla30 : days === 90 ? sla90 : await slaCompliance(ctx, { customerId, from: dPeriod, groupBy: 'priority' });
-  const series = await dailySeries(ctx, from30, today, customerId);
   const contracts = await q<Row>(ctx, sql`
     SELECT c.id, c.number, c.name, c.status, c.start_date, c.end_date, (c.end_date - current_date)::int AS days_to_expiry, c.auto_renew, ty.label AS type,
       (SELECT string_agg(s.name, ', ' ORDER BY s.name) FROM contract_services cs JOIN services s ON s.id = cs.service_id WHERE cs.contract_id = c.id) AS services
     FROM contracts c LEFT JOIN config_options ty ON ty.id = c.type_id WHERE c.customer_id = ${customerId}::uuid AND c.status IN ('active', 'expiring') ORDER BY c.end_date LIMIT 20`);
   const entitlements = (await customerEntitlements(ctx, customerId)).map((e) => ({ id: e.id, name: e.name, unit: e.unit, period: e.utilization.period, contractNumber: e.contractNumber, quantity: e.utilization.quantity, used: e.utilization.used, remaining: e.utilization.remaining, pct: e.utilization.pct, overThreshold: e.utilization.overThreshold, exhausted: e.utilization.exhausted, periodEnd: e.utilization.periodEnd }));
-  const maintenance = await q<Row>(ctx, sql`
-    SELECT o.id, p.name AS program, o.planned_date, o.scheduled_date, o.status, si.name AS site, u.name AS engineer FROM pm_occurrences o JOIN pm_programs p ON p.id = o.program_id LEFT JOIN sites si ON si.id = p.site_id LEFT JOIN users u ON u.id = coalesce(o.engineer_id, p.assigned_engineer_id)
-    WHERE o.customer_id = ${customerId}::uuid AND o.status IN ('planned', 'scheduled', 'rescheduled') AND coalesce(o.scheduled_date, o.planned_date) BETWEEN current_date AND current_date + 30 ORDER BY coalesce(o.scheduled_date, o.planned_date) LIMIT 10`);
-  const visits = await q<Row>(ctx, sql`
-    SELECT v.id, v.number, v.title, v.status, v.scheduled_start, v.scheduled_end, u.name AS engineer, si.name AS site FROM field_visits v LEFT JOIN users u ON u.id = v.engineer_id LEFT JOIN sites si ON si.id = v.site_id
-    WHERE v.customer_id = ${customerId}::uuid AND v.status IN ('requested', 'scheduled', 'in_progress') AND coalesce(v.scheduled_start, now()) >= now() - interval '1 day' ORDER BY v.scheduled_start NULLS LAST LIMIT 10`);
   const reports = await q<Row>(ctx, sql`
     SELECT r.id, r.name, r.report_key, r.format, r.created_at, r.attachment_id, a.filename, a.size, r.parameters->>'period' AS period FROM report_runs r LEFT JOIN attachments a ON a.id = r.attachment_id
     WHERE r.customer_id = ${customerId}::uuid AND r.portal_visible AND r.status = 'completed' ORDER BY r.created_at DESC LIMIT 5`);
-  const recent = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`SELECT ${TICKET_LIST_COLS} FROM tickets t ${TICKET_LIST_JOINS} WHERE ${cust} ORDER BY t.last_activity_at DESC LIMIT 10`));
+  // Your open tickets: the newest activity under the fence (the panel's "View all" is the Open tile's door).
+  const recent = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`SELECT ${TICKET_LIST_COLS} FROM tickets t ${TICKET_LIST_JOINS} WHERE true ${cust} AND ${openCond()} ORDER BY t.last_activity_at DESC LIMIT 8`));
   const teams = await q<Row>(ctx, sql`
     SELECT te.id, te.name, te.team_type, te.email, m.name AS manager_name FROM teams te LEFT JOIN users m ON m.id = te.manager_user_id
     WHERE te.is_active AND (te.id IN (SELECT ct.team_id FROM customer_teams ct WHERE ct.customer_id = ${customerId}::uuid) OR te.team_type = 'service_desk') ORDER BY (te.team_type = 'service_desk') DESC, te.name LIMIT 10`);
-  // Known issues with a workaround: the organisation's published known errors (customer-safe fields only); empty for portal users without portal:kedb.
+  // Known issues with a workaround: the organisation's published known errors (customer-safe fields only; the organisation, not the site); empty for portal users without portal:kedb.
   const canKedb = !isCustomerUser(ctx) || ctx.can('portal:kedb', customerId);
-  const keConds = sql`pd.is_known_error AND pd.portal_visible AND coalesce(pd.ke_status, 'open') <> 'retired' AND ${cust}`;
+  const keConds = sql`pd.is_known_error AND pd.portal_visible AND coalesce(pd.ke_status, 'open') <> 'retired' ${org}`;
   const kePublished = canKedb ? await one<Row>(ctx, sql`SELECT count(*)::int AS n FROM problem_details pd JOIN tickets t ON t.id = pd.ticket_id WHERE ${keConds}`) : { n: 0 };
   const keItems = canKedb
     ? await q<Row>(ctx, sql`SELECT t.id, t.number, t.title, coalesce(pd.ke_status, 'open') AS ke_status, pd.published_at FROM problem_details pd JOIN tickets t ON t.id = pd.ticket_id WHERE ${keConds} AND coalesce(pd.ke_status, 'open') IN ('open', 'fix_in_progress') ORDER BY pd.published_at DESC NULLS LAST LIMIT 5`)
     : [];
-  const openTotal = num(counts.open);
-  const csatFilter = await csatWindow(ctx, from30, today, { customerId });
+  // Satisfaction over the period (a figure) and the tickets still to rate: the one "to rate" predicate the list, the stats and GET /portal/surveys
+  // count with (`surveyPendingCond` carries the resolved-or-closed condition); under a site scope it runs over the home's own fence, so the banner's door
+  // (`statusCategory=resolved,closed&csat=pending&siteId=`) reads the same number and the figure never needs a permission the page does not (`portal:tickets`).
+  const csatFilter = await csatWindow(ctx, from, today, { customerId });
   const csat = await csatFigures(ctx.tx, csatFilter);
-  const pendingCount = await pendingSurveyCount(ctx.tx, customerId);
-  const pendingItems = isCustomerUser(ctx) ? await pendingSurveyItems(ctx.tx, customerId, null, 5) : [];
+  const pendingCount = siteId ? num((await one<Row>(ctx, sql`SELECT count(*)::int AS n FROM tickets t WHERE true ${cust} AND ${surveyPendingCond(sql`t.id`)}`)).n) : await pendingSurveyCount(ctx.tx, customerId);
+  let pendingItems = isCustomerUser(ctx) ? await pendingSurveyItems(ctx.tx, customerId, null, siteId ? 50 : 5) : [];
+  if (siteId && pendingItems.length) {
+    const onSite = await q<{ id: string }>(ctx, sql`SELECT t.id FROM tickets t WHERE t.site_id = ${siteId}::uuid AND t.id = ANY(ARRAY[${sql.join(pendingItems.map((i) => sql`${i.ticketId}::uuid`), sql`, `)}])`);
+    const keep = new Set(onSite.map((r) => String(r.id)));
+    pendingItems = pendingItems.filter((i) => keep.has(i.ticketId)).slice(0, 5);
+  }
   return {
     generatedAt: now,
     customer: info ? { id: info.id, name: info.name, code: info.code, timezone: info.timezone } : { id: customerId, name: '', code: '', timezone: 'UTC' },
-    period: { days, from: from30, to: today },
-    /** Tickets opened and resolved per day for this customer over the period. */
-    series: series.map((d) => ({ day: d.day, opened: num(d.opened), resolved: num(d.resolved) })),
+    period,
+    timezone,
+    /** The site scope applied (null for all sites); the id is validated against the customer's sites. */
+    siteId,
+    site,
+    /** Opened (with the share of each ticket type), resolved and breaches per day over the period, UTC days. */
+    series,
     tickets: {
-      open: openTotal,
+      open: num(live.open),
+      breached: num(live.breached),
+      atRisk: num(live.at_risk),
+      awaitingReply: num(live.awaiting_reply),
+      awaitingApproval: num(live.awaiting_approval),
+      awaitingStatusId,
+      awaitingApprovalStatusId,
+      openedInPeriod: num(live.opened_period),
+      resolvedInPeriod: num(live.resolved_period),
+      openedPrevious: num(live.opened_previous),
+      resolvedPrevious: num(live.resolved_previous),
+      openAtStart: num(live.open_at_start),
+      /** Open major incidents: staff only (the portal list has no major-incident key), null for a portal principal. */
+      majorOpen: isCustomerUser(ctx) ? null : num(live.major_open),
       byStatusCategory: Object.fromEntries(open.map((r) => [String(r.category), num(r.count)])),
-      byPriority,
-      byType: Object.fromEntries(byType.map((r) => [String(r.type), num(r.count)])),
-      awaitingReply: num(counts.awaiting_reply),
-      awaitingApproval: num(counts.awaiting_approval),
-      resolved30d: num(counts.resolved_30d),
-      opened30d: num(counts.opened_30d),
-      majorOpen: num(counts.major_open),
+      byType: byType.map((r) => ({ type: String(r.type), count: num(r.count), breached: num(r.breached) })),
+      byPriority: byPriority.map((r) => ({ id: (r.id as string | null) ?? null, key: (r.key as string | null) ?? null, label: String(r.label), color: (r.color as string | null) ?? null, level: num(r.level), count: num(r.count), breached: num(r.breached) })),
+      bySite,
+      byService,
     },
+    /** Period-over-period movement: open against the backlog at the start of the period, the period counts against the previous period. */
+    deltas: {
+      open: delta(num(live.open), num(live.open_at_start)),
+      openedInPeriod: delta(num(live.opened_period), num(live.opened_previous)),
+      resolvedInPeriod: delta(num(live.resolved_period), num(live.resolved_previous)),
+    },
+    /** The five-bucket backlog ageing with the created window each bar drills down with. */
+    ageing,
+    /** Opened, resolved, MTTA, MTTR, first-contact resolution and reopen rate per priority over the period. */
+    byPriorityResponsiveness,
+    announcements,
+    upcoming,
     sla: { period: { days, totals: slaPeriod.totals, groups: slaPeriod.groups }, days30: { totals: sla30.totals, groups: sla30.groups }, days90: { totals: sla90.totals, groups: sla90.groups } },
     contracts,
     entitlements,
-    upcomingMaintenance: maintenance,
-    scheduledVisits: visits,
     reports,
     recentTickets: recent,
     serviceTeam: {

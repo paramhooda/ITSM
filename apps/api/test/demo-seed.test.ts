@@ -162,6 +162,13 @@ describe('demo dataset', () => {
     expect(responses.items.every((r) => r.customerId === abc.id && !('assigneeName' in r) && !('teamName' in r) && !('recipientEmail' in r))).toBe(true);
   });
 
+  it('gives ABC Manufacturing four active sites and the portal home a live customer-audience announcement', async () => {
+    const abc = await withSystem(async (tx) => (await tx.select({ id: schema.customers.id }).from(schema.customers).where(eq(schema.customers.code, 'ABC')))[0]!);
+    expect(await count('sites', `where customer_id = '${abc.id}' and is_active`)).toBe(4);
+    // Pinned for every customer and inside its window, so the Announcements panel of the demo portal home is never empty.
+    expect(await count('announcements', "where audience = 'customers' and is_active and cardinality(customer_ids) = 0 and starts_at <= now() and (ends_at is null or ends_at > now())")).toBeGreaterThanOrEqual(1);
+  });
+
   it('gives a field engineer visibility limited to granted customers', async () => {
     const eng = await withSystem(async (tx) => (await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, 'suresh.reddy@msp.local')))[0]!);
     invalidatePrincipal(eng.id);

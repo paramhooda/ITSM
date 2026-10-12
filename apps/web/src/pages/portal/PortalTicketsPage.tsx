@@ -35,8 +35,10 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'incident', label: 'Issues' },
   { key: 'request', label: 'Requests' },
+  { key: 'problem', label: 'Problems' },
+  { key: 'change', label: 'Changes' },
 ];
-const TYPE_NOUN: Record<Tab, string> = { all: 'ticket', incident: 'issue', request: 'request' };
+const TYPE_NOUN: Record<Tab, string> = { all: 'ticket', incident: 'issue', request: 'request', problem: 'problem', change: 'change' };
 const CATEGORY_LABELS: Record<string, string> = { new: 'New', open: 'Open', pending: 'Pending', resolved: 'Resolved', closed: 'Closed', cancelled: 'Cancelled' };
 const SLA_LABELS: Record<string, string> = { breached: 'Breached', at_risk: 'At risk', ok: 'On track' };
 /** The page's default view ("All open", the breadcrumb root): the open categories, newest activity first, 25 a page. */
@@ -152,7 +154,7 @@ export default function PortalTicketsPage() {
     if (legacy && legacy !== 'wait') set(legacy, false);
   }, [legacy, set]);
 
-  // A type the portal has no pill for (a problem or a change in a link) reads as All; `toPortalParams` drops it as well, so the route never refuses it.
+  // A type outside the four the organisation can see reads as All; `toPortalParams` drops it as well, so the route never refuses it.
   const tab: Tab = TABS.some((t) => t.key === state.type) ? (state.type as Tab) : 'all';
   const chip = chipOf(state, pendingId, lookupsReady);
   // One mapping from the URL state to the API (shared with the dashboards guard test), so a link reproduces its number.
@@ -162,6 +164,8 @@ export default function PortalTicketsPage() {
   // The stats take the same filters as the list; the API strips the status keys and the tile keys from the tile aggregates, so one tile never moves another.
   const stats = useQuery({ queryKey: pk.ticketStats(filterParams), queryFn: () => portalApi.ticketStats(filterParams), placeholderData: (prev) => prev, refetchInterval: 60_000, enabled: !legacy });
   const s = stats.data ?? list.data?.counts;
+  // The type pills: All always, then a pill for every type the organisation has in the scope (`byType` ignores the type pill, so the set is stable while clicking), plus the pill in effect even at zero so its chip can be read back; All is the sum of the pills.
+  const tabs = TABS.filter((t) => t.key === 'all' || t.key === tab || (s ? (s.byType[t.key] ?? 0) > 0 : false));
 
   const pickChip = (next: PortalStatusChip) => set(chipPatch(next, pendingId));
   const clearFilters = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
@@ -280,8 +284,8 @@ export default function PortalTicketsPage() {
           <>
             <Segmented
               size="sm"
-              // "All" is every ticket type of the organisation counted over the same scope (problems and changes included); Issues and Requests are two of them, so the pills need not sum to it.
-              options={TABS.map((t) => ({ value: t.key, label: t.label, count: s ? (t.key === 'all' ? s.allTypes : s.byType[t.key] ?? 0) : undefined }))}
+              // "All" is every ticket type of the organisation counted over the same scope; every type it holds has a pill, so All is the sum of the pills.
+              options={tabs.map((t) => ({ value: t.key, label: t.label, count: s ? (t.key === 'all' ? s.allTypes : s.byType[t.key] ?? 0) : undefined }))}
               value={tab}
               onChange={(v) => set({ type: v === 'all' ? undefined : v })}
             />

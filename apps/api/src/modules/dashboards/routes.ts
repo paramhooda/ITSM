@@ -24,6 +24,7 @@ export default async function routes(app: FastifyInstance) {
   r.get('/dashboards/soc', { preHandler: app.auth('dashboards:soc'), schema: { tags, querystring: period } }, h((ctx, req) => svc.soc(ctx, scopeOf(req))));
   r.get('/dashboards/amc', { preHandler: app.auth('dashboards:amc'), schema: { tags, querystring: period } }, h((ctx, req) => svc.amc(ctx, scopeOf(req))));
   r.get('/dashboards/engineer', { preHandler: app.auth(), schema: { tags, querystring: period } }, h((ctx, req) => svc.engineer(ctx, scopeOf(req))));
-  r.get('/dashboards/customer', { preHandler: app.auth('portal:access', 'customers:read'), schema: { tags, querystring: period } }, h((ctx, req) => svc.customer(ctx, scopeOf(req))));
+  /** The customer dashboard (the portal home): the period, the customer (staff only; a portal user is pinned to their organisation) and an optional site of that customer. */
+  r.get('/dashboards/customer', { preHandler: app.auth('portal:access', 'customers:read'), schema: { tags, querystring: period.extend({ siteId: uuid.optional() }) } }, h((ctx, req) => svc.customer(ctx, { ...scopeOf(req), siteId: (req.query as { siteId?: string }).siteId ?? null })));
   r.get('/dashboards/trends', { preHandler: app.auth(), schema: { tags, querystring: z.object({ customerId: uuid.optional(), from: dateStr.optional(), to: dateStr.optional(), metric: z.string().max(40).optional() }) } }, h((ctx, req) => svc.trends(ctx, req.query as { customerId?: string; from?: string; to?: string; metric?: string })));
 }

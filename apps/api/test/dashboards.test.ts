@@ -21,7 +21,8 @@ import { toDay, addDays } from '@/modules/reports/dates';
 import { AGE_ORDER } from '@/modules/reports/analytics';
 
 const suffix = Math.random().toString(36).slice(2, 8);
-const ids = { adminId: '', customerA: '', customerB: '', siteA: '', nocService: '', socService: '', amcService: '', p1: '', p4: '', portalUserId: '', bareUserId: '', nocEngineerId: '' };
+const ids = { adminId: '', customerA: '', customerB: '', siteA: '', siteB: '', siteInactive: '', nocService: '', socService: '', amcService: '', p1: '', p4: '', portalUserId: '', bareUserId: '', nocEngineerId: '' };
+const announcementIds: string[] = [];
 let admin: Principal;
 let portal: Principal;
 /** An MSP user with no role at all: no tickets:read, no dashboard permission. */
@@ -47,7 +48,7 @@ const asPortal = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(portal, { requestId:
 const as = <T>(p: Principal, fn: (ctx: Ctx) => Promise<T>) => runAs(p, { requestId: `dash-test-${suffix}` }, fn);
 
 const today = toDay(new Date());
-const sum = (series: Record<string, unknown>[], key: string) => series.reduce((n, r) => n + Number(r[key] ?? 0), 0);
+const sum = (series: object[], key: string) => series.reduce((n, r) => n + Number((r as Record<string, unknown>)[key] ?? 0), 0);
 
 beforeAll(async () => {
   await withSystem(async (tx) => {
@@ -62,6 +63,18 @@ beforeAll(async () => {
     ids.customerB = b.id;
     const [site] = await tx.insert(schema.sites).values({ customerId: a.id, code: 'HQ', name: 'HQ', isPrimary: true }).returning();
     ids.siteA = site.id;
+    const [siteB] = await tx.insert(schema.sites).values({ customerId: b.id, code: 'HQ', name: 'B HQ', isPrimary: true }).returning();
+    ids.siteB = siteB.id;
+    // A deactivated site of A: `me().sites` never offers it, so the home refuses it like a foreign one.
+    const [siteOld] = await tx.insert(schema.sites).values({ customerId: a.id, code: 'OLD', name: 'Old plant', isActive: false }).returning();
+    ids.siteInactive = siteOld.id;
+    // Announcements: one for customers (the portal home shows it), one for staff only, one for customers but another organisation.
+    const ann = await tx.insert(schema.announcements).values([
+      { title: `Dash customers notice ${suffix}`, body: 'For every customer', type: 'info', audience: 'customers', customerIds: [], startsAt: new Date(Date.now() - 3_600_000), pinned: true, isActive: true, createdBy: adminUser.id },
+      { title: `Dash staff notice ${suffix}`, body: 'Staff only', type: 'info', audience: 'staff', customerIds: [], startsAt: new Date(Date.now() - 3_600_000), isActive: true, createdBy: adminUser.id },
+      { title: `Dash B notice ${suffix}`, body: 'For B only', type: 'info', audience: 'customers', customerIds: [b.id], startsAt: new Date(Date.now() - 3_600_000), isActive: true, createdBy: adminUser.id },
+    ]).returning({ id: schema.announcements.id });
+    announcementIds.push(...ann.map((r) => r.id));
     // The service's domain decides the ticket's domain (no category set), so each dashboard sees one of A's tickets.
     const [nocSvc] = await tx.insert(schema.services).values({ key: `dash_noc_${suffix}`, name: `Dash NOC ${suffix}`, domain: 'noc' }).returning();
     const [socSvc] = await tx.insert(schema.services).values({ key: `dash_soc_${suffix}`, name: `Dash SOC ${suffix}`, domain: 'soc' }).returning();
@@ -128,6 +141,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await withSystem(async (tx) => {
     if (createdTicketIds.length) await tx.delete(schema.tickets).where(inArray(schema.tickets.id, createdTicketIds));
+    if (announcementIds.length) await tx.delete(schema.announcements).where(inArray(schema.announcements.id, announcementIds));
     const users = [ids.portalUserId, ids.bareUserId, ids.nocEngineerId].filter(Boolean);
     if (users.length) await tx.delete(schema.users).where(inArray(schema.users.id, users));
     const customerIds = [ids.customerA, ids.customerB].filter(Boolean);
@@ -139,36 +153,99 @@ afterAll(async () => {
 });
 
 describe('dashboards', () => {
-  it('customer(): a 30-day series whose opened/resolved sums match the customer\'s tickets, with the breakdowns the charts read', async () => {
+  it('customer(): the period with its previous window, the live tiles with deltas, the flow series with the type shares and the breakdowns the panels read', async () => {
     const d = await asAdmin((ctx) => customer(ctx, { customerId: ids.customerA }));
-    expect(d.period).toEqual({ days: 30, from: addDays(today, -29), to: today });
+    expect(d.period).toEqual({ days: 30, from: addDays(today, -29), to: today, previousFrom: addDays(today, -59), previousTo: addDays(today, -30) });
+    expect(d.generatedAt).toBeInstanceOf(Date);
+    expect(typeof d.timezone).toBe('string');
+    expect(d.siteId).toBeNull();
+    expect(d.site).toBeNull();
     expect(d.series).toHaveLength(30);
     expect(d.series[0]?.day).toBe(addDays(today, -29));
     expect(d.series.at(-1)?.day).toBe(today);
     expect(sum(d.series, 'opened')).toBe(4);
+    expect(sum(d.series, 'incidentsOpened')).toBe(3);
+    expect(sum(d.series, 'requestsOpened')).toBe(1);
+    expect(sum(d.series, 'problemsOpened')).toBe(0);
+    expect(sum(d.series, 'changesOpened')).toBe(0);
+    expect(d.series.every((r) => r.incidentsOpened + r.requestsOpened + r.problemsOpened + r.changesOpened === r.opened)).toBe(true);
     expect(sum(d.series, 'resolved')).toBe(2);
-    expect(d.tickets.opened30d).toBe(4);
-    expect(d.tickets.resolved30d).toBe(2);
-    expect(d.tickets.open).toBe(2);
-    // Open tickets by priority carry the option key the portal links on, ordered by level.
-    expect(d.tickets.byPriority.map((p) => [p.key, p.count])).toEqual([['p1', 2]]);
-    expect(Object.values(d.tickets.byStatusCategory).reduce((n, c) => n + c, 0)).toBe(2);
+    expect(d.series.every((r) => typeof r.breaches === 'number' && typeof r.resolutionMet === 'number' && typeof r.resolutionBreached === 'number')).toBe(true);
+    const t = d.tickets;
+    expect(t.openedInPeriod).toBe(4);
+    expect(t.resolvedInPeriod).toBe(2);
+    expect(t.open).toBe(2);
+    expect([t.breached, t.atRisk, t.awaitingReply, t.awaitingApproval, t.openedPrevious, t.resolvedPrevious, t.openAtStart]).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    // Staff read the major count; the status ids the awaiting tiles count by travel with the payload for the doors.
+    expect(t.majorOpen).toBe(0);
+    expect(typeof t.awaitingStatusId).toBe('string');
+    expect(typeof t.awaitingApprovalStatusId).toBe('string');
+    expect(d.deltas.open).toEqual({ current: 2, previous: 0, deltaPct: null });
+    expect(d.deltas.openedInPeriod.current).toBe(4);
+    expect(d.deltas.resolvedInPeriod.current).toBe(2);
+    // Open tickets by priority carry the option key the older portal links used, ordered by level; by type carries the breached share.
+    expect(t.byPriority.map((p) => [p.key, p.count, p.breached])).toEqual([['p1', 2, 0]]);
+    expect(t.byType).toEqual([{ type: 'incident', count: 2, breached: 0 }]);
+    expect(Object.values(t.byStatusCategory).reduce((n, c) => n + c, 0)).toBe(2);
+    expect(t.bySite.map((r) => [r.label, r.open])).toEqual([['HQ', 1], ['No site', 1]]);
+    expect(t.byService.map((r) => [r.id, r.open]).sort()).toEqual([[ids.nocService, 1], [ids.socService, 1]].sort());
+    expect(d.ageing.map((a) => a.bucket)).toEqual([...AGE_ORDER]);
+    expect(d.ageing.reduce((n, a) => n + a.count, 0)).toBe(2);
+    expect(d.byPriorityResponsiveness.map((r) => [r.priority, r.opened, r.resolved])).toEqual([['P1 - Critical', 2, 0], ['P4 - Low', 2, 2]]);
     expect(Array.isArray(d.sla.days30.groups)).toBe(true);
     expect(Array.isArray(d.sla.days90.groups)).toBe(true);
     expect(typeof d.sla.days30.totals.met).toBe('number');
+    expect(d.sla.period.days).toBe(30);
+    // Upcoming: the visits coming up (two scheduled ahead and the requested one without a date), the occurrences planned today and in twelve days.
+    expect(d.upcoming.horizonDays).toBe(90);
+    expect(d.upcoming.counts).toEqual({ visits: 3, maintenance: 2, changes: 0, approvals: null });
+    expect(d.upcoming.visits.map((v) => v.number)).toEqual([`FV-DASH-${suffix}-6`, `FV-DASH-${suffix}-2`, `FV-DASH-${suffix}-3`]);
+    expect(d.upcoming.maintenance.map((o) => o.status)).toEqual(['planned', 'scheduled']);
+    expect(d.upcoming.changes).toEqual([]);
+    expect(d.upcoming.approvals).toBeNull();
+    // Announcements aimed at customers, this organisation included; never the staff-only or another organisation's (other suites may add their own rows, so only this fixture's titles are compared).
+    const own = (rows: { title: string }[]) => rows.map((a) => a.title).filter((t) => t.includes(suffix)).sort();
+    expect(own(d.announcements)).toEqual([`Dash customers notice ${suffix}`]);
+    expect(d.recentTickets.length).toBe(2);
   });
 
-  it('customer(): a portal user is pinned to their own customer, so the series never counts customer B', async () => {
+  it('customer(): a portal user is pinned to their own customer and reads no staff-only number', async () => {
     const d = await asPortal((ctx) => customer(ctx, { customerId: ids.customerB }));
     expect(d.customer.id).toBe(ids.customerA);
     expect(d.series).toHaveLength(30);
     expect(sum(d.series, 'opened')).toBe(4);
     expect(sum(d.series, 'resolved')).toBe(2);
     expect(d.tickets.byPriority.map((p) => [p.key, p.count])).toEqual([['p1', 2]]);
-    // B's own view (as the MSP) sees exactly its one ticket.
+    expect(d.tickets.majorOpen).toBeNull();
+    // A customer user (portal:status, no portal:approve) reads the planned-changes count and no approvals.
+    expect(d.upcoming.counts.changes).toBe(0);
+    expect(d.upcoming.counts.approvals).toBeNull();
+    const own = (rows: { title: string }[]) => rows.map((a) => a.title).filter((t) => t.includes(suffix)).sort();
+    expect(own(d.announcements)).toEqual([`Dash customers notice ${suffix}`]);
+    // B's own view (as the MSP) sees exactly its one ticket and its own announcement as well.
     const b = await asAdmin((ctx) => customer(ctx, { customerId: ids.customerB }));
     expect(sum(b.series, 'opened')).toBe(1);
     expect(sum(b.series, 'resolved')).toBe(0);
+    expect(own(b.announcements)).toEqual([`Dash B notice ${suffix}`, `Dash customers notice ${suffix}`].sort());
+  });
+
+  it('customer(): a site scope narrows the tickets, the visits and the maintenance (never the changes), is echoed back, and a foreign site is refused', async () => {
+    const d = await asPortal((ctx) => customer(ctx, { siteId: ids.siteA, days: 7 }));
+    expect(d.siteId).toBe(ids.siteA);
+    expect(d.site).toEqual({ id: ids.siteA, name: 'HQ' });
+    expect(d.period.days).toBe(7);
+    expect(d.tickets.open).toBe(1);
+    expect(d.tickets.openedInPeriod).toBe(2);
+    expect(d.tickets.resolvedInPeriod).toBe(1);
+    expect(sum(d.series, 'opened')).toBe(2);
+    expect(d.tickets.bySite.map((r) => [r.label, r.open])).toEqual([['HQ', 1]]);
+    expect(d.ageing.reduce((n, a) => n + a.count, 0)).toBe(1);
+    expect(d.byPriorityResponsiveness.map((r) => [r.priority, r.opened, r.resolved])).toEqual([['P1 - Critical', 1, 0], ['P4 - Low', 1, 1]]);
+    expect(d.upcoming.counts).toEqual({ visits: 3, maintenance: 2, changes: 0, approvals: null });
+    expect(d.recentTickets.length).toBe(1);
+    await expect(asPortal((ctx) => customer(ctx, { siteId: ids.siteB }))).rejects.toThrow(/site of this customer/);
+    await expect(asAdmin((ctx) => customer(ctx, { customerId: ids.customerA, siteId: ids.siteB }))).rejects.toThrow(/site of this customer/);
+    await expect(asPortal((ctx) => customer(ctx, { siteId: ids.siteInactive }))).rejects.toThrow(/site of this customer/);
   });
 
   it('soc(): a 30-day security-domain flow series (opened, resolved, breaches per day)', async () => {
