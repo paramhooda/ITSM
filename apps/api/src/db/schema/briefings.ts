@@ -113,7 +113,7 @@ export const briefings = pgTable('briefings', {
   /** The person's local day. */
   day: date('day').notNull(),
   facts: jsonb('facts').$type<BriefingFacts | null>(),
-  /** Markdown: the email body and, until the panel ships, the dashboard card. */
+  /** Markdown: the email body (the panel renders the facts). */
   text: text('text').notNull().default(''),
   /** The same briefing as email HTML. */
   html: text('html').notNull().default(''),

@@ -6,7 +6,6 @@ import { useCustomersLookup } from '@/hooks/useLookups';
 import { fmtDate } from '@/lib/format';
 import { DashboardHero, PeriodPicker } from './Hero';
 import { Updated } from './Panel';
-import { BriefingCard } from './BriefingCard';
 
 /** The interactive filters every dashboard shares, read from the URL: `days`, `customerId`, on the NOC `teamId` and, on the portal home, `siteId`. */
 export interface DashboardScope {
@@ -57,8 +56,6 @@ export interface DashboardFrameProps {
   fetching?: boolean;
   /** "refreshes every minute" and the like. */
   refreshNote?: ReactNode;
-  /** The daily briefing card (the Overview and My work). */
-  briefing?: boolean;
   /** The dashboard's body, given the scope every panel follows. */
   children: (scope: DashboardScope) => ReactNode;
 }
@@ -83,7 +80,7 @@ export const dashboardPath = (to: string, scope: Pick<DashboardScope, 'days' | '
  * dashboard that filters the dashboard; every number is a door into the list
  * it was counted on, and a panel's own controls change that panel alone.
  */
-export function DashboardFrame({ title, subtitle, strip = DASHBOARD_MODULES, scope: scopeKind = 'customers', scopeName, sites, teams, teamLabel = 'Team', teamPlaceholder = 'All teams', period, generatedAt, fetching, refreshNote, briefing, children }: DashboardFrameProps) {
+export function DashboardFrame({ title, subtitle, strip = DASHBOARD_MODULES, scope: scopeKind = 'customers', scopeName, sites, teams, teamLabel = 'Team', teamPlaceholder = 'All teams', period, generatedAt, fetching, refreshNote, children }: DashboardFrameProps) {
   const scope = useDashboardScope();
   // The hook call stays whatever the scope kind (hooks cannot be conditional); it is already disabled for customer users and its data is ignored under `scope="none"`.
   const customers = useCustomersLookup();
@@ -136,7 +133,6 @@ export function DashboardFrame({ title, subtitle, strip = DASHBOARD_MODULES, sco
           <Updated at={generatedAt} fetching={fetching} />
         </span>
       </div>
-      {briefing && <BriefingCard />}
       {children(scope)}
     </div>
   );

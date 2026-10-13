@@ -1,9 +1,9 @@
 import { cn } from '@/lib/utils';
 
-/** Grady, the service assistant: a friendly cartoon agent with a headset. Pure SVG so it stays crisp at any size. */
-export function GradyAvatar({ size = 40, className, mood = 'happy' }: { size?: number; className?: string; mood?: 'happy' | 'thinking' }) {
+/** Grady, the service assistant: a friendly cartoon agent with a headset. Pure SVG so it stays crisp at any size. `decorative` hides it from assistive technology (inside a button that already has a label). */
+export function GradyAvatar({ size = 40, className, mood = 'happy', decorative }: { size?: number; className?: string; mood?: 'happy' | 'thinking'; decorative?: boolean }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" className={cn('shrink-0 select-none', className)} role="img" aria-label="Grady">
+    <svg width={size} height={size} viewBox="0 0 64 64" className={cn('shrink-0 select-none', className)} {...(decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': 'Grady' })}>
       <defs>
         <linearGradient id="grady-bg" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#3b82f6" />

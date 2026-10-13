@@ -13,6 +13,7 @@ import { GlobalSearch } from '@/components/GlobalSearch';
 import { GradyWidget } from '@/components/grady/GradyWidget';
 import { AnnouncementBanner } from '@/components/announcements/AnnouncementStrip';
 import { PageContextSync } from '@/components/grady/usePageContext';
+import { BriefingButton } from '@/components/briefings/BriefingButton';
 import { Menu } from '@/components/Menu';
 
 export function BrandLogo({ className }: { className?: string }) {
@@ -275,6 +276,7 @@ export function Sidebar({ items, label }: { items: NavItem[]; label: string }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const { setSearchOpen, toggleAssistant } = useUiStore();
   const can = useAuthStore((s) => s.can);
+  const staff = useAuthStore((s) => s.user?.userType === 'msp');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -308,6 +310,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Plus className="h-4 w-4" /> New ticket
             </button>
           )}
+          {staff && <BriefingButton />}
           <NotificationBell />
           <UserMenu />
         </header>

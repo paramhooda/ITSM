@@ -39,7 +39,7 @@ function OverviewPage() {
   const d = q.data;
   const subtitle = (d && shiftLine(d.me.shift)) ?? 'Your desk, your work and the operations you may see';
   return (
-    <DashboardFrame title={greeting(user.name)} subtitle={subtitle} period={d?.period} generatedAt={d?.generatedAt} fetching={q.isFetching} refreshNote="Refreshes every minute" briefing>
+    <DashboardFrame title={greeting(user.name)} subtitle={subtitle} period={d?.period} generatedAt={d?.generatedAt} fetching={q.isFetching} refreshNote="Refreshes every minute">
       {({ days, customerId }) => {
         if (q.isError) return <ErrorBlock error={q.error} retry={() => q.refetch()} />;
         if (!d) return <KpiSkeleton count={5} />;

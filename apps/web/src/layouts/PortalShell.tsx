@@ -8,6 +8,7 @@ import { GradyWidget } from '@/components/grady/GradyWidget';
 import { PageContextSync } from '@/components/grady/usePageContext';
 import { useUiStore } from '@/stores/ui';
 import { PortalBanners } from '@/components/portal/PortalBanners';
+import { BriefingButton } from '@/components/briefings/BriefingButton';
 
 export function PortalShell({ children }: { children: ReactNode }) {
   const can = useAuthStore((s) => s.can);
@@ -36,6 +37,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
               <Plus className="h-4 w-4" /> Raise a ticket
             </button>
           )}
+          {can('portal:access') && <BriefingButton audience="portal" />}
           <NotificationBell />
           <UserMenu />
         </header>

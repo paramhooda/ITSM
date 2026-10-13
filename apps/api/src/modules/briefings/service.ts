@@ -121,7 +121,7 @@ export function groundNarrative(llm: ModelNarrative, facts: Pick<BriefingFacts, 
 
 // ---------------------------------------------------------------- rendering
 
-/** The briefing as Markdown for the email (and the dashboard card): the narrative's greeting and summary, the headline, one heading per section with its lead and items. */
+/** The briefing as Markdown for the email (the panel renders the facts): the narrative's greeting and summary, the headline, one heading per section with its lead and items. */
 export function renderBriefing(facts: BriefingFacts, userName: string): string {
   const narrative = facts.narrative ?? fallbackNarrative(facts, userName);
   const what = facts.role === 'customer' ? "Your organisation's briefing" : `Your ${facts.roleLabel.toLowerCase()} briefing`;

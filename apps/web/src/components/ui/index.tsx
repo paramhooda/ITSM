@@ -217,6 +217,7 @@ export function Dialog({ open, onClose, title, children, footer, width = 'max-w-
 }
 
 export function Drawer({ open, onClose, title, children, width = 'max-w-xl', footer }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; width?: string; footer?: ReactNode }) {
+  const titleId = useId();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -227,10 +228,10 @@ export function Drawer({ open, onClose, title, children, width = 'max-w-xl', foo
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className={cn('relative bg-surface border-l border-default w-full h-full shadow-pop flex flex-col fade-in', width)}>
+      <div className={cn('relative bg-surface border-l border-default w-full h-full shadow-pop flex flex-col fade-in', width)} role="dialog" aria-modal aria-labelledby={title ? titleId : undefined}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-default">
-          <div className="font-semibold text-[15px] tracking-[-0.01em]">{title}</div>
-          <button onClick={onClose} className="h-7 w-7 rounded-md flex items-center justify-center text-muted hover:text-default hover:bg-surface-2" aria-label="Close">
+          <div className="font-semibold text-[15px] tracking-[-0.01em] min-w-0 flex-1" id={titleId}>{title}</div>
+          <button onClick={onClose} className="h-7 w-7 shrink-0 ml-3 rounded-md flex items-center justify-center text-muted hover:text-default hover:bg-surface-2" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>

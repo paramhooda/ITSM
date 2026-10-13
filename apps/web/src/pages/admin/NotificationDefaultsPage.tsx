@@ -96,7 +96,7 @@ export default function NotificationDefaultsPage() {
                     {def.key === 'paging' && <div className="text-[11.5px] text-subtle">Unlocking a channel lets engineers mute pages on it; email and in-app still arrive.</div>}
                   </div>
                   {def.key === 'briefing' ? (
-                    <div className="text-[12px] text-muted md:col-span-4">Chosen by each person on their Daily briefing card.</div>
+                    <div className="text-[12px] text-muted md:col-span-4">Chosen by each person on their profile.</div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 md:contents">
                       <Cell label="Email default" checked={row.emailDefault} onChange={(v) => save(row, { emailDefault: v, ...(v ? {} : { emailLocked: false }) })} disabled={!canWrite} reason={readOnly} />

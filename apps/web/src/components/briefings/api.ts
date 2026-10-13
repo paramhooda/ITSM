@@ -2,7 +2,7 @@ import { get, post } from '@/api/client';
 
 /** Daily briefings (mirrors apps/api/src/modules/briefings). */
 
-export type BriefingRole = 'engineer' | 'noc_manager' | 'soc_manager' | 'service_manager' | 'account_manager';
+export type BriefingRole = 'engineer' | 'noc_manager' | 'soc_manager' | 'service_manager' | 'account_manager' | 'customer';
 export type BriefingChannel = 'email' | 'in_app';
 
 export interface BriefingPrefs {
@@ -12,9 +12,74 @@ export interface BriefingPrefs {
   channels: BriefingChannel[];
 }
 
-export interface BriefingItem { ref: string; title: string; meta?: string | null; link?: string | null }
-export interface BriefingSection { key: string; title: string; summary?: string | null; items: BriefingItem[] }
-export interface BriefingFacts { role: BriefingRole; roleLabel: string; day: string; timezone: string; generatedAt: string; headline: string[]; sections: BriefingSection[] }
+export type BriefingItemKind = 'ticket' | 'customer' | 'contract' | 'entitlement' | 'integration' | 'sla' | 'visit' | 'maintenance' | 'change' | 'approval' | 'announcement' | 'known_error';
+
+/** A count with the list it opens: `href` null means a figure (no list reproduces it), so it renders as a plain chip. */
+export interface BriefingDoor {
+  label: string;
+  value: number;
+  href: string | null;
+}
+
+export interface BriefingItem {
+  ref: string;
+  title: string;
+  /** The one-line details the email prints; the panel shows the typed fields instead and falls back to this line. */
+  meta?: string | null;
+  link?: string | null;
+  kind?: BriefingItemKind;
+  priority?: { key: string | null; label: string | null; color: string | null } | null;
+  customer?: string | null;
+  /** The owner's name; null for the portal (never a staff name) and for unowned tickets. */
+  assignee?: string | null;
+  team?: string | null;
+  dueAt?: string | null;
+  breachRisk?: 'low' | 'medium' | 'high' | null;
+  sentiment?: string | null;
+  status?: string | null;
+  /** An ISO instant or a YYYY-MM-DD day, shown as given. */
+  when?: string | null;
+  /** Per-row doors (the account manager's customers). */
+  doors?: BriefingDoor[] | null;
+}
+
+export interface BriefingSection {
+  key: string;
+  title: string;
+  /** The deterministic lead sentence, written from the door values. */
+  summary?: string | null;
+  doors: BriefingDoor[];
+  items: BriefingItem[];
+}
+
+export interface BriefingKpi {
+  key: string;
+  label: string;
+  value: number | string;
+  tone: 'good' | 'warn' | 'bad' | null;
+  href: string | null;
+  hint?: string | null;
+}
+
+/** What the model phrased, bounded and grounded against the facts; `source` says whether any of it survived. */
+export interface BriefingNarrative {
+  greeting: string;
+  summary: string;
+  sections: { key: string; lead: string; picks: string[] }[];
+  source: 'model' | 'facts';
+}
+
+export interface BriefingFacts {
+  role: BriefingRole;
+  roleLabel: string;
+  day: string;
+  timezone: string;
+  generatedAt: string;
+  headline: string[];
+  kpis: BriefingKpi[];
+  sections: BriefingSection[];
+  narrative?: BriefingNarrative | null;
+}
 
 export interface Briefing {
   id: string;
@@ -26,6 +91,8 @@ export interface Briefing {
   html: string;
   ai: boolean;
   facts: BriefingFacts | null;
+  /** The narrative beside the facts (from the facts when none was stored). */
+  narrative: BriefingNarrative | null;
   channels: string[];
   generations: number;
   generatedAt: string;

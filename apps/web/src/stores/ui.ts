@@ -21,6 +21,9 @@ interface UiState {
   setAssistantPage: (p: PageContext | null) => void;
   searchOpen: boolean;
   setSearchOpen: (v: boolean) => void;
+  /** The id of the last daily brief this browser opened; the top-bar button shows a dot while today's brief is another one. */
+  briefingSeenId: string | null;
+  setBriefingSeenId: (id: string | null) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -58,6 +61,22 @@ export const useUiStore = create<UiState>((set) => ({
   setAssistantPage: (assistantPage) => set({ assistantPage }),
   searchOpen: false,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
+  briefingSeenId: (() => {
+    try {
+      return localStorage.getItem('itsm.briefing.seen');
+    } catch {
+      return null;
+    }
+  })(),
+  setBriefingSeenId: (briefingSeenId) => {
+    try {
+      if (briefingSeenId) localStorage.setItem('itsm.briefing.seen', briefingSeenId);
+      else localStorage.removeItem('itsm.briefing.seen');
+    } catch {
+      /* ignore */
+    }
+    set({ briefingSeenId });
+  },
 }));
 
 // The product ships a single light theme; clear any legacy dark preference.
