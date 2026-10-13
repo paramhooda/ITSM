@@ -25,10 +25,11 @@ function legacyViewPath(state: Record<string, string>): string {
 
 /**
  * The Overview every staff member lands on: a greeting with the shift running
- * now, My day, announcements, upcoming work, the operations strips they may
- * open, the desk's health for the period (tickets:read) and the management
- * extras (dashboards:management). Its filters live in the hero, every number
- * is a door into the ticket list it was counted on, and a panel's own control
+ * now, then the numbers and charts first: the desk's health for the period
+ * (tickets:read), the operations strips they may open and the management
+ * extras (dashboards:management); their own day (My day, upcoming work and
+ * announcements) sits below. Its filters live in the hero, every number is a
+ * door into the ticket list it was counted on, and a panel's own control
  * (kept in the URL) changes that panel alone.
  */
 function OverviewPage() {
@@ -48,30 +49,17 @@ function OverviewPage() {
         const hasStrips = !!(d.strips.noc || d.strips.soc || d.strips.amc);
         return (
           <div className="flex flex-col gap-6">
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              <MyDayStrip me={d.me} customerId={customerId} today={today} className="xl:col-span-2 rise-in rise-in-1" />
-              <AnnouncementsPanel items={d.announcements} className="rise-in rise-in-2" />
-            </div>
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              <UpcomingPanel upcoming={d.upcoming} today={today} className={hasStrips ? 'rise-in rise-in-2' : 'rise-in rise-in-2 xl:col-span-3'} />
-              {hasStrips && (
-                <div className="xl:col-span-2 flex flex-col gap-3 rise-in rise-in-3">
-                  <SectionLabel hint="Each number is the dashboard's own tile">Operations</SectionLabel>
-                  <OperationsStrips d={d} scope={{ days, customerId }} />
-                </div>
-              )}
-            </div>
             {d.desk && (
               <>
                 <SectionLabel hint={`Open now, and the last ${days} days`}>Service desk</SectionLabel>
                 <DeskKpiRow overview={d} customerId={customerId} />
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                  <TicketFlowPanel d={d} scope={link} className="xl:col-span-2 rise-in rise-in-3" />
-                  <OpenByTypePanel desk={d.desk} open={open} className="rise-in rise-in-3" />
+                  <TicketFlowPanel d={d} scope={link} className="xl:col-span-2 rise-in rise-in-2" />
+                  <SlaCompliancePanel d={d} scope={link} className="rise-in rise-in-2" />
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                  <OverviewArrivalsPanel desk={d.desk} scope={link} className="xl:col-span-2 rise-in rise-in-4" />
-                  <SlaCompliancePanel d={d} scope={link} className="rise-in rise-in-4" />
+                  <OverviewArrivalsPanel desk={d.desk} scope={link} className="xl:col-span-2 rise-in rise-in-3" />
+                  <OpenByTypePanel desk={d.desk} open={open} className="rise-in rise-in-3" />
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                   <OverviewAgeingPanel desk={d.desk} open={open} className="rise-in rise-in-4" />
@@ -81,12 +69,24 @@ function OverviewPage() {
                 <ResponseByPriorityPanel d={d} scope={link} className="rise-in rise-in-4" />
               </>
             )}
+            {hasStrips && (
+              <div className="flex flex-col gap-3 rise-in rise-in-4">
+                <SectionLabel hint="Each number is the dashboard's own tile">Operations</SectionLabel>
+                <OperationsStrips d={d} scope={{ days, customerId }} />
+              </div>
+            )}
             {d.management && (
               <>
                 <SectionLabel hint="Accounts, satisfaction and service levels">Management</SectionLabel>
                 <ManagementExtras d={d} />
               </>
             )}
+            <SectionLabel hint="Your queue, announcements and what is scheduled today and tomorrow">Your day</SectionLabel>
+            <MyDayStrip me={d.me} customerId={customerId} today={today} className="rise-in rise-in-4" />
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <UpcomingPanel upcoming={d.upcoming} today={today} className="xl:col-span-2 rise-in rise-in-4" />
+              <AnnouncementsPanel items={d.announcements} className="rise-in rise-in-4" />
+            </div>
           </div>
         );
       }}
