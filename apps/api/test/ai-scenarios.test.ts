@@ -190,6 +190,35 @@ describe('skills, one scripted conversation each', () => {
     await asAdmin((ctx) => ai.chat(ctx, { conversationId: res.conversationId, confirm: { actionId: res.pendingAction!.id, decision: 'cancel' } }));
   });
 
+  it('approvals: request_approval on an incident names the approver, the wait and the clocks; the confirmation moves the ticket; withdraw_approval brings it back', async () => {
+    const due = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+    const fake = new Scripted().script(tool('request_approval', { ticket: numbers.a1, approver: { kind: 'customer_admin' }, purpose: 'Approve the replacement of the failed firewall power supply (chargeable)', dueAt: due }), say('I will ask the organisation to approve. Shall I proceed?'));
+    ai.setProviderForTests(fake);
+    const res = await asAdmin((ctx) => ai.chat(ctx, { message: `ask ${ALPHA}'s administrator to approve the power supply replacement on ${numbers.a1} by ${due}` }));
+    expect(res.pendingAction?.tool).toBe('request_approval');
+    const preview = [res.pendingAction!.preview, ...(res.pendingAction!.lines ?? [])].join('\n');
+    expect(preview).toMatch(new RegExp(`Ask the administrators of ${ALPHA} to approve: Approve the replacement`));
+    expect(preview).toMatch(/Awaiting Approval/);
+    expect(preview).toMatch(/clocks pause|no resolution clock/);
+    expect(preview).toMatch(/the requester is told the ticket waits on their organisation/);
+    const done = await asAdmin((ctx) => ai.chat(ctx, { conversationId: res.conversationId, confirm: { actionId: res.pendingAction!.id, decision: 'confirm' } }));
+    expect(done.message.toolCalls[0]).toMatchObject({ name: 'request_approval', ok: true, action: true });
+    const [t] = await withSystem((tx) => tx.select({ approvalStatus: schema.tickets.approvalStatus, pendingWaitingOn: schema.tickets.pendingWaitingOn }).from(schema.tickets).where(eq(schema.tickets.id, ticketIds[0]!)));
+    expect(t).toMatchObject({ approvalStatus: 'pending', pendingWaitingOn: 'customer' });
+
+    const fake2 = new Scripted().script(tool('withdraw_approval', { ticket: numbers.a1, reason: 'Fixed under warranty after all' }), say('I will withdraw it. Shall I proceed?'));
+    ai.setProviderForTests(fake2);
+    const w = await asAdmin((ctx) => ai.chat(ctx, { message: `withdraw the approval on ${numbers.a1}` }));
+    expect(w.pendingAction?.tool).toBe('withdraw_approval');
+    const wPreview = [w.pendingAction!.preview, ...(w.pendingAction!.lines ?? [])].join('\n');
+    expect(wPreview).toMatch(/returns to In Progress and the clocks resume/);
+    expect(wPreview).toMatch(/waiting for the administrators of/);
+    const wd = await asAdmin((ctx) => ai.chat(ctx, { conversationId: w.conversationId, confirm: { actionId: w.pendingAction!.id, decision: 'confirm' } }));
+    expect(wd.message.toolCalls[0]).toMatchObject({ name: 'withdraw_approval', ok: true, action: true });
+    const [back] = await withSystem((tx) => tx.select({ approvalStatus: schema.tickets.approvalStatus, pendingWaitingOn: schema.tickets.pendingWaitingOn }).from(schema.tickets).where(eq(schema.tickets.id, ticketIds[0]!)));
+    expect(back).toMatchObject({ approvalStatus: 'withdrawn', pendingWaitingOn: null });
+  });
+
   it('approvals: a reply that drops the figure gets the facts first', async () => {
     const fake = new Scripted().script(tool('my_approvals', {}), say('Nothing is waiting for you.'));
     ai.setProviderForTests(fake);

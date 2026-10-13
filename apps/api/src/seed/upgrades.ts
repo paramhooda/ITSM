@@ -45,6 +45,19 @@ export const OPTION_UPGRADES: { type: string; key: string; why: string; apply: (
       return rows.length;
     },
   },
+  {
+    type: 'ticket_status',
+    key: 'awaiting_approval',
+    why: 'an approval is a lifecycle step on every ticket type, not only requests and changes',
+    apply: async (tx) => {
+      const rows = await tx
+        .update(schema.configOptions)
+        .set({ appliesTo: [], metadata: stamp('awaiting_approval_all_types') })
+        .where(and(eq(schema.configOptions.type, 'ticket_status'), eq(schema.configOptions.key, 'awaiting_approval'), eq(schema.configOptions.isSystem, true), sql`${schema.configOptions.appliesTo} = ARRAY['request','change']::text[]`, stamped('awaiting_approval_all_types')))
+        .returning({ id: schema.configOptions.id });
+      return rows.length;
+    },
+  },
 ];
 
 export async function applyOptionUpgrades(tx: Tx) {

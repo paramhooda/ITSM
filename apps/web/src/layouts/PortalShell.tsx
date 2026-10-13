@@ -33,8 +33,8 @@ export function PortalShell({ children }: { children: ReactNode }) {
           <div className="text-[13px] text-muted truncate">Managed services portal</div>
           <div className="flex-1" />
           {can('portal:tickets') && (
-            <button onClick={() => navigate('/portal/tickets/new')} className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-navy-800 text-white text-[13px] font-medium hover:bg-navy-700 shadow-[0_1px_2px_rgba(9,9,11,0.2)]">
-              <Plus className="h-4 w-4" /> Raise a ticket
+            <button onClick={() => navigate('/portal/tickets/new')} aria-label="Raise a ticket" title="Raise a ticket" className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-navy-800 text-white text-[13px] font-medium whitespace-nowrap shrink-0 hover:bg-navy-700 shadow-[0_1px_2px_rgba(9,9,11,0.2)]">
+              <Plus className="h-4 w-4" /><span className="hidden sm:inline">Raise a ticket</span>
             </button>
           )}
           {can('portal:access') && <BriefingButton audience="portal" />}

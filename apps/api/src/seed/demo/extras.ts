@@ -56,14 +56,14 @@ export async function seedExtras(state: DemoState, tx: Tx) {
   if (recentOpen[1]) push(admin.id, 'sla.warning', `SLA warning on ${recentOpen[1].number}`, `Resolution clock at 80% for "${recentOpen[1].title}".`, `/tickets/${recentOpen[1].id}`, 'ticket', recentOpen[1].id, custOf(recentOpen[1].customerKey).id, 130);
   push(admin.id, 'contract.expiring', `Contract ${apexContract.number} expires in 30 days`, `${apex.name} - ${apexContract.name}. Renewal proposal sent; follow up with the account manager.`, `/contracts/${apexContract.id}`, 'contract', apexContract.id, apex.id, 6 * 60);
   push(admin.id, 'entitlement.threshold', `Entitlement at 83%: Breakdown site visits (${abcAmc.number})`, `${abc.name} has used 10 of 12 breakdown site visits in the current period.`, `/contracts/${abcAmc.id}`, 'contract_entitlement', abcAmc.entitlements.find((e) => e.typeKey === 'site_visits')?.id ?? null, abc.id, 26 * 60, true);
-  if (change) push(admin.id, 'change.approval_requested', `CAB approval requested: ${change.number}`, change.title, `/tickets/${change.id}`, 'ticket', change.id, custOf(change.customerKey).id, 3 * 60);
+  if (change) push(admin.id, 'approval.requested', `[${change.number}] Your approval is requested: CAB approval for ${change.title}`, `Your approval is requested on ${change.number} (Change): CAB approval for ${change.title}`, `/tickets/${change.id}`, 'ticket', change.id, custOf(change.customerKey).id, 3 * 60);
   push(admin.id, 'pm.due', 'PM visits due in the next 14 days', 'Scheduled preventive maintenance occurrences are waiting for engineer confirmation.', '/field/pm', null, null, null, 20 * 60, true);
   push(admin.id, 'report.delivered', 'Weekly SLA report delivered - ABC Manufacturing', 'The weekly SLA compliance report was emailed to the configured recipients.', '/reports', null, null, abc.id, 2 * 24 * 60, true);
   // A few for the people who would act on them
   if (openP1) push(rajesh.id, 'ticket.escalated', `P1 escalated: ${openP1.number}`, openP1.title, `/tickets/${openP1.id}`, 'ticket', openP1.id, custOf(openP1.customerKey).id, 45);
   push(vikram.id, 'contract.expiring', `Contract ${apexContract.number} expires in 30 days`, `${apex.name} - ${apexContract.name}`, `/contracts/${apexContract.id}`, 'contract', apexContract.id, apex.id, 6 * 60);
   push(lakshmi.id, 'entitlement.threshold', `Entitlement at 83%: Breakdown site visits (${abcAmc.number})`, `${abc.name} has used 10 of 12 breakdown site visits.`, `/contracts/${abcAmc.id}`, 'contract_entitlement', null, abc.id, 26 * 60);
-  if (change) push(ananya.id, 'change.approval_requested', `CAB approval requested: ${change.number}`, change.title, `/tickets/${change.id}`, 'ticket', change.id, custOf(change.customerKey).id, 3 * 60);
+  if (change) push(ananya.id, 'approval.requested', `[${change.number}] Your approval is requested: CAB approval for ${change.title}`, `Your approval is requested on ${change.number} (Change): CAB approval for ${change.title}`, `/tickets/${change.id}`, 'ticket', change.id, custOf(change.customerKey).id, 3 * 60);
   for (const t of recentOpen.slice(0, 3)) {
     const pu = custOf(t.customerKey).portalUsers[0];
     if (pu) push(pu.id, 'ticket.status_changed', `${t.number} updated`, `"${t.title}" is now being worked by our engineers.`, `/portal/tickets/${t.id}`, 'ticket', t.id, custOf(t.customerKey).id, rng.int(60, 600));

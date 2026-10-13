@@ -3,7 +3,7 @@ import { schema } from '@/db/client';
 import { eq, and, inArray } from 'drizzle-orm';
 import { notificationCategoryOf } from '@itsm/shared';
 import { config } from '@/config';
-import { render, emailLayout } from '@/lib/templates';
+import { render, renderText, emailLayout } from '@/lib/templates';
 import { enqueue } from '@/jobs/queues';
 import { logger } from '@/core/logger';
 import { normalizePhone } from '@/lib/channels';
@@ -62,7 +62,7 @@ export async function queueNotification(tx: Tx, input: NotificationInput) {
   let html = '';
   if (template) {
     try {
-      subject = render(template.subject ?? input.event, data);
+      subject = renderText(template.subject ?? input.event, data);
       html = emailLayout(subject, render(template.body, data));
     } catch (err) {
       logger.warn({ err, event: input.event }, 'template render failed');
@@ -85,8 +85,8 @@ export async function queueNotification(tx: Tx, input: NotificationInput) {
       let waSubject = subject;
       if (waTemplate) {
         try {
-          text = render(waTemplate.body, data);
-          if (waTemplate.subject) waSubject = render(waTemplate.subject, data);
+          text = renderText(waTemplate.body, data);
+          if (waTemplate.subject) waSubject = renderText(waTemplate.subject, data);
         } catch (err) {
           logger.warn({ err, event: input.event }, 'whatsapp template render failed');
         }

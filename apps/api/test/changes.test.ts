@@ -308,7 +308,7 @@ describe('CAB meetings (database)', () => {
   it('decides an agenda item and the pending approval step with it; closing defers what was not reached', async () => {
     const t = await newChange(`CAB change ${S}`, { change: { scheduledStart: hour(70), scheduledEnd: hour(71) } });
     const deferred = await newChange(`Deferred change ${S}`);
-    await asAdmin((ctx) => requestApproval(ctx, t.id, ids.cabWorkflow));
+    await asAdmin((ctx) => requestApproval(ctx, t.id, { approvalWorkflowId: ids.cabWorkflow, purpose: 'CAB approval for the change' }));
     const m = await asAdmin((ctx) => changes.createMeeting(ctx, { title: `Weekly CAB ${S}`, scheduledAt: hour(48), ticketIds: [t.id, deferred.id] }));
     created.meetings.push(m.id);
     expect(m.items).toHaveLength(2);
@@ -453,12 +453,12 @@ describe('gap closure (database)', () => {
   it('refuses an approval request or a CAB agenda slot until the change is assessed when the gate is on', async () => {
     await setSetting('changes.require_assessment_for_approval', true);
     const t = await newChange(`Unassessed ${S}`, { change: { scheduledStart: hour(60), scheduledEnd: hour(61) } });
-    await expect(asAdmin((ctx) => requestApproval(ctx, t.id, ids.cabWorkflow))).rejects.toThrow(/Assess the change risk/);
+    await expect(asAdmin((ctx) => requestApproval(ctx, t.id, { approvalWorkflowId: ids.cabWorkflow, purpose: 'CAB approval for the change' }))).rejects.toThrow(/Assess the change risk/);
     const m = await asAdmin((ctx) => changes.createMeeting(ctx, { title: `Gate CAB ${S}`, scheduledAt: hour(50) }));
     created.meetings.push(m.id);
     await expect(asAdmin((ctx) => changes.addItem(ctx, m.id, { ticketId: t.id }))).rejects.toThrow(/Assess the change risk/);
     await asAdmin((ctx) => changes.assessRisk(ctx, t.id, { scope: 'one_site', service_impact: 'none' }));
-    await asAdmin((ctx) => requestApproval(ctx, t.id, ids.cabWorkflow));
+    await asAdmin((ctx) => requestApproval(ctx, t.id, { approvalWorkflowId: ids.cabWorkflow, purpose: 'CAB approval for the change' }));
     const view = await asAdmin((ctx) => changes.addItem(ctx, m.id, { ticketId: t.id, notes: 'Scored.' }));
     expect(view.items.find((i) => i.ticketId === t.id)?.notes).toBe('Scored.');
     await setSetting('changes.require_assessment_for_approval', false);
@@ -507,7 +507,7 @@ describe('gap closure (database)', () => {
     queueA = await newChange(`Queue A ${S}`, { requesterUserId: ids.engineer, change: { scheduledStart: hour(120), scheduledEnd: hour(121) } });
     queueB = await newChange(`Queue B ${S}`, { requesterUserId: ids.engineer, change: { scheduledStart: hour(122), scheduledEnd: hour(123) } });
     const c = await newChange(`Queue C no window ${S}`, { requesterUserId: ids.engineer });
-    for (const t of [queueA, queueB, c]) await asAdmin((ctx) => requestApproval(ctx, t.id, ids.cabWorkflow));
+    for (const t of [queueA, queueB, c]) await asAdmin((ctx) => requestApproval(ctx, t.id, { approvalWorkflowId: ids.cabWorkflow, purpose: 'CAB approval for the change' }));
     const queue = await asAdmin((ctx) => changes.cabQueue(ctx, { customerId: ids.customer, limit: 50 }));
     expect(queue.items.map((i) => i.ticketId)).toEqual(expect.arrayContaining([queueA.id, queueB.id, c.id]));
     expect(queue.items.find((i) => i.ticketId === queueA.id)?.pendingStep?.stepName).toBe('CAB');

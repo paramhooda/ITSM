@@ -1,4 +1,4 @@
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, desc, sql, or, isNull, ne } from 'drizzle-orm';
 import { withSystem, schema, type Tx } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import type { Principal } from '@/core/principal';
@@ -824,7 +824,7 @@ async function runChange(state: DemoState, tx: Tx, plan: Plan): Promise<TicketRu
   const reqAt = addMinutes(T0, rng.int(10, 240));
   times.push(reqAt);
   r.mark(reqAt);
-  await requestApproval(r.ctx('rajesh'), ticket.id);
+  await requestApproval(r.ctx('rajesh'), ticket.id, { purpose: `CAB approval for ${plan.title}`, dueAt: addDays(reqAt, 3) });
   r.approvalsRequestedAt = reqAt;
   r.actorAudit('rajesh', 'approval.request', reqAt);
   if (stage === 'awaiting') {
@@ -979,6 +979,38 @@ async function linkTickets(state: DemoState, tx: Tx, plans: Plan[]) {
     }
   }
   state.counts.ticketLinks = links;
+}
+
+/**
+ * Approvals as a lifecycle step on incidents: two open ABC incidents wait on the organisation's administrators for a
+ * chargeable replacement (the portal shows the call-out, the clocks pause), one NOC incident of another customer waits
+ * on the service manager (an internal approver: no pause, nothing the customer sees). Requested now, by the desk.
+ */
+export async function seedIncidentApprovals(state: DemoState, tx: Tx) {
+  const inProgress = state.refs.option('ticket_status', 'in_progress');
+  const fresh = state.refs.option('ticket_status', 'new');
+  const abc = state.customers.find((c) => c.key === 'abc');
+  if (!abc) return;
+  // Working incidents first (In Progress, then New), never one that already carries an approval or waits on something.
+  const open = (customerId: string | null, limit: number) =>
+    tx
+      .select({ id: schema.tickets.id, number: schema.tickets.number })
+      .from(schema.tickets)
+      .where(and(eq(schema.tickets.type, 'incident'), inArray(schema.tickets.statusId, [inProgress, fresh]), or(isNull(schema.tickets.approvalStatus), ne(schema.tickets.approvalStatus, 'pending')), customerId ? eq(schema.tickets.customerId, customerId) : sql`${schema.tickets.customerId} <> ${abc.id}`, eq(schema.tickets.domain, 'noc')))
+      .orderBy(sql`case when ${schema.tickets.statusId} = ${inProgress} then 0 else 1 end`, desc(schema.tickets.createdAt))
+      .limit(limit);
+  const dueAt = addDays(state.now, 2);
+  const purposes = ['Approve the replacement of the failed UPS batteries (chargeable)', 'Approve the paid firmware upgrade of the core switch pair outside the contract scope'];
+  let n = 0;
+  for (const [i, t] of (await open(abc.id, 2)).entries()) {
+    await requestApproval(ctxFor(state, tx, principalOf(state, 'priya')), t.id, { approver: { kind: 'customer_admin' }, purpose: purposes[i]!, dueAt });
+    n++;
+  }
+  for (const t of await open(null, 1)) {
+    await requestApproval(ctxFor(state, tx, principalOf(state, 'rajesh')), t.id, { approver: { kind: 'role', ref: 'service_manager' }, purpose: 'Approve the overtime call-out of a second engineer for the site visit', dueAt });
+    n++;
+  }
+  state.counts.incidentApprovals = n;
 }
 
 export async function seedTickets(state: DemoState) {

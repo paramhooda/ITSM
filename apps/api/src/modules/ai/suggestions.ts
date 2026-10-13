@@ -14,7 +14,7 @@ import { impact as ciImpact } from '@/modules/cmdb/service';
 import { detectConflicts } from '@/modules/changes/service';
 import { llmJson, enabled, asSteps, type Steps } from './service';
 import { assertFeature } from './guards';
-import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, MAJOR_UPDATE_SYSTEM, RESOLUTION_SYSTEM, RESOLUTION_NOTES_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompt';
+import { SUMMARIZE_SYSTEM, CLASSIFY_SYSTEM, DRAFT_SYSTEM, MAJOR_UPDATE_SYSTEM, RESOLUTION_SYSTEM, RESOLUTION_NOTES_SYSTEM, APPROVAL_PURPOSE_SYSTEM, RERANK_SYSTEM, IMPACT_SYSTEM, CLUSTER_SYSTEM } from './prompt';
 import { compactDetail, compactTimeline, ticketLink } from './helpers';
 
 /**
@@ -34,7 +34,7 @@ const trunc = (s: string | null | undefined, n: number) => (s ? (s.length > n ? 
 const firstName = (name?: string | null) => (name ? name.split(/\s+/)[0]! : '');
 const minutesLabel = (m: number) => (Math.abs(m) >= 120 ? `${Math.round(Math.abs(m) / 60)}h` : `${Math.abs(m)}m`);
 
-export type SuggestionKind = 'summary' | 'classification' | 'assignment' | 'similar' | 'knowledge' | 'resolution' | 'resolution_notes' | 'draft_update' | 'duplicates' | 'change_impact' | 'problem_cluster' | 'known_error_wording';
+export type SuggestionKind = 'summary' | 'classification' | 'assignment' | 'similar' | 'knowledge' | 'resolution' | 'resolution_notes' | 'approval_purpose' | 'draft_update' | 'duplicates' | 'change_impact' | 'problem_cluster' | 'known_error_wording';
 /** proposed: waits for a person; accepted / rejected: decided; applied: the change was made (by the person accepting, or by triage above the confidence threshold). */
 export type SuggestionStatus = 'proposed' | 'accepted' | 'rejected' | 'applied';
 
@@ -546,6 +546,36 @@ function fallbackResolutionNotes(row: TicketRow, notes: TimelineItems) {
   const latest = (internal.length ? internal : notes.filter((n) => n.body?.trim())).slice(-3).map((n) => trunc(n.body!.replace(/\s+/g, ' ').trim(), 240));
   const done = latest.length ? `What was done: ${latest.join(' ')}` : 'What was done: see the work notes on the ticket.';
   return `Issue: ${row.title}.\n${done}\nOutcome: the service is restored; please reopen the ticket if the problem comes back.`;
+}
+
+// ---------------------------------------------------------------- approval purpose draft
+
+const approvalPurposeSchema = z.object({ purpose: z.string().min(3).max(2000) });
+
+/** Drafts what an approver is asked to approve, from the ticket and the latest notes (nothing is applied). */
+export async function draftApprovalPurpose(who: Who, ticketId: string) {
+  const s = asSteps(who);
+  const g = await s.tx(async (ctx) => {
+    await assertFeature(ctx, 'draft');
+    const { row, detail } = await readTicket(ctx, ticketId);
+    if (isCustomerUser(ctx)) throw new ForbiddenError();
+    ctx.require('tickets:update', row.customerId);
+    const tl = await timeline(ctx, ticketId);
+    const notes = tl.items.filter((i) => i.kind === 'comment').slice(-6);
+    return { row, detail, notes, compact: compactDetail(ctx, detail) };
+  });
+  const { row, notes } = g;
+  const llm = await llmJson(APPROVAL_PURPOSE_SYSTEM, JSON.stringify({ ticket: { ...g.compact, description: trunc(row.description, 1200) }, notes: compactTimeline(notes, 6) }), (v) => approvalPurposeSchema.parse(v), { maxTokens: 400 });
+  const purpose = llm?.data.purpose ?? fallbackApprovalPurpose(row);
+  return s.tx(async (ctx) => {
+    const suggestionId = await store(ctx, { customerId: row.customerId, entityType: 'ticket', entityId: row.id, kind: 'approval_purpose', payload: { purpose }, rationale: llm ? 'Drafted by the AI provider from the ticket and its notes' : 'Assembled from the ticket title and description (AI provider not configured)' });
+    return { suggestionId, aiGenerated: !!llm, purpose };
+  });
+}
+
+function fallbackApprovalPurpose(row: TicketRow) {
+  const desc = (row.description ?? '').replace(/\s+/g, ' ').trim();
+  return `Please approve: ${row.title}${desc ? ` — ${trunc(desc, 200)}` : ''}`;
 }
 
 // ---------------------------------------------------------------- major incident stakeholder update

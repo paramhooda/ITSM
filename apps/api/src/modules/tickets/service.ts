@@ -297,7 +297,7 @@ export async function createTicket(ctx: Ctx, input: CreateTicketInput): Promise<
   if (assigneeId && assigneeId !== ctx.user.id) await notifyTicketEvent(ctx, 'ticket.assigned', current);
   if (approvalWorkflowId) {
     current = await reloadTicket(ctx.tx, ticket.id);
-    await startApproval(ctx, current, approvalWorkflowId);
+    await startApproval(ctx, current, { workflowId: approvalWorkflowId }, { purpose: `Approval for ${catalog?.name ?? ticket.title}`, requestedBy: userIdOf(ctx) });
   }
   // Triage on arrival runs a moment later in the worker (the row must be committed first); the job checks the switches itself.
   if (type === 'incident' || type === 'request') void enqueue('ai', 'triage-ticket', { ticketId: ticket.id }, { delay: 2000, jobId: `triage-${ticket.id}` });

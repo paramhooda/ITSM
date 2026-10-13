@@ -154,7 +154,9 @@ export default async function routes(app: FastifyInstance) {
     const b = req.body as { decision: 'approved' | 'rejected'; comment?: string | null };
     return approvals.decide(ctx, p.id, p.approvalId, b.decision, b.comment);
   }));
-  r.post('/tickets/:id/request-approval', { preHandler: app.auth('changes:manage', 'tickets:update'), schema: { tags: ['approvals'], params: idParam, body: S.requestApprovalSchema } }, h((ctx, req) => approvals.requestApproval(ctx, (req.params as { id: string }).id, (req.body as { approvalWorkflowId?: string | null }).approvalWorkflowId)));
+  r.post('/tickets/:id/request-approval', { preHandler: app.auth('changes:manage', 'tickets:update'), schema: { tags: ['approvals'], params: idParam, body: S.requestApprovalSchema } }, h((ctx, req) => approvals.requestApproval(ctx, (req.params as { id: string }).id, req.body as S.RequestApprovalInput)));
+  r.post('/tickets/:id/approvals/withdraw', { preHandler: app.auth('changes:manage', 'tickets:update'), schema: { tags: ['approvals'], params: idParam, body: S.withdrawApprovalSchema } }, h((ctx, req) => approvals.withdraw(ctx, (req.params as { id: string }).id, (req.body as { reason?: string | null }).reason)));
+  r.post('/tickets/:id/approvals/remind', { preHandler: app.auth('changes:manage', 'tickets:update'), schema: { tags: ['approvals'], params: idParam } }, h((ctx, req) => approvals.remind(ctx, (req.params as { id: string }).id)));
 
   // ---- similar
   r.get('/tickets/:id/similar', { preHandler: read, schema: { tags, params: idParam } }, h((ctx, req) => list.similarTickets(ctx, (req.params as { id: string }).id)));

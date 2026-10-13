@@ -345,7 +345,7 @@ describe('resuming', () => {
     // An approval wait addressed to the customer: the request awaits the customer's approval; their comment is a comment.
     const r = await asAdmin((ctx) => createTicket(ctx, { type: 'request', customerId: ids.customer, title: `Quote approval ${S}`, description: 'needs sign-off', requesterUserId: ids.portalUser }));
     tickets.push(r.id);
-    await asAdmin((ctx) => requestApproval(ctx, r.id, ids.workflow));
+    await asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.workflow, purpose: 'Approval for the lifecycle test' }));
     let req = await row(r.id);
     expect(req.statusId).toBe(st.awaiting_approval!.id);
     expect(req.pendingWaitingOn).toBe('customer');

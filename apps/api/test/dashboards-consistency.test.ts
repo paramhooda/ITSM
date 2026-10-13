@@ -24,6 +24,7 @@ import { withSystem, closeDb, schema, type Tx } from '@/db/client';
 import { runAs, type Ctx } from '@/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '@/core/principal';
 import { createTicket, resolveTicket } from '@/modules/tickets/service';
+import { requestApproval } from '@/modules/tickets/approvals';
 import { countTickets, ticketStats, groupTickets } from '@/modules/tickets/list';
 import { statsQuerySchema } from '@/modules/tickets/schemas';
 import { management, noc, soc, amc, engineer, customer, overview } from '@/modules/dashboards/service';
@@ -260,6 +261,8 @@ beforeAll(async () => {
     // A8 awaits the organisation's approval (counts under "Waiting on you" and "Awaiting your approval"); A9 awaits an internal approver (counts in neither).
     await mk('a8', { type: 'request', customerId: ids.a, title: `DC A8 awaiting the customer's approval ${S}`, priorityId: ids.p4 });
     await mk('a9', { type: 'incident', customerId: ids.a, title: `DC A9 awaiting an internal approval ${S}`, priorityId: ids.p4 });
+    // A8's approval is requested through the service: the status, the pending block and the party come from `startApproval`.
+    await requestApproval(ctx, t.a8!, { approver: { kind: 'customer_admin' }, purpose: 'Approval requested (Customer approval)' });
     await resolveTicket(ctx, t.a7!, { resolutionNotes: 'Resolved during the consistency test' });
     await resolveTicket(ctx, t.b2!, { resolutionNotes: 'Resolved during the consistency test' });
   });
@@ -292,8 +295,7 @@ beforeAll(async () => {
     await tx.update(schema.changeDetails).set({ scheduledStart: at(1), scheduledEnd: new Date(at(1).getTime() + 2 * 3_600_000) }).where(eq(schema.changeDetails.ticketId, t.c1!));
     // A pending approval of A4 addressed to the organisation's administrators: the home's "N approvals" for a customer_admin is the approvals page's total.
     await tx.insert(schema.approvals).values({ ticketId: t.a4!, customerId: ids.a, step: 1, stepName: 'Customer approval', approverRoleKey: 'customer_admin', status: 'pending' });
-    // A8's step is addressed to the organisation's administrators (a customer party), A9's to an internal role.
-    await tx.insert(schema.approvals).values({ ticketId: t.a8!, customerId: ids.a, step: 1, stepName: 'Customer approval', approverRoleKey: 'customer_admin', status: 'pending' });
+    // A9's step is addressed to an internal role (A8's, to the organisation's administrators, was created by `requestApproval` above).
     await tx.insert(schema.approvals).values({ ticketId: t.a9!, customerId: ids.a, step: 1, stepName: 'Service manager', approverRoleKey: 'service_manager', status: 'pending' });
   });
   // SLA states on the engine's own rows: breached is the engine flag, at risk is running and warned,
@@ -302,11 +304,10 @@ beforeAll(async () => {
     for (const id of [t.a1, t.a5, t.b1]) await tx.execute(sql`UPDATE ticket_slas SET state = 'breached', breached_at = now() WHERE ticket_id = ${id}::uuid AND metric = 'resolution'`);
     for (const id of [t.a2, t.a6]) await tx.execute(sql`UPDATE ticket_slas SET warned_at = now() WHERE ticket_id = ${id}::uuid AND metric = 'resolution'`);
     await tx.execute(sql`UPDATE ticket_slas SET due_at = now() - interval '1 hour' WHERE ticket_id = ${t.a3}::uuid AND metric = 'resolution'`);
-    // "Waiting on you" is the column, not the status key: A4 waits for a reply, A8 for the organisation's approval, A9 for an internal approver.
-    // A8 and A9 are set by a direct update, which bypasses `statusApplies` (awaiting_approval applies to requests and changes until 1b) and the
-    // awaiting_approval guard of `changeStatusCore` (only `startApproval` may enter it); 1b creates A8 through `requestApproval`.
+    // "Waiting on you" is the column, not the status key: A4 waits for a reply, A8 for the organisation's approval (set by the service), A9 for an
+    // internal approver. A4 and A9 are set by a direct update (A9 bypasses the awaiting_approval guard of `changeStatusCore`: only `startApproval`
+    // may enter it; the fixture pins the reader on the column, not the writer).
     await tx.update(schema.tickets).set({ statusId: ids.pendingCustomer, pendingWaitingOn: 'customer', pendingReason: 'Please confirm the delivery address', pendingSetAt: new Date() }).where(eq(schema.tickets.id, t.a4!));
-    await tx.update(schema.tickets).set({ statusId: ids.awaitingApproval, pendingWaitingOn: 'customer', pendingReason: 'Approval requested (Customer approval)', pendingSetAt: new Date() }).where(eq(schema.tickets.id, t.a8!));
     await tx.update(schema.tickets).set({ statusId: ids.awaitingApproval, pendingWaitingOn: 'internal', pendingReason: 'Approval requested (Service manager)', pendingSetAt: new Date() }).where(eq(schema.tickets.id, t.a9!));
     // A7 (resolved) carries a live survey: the portal home's "to rate" banner has a number to reproduce.
     await tx.delete(schema.ticketSurveys).where(eq(schema.ticketSurveys.ticketId, t.a7!));

@@ -47,6 +47,12 @@ export interface NotifyExtra {
   waitingOnLabel?: string | null;
   /** When a wait is expected to end. */
   expectedAt?: Date | null;
+  /** The name shown as `{{actor}}` when the event is sent on someone else's behalf (a step released by a decision names the person who asked). */
+  actorName?: string | null;
+  /** An approval's purpose, due date and the approver's label (the `approval.*` events and the requester's `ticket.pending`). */
+  purpose?: string | null;
+  dueAt?: Date | null;
+  approver?: string | null;
 }
 
 const fmtDay = (d: Date | null | undefined) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '');
@@ -198,6 +204,9 @@ async function templateData(tx: Tx, ticket: TicketRow, actorName: string, extra:
     reason: extra.reason ?? '',
     waitingOnLabel: extra.waitingOnLabel ?? '',
     expectedAt: fmtDay(extra.expectedAt),
+    purpose: extra.purpose ?? '',
+    dueAt: fmtDay(extra.dueAt),
+    approver: extra.approver ?? '',
     sla: extra.sla ? { metric: extra.sla.metric, dueAt: extra.sla.dueAt?.toISOString() ?? '', pct: Math.round(extra.sla.pct) } : { metric: '', dueAt: '', pct: 0 },
     reopenDays: Number(reopen?.value ?? 14),
   };
@@ -246,11 +255,11 @@ export async function notifyTicketEvent(ctx: Ctx, event: NotificationEvent, tick
     let queued = 0;
     const channelList = [...channels];
     if (mspList.length) {
-      const data = await templateData(tx, ticket, ctx.user.name, extra, false);
+      const data = await templateData(tx, ticket, extra.actorName ?? ctx.user.name, extra, false);
       queued += await queueNotification(tx, { event, recipients: mspList, data, customerId: ticket.customerId, channels: channelList, entityType: 'ticket', entityId: ticket.id, link: `/tickets/${ticket.id}`, body: extra.comment ?? undefined });
     }
     if (portalList.length) {
-      const data = await templateData(tx, ticket, ctx.user.name, extra, true);
+      const data = await templateData(tx, ticket, extra.actorName ?? ctx.user.name, extra, true);
       queued += await queueNotification(tx, { event, recipients: portalList, data, customerId: ticket.customerId, channels: channelList, entityType: 'ticket', entityId: ticket.id, link: `/portal/tickets/${ticket.id}`, body: extra.comment ?? undefined });
     }
     return queued;

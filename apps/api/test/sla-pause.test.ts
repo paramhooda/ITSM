@@ -13,7 +13,7 @@ import { withSystem, closeDb, schema, type Tx } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { config } from '../src/config';
-import { createTicket, changeStatus, resolveTicket } from '../src/modules/tickets/service';
+import { createTicket, changeStatus, resolveTicket, reopenTicket } from '../src/modules/tickets/service';
 import { requestApproval, decide } from '../src/modules/tickets/approvals';
 import { applySlas, SYSTEM_ACTOR } from '../src/modules/sla/engine';
 import { slaTick } from '../src/jobs/processors/sla';
@@ -164,7 +164,7 @@ describe('which clocks pause', () => {
     const r = await asAdmin((ctx) => createTicket(ctx, { type: 'request', customerId: ids.customer, siteId: ids.site, serviceId: ids.service, title: `Two-step request ${S}`, description: 'mixed steps', priorityId: ids.p1 }));
     tickets.push(r.id);
     expect((await slas(r.id)).length).toBeGreaterThan(0);
-    const started = await asAdmin((ctx) => requestApproval(ctx, r.id, ids.workflow));
+    const started = await asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.workflow, purpose: 'Approval for the pause test' }));
     const [step1, step2] = [...started.items].sort((a, b) => a.step - b.step);
     let ticket = started.ticket;
     expect(ticket.statusId).toBe(st.awaiting_approval!);
@@ -192,12 +192,15 @@ describe('which clocks pause', () => {
     await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!, pendingReason: 'back', comment: 'back' }))).rejects.toThrow(/cannot move from Resolved to Pending Customer/);
     const r = await asAdmin((ctx) => createTicket(ctx, { type: 'request', customerId: ids.customer, siteId: ids.site, serviceId: ids.service, title: `Resubmitted request ${S}`, description: 'resubmission' }));
     tickets.push(r.id);
-    const first = await asAdmin((ctx) => requestApproval(ctx, r.id, ids.customerWorkflow));
+    const first = await asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.customerWorkflow, purpose: 'Approval for the pause test' }));
     await expectPaused(r.id, 'first request');
     await asPortalAdmin((ctx) => decide(ctx, r.id, [...first.items].sort((a, b) => a.step - b.step)[0]!.id, 'rejected', 'Not now'));
     const rejected = await slas(r.id);
     for (const x of rejected.filter((x) => PAUSABLE.includes(x.metric))) expect(x.state, x.metric).toBe('cancelled');
-    const again = await asAdmin((ctx) => requestApproval(ctx, r.id, ids.customerWorkflow));
+    // A rejected request is an ended ticket: a new approval is refused until it is reopened (with a comment), then requested again.
+    await expect(asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.customerWorkflow, purpose: 'Approval for the pause test' }))).rejects.toThrow(/is rejected; reopen it/);
+    await asAdmin((ctx) => reopenTicket(ctx, r.id, { comment: 'Resubmitting with the revised quote' }));
+    const again = await asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.customerWorkflow, purpose: 'Approval for the pause test' }));
     expect(again.ticket.statusId).toBe(st.awaiting_approval!);
     expect(again.ticket.reopenCount).toBe(1);
     const reopened = await slas(r.id);

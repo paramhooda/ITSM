@@ -32,7 +32,8 @@ export const OPTION_SEEDS: Record<string, OptionSeed[]> = {
     { key: 'closed', label: 'Closed', statusCategory: 'closed', color: 'gray' },
     { key: 'cancelled', label: 'Cancelled', statusCategory: 'cancelled', color: 'gray' },
     // Service requests
-    { key: 'awaiting_approval', label: 'Awaiting Approval', statusCategory: 'pending', pausesSla: true, color: 'purple', appliesTo: ['request', 'change'] },
+    // Every type: an approval is a lifecycle step on incidents and problems too (the party decides whether the clocks pause).
+    { key: 'awaiting_approval', label: 'Awaiting Approval', statusCategory: 'pending', pausesSla: true, color: 'purple' },
     { key: 'in_fulfilment', label: 'In Fulfilment', statusCategory: 'open', color: 'indigo', appliesTo: ['request'] },
     { key: 'fulfilled', label: 'Fulfilled', statusCategory: 'resolved', color: 'green', appliesTo: ['request'] },
     { key: 'rejected', label: 'Rejected', statusCategory: 'cancelled', color: 'red', appliesTo: ['request', 'change'] },

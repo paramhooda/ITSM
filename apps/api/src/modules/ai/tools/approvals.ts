@@ -1,24 +1,28 @@
 import { z } from 'zod';
-import { and, eq, ilike } from 'drizzle-orm';
+import { and, eq, ilike, or } from 'drizzle-orm';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
-import { ValidationError } from '@/core/errors';
-import { listMine, listForTicket, decide, requestApproval } from '@/modules/tickets/approvals';
+import { ValidationError, NotFoundError } from '@/core/errors';
+import { listMine, listForTicket, decide, requestApproval, planApproval, withdraw, partyOf, approverLabel } from '@/modules/tickets/approvals';
+import { AFTER_APPROVAL_KEY, AFTER_REJECTION, REOPEN_KEY, statusByKey } from '@/modules/tickets/status';
 import { listPortalApprovals, decidePortalApproval } from '@/modules/portal/service';
-import type { TicketRow } from '@/modules/tickets/common';
+import { type TicketRow, optionById } from '@/modules/tickets/common';
+import { activeSlaRows } from '@/modules/sla/engine';
+import type { RequestApprovalInput } from '@/modules/tickets/schemas';
 import { define } from './types';
 import { ticketRef } from './core';
-import { isCustomerUser, ticketLink, iso, trunc, resolveTicket } from '../helpers';
+import { isCustomerUser, ticketLink, iso, trunc, resolveTicket, resolveTeam, resolveUser, parseWhen, like } from '../helpers';
 
-/** Approval tools: what waits for the user, starting a workflow, and deciding a step (staff and portal approvers alike). */
+/** Approval tools: what waits for the user, requesting one on any ticket naming the approver, deciding, withdrawing. */
 
 const short = (t: Pick<TicketRow, 'number' | 'title'>) => `${t.number} ("${t.title.slice(0, 80)}")`;
+const fmtDay = (d: Date | null | undefined) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : null);
 
 /** The pending step on a ticket the caller may decide (optionally a specific step number or name). */
 async function pendingStep(ctx: Ctx, t: TicketRow, step?: string | number) {
   const items = isCustomerUser(ctx)
-    ? (await listPortalApprovals(ctx)).items.filter((a) => a.ticket.id === t.id && a.status === 'pending').map((a) => ({ id: a.id, step: a.step, stepName: a.stepName }))
-    : (await listForTicket(ctx, t.id)).items.filter((a) => a.status === 'pending' && a.canDecide).map((a) => ({ id: a.id, step: a.step, stepName: a.stepName }));
+    ? (await listPortalApprovals(ctx)).items.filter((a) => a.ticket.id === t.id && a.status === 'pending').map((a) => ({ id: a.id, step: a.step, stepName: a.stepName, purpose: a.purpose }))
+    : (await listForTicket(ctx, t.id)).items.filter((a) => a.status === 'pending' && a.canDecide).map((a) => ({ id: a.id, step: a.step, stepName: a.stepName, purpose: a.purpose }));
   if (!items.length) throw new ValidationError(`No approval step on ${t.number} is waiting for your decision`);
   if (step === undefined || step === null || step === '') {
     if (items.length === 1) return items[0]!;
@@ -30,11 +34,81 @@ async function pendingStep(ctx: Ctx, t: TicketRow, step?: string | number) {
   return hit;
 }
 
+const approverInput = z.object({
+  kind: z.enum(['customer_admin', 'user', 'role', 'team', 'workflow']).describe('customer_admin: an administrator of the ticket\'s organisation (any of them, or one by name); user: a staff user by name or email; role: an internal role by key or name; team: a team by name; workflow: a configured approval workflow by name'),
+  ref: z.string().max(200).optional().describe('The name, email, key or workflow name; omit for "any administrator of the organisation"'),
+});
+
+/**
+ * Turns the approver the model named into the request's shape: names are resolved here (the service takes ids and keys),
+ * a customer administrator only among the ticket organisation's own portal users.
+ */
+async function resolveApprover(ctx: Ctx, t: TicketRow, approver: z.infer<typeof approverInput> | undefined): Promise<RequestApprovalInput> {
+  if (!approver) return {};
+  const ref = approver.ref?.trim() || null;
+  switch (approver.kind) {
+    case 'workflow': {
+      const wf = await workflowByName(ctx, ref);
+      return { approvalWorkflowId: wf?.id ?? null };
+    }
+    case 'customer_admin': {
+      if (!ref) return { approver: { kind: 'customer_admin' } };
+      const rows = await ctx.tx
+        .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+        .from(schema.users)
+        .innerJoin(schema.userRoles, eq(schema.userRoles.userId, schema.users.id))
+        .innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId))
+        .where(and(eq(schema.users.userType, 'customer'), eq(schema.users.customerId, t.customerId), eq(schema.users.status, 'active'), eq(schema.roles.key, 'customer_admin'), or(ilike(schema.users.name, like(ref)), ilike(schema.users.email, ref))))
+        .limit(6);
+      const exact = rows.filter((u) => u.name.toLowerCase() === ref.toLowerCase() || u.email.toLowerCase() === ref.toLowerCase());
+      const pick = exact.length === 1 ? exact : rows;
+      if (!pick.length) throw new NotFoundError('Administrator', `No administrator of the ticket's organisation matching "${ref}"`);
+      if (pick.length > 1) throw new ValidationError(`"${ref}" is ambiguous among the organisation's administrators: ${pick.map((u) => u.name).join(', ')}`);
+      return { approver: { kind: 'customer_admin', ref: pick[0]!.id } };
+    }
+    case 'user': {
+      const u = await resolveUser(ctx, ref);
+      if (!u) throw new ValidationError('Name the user who should approve');
+      return { approver: { kind: 'user', ref: u.id } };
+    }
+    case 'role': {
+      if (!ref) throw new ValidationError('Name the role that should approve');
+      const rows = await ctx.tx.select({ key: schema.roles.key, name: schema.roles.name }).from(schema.roles).where(or(eq(schema.roles.key, ref.toLowerCase().replace(/\s+/g, '_')), ilike(schema.roles.name, like(ref)))).limit(6);
+      const exact = rows.filter((r) => r.key === ref.toLowerCase().replace(/\s+/g, '_') || r.name.toLowerCase() === ref.toLowerCase());
+      const pick = exact.length === 1 ? exact : rows;
+      if (!pick.length) throw new NotFoundError('Role', `No role matching "${ref}"`);
+      if (pick.length > 1) throw new ValidationError(`Role "${ref}" is ambiguous: ${pick.map((r) => r.name).join(', ')}`);
+      return { approver: { kind: 'role', ref: pick[0]!.key } };
+    }
+    case 'team': {
+      const team = await resolveTeam(ctx, ref);
+      if (!team) throw new ValidationError('Name the team that should approve');
+      return { approver: { kind: 'team', ref: team.id } };
+    }
+    default:
+      throw new ValidationError('Unknown approver kind');
+  }
+}
+
+const requestInput = z.object({
+  ticket: ticketRef,
+  approver: approverInput.optional().describe('Who decides; omitted: the catalog item\'s workflow, else the default workflow for the type'),
+  purpose: z.string().min(3).max(2000).describe('What needs approving, shown to the approver and the requester'),
+  dueAt: z.string().max(60).optional().describe('When a decision is expected (ISO date or a natural date); default from approvals.default_due_days'),
+});
+
+async function describeRequest(ctx: Ctx, input: z.infer<typeof requestInput>) {
+  const t = await resolveTicket(ctx, input.ticket);
+  const body: RequestApprovalInput = { ...(await resolveApprover(ctx, t, input.approver)), purpose: input.purpose, dueAt: parseWhen(input.dueAt, 'due date') };
+  const plan = await planApproval(ctx, t, body);
+  return { t, body, plan };
+}
+
 export const APPROVALS: ReturnType<typeof define>[] = [
   define({
     name: 'my_approvals',
     toolset: 'approvals',
-    description: 'Requests and changes waiting for the user\'s approval decision (addressed to them, their role or their team).',
+    description: 'Tickets of any type waiting for the user\'s approval decision (addressed to them, their role or their team): what needs approving, who asked and by when.',
     inputSchema: z.object({ limit: z.number().int().min(1).max(30).optional() }),
     requires: ['tickets:read'],
     portal: ['portal:approve'],
@@ -43,10 +117,10 @@ export const APPROVALS: ReturnType<typeof define>[] = [
       const limit = input.limit ?? 20;
       if (isCustomerUser(ctx)) {
         const res = await listPortalApprovals(ctx);
-        return { total: res.total, facts: [`${res.total} approval(s) waiting for ${ctx.user.name}`], items: res.items.slice(0, limit).map((a) => ({ approvalId: a.id, step: a.step, stepName: a.stepName, waitingSince: iso(a.createdAt), ticket: { number: a.ticket.number, title: a.ticket.title, type: a.ticket.type, requester: a.ticket.requesterName, priority: a.ticket.priority?.label ?? null, status: a.ticket.status?.label ?? null, catalogItem: a.ticket.catalogItemName, description: trunc(a.ticket.description, 400), link: ticketLink(ctx, a.ticket.id) } })) };
+        return { total: res.total, facts: [`${res.total} approval(s) waiting for ${ctx.user.name}`], items: res.items.slice(0, limit).map((a) => ({ approvalId: a.id, step: a.step, stepName: a.stepName, purpose: a.purpose, dueAt: iso(a.dueAt), requestedBy: a.requestedByName, waitingSince: iso(a.createdAt), ticket: { number: a.ticket.number, title: a.ticket.title, type: a.ticket.type, requester: a.ticket.requesterName, priority: a.ticket.priority?.label ?? null, status: a.ticket.status?.label ?? null, catalogItem: a.ticket.catalogItemName, description: trunc(a.ticket.description, 400), link: ticketLink(ctx, a.ticket.id) } })) };
       }
       const res = await listMine(ctx);
-      return { total: res.total, facts: [`${res.total} approval(s) waiting for ${ctx.user.name}`], items: res.items.slice(0, limit).map((a) => ({ approvalId: a.id, step: a.step, stepName: a.stepName, waitingSince: iso(a.createdAt), ticket: { number: a.ticket.number, title: a.ticket.title, type: a.ticket.type, customer: a.ticket.customerName, requester: a.ticket.requesterName, priority: a.ticket.priority, status: a.ticket.status, createdAt: iso(a.ticket.createdAt), description: trunc(a.ticket.description, 400), link: ticketLink(ctx, a.ticket.id) } })) };
+      return { total: res.total, facts: [`${res.total} approval(s) waiting for ${ctx.user.name}`], items: res.items.slice(0, limit).map((a) => ({ approvalId: a.id, step: a.step, stepName: a.stepName, purpose: a.purpose, dueAt: iso(a.dueAt), requestedBy: a.requestedByName, waitingSince: iso(a.createdAt), ticket: { number: a.ticket.number, title: a.ticket.title, type: a.ticket.type, customer: a.ticket.customerName, requester: a.ticket.requesterName, priority: a.ticket.priority, status: a.ticket.status, createdAt: iso(a.ticket.createdAt), description: trunc(a.ticket.description, 400), link: ticketLink(ctx, a.ticket.id) } })) };
     },
     summary: (_i, result) => `Listed ${(result as { total: number }).total} pending approval(s)`,
   }),
@@ -54,30 +128,75 @@ export const APPROVALS: ReturnType<typeof define>[] = [
   define({
     name: 'request_approval',
     toolset: 'approvals',
-    description: 'Start an approval workflow on a request or change (the catalog item\'s workflow, or the one named).',
-    inputSchema: z.object({ ticket: ticketRef, workflow: z.string().max(200).optional().describe('Workflow name, e.g. "CAB approval"') }),
+    tier: 'write',
+    description:
+      'Request an approval on any open ticket (incident, request, problem or change) naming who decides: an administrator of the customer organisation (any, or one by name), a staff user, a role, a team or a configured workflow; with the purpose and a due date. The ticket waits in Awaiting Approval; the resolution and restoration clocks pause while a customer decides and keep running for an internal approver. The approvers are notified and the requester is told when the wait is on their organisation.',
+    inputSchema: requestInput,
+    requires: ['tickets:update'],
+    portal: null,
+    action: true,
+    invalidates: ['tickets', 'approvals'],
+    run: async (ctx, input) => {
+      const { t, body } = await describeRequest(ctx, input);
+      const res = await requestApproval(ctx, t.id, body);
+      return { ticket: t.number, approvalStatus: res.ticket.approvalStatus, status: res.ticket.statusId, waitingOn: res.ticket.pendingWaitingOn, purpose: body.purpose, dueAt: iso(res.items[0]?.dueAt), steps: res.items.map((a) => ({ step: a.step, name: a.stepName, status: a.status, approver: a.approverUser?.name ?? a.approverTeam?.name ?? a.approverRole?.name ?? null, dueAt: iso(a.dueAt) })), link: ticketLink(ctx, t.id) };
+    },
+    summary: (input, result) => `Requested approval on ${input.ticket} (${(result as { steps: unknown[] }).steps.length} step(s))`,
+    preview: async (ctx, input) => {
+      const { t, plan } = await describeRequest(ctx, input);
+      const lines: string[] = [];
+      const [customer] = await ctx.tx.select({ name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, t.customerId)).limit(1);
+      const who = plan.party === 'customer' && !plan.who.startsWith('the administrators') ? `${plan.who} (customer administrator, ${customer?.name ?? 'the customer'})` : plan.who;
+      lines.push(plan.steps.length > 1 ? `Start the "${plan.name}" workflow (${plan.steps.map((s) => s.name ?? 'step').join(' → ')}), first asking ${who} to approve: ${plan.purpose}` : `Ask ${who} to approve: ${plan.purpose}`);
+      lines.push(plan.dueAt ? `Due ${fmtDay(plan.dueAt)}` : 'Due by the default (approvals.default_due_days)');
+      const awaiting = await statusByKey(ctx, 'awaiting_approval', t.type);
+      const rows = await activeSlaRows(ctx.tx, t.id);
+      const hasClocks = rows.some((r) => r.state === 'running' && (r.metric === 'resolution' || r.metric === 'restoration'));
+      if (plan.party === 'customer') lines.push(`${t.number} moves to ${awaiting.label}; ${hasClocks ? 'the resolution and restoration clocks pause' : 'no resolution clock is running to pause'}`);
+      else lines.push(`${t.number} moves to ${awaiting.label}; the clocks keep running (internal approver)`);
+      lines.push(plan.party === 'customer' ? 'Approvers are notified by email, in-app and WhatsApp; the requester is told the ticket waits on their organisation' : 'Approvers are notified by email, in-app and WhatsApp');
+      return { text: `Request approval on ${short(t)}`, lines };
+    },
+  }),
+
+  define({
+    name: 'withdraw_approval',
+    toolset: 'approvals',
+    tier: 'write',
+    description: 'Withdraw the approval still pending on a ticket (the desk no longer needs the decision): the approvers are told, the steps are cancelled and the ticket returns to work with its clocks resumed. Only on an explicit instruction naming the ticket.',
+    inputSchema: z.object({ ticket: ticketRef, reason: z.string().max(2000).optional().describe('Why the approval is no longer needed') }),
     requires: ['tickets:update'],
     portal: null,
     action: true,
     invalidates: ['tickets', 'approvals'],
     run: async (ctx, input) => {
       const t = await resolveTicket(ctx, input.ticket);
-      const wf = await workflowByName(ctx, input.workflow);
-      const res = await requestApproval(ctx, t.id, wf?.id ?? null);
-      return { ticket: t.number, approvalStatus: res.ticket.approvalStatus, steps: res.items.map((a) => ({ step: a.step, name: a.stepName, status: a.status, approver: a.approverUser?.name ?? a.approverTeam?.name ?? a.approverRole?.name ?? null })), link: ticketLink(ctx, t.id) };
+      const res = await withdraw(ctx, t.id, input.reason ?? null);
+      return { ticket: t.number, approvalStatus: res.approvalStatus, cancelled: res.items.filter((a) => a.status === 'cancelled').length, link: ticketLink(ctx, t.id) };
     },
-    summary: (input, result) => `Started approval on ${input.ticket} (${(result as { steps: unknown[] }).steps.length} step(s))`,
+    summary: (input) => `Withdrew the approval on ${input.ticket}`,
     preview: async (ctx, input) => {
       const t = await resolveTicket(ctx, input.ticket);
-      const wf = await workflowByName(ctx, input.workflow);
-      return `Start the ${wf ? `"${wf.name}"` : 'default'} approval workflow on ${short(t)}; the approvers are notified`;
+      if (t.approvalStatus !== 'pending') throw new ValidationError(`No approval is pending on ${t.number}`);
+      const pending = (await listForTicket(ctx, t.id)).items.filter((a) => a.status === 'pending').sort((a, b) => a.step - b.step);
+      const first = pending[0];
+      const who = first ? await approverLabel(ctx, first) : 'the approvers';
+      const party = first ? await partyOf(ctx, first) : 'internal';
+      const status = await optionById(ctx.tx, t.statusId);
+      const back = await statusByKey(ctx, REOPEN_KEY[t.type], t.type);
+      // A step addressed to a named person already carries the name ("Approval by Manish Agarwal"): the approver is not repeated.
+      const stepLabel = first ? `${first.stepName ?? `step ${first.step}`}${(first.stepName ?? '').includes(who) ? '' : `, waiting for ${who}`} since ${fmtDay(first.createdAt)}` : '';
+      const lines = [`Withdraw the pending approval on ${t.number}${first ? ` (${stepLabel})` : ''}`];
+      if (status?.key === 'awaiting_approval') lines.push(`${t.number} returns to ${back.label}${party === 'customer' ? ' and the clocks resume' : '; the clocks were never paused (internal approver)'}`);
+      lines.push(input.reason ? `Reason: ${trunc(input.reason, 160)}` : 'The approvers and the requester are told');
+      return { text: `Withdraw the approval on ${short(t)}`, lines };
     },
   }),
 
   define({
     name: 'decide_approval',
     toolset: 'approvals',
-    description: 'Approve or reject the approval step on a ticket that is waiting for the user. Only on explicit instruction naming the ticket and the decision.',
+    description: 'Approve or reject the approval step on a ticket that is waiting for the user. Only on explicit instruction naming the ticket and the decision; a rejection from the portal needs a comment.',
     inputSchema: z.object({ ticket: ticketRef, decision: z.enum(['approved', 'rejected']), comment: z.string().max(2000).optional(), step: z.union([z.string().max(100), z.number().int()]).optional().describe('Step number or name when several wait') }),
     requires: ['tickets:read'],
     portal: ['portal:approve'],
@@ -93,7 +212,23 @@ export const APPROVALS: ReturnType<typeof define>[] = [
     preview: async (ctx, input) => {
       const t = await resolveTicket(ctx, input.ticket);
       const step = await pendingStep(ctx, t, input.step);
-      return `${input.decision === 'approved' ? 'Approve' : 'Reject'} step ${step.step}${step.stepName ? ` "${step.stepName}"` : ''} of ${short(t)}${input.comment ? ` with the comment "${trunc(input.comment, 120)}"` : ''}`;
+      if (isCustomerUser(ctx) && input.decision === 'rejected' && !input.comment?.trim()) throw new ValidationError('Say why you are rejecting the request; the note is shown to the requester');
+      const lines = [`${input.decision === 'approved' ? 'Approve' : 'Reject'} step ${step.step}${step.stepName ? ` "${step.stepName}"` : ''}${step.purpose ? `: ${trunc(step.purpose, 160)}` : ''}`];
+      if (input.comment) lines.push(`Comment: ${trunc(input.comment, 120)}`);
+      // The steps still waiting (a portal user's read is fenced to the organisation's ticket; the count names nobody): the card promises a return to work only when this is the last step.
+      const remaining = (await listForTicket(ctx, t.id)).items.filter((a) => a.status === 'waiting').length;
+      if (input.decision === 'approved') {
+        if (remaining) lines.push(`The next step is released (${remaining} more to decide)`);
+        else {
+          const next = await statusByKey(ctx, AFTER_APPROVAL_KEY[t.type], t.type);
+          lines.push(`${t.number} ${t.type === 'change' ? 'moves to' : 'returns to'} ${next.label}${t.pendingWaitingOn === 'customer' ? ' and the clocks resume' : ''}`);
+        }
+      } else if (AFTER_REJECTION[t.type] === 'rejected') lines.push(`${t.number} ends as Rejected${input.comment ? ' with the note posted to the requester' : ''}`);
+      else {
+        const back = await statusByKey(ctx, REOPEN_KEY[t.type], t.type);
+        lines.push(`${t.number} returns to ${back.label} with the note posted to the requester`);
+      }
+      return { text: `${input.decision === 'approved' ? 'Approve' : 'Reject'} the approval on ${short(t)}`, lines };
     },
   }),
 ];

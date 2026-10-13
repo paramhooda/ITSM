@@ -321,6 +321,14 @@ describe('customer portal', () => {
     const pending = list.items.find((a) => a.ticket.id === ids.approvalTicket);
     expect(pending).toBeTruthy();
     expect(pending!.status).toBe('pending');
+    // The inbox row and the ticket's approvals carry what needs approving, by when and who asked (the catalog item's approval, due by the default).
+    expect(pending!.purpose).toBe(`Approval for Approved request ${suffix}`);
+    expect(pending!.dueAt).toBeInstanceOf(Date);
+    expect(pending!.requestedByName).toBe(admin.name);
+    const before = await asA((ctx) => portal.getPortalTicket(ctx, ids.approvalTicket));
+    expect(before.approvals.find((a) => a.id === pending!.id)).toMatchObject({ purpose: `Approval for Approved request ${suffix}`, requestedByName: admin.name });
+    expect(before.approvals.find((a) => a.id === pending!.id)?.dueAt).toBeInstanceOf(Date);
+    expect(before.pending).toMatchObject({ waitingOn: 'customer', waitingOnLabel: 'Your approval is needed', reason: `Approval for Approved request ${suffix}` });
     // The customer_user of B holds no portal:approve.
     await expect(asB((ctx) => portal.listPortalApprovals(ctx))).rejects.toThrow(/portal:approve/);
     const res = await asA((ctx) => portal.decidePortalApproval(ctx, ids.approvalTicket, pending!.id, 'approved', 'Looks fine'));
@@ -329,6 +337,10 @@ describe('customer portal', () => {
     const after = await asA((ctx) => portal.getPortalTicket(ctx, ids.approvalTicket));
     expect(after.approvalStatus).toBe('approved');
     expect(after.pendingForMe).toEqual([]);
+    // The decision note is on the timeline and the ticket is back with the desk; the wait is over.
+    expect(after.timeline.some((i) => i.kind === 'activity' && /approved by .*: Looks fine/.test(i.summary ?? ''))).toBe(true);
+    expect(after.status?.key).toBe('in_fulfilment');
+    expect(after.pending).toBeNull();
   });
 
   it('returns the services view with the customer\'s contract, scope, SLA targets and entitlements', async () => {

@@ -22,6 +22,9 @@ Schema: {"suggestions": [{"source": "ticket"|"kb", "ref": string (ticket number 
 export const RESOLUTION_NOTES_SYSTEM = `You write the resolution notes of an IT ticket for the customer, from the engineer's work notes and the ticket facts. Plain text, 40-120 words, three short parts: what was wrong, what was done, how it was verified or what the customer should do if it recurs. No internal names, hostnames or tooling unless the customer already saw them; never invent causes or steps that are not in the notes. ${JSON_ONLY}
 Schema: {"notes": string}`;
 
+export const APPROVAL_PURPOSE_SYSTEM = `You write the purpose of an approval request on an IT ticket: one or two plain sentences (15-60 words) telling the approver exactly what they are asked to approve and why it matters, from the ticket facts and the engineer's notes (the cost, the risk, the downtime or the change in access when the notes say so). No internal names, hostnames or tooling unless the customer already saw them; never invent figures or commitments that are not in the notes. ${JSON_ONLY}
+Schema: {"purpose": string}`;
+
 export const SENTIMENT_SYSTEM = `You judge the tone of a customer's message to an IT service desk. Label it positive, neutral, negative or angry (angry = hostile, threatening to escalate or cancel, shouting). Score from -100 (furious) to 100 (delighted). Use only the message. ${JSON_ONLY}
 Schema: {"sentiment": "positive"|"neutral"|"negative"|"angry", "score": number, "reason": string (one short clause)}`;
 

@@ -5,7 +5,7 @@ import type { Principal } from '@/core/principal';
 import { schema, type Tx } from '@/db/client';
 import { NotFoundError, ForbiddenError, ValidationError } from '@/core/errors';
 import { storage, storageKeyFor, sha256Buffer } from '@/lib/storage';
-import { render, emailLayout } from '@/lib/templates';
+import { render, renderText, emailLayout } from '@/lib/templates';
 import { config } from '@/config';
 import { enqueue } from '@/jobs/queues';
 import { logger } from '@/core/logger';
@@ -450,7 +450,7 @@ export async function queueReportEmail(tx: Tx, input: ReportEmailInput) {
   let subject = `${input.reportName} - ${input.period}`;
   let html: string;
   try {
-    subject = template ? render(template.subject ?? subject, data) : subject;
+    subject = template ? renderText(template.subject ?? subject, data) : subject;
     html = emailLayout(subject, template ? render(template.body, data) : `<p>Please find attached the <strong>${input.reportName}</strong> for ${input.period}.</p>${data.report.summaryHtml}`);
   } catch (err) {
     logger.warn({ err }, 'report.delivered template render failed');

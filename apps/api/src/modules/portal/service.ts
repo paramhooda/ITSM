@@ -356,6 +356,10 @@ const safeApproval = (a: ApprovalView) => ({
   comment: a.comment,
   createdAt: a.createdAt,
   canDecide: a.canDecide,
+  /** What needs approving, by when, and who asked (the names of staff are what the customer already sees on the ticket). */
+  purpose: a.purpose,
+  dueAt: a.dueAt,
+  requestedByName: a.requestedByUser?.name ?? null,
 });
 
 export async function getPortalTicket(ctx: Ctx, id: string, requested?: string | null) {
@@ -368,7 +372,8 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
   // Customer users already get a filtered timeline / attachment list; filter again for MSP previews.
   const timelineItems = tl.items.filter((i) => !i.isInternal && i.customerVisible).map(({ minutesSpent: _m, ...rest }) => rest);
   const attachments = att.items.filter((a) => a.customerVisible || !scope.preview).map((a) => ({ id: a.id, filename: a.filename, title: a.title, contentType: a.contentType, size: a.size, uploadedByName: a.uploadedByName, createdAt: a.createdAt, canDelete: a.canDelete && !scope.preview }));
-  const latestApprovals = appr.items.filter((a) => a.status !== 'superseded').map(safeApproval);
+  // Only the steps addressed to the organisation: an internal approver (the CAB, a manager, a team) is the desk's business.
+  const latestApprovals = appr.items.filter((a) => a.status !== 'superseded' && a.customerParty).map(safeApproval);
   const cat = t.status?.category ?? 'open';
   const ref = t.closedAt ?? t.resolvedAt;
   const withinWindow = !ref || Date.now() - new Date(ref).getTime() <= windowDays * 86_400_000;
@@ -549,7 +554,7 @@ export async function listPortalApprovals(ctx: Ctx, requested?: string | null) {
   const statusOf = await portalStatusOf(ctx);
   const optIds = rows.flatMap((r) => [r.ticket.priorityId, r.ticket.statusId]);
   const labels = await optionLabels(ctx.tx, optIds);
-  const names = await userNamesOnly(ctx, rows.map((r) => r.ticket.requesterUserId));
+  const names = await userNamesOnly(ctx, rows.flatMap((r) => [r.ticket.requesterUserId, r.approval.requestedBy]));
   const catalogIds = [...new Set(rows.map((r) => r.ticket.catalogItemId).filter((x): x is string => !!x))];
   const catalog = catalogIds.length ? await ctx.tx.select({ id: schema.catalogItems.id, name: schema.catalogItems.name, formSchema: schema.catalogItems.formSchema }).from(schema.catalogItems).where(inArray(schema.catalogItems.id, catalogIds)) : [];
   const items = rows.map(({ approval: a, ticket: t }) => {
@@ -566,6 +571,9 @@ export async function listPortalApprovals(ctx: Ctx, requested?: string | null) {
       stepName: a.stepName,
       status: a.status,
       createdAt: a.createdAt,
+      purpose: a.purpose,
+      dueAt: a.dueAt,
+      requestedByName: a.requestedBy ? names.get(a.requestedBy) ?? null : null,
       ticket: {
         id: t.id,
         number: t.number,
@@ -587,7 +595,7 @@ export async function listPortalApprovals(ctx: Ctx, requested?: string | null) {
 export async function decidePortalApproval(ctx: Ctx, ticketId: string, approvalId: string, decision: 'approved' | 'rejected', comment?: string | null) {
   resolvePortalCustomer(ctx, 'portal:approve', null, { mutation: true });
   const res = await approvalsSvc.decide(ctx, ticketId, approvalId, decision, comment);
-  return { items: res.items.filter((a) => a.status !== 'superseded').map(safeApproval), approvalStatus: res.approvalStatus };
+  return { items: res.items.filter((a) => a.status !== 'superseded' && a.customerParty).map(safeApproval), approvalStatus: res.approvalStatus };
 }
 
 // ---------------------------------------------------------------- services & contracts

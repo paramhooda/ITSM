@@ -11,7 +11,7 @@ import { notifyTicketEvent } from './notify';
 import { onTicketEnded, onTicketReopened } from '@/modules/surveys/service';
 
 /** Why a wait ended (the words of the "Resumed" line and the customer-facing notification). */
-export type ResumeTrigger = 'customer_reply' | 'approval' | 'rejection' | 'manual' | 'expiry';
+export type ResumeTrigger = 'customer_reply' | 'approval' | 'rejection' | 'withdrawal' | 'manual' | 'expiry';
 
 export interface StatusChangeOptions {
   resolutionCodeId?: string | null;
@@ -66,15 +66,14 @@ export const AFTER_REJECTION: Record<TicketType, 'rejected' | 'working'> = { inc
 
 /**
  * The transition matrix by category: a `ValidationError` naming both statuses when the move is not one the
- * lifecycle allows. One exception: the approvals service may resubmit a rejected request or change (cancelled →
- * Awaiting Approval), which the core treats as a reopen into the wait.
+ * lifecycle allows. No exception for approvals: a rejected request or change is an ended ticket, and the approvals
+ * service refuses a new request on it; the path back is a reopen with its comment (ended → work), then the request.
  */
-export function assertTransition(ticket: Pick<TicketRow, 'number'>, from: OptionRow | null, to: OptionRow, action?: string) {
+export function assertTransition(ticket: Pick<TicketRow, 'number'>, from: OptionRow | null, to: OptionRow) {
   if (!from || from.id === to.id) return;
   const fromCat = from.statusCategory as StatusCategory | null;
   const toCat = to.statusCategory as StatusCategory | null;
   if (!fromCat || !toCat) return;
-  if (action === 'approval' && fromCat === 'cancelled' && to.key === APPROVAL_KEY) return;
   if (!TICKET_TRANSITIONS[fromCat].includes(toCat)) throw new ValidationError(`${ticket.number} cannot move from ${from.label} to ${to.label}`);
 }
 
@@ -97,7 +96,7 @@ export function deriveWaitingOn(to: OptionRow, opts: Pick<StatusChangeOptions, '
 /** The rules of entering a wait, shared with the assistant's preview: the matrix, the mandatory reason, the approval guard. */
 export function assertWaitEntry(ticket: Pick<TicketRow, 'number'>, from: OptionRow | null, to: OptionRow, opts: StatusChangeOptions): { toWait: boolean; waitingOn: WaitingOn | null; reason: string | null } {
   if (to.key === APPROVAL_KEY && opts.action !== 'approval') throw new ValidationError('Use Request approval to move a ticket to Awaiting Approval');
-  assertTransition(ticket, from, to, opts.action);
+  assertTransition(ticket, from, to);
   const toWait = isWait(to);
   if (!toWait) return { toWait, waitingOn: null, reason: null };
   const reason = opts.pendingReason?.trim() ?? '';
@@ -115,6 +114,8 @@ const resumeWords = (ctx: Ctx, trigger: ResumeTrigger | undefined, comment: stri
       return 'the approval was decided';
     case 'rejection':
       return 'the request was rejected';
+    case 'withdrawal':
+      return 'the approval request was withdrawn';
     case 'expiry':
       return 'the approval expired without a decision';
     default:
@@ -201,7 +202,7 @@ export async function changeStatusCore(ctx: Ctx, ticket: TicketRow, to: OptionRo
     Object.assign(patch, { pendingReason: null, pendingWaitingOn: null, pendingExpectedAt: null, pendingReference: null, pendingReasonVisible: null, pendingSetBy: null, pendingSetAt: null });
   }
 
-  // Ending the ticket withdraws an approval that is still pending (rows and status only; the approvals module tells the approvers from 1b).
+  // Ending the ticket withdraws an approval that is still pending: the approvers are told, then the rows and the status follow.
   if ((toCat === 'resolved' || toCat === 'closed' || toCat === 'cancelled') && ticket.approvalStatus === 'pending') {
     await cancelPendingApprovals(ctx, ticket, `the ticket was ${toCat}`);
     patch.approvalStatus = 'withdrawn';
@@ -312,14 +313,16 @@ export async function changeStatusCore(ctx: Ctx, ticket: TicketRow, to: OptionRo
 
 /**
  * Ending a ticket (resolved, closed, cancelled) withdraws the approval that was
- * still pending: the steps still pending or waiting become `cancelled` with the
- * reason, and the timeline says so. Lives here because the approvals module
- * imports this file (a static import back would be a cycle). The approvals
- * module notifies the approvers before calling this, since the recipient flag
- * `approvers` reads the rows while they are still pending.
+ * still pending: the approvers and the requester are told first (the recipient
+ * flag `approvers` reads the rows while they are still pending), then the steps
+ * still pending or waiting become `cancelled` with the reason, and the timeline
+ * says so. Lives here because the approvals module imports this file (a static
+ * import back would be a cycle).
  */
 export async function cancelPendingApprovals(ctx: Ctx, ticket: TicketRow, why: string) {
   if (ticket.approvalStatus !== 'pending') return 0;
+  const [pending] = await ctx.tx.select({ purpose: schema.approvals.purpose, dueAt: schema.approvals.dueAt }).from(schema.approvals).where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'pending'))).limit(1);
+  await notifyTicketEvent(ctx, 'approval.withdrawn', ticket, { reason: why, comment: `Withdrawn: ${why}`, recipientFallback: { approvers: true, requester: true }, channels: ['email', 'in_app', 'whatsapp'], purpose: pending?.purpose ?? null, dueAt: pending?.dueAt ?? null, staffOnly: ticket.pendingWaitingOn !== 'customer' });
   const rows = await ctx.tx
     .update(schema.approvals)
     .set({ status: 'cancelled', decidedAt: new Date(), comment: why })
@@ -353,15 +356,21 @@ export async function resumeFromPending(ctx: Ctx, ticket: TicketRow, opts: { tri
         ? `Approved by ${ctx.user.name} · back with the service desk as ${to.label}`
         : opts.trigger === 'rejection'
           ? `Rejected by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · back with the service desk as ${to.label}`
-          : opts.trigger === 'expiry'
-            ? `Approval expired without a decision · back with the service desk as ${to.label}`
-            : `Resumed by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · back with the service desk as ${to.label}`;
-  const action = opts.trigger === 'customer_reply' ? 'customer_reply' : opts.trigger === 'approval' || opts.trigger === 'rejection' || opts.trigger === 'expiry' ? 'approval' : 'status';
+          : opts.trigger === 'withdrawal'
+            ? `Approval request withdrawn by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · back with the service desk as ${to.label}`
+            : opts.trigger === 'expiry'
+              ? `Approval expired without a decision · back with the service desk as ${to.label}`
+              : `Resumed by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · back with the service desk as ${to.label}`;
+  const action = opts.trigger === 'customer_reply' ? 'customer_reply' : opts.trigger === 'manual' ? 'status' : 'approval';
+  // A rejection (by a person or by expiry under the reject policy) posts its note as the reply the requester reads and a
+  // manual resume posts the reason; a withdrawal's reason stays on the approval rows, the activity and the approvers'
+  // notification (the desk's reason is not a reply to the customer). Only a manual resume queues ticket.resumed: the
+  // approvals service sends its own event for the other triggers (one message per person).
   return changeStatusCore(ctx, ticket, to, {
     action,
     silent: opts.trigger !== 'manual',
     summary,
     trigger: opts.trigger,
-    comment: opts.trigger === 'rejection' || opts.trigger === 'manual' ? (opts.note ?? undefined) : undefined,
+    comment: opts.trigger === 'rejection' || opts.trigger === 'manual' || opts.trigger === 'expiry' ? (opts.note ?? undefined) : undefined,
   });
 }

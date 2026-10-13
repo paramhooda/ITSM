@@ -7,15 +7,26 @@ hb.registerHelper('default', (v: unknown, d: unknown) => (v === undefined || v =
 hb.registerHelper('eq', (a: unknown, b: unknown) => a === b);
 
 const cache = new Map<string, HandlebarsTemplateDelegate>();
+const textCache = new Map<string, HandlebarsTemplateDelegate>();
 
-export function render(template: string, data: Record<string, unknown>): string {
-  let fn = cache.get(template);
+function compiled(store: Map<string, HandlebarsTemplateDelegate>, template: string, noEscape: boolean) {
+  let fn = store.get(template);
   if (!fn) {
-    fn = hb.compile(template, { noEscape: false });
-    if (cache.size > 500) cache.clear();
-    cache.set(template, fn);
+    fn = hb.compile(template, { noEscape });
+    if (store.size > 500) store.clear();
+    store.set(template, fn);
   }
-  return fn(data);
+  return fn;
+}
+
+/** Renders an HTML template: every value is escaped (the email body). */
+export function render(template: string, data: Record<string, unknown>): string {
+  return compiled(cache, template, false)(data);
+}
+
+/** Renders a plain-text template: nothing is escaped (an email subject, a WhatsApp message), so an apostrophe stays an apostrophe. */
+export function renderText(template: string, data: Record<string, unknown>): string {
+  return compiled(textCache, template, true)(data);
 }
 
 export const escapeHtml = (s: string) => Handlebars.Utils.escapeExpression(s);

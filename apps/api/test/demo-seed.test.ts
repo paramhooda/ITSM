@@ -159,6 +159,13 @@ describe('demo dataset', () => {
     expect(await count('tickets', "t join config_options s on s.id = t.status_id where t.pending_waiting_on is not null and (s.status_category <> 'pending' or (s.metadata->>'wait')::boolean = false)")).toBe(0);
   });
 
+  it('shows approvals as a lifecycle step on incidents: two open ABC incidents wait on the organisation, every pending step has a purpose and a due date', async () => {
+    expect(await count('tickets', "t join customers c on c.id = t.customer_id where c.code = 'ABC' and t.type = 'incident' and t.approval_status = 'pending' and t.pending_waiting_on = 'customer'")).toBeGreaterThanOrEqual(2);
+    expect(await count('tickets', "where type = 'incident' and approval_status = 'pending' and pending_waiting_on = 'internal'")).toBeGreaterThanOrEqual(1);
+    expect(await count('approvals', "where status = 'pending' and (purpose is null or due_at is null)")).toBe(0);
+    expect(await count('approvals', "a join tickets t on t.id = a.ticket_id where t.type = 'change' and a.status = 'pending' and a.purpose not like 'CAB approval for %'")).toBe(0);
+  });
+
   it('keeps its dates current', async () => {
     // Every assertion is relative to the load date and scoped to the demo rows (CTR- numbers, the demo customer codes, the demo
     // licence names): the database is shared with other test files that create their own contracts and licences.

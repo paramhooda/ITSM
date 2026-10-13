@@ -157,7 +157,7 @@ export const TICKETS: ReturnType<typeof define>[] = [
   define({
     name: 'ticket_approvals',
     toolset: 'tickets',
-    description: 'Approval steps of a request or change: step, approver, status, decision and whether the user may decide.',
+    description: 'Approval steps of a ticket of any type: step, approver, the purpose, who asked, the due date, status, decision and whether the user may decide.',
     inputSchema: z.object({ ticket: ticketRef }),
     requires: ['tickets:read'],
     portal: ['portal:tickets'],
@@ -165,7 +165,7 @@ export const TICKETS: ReturnType<typeof define>[] = [
     run: async (ctx, input) => {
       const t = await resolveTicket(ctx, input.ticket);
       const res = await approvalsForTicket(ctx, t.id);
-      return { ticket: t.number, approvalStatus: res.approvalStatus, items: res.items.map((a) => ({ id: a.id, step: a.step, name: a.stepName, approver: a.approverUser?.name ?? a.approverTeam?.name ?? a.approverRole?.name ?? null, status: a.status, decidedBy: a.decidedByUser?.name ?? null, decidedAt: iso(a.decidedAt), comment: trunc(a.comment, 300), canDecide: a.canDecide })) };
+      return { ticket: t.number, approvalStatus: res.approvalStatus, items: res.items.map((a) => ({ id: a.id, step: a.step, name: a.stepName, approver: a.approverUser?.name ?? a.approverTeam?.name ?? a.approverRole?.name ?? null, purpose: a.purpose, requestedBy: a.requestedByUser?.name ?? null, dueAt: iso(a.dueAt), remindedAt: iso(a.remindedAt), status: a.status, decidedBy: a.decidedByUser?.name ?? null, decidedAt: iso(a.decidedAt), comment: trunc(a.comment, 300), canDecide: a.canDecide })) };
     },
     summary: (input, result) => `Read ${(result as { items: unknown[] }).items.length} approval steps of ${input.ticket.toUpperCase()}`,
   }),

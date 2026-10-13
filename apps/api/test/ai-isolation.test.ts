@@ -244,6 +244,18 @@ describe('every portal-reachable tool answers for the user’s own organisation 
     expect(articles.hits.some((h) => h.title.includes('HA runbook'))).toBe(false);
   });
 
+  it('request_approval naming a customer user of Beta as the approver of Alpha\'s ticket is refused, as staff, by name and by id', async () => {
+    const tool = toolByName('request_approval')!;
+    expect(tool.portal).toBeNull();
+    for (const ref of [`iso-beta-${S}@test.local`, 'Beta Portal User', ids.userB]) {
+      const run = asAdmin((ctx) => tool.preview!(ctx, { ticket: numbers.a1, approver: { kind: 'user', ref }, purpose: 'Approve the probe' } as never));
+      await expect(run, ref).rejects.toThrow(/is not an administrator of|No user matching|No administrator/);
+    }
+    await expect(asAdmin((ctx) => tool.preview!(ctx, { ticket: numbers.a1, approver: { kind: 'customer_admin', ref: 'Beta Portal User' }, purpose: 'Approve the probe' } as never))).rejects.toThrow(/No administrator of the ticket's organisation/);
+    const [t] = await withSystem((tx) => tx.select({ approvalStatus: schema.tickets.approvalStatus }).from(schema.tickets).where(eq(schema.tickets.id, ticketIds[0]!)));
+    expect(t!.approvalStatus).not.toBe('pending');
+  });
+
   it('query_tickets as a portal user may ask what waits on the organisation and nothing else (the portal list fence)', async () => {
     // `waitingOn=customer` is the one word a customer may ask for (a reply or an approval the organisation owes); a supplier, change, agreement or internal wait is the desk's business.
     const mine = (await asAlpha((ctx) => toolByName('query_tickets')!.run(ctx, { mode: 'count', waitingOn: 'customer' }))) as { total: number; definition: string; facts: string[] };

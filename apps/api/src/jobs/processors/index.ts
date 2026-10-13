@@ -18,6 +18,7 @@ import './paging';
 import './risk';
 import './status';
 import './changes';
+import './approvals';
 import './briefings';
 import './surveys';
 import './boards';

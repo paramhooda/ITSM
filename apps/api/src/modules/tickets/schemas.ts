@@ -237,7 +237,22 @@ export const timeEntrySchema = z.object({
 export const watcherSchema = z.object({ userId: uuid.optional() });
 
 export const decideSchema = z.object({ decision: z.enum(['approved', 'rejected']), comment: z.string().max(5000).nullable().optional() });
-export const requestApprovalSchema = z.object({ approvalWorkflowId: nullableUuid });
+/**
+ * Who is asked to approve when no catalog workflow applies: an administrator of the ticket's organisation (any of them,
+ * or one by user id), a staff user, an internal role by key, or a team. At most one of `approver` and
+ * `approvalWorkflowId` (the service refuses both); neither falls back to the catalog item's workflow, then the
+ * "CAB approval" / "Customer approval" workflow, then the first active one.
+ */
+export const approverSchema = z.object({ kind: z.enum(['customer_admin', 'user', 'role', 'team']), ref: z.string().max(200).nullable().optional() });
+export const requestApprovalSchema = z.object({
+  approvalWorkflowId: nullableUuid,
+  approver: approverSchema.nullable().optional(),
+  /** What needs approving, shown to the approver and to the requester; defaults to "Approval for <title>" so a bare request still works. */
+  purpose: z.string().trim().min(3).max(2000).optional(),
+  dueAt: z.coerce.date().nullable().optional(),
+});
+export type RequestApprovalInput = z.infer<typeof requestApprovalSchema>;
+export const withdrawApprovalSchema = z.object({ reason: z.string().max(2000).nullable().optional() });
 
 export const bulkSchema = z.object({
   ids: z.array(uuid).min(1).max(200),
