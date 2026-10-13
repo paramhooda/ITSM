@@ -5,3 +5,4 @@ export * from './appmap.js';
 export * from './ticketLinks.js';
 export * from './palette.js';
 export * from './sla.js';
+export * from './listQuery.js';

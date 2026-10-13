@@ -54,7 +54,7 @@ export const NOTIFICATION_PREFS: ReturnType<typeof define>[] = [
   define({
     name: 'set_notification_preference',
     toolset: 'profile',
-    description: 'Switch one notification category on or off for the user on one channel, email or WhatsApp: "stop WhatsApp for SLA warnings", "email me about surveys", "turn off contract emails". One category and one channel per call; in-app notifications are always on. Rows the administrator locked cannot be switched off, WhatsApp needs the opted-in mobile number, and the daily briefing row changes the briefing card\'s email channel.',
+    description: 'Switch one notification category on or off for the user on one channel, email or WhatsApp: "stop WhatsApp for SLA warnings", "email me about surveys", "turn off contract emails". One category and one channel per call; in-app notifications are always on. Rows the administrator locked cannot be switched off, WhatsApp needs the opted-in mobile number, and the daily briefing row changes the daily briefing\'s email channel.',
     inputSchema: z.object({
       category: z.enum(NOTIFICATION_CATEGORY_KEYS).describe('Row of the matrix, e.g. sla, tickets, approvals, feedback, contracts'),
       channel: z.enum(['email', 'whatsapp']),

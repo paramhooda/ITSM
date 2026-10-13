@@ -26,6 +26,7 @@ import { availableTools, toolByName, ALL_TOOLS, type AiTool } from '../src/modul
 import { buildSystemPrompt, describeScope } from '../src/modules/ai/prompt';
 import { fenceToolResult, belongsElsewhere, fenceAnswer, collectSeen, ANSWER_FENCE_NOTE } from '../src/modules/ai/fence';
 import * as ai from '../src/modules/ai/service';
+import * as briefings from '../src/modules/briefings/service';
 
 const S = Math.random().toString(36).slice(2, 8);
 const meta = { requestId: `test-ai-iso-${S}`, ip: '127.0.0.1' };
@@ -35,7 +36,9 @@ const ALPHA_CODE = `ISA${S.toUpperCase()}`;
 const BETA_CODE = `ISB${S.toUpperCase()}`;
 let admin: Principal;
 let alphaUser: Principal;
-const ids = { a: '', b: '', siteA: '', siteB: '', service: '', userA: '', contractA: '', contractB: '' };
+/** Beta's portal user: the stored brief row of Alpha's user is fenced from them by row-level security. */
+let betaUser: Principal;
+const ids = { a: '', b: '', siteA: '', siteB: '', service: '', userA: '', userB: '', contractA: '', contractB: '' };
 const ticketIds: string[] = [];
 const articleIds: string[] = [];
 const numbers: Record<string, string> = {};
@@ -43,6 +46,7 @@ const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISO
 
 const asAdmin = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(admin, meta, fn);
 const asAlpha = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(alphaUser, meta, fn);
+const asBeta = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(betaUser, meta, fn);
 const text = (v: unknown) => JSON.stringify(v);
 
 async function principalFor(email: string) {
@@ -70,6 +74,9 @@ beforeAll(async () => {
     const [u] = await tx.insert(schema.users).values({ email: `iso-alpha-${S}@test.local`, name: 'Alpha Portal User', userType: 'customer', customerId: ca!.id, status: 'active' }).returning({ id: schema.users.id });
     ids.userA = u!.id;
     await tx.insert(schema.userRoles).values({ userId: u!.id, roleId: role!.id, customerId: ca!.id });
+    const [ub] = await tx.insert(schema.users).values({ email: `iso-beta-${S}@test.local`, name: 'Beta Portal User', userType: 'customer', customerId: cb!.id, status: 'active' }).returning({ id: schema.users.id });
+    ids.userB = ub!.id;
+    await tx.insert(schema.userRoles).values({ userId: ub!.id, roleId: role!.id, customerId: cb!.id });
     // Contracts and entitlements for both organisations.
     const [ka] = await tx.insert(schema.contracts).values({ customerId: ca!.id, number: `ISO-A-${S}`, name: `Alpha support ${S}`, status: 'active', startDate: day(-30), endDate: day(40), slaPolicyId: policy?.id ?? null, escalationMatrix: [] }).returning();
     const [kbc] = await tx.insert(schema.contracts).values({ customerId: cb!.id, number: `ISO-B-${S}`, name: `Beta support ${S}`, status: 'active', startDate: day(-30), endDate: day(20), slaPolicyId: policy?.id ?? null, escalationMatrix: [] }).returning();
@@ -94,6 +101,7 @@ beforeAll(async () => {
   });
   admin = await principalFor('admin@msp.local');
   alphaUser = await principalFor(`iso-alpha-${S}@test.local`);
+  betaUser = await principalFor(`iso-beta-${S}@test.local`);
 
   // Look-alike tickets: two for Alpha, one for Beta with the same wording.
   const make = (ctx: Ctx, customerId: string, title: string) => createTicket(ctx, { type: 'incident', customerId, title, description: `Firewall cluster failover failed at the head office ${S}. VPN users disconnected.`, serviceId: ids.service, siteId: customerId === ids.a ? ids.siteA : ids.siteB });
@@ -123,10 +131,11 @@ afterAll(async () => {
   ai.setProviderForTests(null);
   await withSystem(async (tx) => {
     await tx.delete(schema.aiConversations).where(inArray(schema.aiConversations.userId, [admin.id, ids.userA]));
+    await tx.delete(schema.briefings).where(inArray(schema.briefings.userId, [ids.userA, ids.userB]));
     if (articleIds.length) await tx.delete(schema.kbArticles).where(inArray(schema.kbArticles.id, articleIds));
     await tx.delete(schema.kbArticles).where(like(schema.kbArticles.title, `%${S}%`));
     await tx.delete(schema.tickets).where(inArray(schema.tickets.customerId, [ids.a, ids.b]));
-    await tx.delete(schema.users).where(eq(schema.users.id, ids.userA));
+    await tx.delete(schema.users).where(inArray(schema.users.id, [ids.userA, ids.userB]));
     await tx.delete(schema.customers).where(inArray(schema.customers.id, [ids.a, ids.b]));
     await tx.delete(schema.services).where(eq(schema.services.id, ids.service));
   });
@@ -137,6 +146,30 @@ describe('every portal-reachable tool answers for the user’s own organisation 
   it('offers no MSP-only tools to the portal user', async () => {
     const names = await asAlpha(async (ctx) => availableTools(ctx).map((t) => t.name));
     for (const forbidden of ['list_customers', 'get_customer', 'get_ci', 'ci_history', 'impact_analysis', 'my_workload', 'problem_candidates', 'engineer_directory', 'out_of_scope_work', 'top_services_by_incidents']) expect(names).not.toContain(forbidden);
+  });
+
+  it('the daily brief for Alpha’s organisation never names Beta, links only into the portal, and Beta’s user cannot read the stored row', async () => {
+    const { briefing } = await asAlpha((ctx) => briefings.generate(ctx));
+    expect(briefing.role).toBe('customer');
+    const all = text(briefing);
+    for (const needle of [BETA, BETA_CODE, ids.b, numbers.b1!, `Beta firewall PM ${S}`, `Beta site visit ${S}`, `Beta visits ${S}`]) expect(all).not.toContain(needle);
+    const facts = briefing.facts!;
+    const hrefs = [...facts.kpis.map((k) => k.href), ...facts.sections.flatMap((s) => s.doors.map((d) => d.href))].filter((h): h is string => !!h);
+    expect(hrefs.length).toBeGreaterThan(0);
+    for (const h of hrefs) expect(h.startsWith('/portal/')).toBe(true);
+    for (const l of facts.sections.flatMap((s) => s.items.map((i) => i.link)).filter((h): h is string => !!h)) expect(l).toMatch(/^\/(portal\/|knowledge\/known-errors)/);
+    // one open Alpha ticket (the other was resolved); no owner and no staff name anywhere in the facts
+    expect(facts.kpis.find((k) => k.key === 'open')?.value).toBe(1);
+    expect(facts.sections.flatMap((s) => s.items).every((i) => !i.assignee && !i.team)).toBe(true);
+    expect(text(facts)).not.toContain(admin.name);
+    // no staff path either: every item link is a portal page or the shared known-error page
+    expect(text(facts)).not.toContain('"/tickets/');
+    expect(text(facts)).not.toContain('"/customers/');
+    // the row fence: Alpha's user reads their row back, Beta's user has none
+    expect((await asAlpha((ctx) => briefings.today(ctx))).briefing?.id).toBe(briefing.id);
+    expect((await asBeta((ctx) => briefings.today(ctx))).briefing).toBeNull();
+    const rows = await withSystem((tx) => tx.select({ id: schema.briefings.id }).from(schema.briefings).where(eq(schema.briefings.userId, ids.userA)));
+    expect(rows.map((r) => r.id)).toEqual([briefing.id]);
   });
 
   it('every portal-offered tool, asked for Beta by name, number, id or code, returns no Beta identifier (reads) and previews Alpha only or refuses (actions)', async () => {

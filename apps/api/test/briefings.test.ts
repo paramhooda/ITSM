@@ -4,7 +4,10 @@
  * person's own tickets and the account manager's only their customers; the
  * model phrases it when on and the facts stand on their own when off; the
  * scheduled generation delivers through the chosen channels under the
- * person's own identity; customer users get nothing.
+ * person's own identity; the facts are typed with doors that reproduce on the
+ * list and a bounded narrative the model may phrase but never bend; a
+ * customer user gets the brief for their own organisation, on demand, through
+ * the portal list only.
  * Run with the dev environment sourced: npx vitest run test/briefings.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -14,7 +17,9 @@ import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
 import { createTicket } from '../src/modules/tickets/service';
 import * as briefings from '../src/modules/briefings/service';
-import { detectRole } from '../src/modules/briefings/definitions';
+import { detectRole, metaOf } from '../src/modules/briefings/definitions';
+import { countForLink, countForPortalLink, countDueWithin } from '../src/modules/briefings/doors';
+import { ticketListPath } from '@itsm/shared';
 import * as ai from '../src/modules/ai/service';
 import type { ChatResponse } from '../src/lib/ai';
 
@@ -24,7 +29,13 @@ let admin: Principal;
 let alice: Principal;
 let am: Principal;
 let portal: Principal;
-const ids = { a: '', b: '', team: '', alice: '', am: '', portal: '', p1: '', p3: '', mine: '', unassigned: '', theirs: '' };
+/** A customer user of A (no portal:approve). */
+let portalUser: Principal;
+/** A customer account of A with no role at all (no portal:access). */
+let portalNoAccess: Principal;
+/** A NOC manager who is a member of Alice's team. */
+let nocManager: Principal;
+const ids = { a: '', b: '', team: '', alice: '', am: '', portal: '', portalUser: '', portalNoAccess: '', nocManager: '', p1: '', p3: '', mine: '', unassigned: '', theirs: '' };
 const json = (o: unknown): ChatResponse => ({ text: JSON.stringify(o), toolCalls: [], stopReason: 'end', usage: { inputTokens: 1, outputTokens: 1 } });
 const as = (p: Principal) => <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(p, meta, fn);
 const setLimits = (maxPerDay: number, cooldownMinutes: number) =>
@@ -68,6 +79,15 @@ beforeAll(async () => {
     const [pu] = await tx.insert(schema.users).values({ email: `br-portal-${S}@example.test`, name: 'Briefing Portal', userType: 'customer', customerId: a!.id, status: 'active' }).returning();
     ids.portal = pu!.id;
     await tx.insert(schema.userRoles).values({ userId: pu!.id, roleId: await roleId(tx, 'customer_admin'), customerId: a!.id });
+    const [cu] = await tx.insert(schema.users).values({ email: `br-portal-user-${S}@example.test`, name: 'Briefing Customer User', userType: 'customer', customerId: a!.id, status: 'active' }).returning();
+    ids.portalUser = cu!.id;
+    await tx.insert(schema.userRoles).values({ userId: cu!.id, roleId: await roleId(tx, 'customer_user'), customerId: a!.id });
+    const [na] = await tx.insert(schema.users).values({ email: `br-portal-none-${S}@example.test`, name: 'Briefing No Access', userType: 'customer', customerId: a!.id, status: 'active' }).returning();
+    ids.portalNoAccess = na!.id;
+    const [nm] = await tx.insert(schema.users).values({ email: `br-nocm-${S}@example.test`, name: 'Nadia Manager', userType: 'msp', status: 'active', timezone: 'Asia/Kolkata' }).returning();
+    ids.nocManager = nm!.id;
+    await tx.insert(schema.userRoles).values({ userId: nm!.id, roleId: await roleId(tx, 'noc_manager'), customerId: null });
+    await tx.insert(schema.teamMembers).values({ teamId: team!.id, userId: nm!.id });
     ids.p1 = await optionId(tx, 'ticket_priority', 'p1');
     ids.p3 = await optionId(tx, 'ticket_priority', 'p3');
     invalidatePrincipal(adm!.id);
@@ -76,6 +96,9 @@ beforeAll(async () => {
   alice = await reload(ids.alice);
   am = await reload(ids.am);
   portal = await reload(ids.portal);
+  portalUser = await reload(ids.portalUser);
+  portalNoAccess = await reload(ids.portalNoAccess);
+  nocManager = await reload(ids.nocManager);
   await as(admin)(async (ctx) => {
     const mine = await createTicket(ctx, { type: 'incident', customerId: ids.a, title: `Alice's firewall ${S}`, description: 'Assigned to Alice', priorityId: ids.p1, assignedTeamId: ids.team, assigneeId: ids.alice });
     const un = await createTicket(ctx, { type: 'incident', customerId: ids.a, title: `Nobody's printer ${S}`, description: 'Unassigned', priorityId: ids.p3, assignedTeamId: ids.team });
@@ -84,14 +107,16 @@ beforeAll(async () => {
     ids.unassigned = un.id;
     ids.theirs = theirs.id;
   });
+  // Alice's ticket is due in two hours: the "due in 24 hours" figure counts it, whatever the SLA policy set.
+  await withSystem((tx) => tx.update(schema.tickets).set({ dueAt: new Date(Date.now() + 2 * 3_600_000) }).where(eq(schema.tickets.id, ids.mine)));
 });
 
 afterAll(async () => {
   await withSystem(async (tx) => {
-    await tx.delete(schema.briefings).where(inArray(schema.briefings.userId, [ids.alice, ids.am]));
+    await tx.delete(schema.briefings).where(inArray(schema.briefings.userId, [ids.alice, ids.am, ids.portal, ids.portalUser, ids.nocManager]));
     await tx.delete(schema.notificationOutbox).where(eq(schema.notificationOutbox.event, 'briefing.daily'));
     await tx.delete(schema.tickets).where(inArray(schema.tickets.id, [ids.mine, ids.unassigned, ids.theirs]));
-    await tx.delete(schema.users).where(inArray(schema.users.id, [ids.alice, ids.am, ids.portal]));
+    await tx.delete(schema.users).where(inArray(schema.users.id, [ids.alice, ids.am, ids.portal, ids.portalUser, ids.portalNoAccess, ids.nocManager]));
     await tx.delete(schema.teams).where(eq(schema.teams.id, ids.team));
     await tx.delete(schema.customers).where(inArray(schema.customers.id, [ids.a, ids.b]));
   });
@@ -132,7 +157,34 @@ describe('roles and content', () => {
     expect(t.briefing).toBeNull();
     expect(t.roles.find((r) => r.key === 'service_manager')?.allowed).toBe(false);
     expect(t.roles.find((r) => r.key === 'engineer')?.allowed).toBe(true);
-    await expect(as(portal)((ctx) => briefings.today(ctx))).rejects.toThrow(/staff/);
+    // staff are never offered the customer brief; a customer is offered theirs only
+    expect(t.roles.some((r) => r.key === 'customer')).toBe(false);
+    const p = await as(portal)((ctx) => briefings.today(ctx));
+    expect(p.role).toBe('customer');
+    expect(p.roles).toEqual([{ key: 'customer', label: 'Your organisation', description: expect.any(String), allowed: true }]);
+    expect(p.briefing).toBeNull();
+    expect(await as(portal)(async (ctx) => briefings.roleFor(ctx, briefings.prefsOf({ briefing: { role: 'engineer' } })))).toBe('customer');
+    expect(await as(portal)(async (ctx) => detectRole(ctx))).toBe('customer');
+    // a customer account whose role lacks portal:access is refused
+    await expect(as(portalNoAccess)((ctx) => briefings.today(ctx))).rejects.toThrow(/portal access/);
+  });
+
+  it('prints an item\'s instants in the person\'s zone and a day as the day it is, east or west of UTC', () => {
+    const instant = '2026-10-20T01:30:00.000Z';
+    expect(metaOf({ ref: 'x', title: 'x', kind: 'ticket', dueAt: instant }, 'Asia/Kolkata')).toBe('due 2026-10-20 07:00 GMT+5:30');
+    expect(metaOf({ ref: 'x', title: 'x', kind: 'ticket', dueAt: instant }, 'America/New_York')).toMatch(/^due 2026-10-19 21:30 (EDT|GMT-4)$/);
+    // a maintenance window or a contract end is a date column: the same day in every zone
+    expect(metaOf({ ref: 'x', title: 'x', kind: 'maintenance', when: '2026-10-20', status: 'planned' }, 'America/New_York')).toBe('planned · 2026-10-20');
+    expect(metaOf({ ref: 'x', title: 'x', kind: 'maintenance', when: '2026-10-20' }, 'Pacific/Honolulu')).toBe('2026-10-20');
+    expect(metaOf({ ref: 'x', title: 'x', kind: 'visit', when: instant }, 'Pacific/Honolulu')).toMatch(/^2026-10-19 15:30 (HST|GMT-10)$/);
+  });
+
+  it('greets by the time of day in the person\'s timezone', () => {
+    // 03:00 UTC is 08:30 in Kolkata, 13:00 UTC is 18:30
+    expect(briefings.greetingFor('Alice Briefing', new Date('2026-03-04T03:00:00Z'), 'Asia/Kolkata')).toBe('Good morning, Alice.');
+    expect(briefings.greetingFor('Alice Briefing', new Date('2026-03-04T09:00:00Z'), 'Asia/Kolkata')).toBe('Good afternoon, Alice.');
+    expect(briefings.greetingFor('Alice Briefing', new Date('2026-03-04T13:00:00Z'), 'Asia/Kolkata')).toBe('Good evening, Alice.');
+    expect(briefings.greetingFor('Alice Briefing', new Date('2026-03-04T13:00:00Z'), 'Mars/Olympus')).toBe('Good afternoon, Alice.');
   });
 
   it('writes the engineer briefing from the person\'s own queue and stores it for the day', async () => {
@@ -141,9 +193,39 @@ describe('roles and content', () => {
     expect(usage).toMatchObject({ used: 1, remaining: 2, cooling: true, exhausted: false });
     expect(b.role).toBe('engineer');
     expect(b.ai).toBe(false);
-    expect(b.text.startsWith('Good morning, Alice.')).toBe(true);
-    const mine = await withSystem((tx) => tx.select({ number: schema.tickets.number }).from(schema.tickets).where(eq(schema.tickets.id, ids.mine)).limit(1));
+    expect(b.text).toMatch(/^Good (morning|afternoon|evening), Alice\./);
+    const mine = await withSystem((tx) => tx.select({ number: schema.tickets.number, dueAt: schema.tickets.dueAt }).from(schema.tickets).where(eq(schema.tickets.id, ids.mine)).limit(1));
     expect(b.text).toContain(mine[0]!.number);
+    // the KPI row: doors where the list reproduces the number, figures elsewhere
+    const facts = b.facts!;
+    expect(facts.kpis.map((k) => k.label)).toEqual(['Open', 'Due in 24 hours', 'Breached', 'Likely to breach', `Unassigned in Briefing NOC ${S}`]);
+    expect(facts.kpis.find((k) => k.key === 'open')).toMatchObject({ value: 1, href: ticketListPath({ assignee: 'me', status: 'open' }) });
+    const due = facts.kpis.find((k) => k.key === 'due24')!;
+    expect(due.href).toBeNull();
+    expect(due.value).toBe(1);
+    // the figure is counted over every open ticket of Alice's (never a page): it equals the direct count, which starts now (overdue is the Breached door's business)
+    expect(await as(alice)((ctx) => countDueWithin(ctx, { assignee: 'me', status: 'open' }, 24))).toBe(due.value);
+    expect(await as(alice)((ctx) => countDueWithin(ctx, { assignee: 'me', status: 'open' }, 1))).toBe(0);
+    expect(facts.headline[0]).toContain('1 due in the next 24 hours');
+    const unassigned = facts.sections.find((s) => s.key === 'unassigned')!;
+    expect(unassigned.doors).toEqual([{ label: `Unassigned in Briefing NOC ${S}`, value: 1, href: ticketListPath({ teamId: ids.team, assignee: 'unassigned', status: 'open' }) }]);
+    expect(unassigned.doors[0]!.href).toContain(`teamId=${ids.team}`);
+    expect(unassigned.doors[0]!.href).not.toContain('domain=');
+    expect(await as(alice)((ctx) => countForLink(ctx, { teamId: ids.team, assignee: 'unassigned', status: 'open' }))).toBe(1);
+    // items are typed and the email line is written from the typed fields, times in Alice's zone
+    const item = facts.sections.find((s) => s.key === 'due')!.items[0]!;
+    expect(item).toMatchObject({ kind: 'ticket', ref: mine[0]!.number, customer: `Briefing Customer A ${S}`, assignee: 'Alice Briefing', breachRisk: null });
+    expect(item.priority).toMatchObject({ key: 'p1', label: 'P1 - Critical' });
+    expect(item.dueAt).toBe(mine[0]!.dueAt!.toISOString());
+    const localDue = new Date(mine[0]!.dueAt!.getTime() + 5.5 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ');
+    expect(item.meta).toContain(`due ${localDue}`);
+    // the deterministic narrative: a greeting, the headline as the summary, one lead per section, no picks
+    expect(b.narrative!.source).toBe('facts');
+    expect(b.narrative!.greeting).toMatch(/^Good (morning|afternoon|evening), Alice\.$/);
+    expect(b.narrative!.summary).toBe(facts.headline.join(' '));
+    expect(b.narrative!.sections.map((s) => s.key)).toEqual(facts.sections.map((s) => s.key));
+    expect(b.narrative!.sections.every((s) => s.picks.length === 0)).toBe(true);
+    expect(b.facts?.narrative).toEqual(b.narrative!);
     expect(b.text).toContain('## Due next');
     expect(b.text).toContain(`## Unassigned in Briefing NOC ${S}`);
     expect(b.facts?.headline[0]).toContain('You have 1 open ticket');
@@ -177,14 +259,47 @@ describe('roles and content', () => {
     expect(p1p2?.items.some((i) => i.title === `Other customer ${S}`)).toBe(false);
   });
 
-  it('takes the model\'s text when a provider is on and keeps the facts otherwise', async () => {
-    ai.setProviderForTests({ name: 'fake', model: 'fake-1', chat: async () => json({ text: 'Good morning, Alice. The model wrote this.\n\n- one open ticket\n\n## Due next\n- **[INC-1](/tickets/x)** something' }) });
+  it('keeps of the model\'s narrative only what the facts support, and keeps the facts when the provider is off or answers in another shape', async () => {
+    await withSystem((tx) => tx.delete(schema.briefings).where(eq(schema.briefings.userId, ids.alice)));
+    const unassignedTitle = `Unassigned in Briefing NOC ${S}`;
+    ai.setProviderForTests({
+      name: 'fake',
+      model: 'fake-1',
+      chat: async () =>
+        json({
+          greeting: 'Good day, Alice.',
+          summary: 'You have 1 open ticket and 99 breached SLAs that need attention first thing today.',
+          sections: [
+            { key: 'due', lead: 'Start with the 1 ticket due within the day.', picks: ['NOT-A-REF'] },
+            { key: 'invented', lead: 'A section the input does not have.', picks: [] },
+          ],
+        }),
+    });
     try {
       await setLimits(0, 0);
       const { briefing: b } = await as(alice)((ctx) => briefings.generate(ctx));
       expect(b.ai).toBe(true);
-      expect(b.text).toContain('The model wrote this');
+      expect(b.narrative!.source).toBe('model');
+      expect(b.narrative!.greeting).toBe('Good day, Alice.');
+      expect(b.text.startsWith('Good day, Alice.')).toBe(true);
+      // the summary quoted 99, a number not in the input: the deterministic summary stands
+      expect(b.narrative!.summary).toBe(b.facts!.headline.join(' '));
+      // the grounded lead is kept, the pick that is no ref is dropped, the invented section is absent, the omitted ones get the fallback lead
+      const due = b.narrative!.sections.find((s) => s.key === 'due')!;
+      expect(due.lead).toBe('Start with the 1 ticket due within the day.');
+      expect(due.picks).toEqual([]);
+      expect(b.narrative!.sections.some((s) => s.key === 'invented')).toBe(false);
+      expect(b.narrative!.sections.find((s) => s.key === 'unassigned')?.lead).toBe(b.facts!.sections.find((s) => s.key === 'unassigned')!.summary);
+      expect(b.text).toContain(`## ${unassignedTitle}`);
       expect(b.html).toContain('<a href="');
+      // the old free-text shape is not a narrative: the facts stand
+      ai.setProviderForTests({ name: 'fake', model: 'fake-1', chat: async () => json({ text: 'Good morning, Alice. The model wrote this.' }) });
+      const { briefing: old } = await as(alice)((ctx) => briefings.generate(ctx));
+      expect(old.ai).toBe(false);
+      expect(old.narrative!.source).toBe('facts');
+      expect(old.text).not.toContain('The model wrote this');
+      // feature switched off: the facts stand
+      ai.setProviderForTests({ name: 'fake', model: 'fake-1', chat: async () => json({ greeting: 'Good day, Alice.', summary: 'Everything in your queue is quiet today and nothing needs you.', sections: [] }) });
       await withSystem((tx) => tx.update(schema.systemSettings).set({ value: ['briefing'] }).where(eq(schema.systemSettings.key, 'ai.disabled_features')));
       const { briefing: off } = await as(alice)((ctx) => briefings.generate(ctx));
       expect(off.ai).toBe(false);
@@ -193,6 +308,68 @@ describe('roles and content', () => {
       await withSystem((tx) => tx.update(schema.systemSettings).set({ value: [] }).where(eq(schema.systemSettings.key, 'ai.disabled_features')));
       ai.setProviderForTests({ name: 'none', model: 'none', chat: async () => json({}) });
     }
+  });
+
+  it('the NOC manager briefing quotes the counted team figures and its doors carry the team, never a domain', async () => {
+    const { briefing: b } = await as(nocManager)((ctx) => briefings.generate(ctx));
+    expect(b.role).toBe('noc_manager');
+    const team = b.facts!.sections.find((s) => s.key === `team:${ids.team}`)!;
+    expect(team.title).toBe(`Briefing NOC ${S}`);
+    // "N open, N P1/P2, N breached, N at risk, N unassigned; …": the doors equal the numbers in the sentence
+    const nums = (team.summary ?? '').replace('P1/P2', 'priorities').match(/\d+/g)!.map(Number);
+    const doorOf = (label: string) => team.doors.find((d) => d.label === label)!;
+    expect(doorOf('Open').value).toBe(nums[0]);
+    expect(doorOf('Breached').value).toBe(nums[2]);
+    expect(doorOf('At risk').value).toBe(nums[3]);
+    expect(doorOf('Unassigned').value).toBe(nums[4]);
+    expect(doorOf('Open')).toMatchObject({ value: 3, href: ticketListPath({ teamId: ids.team, status: 'open' }) }); // Alice's, the unassigned one and the admin's for customer B all sit in the team
+    expect(doorOf('Unassigned')).toMatchObject({ value: 1, href: ticketListPath({ teamId: ids.team, assignee: 'unassigned', status: 'open' }) });
+    const hrefs = [...b.facts!.kpis.map((k) => k.href), ...b.facts!.sections.flatMap((s) => s.doors.map((d) => d.href))].filter((h): h is string => !!h);
+    expect(hrefs.length).toBeGreaterThan(0);
+    expect(hrefs.every((h) => !h.includes('domain='))).toBe(true);
+    expect(b.facts!.kpis.find((k) => k.key === 'open')).toMatchObject({ value: 3, href: ticketListPath({ teamId: [ids.team], status: 'open' }) });
+    expect(b.facts!.kpis.find((k) => k.key === 'major')).toMatchObject({ href: ticketListPath({ isMajor: true, status: 'open' }) });
+    expect(b.facts!.headline[0]).toContain(`Across Briefing NOC ${S}: 3 open tickets`);
+  });
+
+  it('a customer user gets the brief for their own organisation through the portal list only', async () => {
+    const { briefing: b } = await as(portal)((ctx) => briefings.generate(ctx));
+    expect(b.role).toBe('customer');
+    expect(b.roleLabel).toBe('Your organisation');
+    const facts = b.facts!;
+    expect(facts.kpis.map((k) => k.key)).toEqual(['open', 'awaiting', 'breached', 'atRisk', 'sla', 'toRate']);
+    for (const k of facts.kpis) if (k.href) expect(k.href.startsWith('/portal/tickets')).toBe(true);
+    expect(facts.kpis.find((k) => k.key === 'open')).toMatchObject({ value: 2, href: '/portal/tickets' });
+    expect(facts.kpis.find((k) => k.key === 'sla')!.href).toBeNull();
+    // the home's numbers equal the portal list's own count for the door's link
+    expect(await as(portal)((ctx) => countForPortalLink(ctx, { status: 'open' }))).toBe(2);
+    expect(await as(portal)((ctx) => countForPortalLink(ctx, { sla: 'breached' }))).toBe(facts.kpis.find((k) => k.key === 'breached')!.value);
+    // every link is a portal (or shared knowledge) path; no staff list, record or customer path
+    const links = [...facts.kpis.map((k) => k.href), ...facts.sections.flatMap((s) => [...s.doors.map((d) => d.href), ...s.items.map((i) => i.link)])].filter((h): h is string => !!h);
+    expect(links.length).toBeGreaterThan(0);
+    for (const l of links) expect(l).toMatch(/^\/(portal\/|knowledge\/known-errors)/);
+    const text = JSON.stringify(facts);
+    expect(text).not.toContain(`Other customer ${S}`);
+    expect(text).not.toContain('Alice Briefing');
+    expect(text).not.toContain(`Briefing Customer B ${S}`);
+    expect(facts.sections.flatMap((s) => s.items).every((i) => i.assignee === null || i.assignee === undefined)).toBe(true);
+    expect(facts.sections.flatMap((s) => s.items).every((i) => !i.team)).toBe(true);
+    expect(b.text).toContain('Your organisation');
+    expect(facts.headline[0]).toBe('Your organisation has 2 open tickets, 0 waiting on you and 0 with a breached SLA.');
+    // the administrator holds portal:approve, so the approval door exists; a customer user has no such door
+    const awaiting = facts.sections.find((s) => s.key === 'awaiting')!;
+    expect(awaiting.doors.map((d) => d.label)).toEqual(['Awaiting your reply', 'Awaiting your approval']);
+    const { briefing: u } = await as(portalUser)((ctx) => briefings.generate(ctx));
+    expect(u.role).toBe('customer');
+    expect(u.facts!.sections.find((s) => s.key === 'awaiting')!.doors.map((d) => d.label)).toEqual(['Awaiting your reply']);
+    expect(JSON.stringify(u.facts)).not.toContain('Awaiting your approval');
+    // a role the customer may not take falls through to theirs; a customer account without portal access is refused
+    const forced = await as(portalUser)((ctx) => briefings.generate(ctx, { role: 'engineer' }));
+    expect(forced.briefing.role).toBe('customer');
+    await expect(as(portalNoAccess)((ctx) => briefings.generate(ctx))).rejects.toThrow(/portal access/);
+    const t = await as(portal)((ctx) => briefings.today(ctx));
+    expect(t.briefing?.id).toBe(b.id);
+    expect(t.roles.map((r) => r.key)).toEqual(['customer']);
   });
 
   it('converts the markdown subset to email HTML with absolute links and escaping', () => {

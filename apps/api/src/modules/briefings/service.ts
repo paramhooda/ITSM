@@ -13,15 +13,23 @@ import { queueNotification } from '@/modules/notifications/dispatch';
 import { llmJson, enabled as aiEnabled, asSteps, stepsFor, type Steps } from '@/modules/ai/service';
 import { loadAiSettings, featureEnabled } from '@/modules/ai/guards';
 import { BRIEFING_SYSTEM } from '@/modules/ai/prompt';
-import type { BriefingFacts, BriefingRole } from '@/db/schema/briefings';
-import { BRIEFING_DEFINITIONS, BRIEFING_ROLES, briefingDefinition, detectRole } from './definitions';
+import { numbersIn, groundedAgainst } from '@/modules/reports/insights';
+import { normaliseFacts, type BriefingFacts, type BriefingNarrative, type BriefingRole } from '@/db/schema/briefings';
+import { isCustomerUser } from '@/modules/tickets/common';
+import { BRIEFING_ROLES, briefingDefinition, definitionsFor, detectRole, zoneOf } from './definitions';
 
 /**
- * Daily briefings. A person opts in on their profile (time of day in their
- * timezone, the role whose briefing they want, the channels); every fifteen
- * minutes the scheduler finds the people whose time has come and have no
- * briefing for their local day yet, and generates one for each under their
- * own identity, so the figures are exactly what they could see themselves.
+ * Daily briefings. A member of staff opts in on their profile (time of day in
+ * their timezone, the role whose briefing they want, the channels); every
+ * fifteen minutes the scheduler finds the people whose time has come and have
+ * no briefing for their local day yet, and generates one for each under their
+ * own identity, so the figures are exactly what they could see themselves. A
+ * portal user generates the brief for their organisation on demand only.
+ *
+ * The facts are computed; the model only phrases them: it returns a bounded
+ * narrative (a greeting, a summary, one lead per section, up to three picks)
+ * that is grounded against the input before it is kept, field by field, with
+ * the deterministic narrative behind every field that fails.
  */
 
 export const BRIEFING_CHANNELS = ['email', 'in_app'] as const;
@@ -40,14 +48,15 @@ export function prefsOf(preferences: Record<string, unknown> | null | undefined)
   return parsed.success ? parsed.data : briefingPrefSchema.parse({});
 }
 
-function staffOnly(ctx: Ctx) {
-  if (ctx.user.userType === 'customer') throw new ForbiddenError('Briefings are for the service provider\'s staff');
+/** Staff may always read their briefing; a portal user only when their organisation's brief is open to them. */
+function assertAllowed(ctx: Ctx) {
+  if (isCustomerUser(ctx) && !briefingDefinition('customer')!.allowed(ctx)) throw new ForbiddenError('Briefings in the portal are for customer accounts with portal access');
 }
 
-const zoneOf = (tz: string | null | undefined) => (tz && DateTime.local().setZone(tz).isValid ? tz : 'UTC');
+export { zoneOf };
 export const localDay = (tz: string | null | undefined, now = new Date()) => DateTime.fromJSDate(now, { zone: zoneOf(tz) }).toISODate()!;
 
-/** The role this person's briefing takes: their choice when allowed, else the detected one, else the engineer briefing. */
+/** The role this person's briefing takes: their choice when allowed, else the detected one (their organisation for a portal user, the engineer briefing otherwise). */
 export function roleFor(ctx: Ctx, prefs: BriefingPrefs): BriefingRole {
   if (prefs.role !== 'auto') {
     const def = briefingDefinition(prefs.role);
@@ -56,18 +65,75 @@ export function roleFor(ctx: Ctx, prefs: BriefingPrefs): BriefingRole {
   return detectRole(ctx);
 }
 
-// ---------------------------------------------------------------- rendering
+// ---------------------------------------------------------------- the narrative
 
 const first = (name: string) => name.trim().split(/\s+/)[0] ?? name;
 
-/** The deterministic briefing: greeting, the headline, one heading per section. */
+/** "Good morning/afternoon/evening, <First>." from the hour of the generation in the person's own timezone. */
+export function greetingFor(name: string, generatedAt: Date | string, timezone: string): string {
+  const hour = DateTime.fromJSDate(new Date(generatedAt), { zone: zoneOf(timezone) }).hour;
+  const part = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+  return `Good ${part}, ${first(name)}.`;
+}
+
+/** The narrative written from the facts alone: the greeting, the headline as the summary, each section's own lead, no picks. */
+export function fallbackNarrative(facts: Pick<BriefingFacts, 'headline' | 'sections' | 'generatedAt' | 'timezone'>, name: string): BriefingNarrative {
+  return {
+    greeting: greetingFor(name, facts.generatedAt || new Date(), facts.timezone),
+    summary: facts.headline.join(' '),
+    sections: facts.sections.map((s) => ({ key: s.key, lead: s.summary ?? (s.items.length ? `${s.items.length} item${s.items.length === 1 ? '' : 's'}.` : 'Nothing to report.'), picks: [] })),
+    source: 'facts',
+  };
+}
+
+/** What the model may return: bounded lengths, at most three picks a section, at most twelve sections. */
+export const briefingNarrativeSchema = z.object({
+  greeting: z.string().trim().min(1).max(160),
+  summary: z.string().trim().min(20).max(600),
+  sections: z.array(z.object({ key: z.string().max(80), lead: z.string().trim().min(1).max(220), picks: z.array(z.string().max(80)).max(3).default([]) })).max(12),
+});
+export type ModelNarrative = z.infer<typeof briefingNarrativeSchema>;
+
+/**
+ * Keeps of the model's narrative only what the facts support: every number in
+ * a kept field appears in the input; a section the input does not have is
+ * dropped; a lead that invents a figure falls back to the deterministic lead;
+ * picks are refs of that section's items; sections the model omitted get the
+ * fallback lead. `source` is `model` only when the summary or a lead survived.
+ */
+export function groundNarrative(llm: ModelNarrative, facts: Pick<BriefingFacts, 'sections'>, fallback: BriefingNarrative, input: unknown): BriefingNarrative {
+  const allowed = numbersIn(input);
+  const greeting = groundedAgainst(llm.greeting, allowed) ? llm.greeting : fallback.greeting;
+  const summaryKept = groundedAgainst(llm.summary, allowed);
+  let leadsKept = 0;
+  const sections = facts.sections.map((sec) => {
+    const fb = fallback.sections.find((s) => s.key === sec.key) ?? { key: sec.key, lead: sec.summary ?? 'Nothing to report.', picks: [] };
+    const m = llm.sections.find((s) => s.key === sec.key);
+    if (!m) return fb;
+    const leadKept = groundedAgainst(m.lead, allowed);
+    if (leadKept) leadsKept++;
+    const refs = new Set(sec.items.map((i) => i.ref));
+    const picks = [...new Set(m.picks.filter((p) => refs.has(p)))].slice(0, 3);
+    return { key: sec.key, lead: leadKept ? m.lead : fb.lead, picks };
+  });
+  return { greeting, summary: summaryKept ? llm.summary : fallback.summary, sections, source: summaryKept || leadsKept > 0 ? 'model' : 'facts' };
+}
+
+// ---------------------------------------------------------------- rendering
+
+/** The briefing as Markdown for the email (and the dashboard card): the narrative's greeting and summary, the headline, one heading per section with its lead and items. */
 export function renderBriefing(facts: BriefingFacts, userName: string): string {
-  const out: string[] = [`Good morning, ${first(userName)}. Your ${facts.roleLabel.toLowerCase()} briefing for ${facts.day}:`, '', ...facts.headline.map((h) => `- ${h}`)];
+  const narrative = facts.narrative ?? fallbackNarrative(facts, userName);
+  const what = facts.role === 'customer' ? "Your organisation's briefing" : `Your ${facts.roleLabel.toLowerCase()} briefing`;
+  // The summary paragraph only when it says something the headline bullets do not (the deterministic one is the headline itself).
+  const summary = narrative.summary === facts.headline.join(' ') ? [] : [narrative.summary, ''];
+  const out: string[] = [`${narrative.greeting} ${what} for ${facts.day}:`, '', ...summary, ...facts.headline.map((h) => `- ${h}`)];
   for (const s of facts.sections) {
+    const lead = narrative.sections.find((n) => n.key === s.key)?.lead ?? s.summary;
     out.push('', `## ${s.title}`);
-    if (s.summary) out.push(s.summary);
+    if (lead) out.push(lead);
     for (const i of s.items) out.push(`- **${i.link ? `[${i.ref}](${i.link})` : i.ref}** ${i.title}${i.meta ? ` — ${i.meta}` : ''}`);
-    if (!s.items.length && !s.summary) out.push('Nothing to report.');
+    if (!s.items.length && !lead) out.push('Nothing to report.');
   }
   return out.join('\n');
 }
@@ -106,8 +172,6 @@ export function markdownToHtml(md: string, appUrl: string): string {
   closeList();
   return html.join('\n');
 }
-
-const briefingSchema = z.object({ text: z.string().trim().min(40).max(8000) });
 
 // ---------------------------------------------------------------- limits on manual generation
 
@@ -150,7 +214,12 @@ export interface GenerateOptions {
   now?: Date;
 }
 
-const view = (r: typeof schema.briefings.$inferSelect) => ({ id: r.id, userId: r.userId, role: r.roleKey as BriefingRole, roleLabel: briefingDefinition(r.roleKey)?.label ?? r.roleKey, day: r.day, text: r.text, html: r.html, ai: r.ai, facts: r.facts, channels: r.channels, generations: r.generations, generatedAt: r.generatedAt, deliveredAt: r.deliveredAt });
+/** A stored row as the API serves it: the facts normalised (old rows gain empty KPIs and doors) and the narrative beside them, from the facts when none was stored. */
+const view = (r: typeof schema.briefings.$inferSelect, userName: string) => {
+  const facts = normaliseFacts(r.facts);
+  const narrative: BriefingNarrative | null = facts ? facts.narrative ?? fallbackNarrative(facts, userName) : null;
+  return { id: r.id, userId: r.userId, role: r.roleKey as BriefingRole, roleLabel: briefingDefinition(r.roleKey)?.label ?? r.roleKey, day: r.day, text: r.text, html: r.html, ai: r.ai, facts: facts ? { ...facts, narrative } : null, narrative, channels: r.channels, generations: r.generations, generatedAt: r.generatedAt, deliveredAt: r.deliveredAt };
+};
 
 export type BriefingView = ReturnType<typeof view>;
 export interface GenerateResult {
@@ -162,6 +231,18 @@ export interface GenerateResult {
   usage: ReturnType<typeof usageOf>;
 }
 
+/** What the model sees: the facts without links (the panel links from the facts, never from the model), at most eight items a section. */
+export function narrativeInput(facts: Pick<BriefingFacts, 'role' | 'roleLabel' | 'day' | 'headline' | 'kpis' | 'sections'>, name: string) {
+  return {
+    name: first(name),
+    role: facts.roleLabel,
+    day: facts.day,
+    headline: facts.headline,
+    kpis: facts.kpis.map((k) => ({ label: k.label, value: k.value })),
+    sections: facts.sections.map((s) => ({ key: s.key, title: s.title, summary: s.summary, doors: s.doors.map((d) => ({ label: d.label, value: d.value })), items: s.items.slice(0, 8).map((i) => ({ ref: i.ref, title: i.title, meta: i.meta })) })),
+  };
+}
+
 /**
  * Builds (and stores) the briefing for the person behind `who`, phrasing it
  * with the model when one is on. On request (not delivered) the person's
@@ -171,8 +252,9 @@ export interface GenerateResult {
 export async function generate(who: Ctx | Steps, opts: GenerateOptions = {}): Promise<GenerateResult> {
   const s = asSteps(who);
   const now = opts.now ?? new Date();
+  const name = s.principal.name;
   const gathered = await s.tx(async (ctx) => {
-    staffOnly(ctx);
+    assertAllowed(ctx);
     const prefs = prefsOf(ctx.user.preferences);
     const role = opts.role && briefingDefinition(opts.role)?.allowed(ctx) ? opts.role : roleFor(ctx, prefs);
     const def = briefingDefinition(role)!;
@@ -183,65 +265,66 @@ export async function generate(who: Ctx | Steps, opts: GenerateOptions = {}): Pr
     const [existing] = await ctx.tx.select().from(schema.briefings).where(and(eq(schema.briefings.userId, ctx.user.id), eq(schema.briefings.day, day))).limit(1);
     if (!opts.deliver && existing) {
       const usage = usageOf(existing, limits, now);
-      if (usage.exhausted) return { reuse: { briefing: view(existing), reused: true, reason: 'limit' as const, usage } };
-      if (usage.cooling && existing.roleKey === role) return { reuse: { briefing: view(existing), reused: true, reason: 'cooldown' as const, usage } };
+      if (usage.exhausted) return { reuse: { briefing: view(existing, name), reused: true, reason: 'limit' as const, usage } };
+      if (usage.cooling && existing.roleKey === role) return { reuse: { briefing: view(existing, name), reused: true, reason: 'cooldown' as const, usage } };
     }
     const built = await def.build(ctx, { day, timezone, now });
-    const facts: BriefingFacts = { role, roleLabel: def.label, day, timezone, generatedAt: now.toISOString(), headline: built.headline, sections: built.sections };
+    const facts: BriefingFacts = { role, roleLabel: def.label, day, timezone, generatedAt: now.toISOString(), headline: built.headline, kpis: built.kpis, sections: built.sections, narrative: null };
     return { facts, prefs, limits, generations: existing ? existing.generations + (opts.deliver ? 0 : 1) : 1, useModel: aiEnabled() && featureEnabled(await loadAiSettings(ctx.tx), 'briefing') };
   });
   if ('reuse' in gathered && gathered.reuse) return gathered.reuse;
-  const fallback = renderBriefing(gathered.facts, s.principal.name);
-  let text = fallback;
-  let ai = false;
+  const facts = gathered.facts;
+  const fallback = fallbackNarrative(facts, name);
+  let narrative = fallback;
   if (gathered.useModel) {
-    const llm = await llmJson(BRIEFING_SYSTEM, JSON.stringify({ name: first(s.principal.name), role: gathered.facts.roleLabel, day: gathered.facts.day, headline: gathered.facts.headline, sections: gathered.facts.sections.map((sec) => ({ title: sec.title, summary: sec.summary, items: sec.items.map((i) => ({ ref: i.ref, title: i.title, meta: i.meta, link: i.link })) })) }), (v) => briefingSchema.parse(v), { maxTokens: 1200 });
-    if (llm) {
-      text = llm.data.text;
-      ai = true;
-    }
+    const input = narrativeInput(facts, name);
+    const llm = await llmJson(BRIEFING_SYSTEM, JSON.stringify(input), (v) => briefingNarrativeSchema.parse(v), { maxTokens: 1800 });
+    if (llm) narrative = groundNarrative(llm.data, facts, fallback, input);
   }
+  facts.narrative = narrative;
+  const ai = narrative.source === 'model';
+  const text = renderBriefing(facts, name);
   const html = markdownToHtml(text, config.APP_URL);
   return s.tx(async (ctx) => {
     const channels = opts.deliver ? gathered.prefs.channels : [];
     const [row] = await ctx.tx
       .insert(schema.briefings)
-      .values({ userId: ctx.user.id, roleKey: gathered.facts.role, day: gathered.facts.day, facts: gathered.facts, text, html, ai, channels, generations: gathered.generations, generatedAt: now })
-      .onConflictDoUpdate({ target: [schema.briefings.userId, schema.briefings.day], set: { roleKey: gathered.facts.role, facts: gathered.facts, text, html, ai, channels, generations: gathered.generations, generatedAt: now } })
+      .values({ userId: ctx.user.id, roleKey: facts.role, day: facts.day, facts, text, html, ai, channels, generations: gathered.generations, generatedAt: now })
+      .onConflictDoUpdate({ target: [schema.briefings.userId, schema.briefings.day], set: { roleKey: facts.role, facts, text, html, ai, channels, generations: gathered.generations, generatedAt: now } })
       .returning();
     if (opts.deliver && channels.length) {
       await queueNotification(ctx.tx, {
         event: 'briefing.daily',
         recipients: [{ userId: ctx.user.id, email: ctx.user.email, name: ctx.user.name }],
-        data: { briefing: { date: gathered.facts.day, roleLabel: gathered.facts.roleLabel.toLowerCase(), html, headline: gathered.facts.headline.join(' '), link: `${config.APP_URL.replace(/\/$/, '')}/?briefing=${gathered.facts.day}` } },
+        data: { briefing: { date: facts.day, roleLabel: facts.roleLabel.toLowerCase(), html, headline: facts.headline.join(' '), link: `${config.APP_URL.replace(/\/$/, '')}/?briefing=${facts.day}` } },
         channels,
         entityType: 'briefing',
         entityId: row.id,
-        link: `/?briefing=${gathered.facts.day}`,
-        title: `Your ${gathered.facts.roleLabel.toLowerCase()} briefing for ${gathered.facts.day}`,
-        body: gathered.facts.headline.slice(0, 2).join(' '),
+        link: `/?briefing=${facts.day}`,
+        title: `Your ${facts.roleLabel.toLowerCase()} briefing for ${facts.day}`,
+        body: facts.headline.slice(0, 2).join(' '),
       });
       await ctx.tx.update(schema.briefings).set({ deliveredAt: now }).where(eq(schema.briefings.id, row.id));
     }
-    await ctx.audit({ entityType: 'briefing', entityId: row.id, entityLabel: `${gathered.facts.roleLabel} ${gathered.facts.day}`, action: opts.deliver ? 'deliver' : 'generate', metadata: { role: gathered.facts.role, day: gathered.facts.day, ai, channels, generations: row.generations } });
+    await ctx.audit({ entityType: 'briefing', entityId: row.id, entityLabel: `${facts.roleLabel} ${facts.day}`, action: opts.deliver ? 'deliver' : 'generate', customerId: isCustomerUser(ctx) ? ctx.user.customerId : null, metadata: { role: facts.role, day: facts.day, ai, channels, generations: row.generations } });
     const stored = { ...row, deliveredAt: opts.deliver && channels.length ? now : row.deliveredAt };
-    return { briefing: view(stored), reused: false, reason: null, usage: usageOf(stored, gathered.limits, now) };
+    return { briefing: view(stored, name), reused: false, reason: null, usage: usageOf(stored, gathered.limits, now) };
   });
 }
 
-/** Today's briefing (the person's local day) with their preferences and the roles open to them. */
+/** Today's briefing (the person's local day) with their preferences and the roles open to their audience (staff never see the customer brief, a customer sees only theirs). */
 export async function today(ctx: Ctx, now = new Date()) {
-  staffOnly(ctx);
+  assertAllowed(ctx);
   const prefs = prefsOf(ctx.user.preferences);
   const day = localDay(ctx.user.timezone, now);
   const [row] = await ctx.tx.select().from(schema.briefings).where(and(eq(schema.briefings.userId, ctx.user.id), eq(schema.briefings.day, day))).limit(1);
   return {
     day,
-    briefing: row ? view(row) : null,
+    briefing: row ? view(row, ctx.user.name) : null,
     usage: usageOf(row ?? null, await loadLimits(ctx.tx), now),
     prefs,
     role: roleFor(ctx, prefs),
-    roles: BRIEFING_DEFINITIONS.map((d) => ({ key: d.key, label: d.label, description: d.description, allowed: d.allowed(ctx) })),
+    roles: definitionsFor(ctx).map((d) => ({ key: d.key, label: d.label, description: d.description, allowed: d.allowed(ctx) })),
   };
 }
 
@@ -256,7 +339,7 @@ export function isDue(prefs: BriefingPrefs, timezone: string | null | undefined,
   return { due: local.toFormat('HH:mm') >= prefs.time, day };
 }
 
-/** The people whose briefing is due now, read with the system identity. */
+/** The people whose briefing is due now, read with the system identity (staff only: the portal brief is on demand). */
 export async function dueBriefings(tx: Tx, now = new Date()) {
   const users = await tx
     .select({ id: schema.users.id, timezone: schema.users.timezone, preferences: schema.users.preferences, // plain `users.id`: in a single-table select drizzle drops the qualifier and `"id"` would bind to the briefing

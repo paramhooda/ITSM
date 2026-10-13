@@ -33,7 +33,8 @@ import { customerOverview } from '@/modules/customers/service';
 import { attentionByCustomer, socCond } from '@/modules/dashboards/common';
 import { resolutionCompliance } from '@/modules/sla/compliance';
 import { complianceOverview } from '@/modules/sla/policies';
-import { briefingDefinition } from '@/modules/briefings/definitions';
+import { briefingDefinition, type BriefingDefinition } from '@/modules/briefings/definitions';
+import type { BriefingDoor, BriefingKpi } from '@/db/schema/briefings';
 import { portalTicketStatsQuery } from '@/modules/portal/schemas';
 import { toDay, addDays } from '@/modules/reports/dates';
 import { computeRollups } from '@/jobs/processors/metrics';
@@ -190,7 +191,8 @@ beforeAll(async () => {
     ids.awaitingApproval = await optionId(tx, 'ticket_status', 'awaiting_approval');
     ids.critical = await optionId(tx, 'security_severity', 'critical');
     ids.high = await optionId(tx, 'security_severity', 'high');
-    const [a] = await tx.insert(schema.customers).values({ code: `DCA${S.toUpperCase()}`, name: `Consistency Customer A ${S}` }).returning();
+    // The admin is A's account manager, so the account manager briefing's per-customer doors are held here too.
+    const [a] = await tx.insert(schema.customers).values({ code: `DCA${S.toUpperCase()}`, name: `Consistency Customer A ${S}`, accountManagerId: adminUser.id }).returning();
     const [b] = await tx.insert(schema.customers).values({ code: `DCB${S.toUpperCase()}`, name: `Consistency Customer B ${S}` }).returning();
     ids.a = a!.id;
     ids.b = b!.id;
@@ -1064,6 +1066,68 @@ describe('one SLA vocabulary', () => {
         row('customersOverview.slaByCustomer[A].met', rowA.met, { customerId: ids.a, ...ended('met', o.slaWindow) }),
         row('customersOverview panel door (every customer, breached clocks)', o.slaByCustomer.reduce((n, r) => n + r.breached, 0), { ...ended('breached', o.slaWindow) }),
       ]);
+    });
+  });
+});
+
+describe('briefing doors reproduce on the list', () => {
+  /** The number the list shows for a door's own href: parsed as the page does, validated as the route does, counted with the list's predicates. */
+  const staffCount = (ctx: Ctx, href: string) => countTickets(ctx, statsQuerySchema.parse(statsParamsForLink(href)));
+  const portalCount = (ctx: Ctx, href: string) => countPortalTickets(ctx, portalTicketStatsQuery.parse(portalParamsForLink(href)));
+  interface Door { where: string; label: string; value: number | string; href: string | null }
+  /** Every KPI, section door and per-row door of a built briefing, with where it sits. */
+  const doorsOf = (built: Awaited<ReturnType<BriefingDefinition['build']>>): Door[] => [
+    ...built.kpis.map((k: BriefingKpi) => ({ where: `kpi ${k.key}`, label: k.label, value: k.value, href: k.href })),
+    ...built.sections.flatMap((s) => [
+      ...s.doors.map((d: BriefingDoor) => ({ where: `section ${s.key}`, label: d.label, value: d.value, href: d.href })),
+      ...s.items.flatMap((i) => (i.doors ?? []).map((d) => ({ where: `section ${s.key} row ${i.ref}`, label: d.label, value: d.value, href: d.href }))),
+    ]),
+  ];
+  async function holds(p: Principal, role: string, count: (ctx: Ctx, href: string) => Promise<number>, expectPortal: boolean) {
+    await snapshot(p, async (ctx) => {
+      const def = briefingDefinition(role)!;
+      expect(def.allowed(ctx), `${role} allowed`).toBe(true);
+      const built = await def.build(ctx, { day: toDay(new Date()), timezone: 'UTC', now: new Date() });
+      const doors = doorsOf(built);
+      const linked = doors.filter((d) => d.href);
+      expect(linked.length, `${role} has doors`).toBeGreaterThan(0);
+      for (const d of linked) {
+        if (expectPortal) expect(d.href, `${d.where} ${d.label}`).toMatch(/^\/portal\/tickets/);
+        else expect(d.href, `${d.where} ${d.label}`).toMatch(/^\/tickets/);
+        expect(typeof d.value, `${d.where} ${d.label} is a number`).toBe('number');
+        expect(await count(ctx, d.href!), `${role}: ${d.where} ${d.label} = ${d.value} → ${d.href}`).toBe(d.value);
+      }
+      return built;
+    });
+  }
+  it('as the admin (service manager and account manager)', async () => {
+    await holds(admin, 'service_manager', staffCount, false);
+    await holds(admin, 'account_manager', staffCount, false);
+  });
+  it('as an engineer without soc:read (noah)', async () => {
+    await holds(noah, 'engineer', staffCount, false);
+  });
+  it('as the NOC manager (team doors, no domain key)', async () => {
+    await snapshot(nocManager, async (ctx) => {
+      const built = await briefingDefinition('noc_manager')!.build(ctx, { day: toDay(new Date()), timezone: 'UTC', now: new Date() });
+      const team = built.sections.find((s) => s.key === `team:${ids.team}`);
+      expect(team, 'the fixture team has a section').toBeTruthy();
+      for (const d of team!.doors) expect(d.href).toContain(`teamId=${ids.team}`);
+      for (const d of doorsOf(built)) if (d.href) expect(d.href).not.toContain('domain=');
+    });
+    await holds(nocManager, 'noc_manager', staffCount, false);
+  });
+  it('as a customer user and a customer administrator of A (the approval door only for the administrator)', async () => {
+    await holds(portalA, 'customer', portalCount, true);
+    await holds(portalAdminA, 'customer', portalCount, true);
+    await snapshot(portalA, async (ctx) => {
+      const built = await briefingDefinition('customer')!.build(ctx, { day: toDay(new Date()), timezone: 'UTC', now: new Date() });
+      expect(doorsOf(built).some((d) => d.label === 'Awaiting your approval')).toBe(false);
+    });
+    await snapshot(portalAdminA, async (ctx) => {
+      const built = await briefingDefinition('customer')!.build(ctx, { day: toDay(new Date()), timezone: 'UTC', now: new Date() });
+      const approval = doorsOf(built).find((d) => d.label === 'Awaiting your approval');
+      expect(approval?.href).toContain(`statusId=${ids.awaitingApproval}`);
     });
   });
 });
