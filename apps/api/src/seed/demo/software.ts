@@ -16,7 +16,8 @@ import { addDays, hashHex, isoDate } from './rng';
 
 interface TitleSpec { key: string; publisher: string; name: string; versionFamily: string | null; licenceModel: string; categoryKey: string; website?: string }
 
-const TITLES: TitleSpec[] = [
+/** The shared catalogue; the AutoCAD family is the load year (Autodesk names releases by year). */
+const titles = (now: Date): TitleSpec[] => [
   { key: 'winsrv', publisher: 'Microsoft', name: 'Windows Server', versionFamily: '2022', licenceModel: 'per_core', categoryKey: 'operating_system' },
   { key: 'sql', publisher: 'Microsoft', name: 'SQL Server Standard', versionFamily: '2019', licenceModel: 'per_core', categoryKey: 'database' },
   { key: 'm365', publisher: 'Microsoft', name: 'Microsoft 365 E3', versionFamily: null, licenceModel: 'subscription', categoryKey: 'productivity' },
@@ -28,40 +29,41 @@ const TITLES: TitleSpec[] = [
   { key: 'rhel', publisher: 'Red Hat', name: 'Enterprise Linux', versionFamily: '9', licenceModel: 'subscription', categoryKey: 'operating_system' },
   { key: 'oracle', publisher: 'Oracle', name: 'Database Enterprise', versionFamily: '19c', licenceModel: 'per_core', categoryKey: 'database' },
   { key: 'zoom', publisher: 'Zoom', name: 'Workplace', versionFamily: null, licenceModel: 'subscription', categoryKey: 'collaboration' },
-  { key: 'autocad', publisher: 'Autodesk', name: 'AutoCAD', versionFamily: '2025', licenceModel: 'subscription', categoryKey: 'design' },
+  { key: 'autocad', publisher: 'Autodesk', name: 'AutoCAD', versionFamily: String(now.getUTCFullYear()), licenceModel: 'subscription', categoryKey: 'design' },
   { key: 'sap', publisher: 'SAP', name: 'ERP named user', versionFamily: null, licenceModel: 'per_user', categoryKey: 'business_application' },
 ];
 
-interface LicenceSpec { cust: string; name: string; title: string; metric: string; term: string; qty: number; start: number; end: number | null; renewal: number | null; contract: string | null; cost: number; renewedBy?: string; id?: string }
+interface LicenceSpec { cust: string; /** Unique per customer; `renewedBy` names the successor's key. */ key: string; name: string; title: string; metric: string; term: string; qty: number; start: number; end: number | null; renewal: number | null; contract: string | null; cost: number; renewedBy?: string; id?: string }
 
-const LICENCES: LicenceSpec[] = [
-  { cust: 'abc', name: 'Microsoft 365 E3 annual (250)', title: 'm365', metric: 'per_user', term: 'subscription', qty: 250, start: -320, end: 45, renewal: 30, contract: 'abc_ms', cost: 7_500_000 },
-  { cust: 'abc', name: 'Windows Server 2022 16-core packs (3)', title: 'winsrv', metric: 'per_core', term: 'perpetual', qty: 48, start: -400, end: null, renewal: null, contract: 'abc_amc', cost: 960_000 },
-  { cust: 'abc', name: 'SQL Server 2019 Std 2-core packs', title: 'sql', metric: 'per_core', term: 'perpetual', qty: 8, start: -400, end: null, renewal: null, contract: 'abc_amc', cost: 920_000 },
-  { cust: 'abc', name: 'Veeam B&R sockets', title: 'veeam', metric: 'per_device', term: 'subscription', qty: 10, start: -200, end: 165, renewal: 150, contract: 'abc_ms', cost: 410_000 },
-  { cust: 'abc', name: 'Office LTSC 2021 devices', title: 'office', metric: 'per_device', term: 'perpetual', qty: 40, start: -600, end: null, renewal: null, contract: null, cost: 1_100_000 },
-  { cust: 'abc', name: 'FortiClient EMS subscription', title: 'forti', metric: 'per_user', term: 'subscription', qty: 300, start: -100, end: 265, renewal: 250, contract: 'abc_ms', cost: 540_000 },
-  { cust: 'abc', name: 'AutoCAD 2025 seats', title: 'autocad', metric: 'per_user', term: 'subscription', qty: 5, start: -60, end: 305, renewal: 290, contract: null, cost: 1_250_000 },
-  { cust: 'abc', name: 'Acrobat Pro (expired)', title: 'acrobat', metric: 'per_user', term: 'subscription', qty: 20, start: -385, end: -20, renewal: -35, contract: null, cost: 380_000 },
-  { cust: 'abc', name: 'vSphere 8 Ent Plus 32-core', title: 'vsphere', metric: 'per_core', term: 'subscription', qty: 64, start: -300, end: 65, renewal: 50, contract: 'abc_ms', cost: 2_600_000 },
-  { cust: 'abc', name: 'SAP ERP named users (40)', title: 'sap', metric: 'per_user', term: 'subscription', qty: 40, start: -150, end: 215, renewal: 200, contract: null, cost: 4_800_000 },
-  { cust: 'abc', name: 'RHEL 9 subscriptions (4)', title: 'rhel', metric: 'per_device', term: 'subscription', qty: 4, start: -120, end: 245, renewal: 230, contract: 'abc_amc', cost: 140_000 },
-  { cust: 'meridian', name: 'Microsoft 365 E3 annual (200) 2025', title: 'm365', metric: 'per_user', term: 'subscription', qty: 200, start: -565, end: -201, renewal: -216, contract: 'mrd_ms', cost: 5_800_000, renewedBy: 'Microsoft 365 E3 annual (200)' },
-  { cust: 'meridian', name: 'Microsoft 365 E3 annual (200)', title: 'm365', metric: 'per_user', term: 'subscription', qty: 200, start: -200, end: 160, renewal: 145, contract: 'mrd_ms', cost: 6_000_000 },
-  { cust: 'meridian', name: 'Windows Server 2022 cores', title: 'winsrv', metric: 'per_core', term: 'perpetual', qty: 96, start: -500, end: null, renewal: null, contract: 'mrd_ms', cost: 1_920_000 },
-  { cust: 'meridian', name: 'Oracle DB 19c EE processor (HO + DR)', title: 'oracle', metric: 'per_core', term: 'perpetual', qty: 32, start: -700, end: null, renewal: null, contract: null, cost: 19_600_000 },
-  { cust: 'meridian', name: 'FortiClient EMS', title: 'forti', metric: 'per_user', term: 'subscription', qty: 250, start: -150, end: 215, renewal: 200, contract: 'mrd_soc', cost: 450_000 },
-  { cust: 'meridian', name: 'vSphere 8 cores', title: 'vsphere', metric: 'per_core', term: 'subscription', qty: 96, start: -250, end: 115, renewal: 100, contract: 'mrd_ms', cost: 3_900_000 },
-  { cust: 'meridian', name: 'Veeam sockets', title: 'veeam', metric: 'per_device', term: 'subscription', qty: 12, start: -250, end: 115, renewal: 100, contract: 'mrd_ms', cost: 490_000 },
-  { cust: 'meridian', name: 'Zoom Workplace', title: 'zoom', metric: 'per_user', term: 'subscription', qty: 150, start: -90, end: 275, renewal: 260, contract: null, cost: 900_000 },
-  { cust: 'meridian', name: 'Acrobat Pro', title: 'acrobat', metric: 'per_user', term: 'subscription', qty: 30, start: -120, end: 245, renewal: 230, contract: null, cost: 570_000 },
-  { cust: 'meridian', name: 'RHEL 9 subscriptions', title: 'rhel', metric: 'per_device', term: 'subscription', qty: 10, start: -30, end: 335, renewal: 320, contract: 'mrd_ms', cost: 350_000 },
-  { cust: 'northwind', name: 'Microsoft 365 E3 (150)', title: 'm365', metric: 'per_user', term: 'subscription', qty: 150, start: -345, end: 20, renewal: 10, contract: 'nwp_ms', cost: 4_500_000 },
-  { cust: 'northwind', name: 'Windows Server 2022 cores', title: 'winsrv', metric: 'per_core', term: 'perpetual', qty: 24, start: -380, end: null, renewal: null, contract: 'nwp_amc', cost: 480_000 },
-  { cust: 'northwind', name: 'Office LTSC 2021', title: 'office', metric: 'per_device', term: 'perpetual', qty: 60, start: -500, end: null, renewal: null, contract: null, cost: 1_650_000 },
-  { cust: 'northwind', name: 'Veeam sockets', title: 'veeam', metric: 'per_device', term: 'subscription', qty: 1, start: -180, end: 185, renewal: 170, contract: 'nwp_amc', cost: 41_000 },
-  { cust: 'northwind', name: 'RHEL 9', title: 'rhel', metric: 'per_device', term: 'subscription', qty: 10, start: -60, end: 305, renewal: 290, contract: 'nwp_ms', cost: 350_000 },
-  { cust: 'northwind', name: 'vSphere 8 Standard 64-core', title: 'vsphere', metric: 'per_core', term: 'subscription', qty: 64, start: -280, end: 85, renewal: 70, contract: 'nwp_amc', cost: 1_300_000 },
+/** Licences with day offsets from the load; the two year-bearing names are computed from the load date. */
+const licences = (now: Date): LicenceSpec[] => [
+  { cust: 'abc', key: 'm365', name: 'Microsoft 365 E3 annual (250)', title: 'm365', metric: 'per_user', term: 'subscription', qty: 250, start: -320, end: 45, renewal: 30, contract: 'abc_ms', cost: 7_500_000 },
+  { cust: 'abc', key: 'winsrv', name: 'Windows Server 2022 16-core packs (3)', title: 'winsrv', metric: 'per_core', term: 'perpetual', qty: 48, start: -400, end: null, renewal: null, contract: 'abc_amc', cost: 960_000 },
+  { cust: 'abc', key: 'sql', name: 'SQL Server 2019 Std 2-core packs', title: 'sql', metric: 'per_core', term: 'perpetual', qty: 8, start: -400, end: null, renewal: null, contract: 'abc_amc', cost: 920_000 },
+  { cust: 'abc', key: 'veeam', name: 'Veeam B&R sockets', title: 'veeam', metric: 'per_device', term: 'subscription', qty: 10, start: -200, end: 165, renewal: 150, contract: 'abc_ms', cost: 410_000 },
+  { cust: 'abc', key: 'office', name: 'Office LTSC 2021 devices', title: 'office', metric: 'per_device', term: 'perpetual', qty: 40, start: -600, end: null, renewal: null, contract: null, cost: 1_100_000 },
+  { cust: 'abc', key: 'forti', name: 'FortiClient EMS subscription', title: 'forti', metric: 'per_user', term: 'subscription', qty: 300, start: -100, end: 265, renewal: 250, contract: 'abc_ms', cost: 540_000 },
+  { cust: 'abc', key: 'autocad', name: `AutoCAD ${now.getUTCFullYear()} seats`, title: 'autocad', metric: 'per_user', term: 'subscription', qty: 5, start: -60, end: 305, renewal: 290, contract: null, cost: 1_250_000 },
+  { cust: 'abc', key: 'acrobat', name: 'Acrobat Pro (expired)', title: 'acrobat', metric: 'per_user', term: 'subscription', qty: 20, start: -385, end: -20, renewal: -35, contract: null, cost: 380_000 },
+  { cust: 'abc', key: 'vsphere', name: 'vSphere 8 Ent Plus 32-core', title: 'vsphere', metric: 'per_core', term: 'subscription', qty: 64, start: -300, end: 65, renewal: 50, contract: 'abc_ms', cost: 2_600_000 },
+  { cust: 'abc', key: 'sap', name: 'SAP ERP named users (40)', title: 'sap', metric: 'per_user', term: 'subscription', qty: 40, start: -150, end: 215, renewal: 200, contract: null, cost: 4_800_000 },
+  { cust: 'abc', key: 'rhel', name: 'RHEL 9 subscriptions (4)', title: 'rhel', metric: 'per_device', term: 'subscription', qty: 4, start: -120, end: 245, renewal: 230, contract: 'abc_amc', cost: 140_000 },
+  { cust: 'meridian', key: 'm365_prev', name: `Microsoft 365 E3 annual (200) ${isoDate(addDays(now, -565)).slice(0, 4)}`, title: 'm365', metric: 'per_user', term: 'subscription', qty: 200, start: -565, end: -201, renewal: -216, contract: 'mrd_ms', cost: 5_800_000, renewedBy: 'm365' },
+  { cust: 'meridian', key: 'm365', name: 'Microsoft 365 E3 annual (200)', title: 'm365', metric: 'per_user', term: 'subscription', qty: 200, start: -200, end: 160, renewal: 145, contract: 'mrd_ms', cost: 6_000_000 },
+  { cust: 'meridian', key: 'winsrv', name: 'Windows Server 2022 cores', title: 'winsrv', metric: 'per_core', term: 'perpetual', qty: 96, start: -500, end: null, renewal: null, contract: 'mrd_ms', cost: 1_920_000 },
+  { cust: 'meridian', key: 'oracle', name: 'Oracle DB 19c EE processor (HO + DR)', title: 'oracle', metric: 'per_core', term: 'perpetual', qty: 32, start: -700, end: null, renewal: null, contract: null, cost: 19_600_000 },
+  { cust: 'meridian', key: 'forti', name: 'FortiClient EMS', title: 'forti', metric: 'per_user', term: 'subscription', qty: 250, start: -150, end: 215, renewal: 200, contract: 'mrd_soc', cost: 450_000 },
+  { cust: 'meridian', key: 'vsphere', name: 'vSphere 8 cores', title: 'vsphere', metric: 'per_core', term: 'subscription', qty: 96, start: -250, end: 115, renewal: 100, contract: 'mrd_ms', cost: 3_900_000 },
+  { cust: 'meridian', key: 'veeam', name: 'Veeam sockets', title: 'veeam', metric: 'per_device', term: 'subscription', qty: 12, start: -250, end: 115, renewal: 100, contract: 'mrd_ms', cost: 490_000 },
+  { cust: 'meridian', key: 'zoom', name: 'Zoom Workplace', title: 'zoom', metric: 'per_user', term: 'subscription', qty: 150, start: -90, end: 275, renewal: 260, contract: null, cost: 900_000 },
+  { cust: 'meridian', key: 'acrobat', name: 'Acrobat Pro', title: 'acrobat', metric: 'per_user', term: 'subscription', qty: 30, start: -120, end: 245, renewal: 230, contract: null, cost: 570_000 },
+  { cust: 'meridian', key: 'rhel', name: 'RHEL 9 subscriptions', title: 'rhel', metric: 'per_device', term: 'subscription', qty: 10, start: -30, end: 335, renewal: 320, contract: 'mrd_ms', cost: 350_000 },
+  { cust: 'northwind', key: 'm365', name: 'Microsoft 365 E3 (150)', title: 'm365', metric: 'per_user', term: 'subscription', qty: 150, start: -345, end: 20, renewal: 10, contract: 'nwp_ms', cost: 4_500_000 },
+  { cust: 'northwind', key: 'winsrv', name: 'Windows Server 2022 cores', title: 'winsrv', metric: 'per_core', term: 'perpetual', qty: 24, start: -380, end: null, renewal: null, contract: 'nwp_amc', cost: 480_000 },
+  { cust: 'northwind', key: 'office', name: 'Office LTSC 2021', title: 'office', metric: 'per_device', term: 'perpetual', qty: 60, start: -500, end: null, renewal: null, contract: null, cost: 1_650_000 },
+  { cust: 'northwind', key: 'veeam', name: 'Veeam sockets', title: 'veeam', metric: 'per_device', term: 'subscription', qty: 1, start: -180, end: 185, renewal: 170, contract: 'nwp_amc', cost: 41_000 },
+  { cust: 'northwind', key: 'rhel', name: 'RHEL 9', title: 'rhel', metric: 'per_device', term: 'subscription', qty: 10, start: -60, end: 305, renewal: 290, contract: 'nwp_ms', cost: 350_000 },
+  { cust: 'northwind', key: 'vsphere', name: 'vSphere 8 Standard 64-core', title: 'vsphere', metric: 'per_core', term: 'subscription', qty: 64, start: -280, end: 85, renewal: 70, contract: 'nwp_amc', cost: 1_300_000 },
 ];
 
 /** Endpoint software per customer (every endpoint gets the first entries; every third endpoint also gets `third`). Named-user rows per customer for Microsoft 365. */
@@ -76,6 +78,8 @@ const SOFTWARE_CUSTOMERS = ['abc', 'meridian', 'northwind'];
 export async function seedSoftware(state: DemoState, tx: Tx) {
   const { refs, rng, now } = state;
   const owner = user(state, 'lakshmi').id;
+  const TITLES = titles(now);
+  const LICENCES = licences(now);
 
   // Catalogue (shared; idempotent on the normalised key)
   const productRows = TITLES.map((t) => ({ key: productKey(t.publisher, t.name, t.versionFamily), publisher: t.publisher, name: t.name, versionFamily: t.versionFamily, licenceModel: t.licenceModel, categoryId: refs.option('software_category', t.categoryKey), customerId: null as string | null, isActive: true, tags: [t.categoryKey] }));
@@ -144,7 +148,7 @@ export async function seedSoftware(state: DemoState, tx: Tx) {
   for (let i = 0; i < installRows.length; i += 500) await tx.insert(schema.softwareInstallations).values(installRows.slice(i, i + 500));
 
   // Licences
-  const byName = new Map<string, string>();
+  const byKey = new Map<string, string>();
   for (const l of LICENCES) {
     const cust = state.customers.find((c) => c.key === l.cust);
     if (!cust) continue;
@@ -159,12 +163,12 @@ export async function seedSoftware(state: DemoState, tx: Tx) {
         ownerUserId: owner, isActive: true,
       })
       .returning({ id: schema.softwareLicences.id });
-    byName.set(`${l.cust}:${l.name}`, row!.id);
+    byKey.set(`${l.cust}:${l.key}`, row!.id);
     state.counts.softwareLicences = (state.counts.softwareLicences ?? 0) + 1;
   }
   for (const l of LICENCES.filter((x) => x.renewedBy)) {
-    const id = byName.get(`${l.cust}:${l.name}`);
-    const successorId = byName.get(`${l.cust}:${l.renewedBy}`);
+    const id = byKey.get(`${l.cust}:${l.key}`);
+    const successorId = byKey.get(`${l.cust}:${l.renewedBy}`);
     if (id && successorId) await tx.update(schema.softwareLicences).set({ successorId, renewedAt: addDays(now, -230) }).where(eq(schema.softwareLicences.id, id));
   }
 

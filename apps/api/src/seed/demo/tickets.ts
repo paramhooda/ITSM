@@ -124,9 +124,9 @@ function pickCi(rng: Rng, cust: DemoCustomer, site: DemoSite | null, types: stri
   return rng.pick(atSite.length ? atSite : pool);
 }
 
-function varsFor(rng: Rng, cust: DemoCustomer, site: DemoSite | null, ci: DemoCi | null, userName: string): Vars {
+function varsFor(rng: Rng, cust: DemoCustomer, site: DemoSite | null, ci: DemoCi | null, userName: string, createdAt: Date): Vars {
   const app = cust.cis.find((c) => c.typeKey === 'application' && c.siteKey === cust.sites[0]!.key) ?? cust.cis.find((c) => c.typeKey === 'application');
-  return { rng, cust, site, ci, host: ci?.hostname ?? ci?.name ?? `${cust.short}-${site?.code.toLowerCase() ?? 'hq'}-srv01`, ip: ci?.ipAddress ?? `10.${cust.index}.${site?.subnet ?? 1}.${rng.int(20, 200)}`, user: userName, app: app?.name ?? 'ERP', n: rng.int(1, 99) };
+  return { rng, cust, site, ci, host: ci?.hostname ?? ci?.name ?? `${cust.short}-${site?.code.toLowerCase() ?? 'hq'}-srv01`, ip: ci?.ipAddress ?? `10.${cust.index}.${site?.subnet ?? 1}.${rng.int(20, 200)}`, user: userName, app: app?.name ?? 'ERP', n: rng.int(1, 99), createdAt };
 }
 
 function buildPlans(state: DemoState): Plan[] {
@@ -197,7 +197,7 @@ function buildPlans(state: DemoState): Plan[] {
       const outcome: Outcome = !open ? 'resolved' : rng.weighted([['new', 0.15], ['in_progress', 0.6], ['pending_customer', t.pendingVendor ? 0.1 : 0.2], ['pending_vendor', t.pendingVendor ? 0.15 : 0.05]]);
       const assigneeKey = outcome === 'new' ? null : assigneeFor(rng, teamKey, t.categoryKey, cust);
       const creator: Actor = req.creator.kind === 'msp' && req.creator.key === '__assignee__' ? { kind: 'msp', key: assigneeKey ?? assigneeFor(rng, teamKey, t.categoryKey, cust) } : req.creator;
-      const vars = varsFor(rng, cust, effectiveSite, ci, req.name);
+      const vars = varsFor(rng, cust, effectiveSite, ci, req.name, createdAt);
       plans.push({
         key: `inc-${++seq}`, type: 'incident', cust, site: effectiveSite, ci, vars, incident: t,
         categoryKey: t.categoryKey, subcategoryKey: t.subcategoryKey ?? null, serviceKey: t.serviceKey,
@@ -225,7 +225,7 @@ function buildPlans(state: DemoState): Plan[] {
       const outcome: Outcome = !open ? 'resolved' : rng.weighted([['new', 0.25], ['in_progress', 0.6], ['pending_customer', 0.15]]);
       const approvalDecision = hasApproval ? (open && rng.chance(0.4) ? 'pending' : rng.chance(0.08) ? 'rejected' : 'approved') : null;
       const assigneeKey = outcome === 'new' || approvalDecision === 'pending' || approvalDecision === 'rejected' ? null : assigneeFor(rng, teamKey, svc?.categoryKey ?? null, cust);
-      const vars = varsFor(rng, cust, site, ci, req.name);
+      const vars = varsFor(rng, cust, site, ci, req.name, createdAt);
       plans.push({
         key: `req-${++seq}`, type: 'request', cust, site, ci, vars, request: t,
         categoryKey: null, subcategoryKey: null, serviceKey: t.serviceKey, impactKey: 'low', urgencyKey: 'medium', priorityKey: 'p4', sourceKey,
@@ -248,7 +248,7 @@ function buildPlans(state: DemoState): Plan[] {
       const open = rng.chance(0.3);
       const createdAt = sampleCreatedAt(rng, now, false, false, false);
       const assigneeKey = assigneeFor(rng, 'noc', t.categoryKey, cust);
-      const vars = varsFor(rng, cust, effectiveSite, ci, cust.contacts.find((c) => c.isPrimary)!.name);
+      const vars = varsFor(rng, cust, effectiveSite, ci, cust.contacts.find((c) => c.isPrimary)!.name, createdAt);
       const problemStageFor = (isOpen: boolean): Plan['problemStage'] => {
         if (!isOpen) return 'resolved';
         const drawn = rng.weighted([['investigating', 0.4], ['rca', 0.3], ['known_error', 0.3]]) as Plan['problemStage'];
@@ -275,7 +275,7 @@ function buildPlans(state: DemoState): Plan[] {
       const createdAt = sampleCreatedAt(rng, now, open, false, false);
       const assigneeKey = assigneeFor(rng, t.categoryKey === 'hardware' ? 'field' : 'noc', t.categoryKey, cust);
       const stage: Plan['changeStage'] = open ? rng.weighted([['draft', 0.15], ['awaiting', 0.35], ['scheduled', 0.35], ['implementing', 0.15]]) : rng.weighted([['implemented', 0.82], ['failed', 0.08], ['rejected', 0.1]]);
-      const vars = varsFor(rng, cust, effectiveSite, ci, cust.contacts.find((c) => c.isPrimary)!.name);
+      const vars = varsFor(rng, cust, effectiveSite, ci, cust.contacts.find((c) => c.isPrimary)!.name, createdAt);
       plans.push({
         key: `chg-${++seq}`, type: 'change', cust, site: effectiveSite, ci, vars, change: t,
         categoryKey: t.categoryKey, subcategoryKey: null, serviceKey: t.serviceKey, impactKey: 'medium', urgencyKey: t.changeType === 'emergency' ? 'high' : 'low', priorityKey: t.changeType === 'emergency' ? 'p2' : 'p4', sourceKey: 'engineer',

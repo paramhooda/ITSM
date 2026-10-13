@@ -2,7 +2,7 @@ import { eq, gte, sql } from 'drizzle-orm';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { customer, type DemoState } from './state';
-import { addDays, addMinutes, atIst, istWeekday } from './rng';
+import { addDays, addMinutes, atIst, nextWeekday } from './rng';
 
 /**
  * The ticket, entitlement and approval services queued hundreds of emails and
@@ -14,12 +14,6 @@ export async function cleanupNotifications(state: DemoState, tx: Tx) {
   const out = await tx.delete(schema.notificationOutbox).where(gte(schema.notificationOutbox.createdAt, since)).returning({ id: schema.notificationOutbox.id });
   const inApp = await tx.delete(schema.notifications).where(gte(schema.notifications.createdAt, since)).returning({ id: schema.notifications.id });
   state.counts.notificationsPurged = out.length + inApp.length;
-}
-
-function nextWeekday(from: Date, weekday: number, hour: number): Date {
-  let d = atIst(addDays(from, 1), hour, 0);
-  for (let i = 0; i < 8 && istWeekday(d) !== weekday; i++) d = atIst(addDays(d, 1), hour, 0);
-  return d;
 }
 
 export async function seedExtras(state: DemoState, tx: Tx) {

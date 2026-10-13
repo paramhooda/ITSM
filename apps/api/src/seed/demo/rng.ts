@@ -82,6 +82,13 @@ export function istWeekday(d: Date): number {
   return new Date(d.getTime() + IST_OFFSET_MIN * MINUTE).getUTCDay(); // 0 = Sunday
 }
 
+/** The first `weekday` (0 = Sunday) strictly after `from`, at `hour` IST. */
+export function nextWeekday(from: Date, weekday: number, hour: number): Date {
+  let d = atIst(addDays(from, 1), hour, 0);
+  for (let i = 0; i < 8 && istWeekday(d) !== weekday; i++) d = atIst(addDays(d, 1), hour, 0);
+  return d;
+}
+
 /** Random instant on the IST calendar day of `d`, biased to business hours unless `anyHour`. */
 export function randomTimeOfDay(rng: Rng, d: Date, anyHour = false): Date {
   const hour = anyHour ? rng.int(0, 23) : rng.weighted<number>([[9, 2], [10, 4], [11, 5], [12, 4], [13, 3], [14, 4], [15, 4], [16, 4], [17, 3], [18, 1], [8, 1], [20, 0.5]]);

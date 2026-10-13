@@ -5,6 +5,7 @@ import { schema } from '@/db/client';
 import { buildCtx, type Ctx } from '@/core/context';
 import type { Principal } from '@/core/principal';
 import { Rng } from './rng';
+import { INDIA_HOLIDAY_CALENDAR, UK_HOLIDAY_CALENDAR } from '../holidays';
 
 /** Resolved ids of configuration data created by the default seed. */
 export interface Refs {
@@ -20,7 +21,10 @@ export interface Refs {
   policy(name: string): string;
   catalogItem(key: string): typeof schema.catalogItems.$inferSelect;
   workflow(name: string): string;
+  /** The India Public Holidays calendar, by name. */
   holidayCalendarId: string | null;
+  /** The UK Bank Holidays calendar the demo creates, by name; null until the contracts phase. */
+  ukHolidayCalendarId: string | null;
 }
 
 export interface DemoUser {
@@ -230,7 +234,7 @@ export async function loadRefs(tx: Tx): Promise<Refs> {
   const policies = new Map((await tx.select().from(schema.slaPolicies)).map((p) => [p.name, p.id]));
   const catalog = new Map((await tx.select().from(schema.catalogItems)).map((c) => [c.key, c]));
   const workflows = new Map((await tx.select().from(schema.approvalWorkflows)).map((w) => [w.name, w.id]));
-  const [hol] = await tx.select({ id: schema.holidayCalendars.id }).from(schema.holidayCalendars).limit(1);
+  const holidayCalendars = new Map((await tx.select({ id: schema.holidayCalendars.id, name: schema.holidayCalendars.name }).from(schema.holidayCalendars)).map((h) => [h.name, h.id]));
   const need = <T>(map: Map<string, T>, key: string, what: string): T => {
     const v = map.get(key);
     if (v === undefined) throw new Error(`default seed missing ${what} "${key}"`);
@@ -249,7 +253,8 @@ export async function loadRefs(tx: Tx): Promise<Refs> {
     policy: (name) => need(policies, name, 'SLA policy'),
     catalogItem: (key) => need(catalog, key, 'catalog item'),
     workflow: (name) => need(workflows, name, 'approval workflow'),
-    holidayCalendarId: hol?.id ?? null,
+    holidayCalendarId: holidayCalendars.get(INDIA_HOLIDAY_CALENDAR) ?? null,
+    ukHolidayCalendarId: holidayCalendars.get(UK_HOLIDAY_CALENDAR) ?? null,
   };
 }
 

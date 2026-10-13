@@ -5,6 +5,7 @@ import { schema } from '@/db/client';
 import { OPTION_SEEDS, PRIORITY_MATRIX, TEAM_SEEDS, CI_TYPE_SEEDS, RELATIONSHIP_TYPE_SEEDS, KB_CATEGORY_SEEDS } from './options';
 import { NOTIFICATION_TEMPLATE_SEEDS_ALL, NOTIFICATION_RULE_SEEDS } from './templates';
 import { DEFAULT_BUSINESS_HOURS } from '@/lib/calendar';
+import { INDIA_HOLIDAY_CALENDAR, holidaysFor } from './holidays';
 import { logger } from '@/core/logger';
 
 export async function seedDefaults(tx: Tx) {
@@ -122,17 +123,10 @@ async function seedTeamShifts(tx: Tx) {
 async function seedCalendars(tx: Tx) {
   const [existing] = await tx.select({ id: schema.businessCalendars.id }).from(schema.businessCalendars).limit(1);
   if (existing) return;
-  const [hol] = await tx.insert(schema.holidayCalendars).values({ name: 'India Public Holidays', country: 'IN' }).returning();
-  const year = new Date().getFullYear();
-  const holidays = [
-    ['01-26', 'Republic Day'],
-    ['08-15', 'Independence Day'],
-    ['10-02', 'Gandhi Jayanti'],
-    ['12-25', 'Christmas Day'],
-  ];
-  for (const y of [year, year + 1]) {
-    for (const [md, name] of holidays) await tx.insert(schema.holidays).values({ calendarId: hol.id, date: `${y}-${md}`, name }).onConflictDoNothing();
-  }
+  const [hol] = await tx.insert(schema.holidayCalendars).values({ name: INDIA_HOLIDAY_CALENDAR, country: 'IN' }).returning();
+  // The seed year and the next: the fixed national dates for both, the movable ones where the table has the year.
+  const year = new Date().getUTCFullYear();
+  for (const h of holidaysFor([year, year + 1])) await tx.insert(schema.holidays).values({ calendarId: hol.id, date: h.date, name: h.name }).onConflictDoNothing();
   await tx.insert(schema.businessCalendars).values([
     { name: '24x7', description: 'Round-the-clock coverage', timezone: 'Asia/Kolkata', is24x7: true, hours: {}, isDefault: true },
     { name: 'Business Hours (Mon-Fri 09:00-18:00 IST)', description: 'Standard business hours', timezone: 'Asia/Kolkata', is24x7: false, hours: DEFAULT_BUSINESS_HOURS, holidayCalendarId: hol.id },

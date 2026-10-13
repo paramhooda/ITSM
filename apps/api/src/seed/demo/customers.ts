@@ -5,6 +5,15 @@ import { createCustomer } from '@/modules/customers/service';
 import { createSite } from '@/modules/customers/sites';
 import { createContact } from '@/modules/customers/contacts';
 import { adminCtx, type DemoCustomer, type DemoState } from './state';
+import { contractSeeds } from './contracts';
+import { addDays, isoDate, shiftDate } from './rng';
+
+/** Two weeks before the customer's earliest signed contract (the draft proposal does not count); relative to the load like the contracts. */
+function onboardedOn(state: DemoState, customerKey: string): string {
+  const starts = contractSeeds(state.now).filter((c) => c.customerKey === customerKey && c.status !== 'draft').map((c) => c.startDate);
+  const earliest = starts.length ? starts.reduce((a, b) => (a < b ? a : b)) : isoDate(addDays(state.now, -400));
+  return shiftDate(earliest, -14);
+}
 
 interface SiteSeed {
   key: string;
@@ -251,7 +260,7 @@ export async function seedCustomers(state: DemoState, tx: Tx, passwordHash: stri
       timezone: seed.timezone,
       notes: seed.notes,
       tags: seed.tags,
-      customFields: { serviceReviewCadence: seed.typeKey === 'strategic' ? 'monthly' : 'quarterly', onboardedOn: '2025-01-15' },
+      customFields: { serviceReviewCadence: seed.typeKey === 'strategic' ? 'monthly' : 'quarterly', onboardedOn: onboardedOn(state, seed.key) },
     });
     const cust: DemoCustomer = {
       key: seed.key,

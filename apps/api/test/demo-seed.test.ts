@@ -10,6 +10,10 @@ import { listResponses } from '../src/modules/surveys/service';
 import { responsesQuery } from '../src/modules/surveys/schemas';
 import { resolutionCompliance } from '../src/modules/sla/compliance';
 import { toDay, addDays } from '../src/modules/reports/dates';
+import { noticeDays } from '../src/jobs/processors/contracts';
+import { INDIA_MOVABLE, INDIA_HOLIDAY_CALENDAR, UK_HOLIDAY_CALENDAR } from '../src/seed/holidays';
+import { CUSTOMER_SEEDS } from '../src/seed/demo/customers';
+import { CAL_UK } from '../src/seed/demo/state';
 
 /**
  * Loads the demonstration dataset into the test database when it is empty
@@ -144,6 +148,51 @@ describe('demo dataset', () => {
     expect(await count('approvals')).toBeGreaterThan(10);
     expect(await count('entitlement_consumptions')).toBeGreaterThan(20);
     expect(await count('tickets', "where created_at > now() - interval '7 days'")).toBeGreaterThan(15);
+  });
+
+  it('keeps its dates current', async () => {
+    // Every assertion is relative to the load date and scoped to the demo rows (CTR- numbers, the demo customer codes, the demo
+    // licence names): the database is shared with other test files that create their own contracts and licences.
+    const demoCodes = CUSTOMER_SEEDS.map((c) => `'${c.code}'`).join(', ');
+    const demoCustomers = `(select id from customers where code in (${demoCodes}))`;
+    const year = new Date().getUTCFullYear(); // the seeds take their year from the load instant in UTC
+    // Contracts: active and expiring ones cover today; none sits inside the window the daily job uses, so the two expiring ones stay the only two.
+    expect(await count('contracts', "where number like 'CTR-%' and status in ('active','expiring') and (start_date > current_date or end_date < current_date)")).toBe(0);
+    const maxNotice = Math.max(0, ...(await withSystem(noticeDays)));
+    expect(await count('contracts', `where number like 'CTR-%' and status = 'active' and end_date <= current_date + greatest(coalesce(notice_period_days, 0), ${maxNotice})`)).toBe(0);
+    expect(await count('contracts', "where number like 'CTR-%' and status = 'expiring'")).toBe(2);
+    // Numbers carry the start year; the draft proposal starts next January; the predecessors end before their successors start.
+    expect(await count('contracts', "where number like 'CTR-%' and number not like 'CTR-' || to_char(start_date, 'YYYY') || '-%'")).toBe(0);
+    expect(await count('contracts', `where number like 'CTR-%' and status = 'draft' and start_date = '${year + 1}-01-01'`)).toBe(1);
+    expect(await count('contracts', "p join contracts c on c.parent_contract_id = p.id where c.number like 'CTR-%' and p.end_date >= c.start_date")).toBe(0);
+    expect(await count('contracts', "p join contracts c on c.parent_contract_id = p.id where c.number like 'CTR-%' and c.custom_fields->>'renewedFrom' is distinct from p.number")).toBe(0);
+    expect(await count('contracts', "where number like 'CTR-%' and name like 'Managed Infrastructure Services %' and name <> 'Managed Infrastructure Services ' || to_char(start_date, 'YYYY')")).toBe(0);
+    expect(await count('contracts', "where number like 'CTR-%' and name like 'Managed Infrastructure Services %'")).toBe(2);
+    expect(await count('contracts', `where number like 'CTR-%' and name like 'SOC Services %-%' and name <> 'SOC Services ' || to_char(start_date, 'YYYY') || '-' || to_char(end_date, 'YY')`)).toBe(0);
+    expect(await count('contracts', `where number like 'CTR-%' and name ~ '^SOC Services [0-9]{4}$' and name <> 'SOC Services ' || to_char(start_date, 'YYYY')`)).toBe(0);
+    expect(await count('contracts', `where number like 'CTR-%' and name ~ '^SOC Services [0-9]{4}'`)).toBe(2);
+    expect(await count('contracts', `where number like 'CTR-%' and status = 'draft' and name <> 'Managed Services ${year + 1} (proposal)'`)).toBe(0);
+    // Customers were onboarded before their first signed contract.
+    expect(await count('customers', `where code in (${demoCodes}) and (custom_fields->>'onboardedOn')::date > (select min(c.start_date) from contracts c where c.customer_id = customers.id and c.status <> 'draft')`)).toBe(0);
+    // Request form dates and the CVE year follow the ticket's own creation date.
+    for (const field of ['startDate', 'expiry', 'preferredDate']) {
+      expect(await count('tickets', `where customer_id in ${demoCustomers} and type = 'request' and form_data ? '${field}' and (form_data->>'${field}')::date < created_at::date`)).toBe(0);
+      expect(await count('tickets', `where customer_id in ${demoCustomers} and type = 'request' and form_data ? '${field}'`)).toBeGreaterThan(0);
+    }
+    expect(await count('tickets', `where customer_id in ${demoCustomers} and title like 'Critical CVE-%' and title not like 'Critical CVE-' || to_char(created_at, 'YYYY') || '-%'`)).toBe(0);
+    // Holidays for the load year and the next: India from the fixed dates plus the movable table, the UK by rule, the UK business calendar wired to it.
+    const india = (y: number) => count('holidays h join holiday_calendars c on c.id = h.calendar_id', `where c.name = '${INDIA_HOLIDAY_CALENDAR}' and extract(year from h.date) = ${y}`);
+    const uk = (y: number) => count('holidays h join holiday_calendars c on c.id = h.calendar_id', `where c.name = '${UK_HOLIDAY_CALENDAR}' and extract(year from h.date) = ${y}`);
+    for (const y of [year, year + 1]) {
+      expect(await india(y)).toBe(4 + (INDIA_MOVABLE[y]?.length ?? 0));
+      expect(await uk(y)).toBe(8);
+    }
+    expect(await count('business_calendars b join holiday_calendars h on h.id = b.holiday_calendar_id', `where b.name = '${CAL_UK}' and h.name = '${UK_HOLIDAY_CALENDAR}'`)).toBe(1);
+    expect(await count('contracts c join holiday_calendars h on h.id = c.holiday_calendar_id', `where c.number like 'CTR-%' and c.name = 'Managed IT Services (UK)' and h.name = '${UK_HOLIDAY_CALENDAR}'`)).toBe(1);
+    expect(await count('contracts c join holiday_calendars h on h.id = c.holiday_calendar_id', `where c.number like 'CTR-%' and c.name <> 'Managed IT Services (UK)' and h.name <> '${INDIA_HOLIDAY_CALENDAR}'`)).toBe(0);
+    // Software: the renewed Microsoft 365 licence carries the year it started.
+    expect(await count('software_licences', "where name like 'Microsoft 365 E3 annual%' and successor_id is not null and name = 'Microsoft 365 E3 annual (200) ' || to_char(start_date, 'YYYY')")).toBe(1);
+    expect(await count('software_licences', `where name like 'AutoCAD % seats' and name <> 'AutoCAD ${year} seats'`)).toBe(0);
   });
 
   it('lets an ABC Manufacturing portal user see only ABC tickets', async () => {

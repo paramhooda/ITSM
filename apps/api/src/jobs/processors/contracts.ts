@@ -10,7 +10,8 @@ import { checkEntitlementThreshold } from '@/modules/contracts/entitlements';
 const SYSTEM_ACTOR = { userId: null, userName: 'system', source: 'system' };
 const DEFAULT_NOTICE = [90, 60, 30, 7];
 
-async function noticeDays(tx: Tx): Promise<number[]> {
+/** The configured expiry-notice thresholds, widest first (the daily job flips a contract to expiring inside the widest one). */
+export async function noticeDays(tx: Tx): Promise<number[]> {
   const [row] = await tx.select({ value: schema.systemSettings.value }).from(schema.systemSettings).where(eq(schema.systemSettings.key, 'contracts.expiry_notice_days')).limit(1);
   const list = Array.isArray(row?.value) ? (row!.value as unknown[]).map(Number).filter((n) => !isNaN(n) && n >= 0) : DEFAULT_NOTICE;
   return [...new Set(list.length ? list : DEFAULT_NOTICE)].sort((a, b) => b - a);
