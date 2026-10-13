@@ -39,7 +39,7 @@ export function TicketCard({ row }: { row: PortalTicketRow }) {
         <TicketSla row={row} />
         {row.awaitingCustomer && (
           <span className="inline-flex items-center gap-1 text-[11.5px] text-amber-700">
-            <MessageSquareWarning className="h-3.5 w-3.5" /> Needs your reply
+            <MessageSquareWarning className="h-3.5 w-3.5" /> {row.status.key === 'awaiting_approval' ? 'Needs your approval' : 'Needs your reply'}
           </span>
         )}
         {row.surveyPending && (

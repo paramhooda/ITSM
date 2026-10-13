@@ -4,13 +4,13 @@ import type { Permission } from '@itsm/shared';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
-import { createTicket, getTicket, reopenTicket } from '@/modules/tickets/service';
+import { createTicket, customerPendingView, getTicket, reopenTicket } from '@/modules/tickets/service';
 import { countTickets, listTickets, ticketStats, TILE_KEYS } from '@/modules/tickets/list';
 import type { StatsQuery } from '@/modules/tickets/schemas';
 import { addComment, timeline } from '@/modules/tickets/activity';
 import * as approvalsSvc from '@/modules/tickets/approvals';
-import { changeStatusCore, statusByKey } from '@/modules/tickets/status';
-import { loadTicket, optionByKey, requireAction } from '@/modules/tickets/common';
+import { changeStatusCore, statusByKey, REOPEN_KEY } from '@/modules/tickets/status';
+import { loadTicket, optionById, optionByKey, optionsOfType, requireAction, toLabel } from '@/modules/tickets/common';
 import { visibleAnnouncements, majorIncidentBanners } from '@/modules/status/announcements';
 import { listItems as listCatalogItems } from '@/modules/catalog/service';
 import { listAttachments } from '@/modules/attachments/service';
@@ -49,7 +49,6 @@ import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiLis
 const PORTAL_PERMISSIONS: Permission[] = ['portal:access', 'portal:tickets', 'portal:approve', 'portal:assets', 'portal:contracts', 'portal:reports', 'portal:manage_users', 'portal:status', 'portal:kedb', 'portal:software'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_CATEGORIES = ['new', 'open', 'pending'];
-const AWAITING_STATUS_KEY = 'pending_customer';
 const CLOSE_CONFIRM_CODE = 'resolved_confirmed';
 
 export interface PortalScope {
@@ -143,13 +142,38 @@ export async function me(ctx: Ctx, requested?: string | null) {
 
 const T = schema.tickets;
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
-/** The portal strips `csat` from the tile scope as well: there `csat=pending` is the To rate tile, not a base-scope pill. */
-const PORTAL_TILE_KEYS: readonly (keyof StatsQuery)[] = [...TILE_KEYS, 'csat'];
+/** The portal strips `csat` and `waitingOn` from the tile scope as well: there `csat=pending` is the To rate tile and `waitingOn=customer` the Waiting on you tile, not base-scope pills. */
+const PORTAL_TILE_KEYS: readonly (keyof StatsQuery)[] = [...TILE_KEYS, 'csat', 'waitingOn'];
+
+type WorkingStatus = NonNullable<ReturnType<typeof toLabel>>;
+type StatusLike = { id: string; key: string | null; label: string | null; color: string | null };
+/** The status a portal row reads: the ticket's own, except that an internal hold reads as the type's working status (the customer sees no wait). */
+export type PortalStatusOf = <S extends StatusLike>(row: { type: string; pendingWaitingOn: string | null }, status: S) => S | WorkingStatus;
+
+/**
+ * The fence on the status word: an internal hold (`pending_waiting_on = 'internal'`)
+ * is the desk's business, so on every portal surface (the list rows, the detail,
+ * the inbox row, the brief's items) the ticket reads as the type's working
+ * status (`REOPEN_KEY`: In Progress, In Fulfilment, Under Investigation,
+ * Implementing) with no pending block. The working statuses are loaded once per
+ * request; a type whose working status is not configured keeps its own label.
+ * Only the words change: the portal's category counts still count the hold
+ * under `pending`, which is what the list reproduces.
+ */
+export async function portalStatusOf(ctx: Ctx): Promise<PortalStatusOf> {
+  const all = await optionsOfType(ctx.tx, 'ticket_status');
+  const working = new Map<string, WorkingStatus>();
+  for (const [type, key] of Object.entries(REOPEN_KEY)) {
+    const opt = all.find((o) => o.key === key && o.isActive);
+    if (opt) working.set(type, toLabel(opt)!);
+  }
+  return (row, status) => (row.pendingWaitingOn === 'internal' ? working.get(row.type) ?? status : status);
+}
 
 /**
  * The staff list parameters a portal query resolves to: the organisation
  * pinned, the portal aliases mapped (`status` chip → `statusCategory` /
- * `statusId` / `csat`; `priority` key → `priorityId`; `mine` → requester = me),
+ * `waitingOn` / `csat`; `priority` key → `priorityId`; `mine` → requester = me),
  * the explicit staff keys layered on top (an explicit `statusCategory=any` lifts
  * the status filter; without any status key the open categories apply) and
  * every staff-only flag left unset. `listPortalTickets`, `countPortalTickets`
@@ -168,17 +192,15 @@ export async function portalListParams(ctx: Ctx, q: PortalTicketStatsQuery): Pro
   else if (q.status === 'rate') {
     statusCategory = 'resolved,closed';
     csat = 'pending';
-  } else if (q.status === 'awaiting') {
-    const awaiting = await optionByKey(ctx.tx, 'ticket_status', AWAITING_STATUS_KEY);
-    if (awaiting) statusId = awaiting.id;
-    else statusCategory = 'pending';
   }
+  // The Waiting on you chip (and its alias `status=awaiting`): one word, one predicate, `pending_waiting_on = 'customer'` on the open categories.
+  const waitingOn: 'customer' | undefined = q.waitingOn ?? (q.status === 'awaiting' ? 'customer' : undefined);
   if (q.statusCategory) statusCategory = q.statusCategory === 'any' ? undefined : q.statusCategory;
   if (q.statusId) statusId = q.statusId;
   if (q.csat) csat = q.csat;
   // Without any status key the open categories apply, except that `csat=pending` on its own is the To rate door: a pending survey lives on a
   // resolved or closed ticket, so the open categories would hide every one of them while the To rate chip still showed its count.
-  if (q.status === undefined && q.statusCategory === undefined && q.statusId === undefined) statusCategory = csat === 'pending' ? 'resolved,closed' : OPEN_CATEGORIES.join(',');
+  if ((q.status === undefined || q.status === 'awaiting') && q.statusCategory === undefined && q.statusId === undefined) statusCategory = csat === 'pending' ? 'resolved,closed' : OPEN_CATEGORIES.join(',');
   let priorityId: string | undefined;
   if (q.priority) {
     const prio = UUID_RE.test(q.priority) ? { id: q.priority } : await optionByKey(ctx.tx, 'ticket_priority', q.priority.toLowerCase());
@@ -190,6 +212,7 @@ export async function portalListParams(ctx: Ctx, q: PortalTicketStatsQuery): Pro
     type: q.type,
     statusCategory,
     statusId,
+    waitingOn,
     priorityId,
     siteId: q.siteId,
     serviceId: q.serviceId,
@@ -264,13 +287,14 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     knownError: undefined,
   });
   const requesterNames = await userNamesOnly(ctx, res.items.map((r) => r.requesterUserId));
+  const statusOf = await portalStatusOf(ctx);
   const items = res.items.map((r) => ({
     id: r.id,
     number: r.number,
     type: r.type,
     typeLabel: r.typeLabel,
     title: r.title,
-    status: r.status,
+    status: statusOf({ type: r.type, pendingWaitingOn: r.waitingOn }, r.status),
     priority: r.priority,
     siteId: r.siteId,
     siteName: r.siteName,
@@ -282,7 +306,9 @@ export async function listPortalTickets(ctx: Ctx, q: TicketListQuery) {
     assigneeName: firstName(r.assigneeName),
     teamName: r.teamName,
     approvalStatus: r.approvalStatus,
-    awaitingCustomer: r.status.key === AWAITING_STATUS_KEY,
+    // One word for what waits on the organisation (a reply or an approval); the party in the customer's vocabulary, never an internal hold.
+    awaitingCustomer: r.waitingOn === 'customer',
+    waitingOn: r.waitingOn && r.waitingOn !== 'internal' ? r.waitingOn : null,
     dueAt: r.dueAt,
     resolvedAt: r.resolvedAt,
     closedAt: r.closedAt,
@@ -336,6 +362,8 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
   const scope = resolvePortalCustomer(ctx, 'portal:tickets', requested);
   const t = await getTicket(ctx, id);
   if (t.customerId !== scope.customerId) throw new NotFoundError('Ticket');
+  const raw = await loadTicket(ctx, t.id);
+  const statusOf = await portalStatusOf(ctx);
   const [tl, att, appr, windowDays] = [await timeline(ctx, t.id), await listAttachments(ctx, 'ticket', t.id), await approvalsSvc.listForTicket(ctx, t.id), await reopenWindowDays(ctx)];
   // Customer users already get a filtered timeline / attachment list; filter again for MSP previews.
   const timelineItems = tl.items.filter((i) => !i.isInternal && i.customerVisible).map(({ minutesSpent: _m, ...rest }) => rest);
@@ -360,7 +388,8 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
     typeLabel: t.typeLabel,
     title: t.title,
     description: t.description,
-    status: t.status,
+    // An internal hold reads as the working status (the fence; `pending` below is null for it).
+    status: t.status ? statusOf(raw, t.status) : t.status,
     priority: t.priority,
     impact: t.impact,
     urgency: t.urgency,
@@ -386,6 +415,8 @@ export async function getPortalTicket(ctx: Ctx, id: string, requested?: string |
     resolutionCode: t.resolutionCode,
     closureCode: t.closureCode,
     approvalStatus: t.approvalStatus,
+    // The wait in the customer's words (exactly waitingOn, waitingOnLabel, reason when shown, expectedAt; null for an internal hold).
+    pending: customerPendingView(raw, await optionById(ctx.tx, raw.statusId), { canApprove: ctx.user.userType === 'customer' && ctx.can('portal:approve', t.customerId) }),
     approvals: latestApprovals,
     pendingForMe: latestApprovals.filter((a) => a.status === 'pending' && a.canDecide),
     reopenCount: t.reopenCount,
@@ -495,11 +526,11 @@ export async function portalTicketAttachments(ctx: Ctx, id: string, requested?: 
 export async function listPortalApprovals(ctx: Ctx, requested?: string | null) {
   const scope = resolvePortalCustomer(ctx, 'portal:approve', requested);
   const cid = scope.customerId;
-  let rows: { approval: typeof schema.approvals.$inferSelect; ticket: { id: string; number: string; title: string; type: string; priorityId: string | null; statusId: string; createdAt: Date; requesterUserId: string | null; description: string | null; catalogItemId: string | null; formData: Record<string, unknown> } }[];
+  let rows: { approval: typeof schema.approvals.$inferSelect; ticket: { id: string; number: string; title: string; type: string; priorityId: string | null; statusId: string; createdAt: Date; requesterUserId: string | null; description: string | null; catalogItemId: string | null; formData: Record<string, unknown>; pendingWaitingOn: string | null } }[];
   if (scope.preview) {
     // Pending steps addressed to the customer's portal roles.
     rows = await ctx.tx
-      .select({ approval: schema.approvals, ticket: { id: T.id, number: T.number, title: T.title, type: T.type, priorityId: T.priorityId, statusId: T.statusId, createdAt: T.createdAt, requesterUserId: T.requesterUserId, description: T.description, catalogItemId: T.catalogItemId, formData: T.formData } })
+      .select({ approval: schema.approvals, ticket: { id: T.id, number: T.number, title: T.title, type: T.type, priorityId: T.priorityId, statusId: T.statusId, createdAt: T.createdAt, requesterUserId: T.requesterUserId, description: T.description, catalogItemId: T.catalogItemId, formData: T.formData, pendingWaitingOn: T.pendingWaitingOn } })
       .from(schema.approvals)
       .innerJoin(T, eq(T.id, schema.approvals.ticketId))
       .where(and(eq(schema.approvals.customerId, cid), eq(schema.approvals.status, 'pending'), inArray(schema.approvals.approverRoleKey, [...PORTAL_ROLE_KEYS])))
@@ -507,14 +538,15 @@ export async function listPortalApprovals(ctx: Ctx, requested?: string | null) {
   } else {
     const mine = await approvalsSvc.listMine(ctx);
     const ticketIds = [...new Set(mine.items.filter((a) => a.customerId === cid).map((a) => a.ticketId))];
-    const extra = ticketIds.length ? await ctx.tx.select({ id: T.id, catalogItemId: T.catalogItemId, formData: T.formData }).from(T).where(inArray(T.id, ticketIds)) : [];
+    const extra = ticketIds.length ? await ctx.tx.select({ id: T.id, catalogItemId: T.catalogItemId, formData: T.formData, pendingWaitingOn: T.pendingWaitingOn }).from(T).where(inArray(T.id, ticketIds)) : [];
     rows = mine.items
       .filter((a) => a.customerId === cid)
       .map(({ ticket, ...approval }) => {
         const x = extra.find((e) => e.id === ticket.id);
-        return { approval: approval as typeof schema.approvals.$inferSelect, ticket: { ...ticket, catalogItemId: x?.catalogItemId ?? null, formData: x?.formData ?? {} } };
+        return { approval: approval as typeof schema.approvals.$inferSelect, ticket: { ...ticket, catalogItemId: x?.catalogItemId ?? null, formData: x?.formData ?? {}, pendingWaitingOn: x?.pendingWaitingOn ?? null } };
       });
   }
+  const statusOf = await portalStatusOf(ctx);
   const optIds = rows.flatMap((r) => [r.ticket.priorityId, r.ticket.statusId]);
   const labels = await optionLabels(ctx.tx, optIds);
   const names = await userNamesOnly(ctx, rows.map((r) => r.ticket.requesterUserId));
@@ -525,7 +557,9 @@ export async function listPortalApprovals(ctx: Ctx, requested?: string | null) {
     const fields = (item?.formSchema ?? []) as { key: string; label?: string }[];
     const form = fields.length ? fields.map((f) => ({ label: f.label ?? f.key, value: t.formData?.[f.key] ?? null })) : Object.entries(t.formData ?? {}).map(([k, v]) => ({ label: k, value: v }));
     const pr = t.priorityId ? labels.get(t.priorityId) : undefined;
-    const stt = labels.get(t.statusId);
+    const stt0 = labels.get(t.statusId);
+    // The inbox row's status through the same fence as every portal row (an internal hold on the ticket reads as the working status).
+    const stt = stt0 ? statusOf(t, { id: stt0.id, key: stt0.key, label: stt0.label, color: stt0.color }) : undefined;
     return {
       id: a.id,
       step: a.step,

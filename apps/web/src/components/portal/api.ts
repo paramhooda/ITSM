@@ -1,5 +1,5 @@
 import { get, post, patch } from '@/api/client';
-import type { OptionLabel, SlaCompact, SlaMetricSummary, TimelineEntry, CatalogField } from '@/components/tickets/types';
+import type { OptionLabel, SlaCompact, SlaMetricSummary, TimelineEntry, CatalogField, TicketPending } from '@/components/tickets/types';
 import type { PortalAssetsOverview } from '@/components/overview/types';
 import type { Announcement } from '@/components/announcements/api';
 import type { PortalKnownError, PortalKnownErrorList } from '@/components/known-errors/api';
@@ -71,7 +71,10 @@ export interface PortalTicketRow {
   assigneeName: string | null;
   teamName: string | null;
   approvalStatus: string | null;
+  /** The ticket waits on the organisation (a reply or an approval): the one "Waiting on you" predicate (`waitingOn=customer`). */
   awaitingCustomer: boolean;
+  /** The party in the customer's vocabulary (customer, vendor, change, agreement); null when nothing waits or the hold is the desk's own. */
+  waitingOn: 'customer' | 'vendor' | 'change' | 'agreement' | null;
   dueAt: string | null;
   resolvedAt: string | null;
   closedAt: string | null;
@@ -160,6 +163,8 @@ export interface PortalTicket {
   resolutionCode: OptionLabel | null;
   closureCode: OptionLabel | null;
   approvalStatus: string | null;
+  /** Why the ticket waits, in the customer's words (exactly waitingOn, waitingOnLabel, reason when shown, expectedAt); null when nothing waits on anyone the customer should know about. */
+  pending: TicketPending | null;
   approvals: PortalApproval[];
   pendingForMe: PortalApproval[];
   reopenCount: number;
@@ -618,9 +623,10 @@ export interface PortalHome {
     open: number;
     breached: number;
     atRisk: number;
-    awaitingReply: number;
+    /** Open tickets waiting on the organisation (a reply or an approval): door `waitingOn=customer`. */
+    waitingOnYou: number;
+    /** Of them, those awaiting the organisation's approval: door `waitingOn=customer` with `statusId=awaitingApprovalStatusId`. */
     awaitingApproval: number;
-    awaitingStatusId: string | null;
     awaitingApprovalStatusId: string | null;
     openedInPeriod: number;
     resolvedInPeriod: number;

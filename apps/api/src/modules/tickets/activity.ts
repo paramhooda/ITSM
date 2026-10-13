@@ -6,9 +6,11 @@ import type { Ctx } from '@/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { diffChanges } from '@/core/audit';
 import { markResponded } from '@/modules/sla/engine';
-import { type TicketRow, addActivity, actorOf, isCustomerUser, loadTicket, loadTicketByNumber, reloadTicket, requireAction, requireRead, userIdOf, optionMap, toLabel } from './common';
+import { waitingOnLabels, type WaitingOn } from '@itsm/shared';
+import { type TicketRow, addActivity, actorOf, isCustomerUser, isWait, loadTicket, loadTicketByNumber, optionById, reloadTicket, requireAction, requireRead, userIdOf, optionMap, toLabel } from './common';
 import { notifyTicketEvent } from './notify';
-import { resumeAfterCustomerReply } from './status';
+// `changeStatusCore` from ./status, never `changeStatus` from ./service: service.ts imports this file, a static import back is a cycle.
+import { changeStatusCore, resumeFromPending } from './status';
 
 // ---------------------------------------------------------------- comments
 
@@ -18,6 +20,8 @@ export interface CommentInput {
   minutesSpent?: number | null;
   workType?: string;
   billable?: boolean;
+  /** Reply and wait: after the comment the ticket moves to this status with the comment as the reason (staff with tickets:update only). */
+  then?: { statusId: string; expectedAt?: Date | null; pendingReference?: string | null; waitingOn?: WaitingOn | null } | null;
 }
 
 export async function addComment(ctx: Ctx, ticketId: string, input: CommentInput) {
@@ -27,6 +31,16 @@ export async function addComment(ctx: Ctx, ticketId: string, input: CommentInput
   if (kind === 'work_note') requireAction(ctx, t, 'tickets:work_notes');
   else requireAction(ctx, t, 'tickets:comment', 'portal:tickets');
   if (!customer && input.minutesSpent) ctx.require('tickets:time', t.customerId);
+  // The status move after the comment is checked before anything is written, so a comment-only agent is refused cleanly.
+  let thenTo = null as Awaited<ReturnType<typeof optionById>>;
+  if (input.then) {
+    if (customer) throw new ForbiddenError('This action is not available in the customer portal');
+    requireAction(ctx, t, 'tickets:update');
+    thenTo = await optionById(ctx.tx, input.then.statusId);
+    if (!thenTo || thenTo.type !== 'ticket_status' || !thenTo.isActive) throw new ValidationError('Invalid status');
+    // Reply and wait only puts a ticket on hold: resolving, closing, cancelling and reopening keep their own rules and permissions (the status actions).
+    if (!isWait(thenTo)) throw new ValidationError('Reply and wait only moves a ticket to a pending status; use the status actions for anything else');
+  }
   const now = new Date();
   const [comment] = await ctx.tx
     .insert(schema.ticketComments)
@@ -47,9 +61,16 @@ export async function addComment(ctx: Ctx, ticketId: string, input: CommentInput
   }
   await ctx.audit({ entityType: 'ticket', entityId: t.id, entityLabel: t.number, action: kind === 'work_note' ? 'ticket.work_note' : 'ticket.comment', customerId: t.customerId, metadata: { commentId: comment.id, kind, minutesSpent: comment.minutesSpent } });
   if (!customer && input.minutesSpent) await addTimeEntry(ctx, t.id, { minutes: input.minutesSpent, description: input.body.slice(0, 200), workType: (input.workType as 'remote' | 'onsite' | 'travel' | 'other') ?? 'remote', billable: input.billable ?? false }, { silent: true });
-  // A customer reply ends an "awaiting customer" wait: the ticket goes back to the service desk and the SLA clocks resume.
-  if (customer) updated = (await resumeAfterCustomerReply(ctx, updated)) ?? updated;
-  if (kind !== 'work_note') await notifyTicketEvent(ctx, customer ? 'ticket.customer_comment' : 'ticket.engineer_comment', updated, { comment: input.body });
+  // A customer reply ends a customer reply wait: the ticket goes back to the service desk and the SLA clocks resume (an approval wait stays).
+  if (customer) updated = (await resumeFromPending(ctx, updated, { trigger: 'customer_reply' })) ?? updated;
+  // Reply and wait: the comment is the reason (a reply the customer reads, or a work note). After a reply the customer hears of the wait once, in the reply itself;
+  // after a work note nothing else reaches them, so the wait is announced as usual (ticket.pending without the note's text, or staff only for an internal hold).
+  let waitingOnLabel: string | null = null;
+  if (thenTo && input.then) {
+    updated = await changeStatusCore(ctx, updated, thenTo, { pendingReason: input.body.slice(0, 500), tellCustomer: kind === 'comment', postReason: false, silent: kind !== 'work_note', expectedAt: input.then.expectedAt ?? null, pendingReference: input.then.pendingReference ?? null, waitingOn: input.then.waitingOn ?? undefined });
+    if (isWait(thenTo) && updated.pendingWaitingOn === 'customer') waitingOnLabel = waitingOnLabels('customer').customer;
+  }
+  if (kind !== 'work_note') await notifyTicketEvent(ctx, customer ? 'ticket.customer_comment' : 'ticket.engineer_comment', updated, { comment: input.body, waitingOnLabel });
   // The tone of a customer's words is judged a moment later in the worker (the row must be committed first).
   if (customer) void enqueue('ai', 'comment-sentiment', { commentId: comment.id }, { delay: 1500, jobId: `sentiment-${comment.id}` });
   return comment;

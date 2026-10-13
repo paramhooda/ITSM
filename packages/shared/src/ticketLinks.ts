@@ -1,4 +1,4 @@
-import type { TicketType } from './constants.js';
+import type { TicketType, WaitingOn } from './constants.js';
 import { DOMAINS } from './constants.js';
 import type { SlaOutcome } from './sla.js';
 
@@ -34,6 +34,13 @@ export interface TicketListLink {
   priorityIds?: string[] | null;
   severityIds?: string[] | null;
   statusIds?: string[] | null;
+  /**
+   * Who an open ticket waits on (`tickets.pending_waiting_on`): `customer` is the one
+   * word for "waiting on the customer" (a reply or an approval addressed to the
+   * organisation) on every surface; the other values are staff-only pills. A list
+   * of values is allowed on the staff list; the portal accepts `customer` alone.
+   */
+  waitingOn?: WaitingOn | WaitingOn[] | null;
   categoryId?: string | null;
   serviceId?: string | null;
   siteId?: string | null;
@@ -76,6 +83,7 @@ export function ticketListQuery(link: TicketListLink): string {
   else if (link.status === 'resolved') put('statusCategory', 'resolved');
   // `open` (and unset) is the page default: nothing to carry.
   put('statusId', list(link.statusIds));
+  put('waitingOn', list(link.waitingOn));
   put('slaState', list(link.sla));
   put('breachRisk', link.breachRisk);
   put('assignee', link.assignee);
@@ -110,9 +118,11 @@ export function ticketListPath(link: TicketListLink): string {
  * only these: a staff-only key (customer, domain, team, assignee, risk, major,
  * known error, severity, category) would be dropped by the route's schema while
  * the breadcrumb still showed it, so the whitelist makes the leak impossible and
- * lets the guard test reason about one key set.
+ * lets the guard test reason about one key set. `waitingOn` is portal-safe for the
+ * value `customer` only (what waits on the organisation); a supplier, change,
+ * agreement or internal wait is the desk's business and the portal route refuses it.
  */
-export const PORTAL_TICKET_LINK_KEYS = ['type', 'statusCategory', 'statusId', 'priorityId', 'siteId', 'serviceId', 'slaState', 'csat', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'] as const;
+export const PORTAL_TICKET_LINK_KEYS = ['type', 'statusCategory', 'statusId', 'waitingOn', 'priorityId', 'siteId', 'serviceId', 'slaState', 'csat', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'] as const;
 export type PortalTicketLinkKey = (typeof PORTAL_TICKET_LINK_KEYS)[number];
 
 /** The query string of a portal ticket list link: the same keys in the same fixed order as `ticketListQuery`, restricted to the portal-safe set. */
@@ -120,7 +130,9 @@ export function portalTicketListQuery(link: TicketListLink): string {
   const allowed = new Set<string>(PORTAL_TICKET_LINK_KEYS);
   const p = new URLSearchParams();
   new URLSearchParams(ticketListQuery(link)).forEach((v, k) => {
-    if (allowed.has(k)) p.set(k, v);
+    if (!allowed.has(k)) return;
+    if (k === 'waitingOn' && v !== 'customer') return;
+    p.set(k, v);
   });
   return p.toString();
 }

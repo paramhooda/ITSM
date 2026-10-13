@@ -16,6 +16,56 @@ export const TICKET_PREFIX: Record<TicketType, string> = {
 export const STATUS_CATEGORIES = ['new', 'open', 'pending', 'resolved', 'closed', 'cancelled'] as const;
 export type StatusCategory = (typeof STATUS_CATEGORIES)[number];
 
+/**
+ * The party a ticket in a wait is waiting on. A wait is a pending-category
+ * status whose option metadata does not say `wait: false`; every ticket in a
+ * wait carries a reason and one of these. Only waits outside the provider's
+ * control (customer, supplier, change, agreed) stop the resolution and
+ * restoration clocks; an internal hold keeps every clock running.
+ */
+export const WAITING_ON = ['customer', 'vendor', 'change', 'agreement', 'internal'] as const;
+export type WaitingOn = (typeof WAITING_ON)[number];
+
+/**
+ * One table for the words of a wait: `staff` is what the service desk reads,
+ * `customer` what the portal, the notifications and the assistant say to the
+ * customer. An internal hold is never shown to the customer (they read the
+ * type's working status), so its customer wording is neutral.
+ */
+export function waitingOnLabels(waitingOn: WaitingOn, opts: { approval?: boolean; canApprove?: boolean } = {}): { staff: string; customer: string } {
+  switch (waitingOn) {
+    case 'customer':
+      if (opts.approval) return { staff: "Awaiting the customer's approval", customer: opts.canApprove ? 'Your approval is needed' : "Your organisation's approval is needed" };
+      return { staff: 'Waiting on the customer', customer: 'We need something from you' };
+    case 'vendor':
+      return { staff: 'Waiting on a supplier or third party', customer: 'Waiting on a supplier or third party' };
+    case 'change':
+      return { staff: 'Waiting for a scheduled change', customer: 'Waiting for a scheduled change' };
+    case 'agreement':
+      return { staff: 'On hold as agreed with the customer', customer: 'On hold as agreed with you' };
+    case 'internal':
+    default:
+      return { staff: opts.approval ? 'Awaiting internal approval' : 'On hold (internal)', customer: 'With the service desk' };
+  }
+}
+
+/**
+ * The transitions the lifecycle allows, by status category (ITIL: work moves
+ * forward through pending into an end state, an ended ticket reopens into
+ * work, nothing jumps from new to closed; a ticket in work with no fix to record
+ * may close straight away, and a resolved ticket raised in error may still be
+ * cancelled before it closes). Applied inside the one status
+ * transition of the API and read by the web to build its status menus.
+ */
+export const TICKET_TRANSITIONS: Record<StatusCategory, StatusCategory[]> = {
+  new: ['open', 'pending', 'resolved', 'cancelled'],
+  open: ['open', 'pending', 'resolved', 'closed', 'cancelled'],
+  pending: ['open', 'pending', 'resolved', 'cancelled'],
+  resolved: ['resolved', 'closed', 'open', 'new', 'cancelled'],
+  closed: ['open', 'new'],
+  cancelled: ['open', 'new'],
+};
+
 /** Scope classification of a ticket relative to the customer's contracts. Never a blocker. */
 export const SCOPE_STATUSES = ['in_scope', 'out_of_scope', 'unknown'] as const;
 export type ScopeStatus = (typeof SCOPE_STATUSES)[number];
@@ -122,6 +172,7 @@ export type LicenceStatus = (typeof LICENCE_STATUSES)[number];
 export const NOTIFICATION_EVENTS = [
   'ticket.created', 'ticket.assigned', 'ticket.status_changed', 'ticket.customer_comment', 'ticket.engineer_comment',
   'ticket.resolved', 'ticket.closed', 'ticket.escalated', 'sla.warning', 'sla.breached',
+  'ticket.pending', 'ticket.resumed',
   'change.approval_requested', 'change.approved', 'change.rejected', 'request.approval_requested', 'request.approved', 'request.rejected',
   'contract.expiring', 'contract.expired', 'contract.renewal_due', 'contract.missing_documents',
   'entitlement.threshold', 'entitlement.exhausted',
@@ -171,7 +222,7 @@ export interface NotificationCategoryDef {
   whatsapp: boolean;
 }
 export const NOTIFICATION_CATEGORIES: NotificationCategoryDef[] = [
-  { key: 'tickets', label: 'Assignments and ticket updates', customerLabel: 'Ticket updates', description: 'A ticket is logged, assigned or changes status; a customer sounds unhappy.', customerDescription: 'Your ticket is logged, assigned or changes status.', audience: 'both', events: ['ticket.created', 'ticket.assigned', 'ticket.status_changed', 'ticket.sentiment_negative'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
+  { key: 'tickets', label: 'Assignments and ticket updates', customerLabel: 'Ticket updates', description: 'A ticket is logged, assigned, changes status, waits on something or comes back to the desk; a customer sounds unhappy.', customerDescription: 'Your ticket is logged, assigned, changes status, needs something from you or is back with the service desk.', audience: 'both', events: ['ticket.created', 'ticket.assigned', 'ticket.status_changed', 'ticket.pending', 'ticket.resumed', 'ticket.sentiment_negative'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
   { key: 'replies', label: 'Comments and replies', customerLabel: 'Replies from the service desk', description: 'A customer comments on a ticket; the service desk replies.', customerDescription: 'The service desk replies on your ticket.', audience: 'both', events: ['ticket.customer_comment', 'ticket.engineer_comment'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
   { key: 'closure', label: 'Resolution and closure', description: 'A ticket is resolved or closed.', audience: 'both', events: ['ticket.resolved', 'ticket.closed'], seed: { emailDefault: true, emailLocked: false, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },
   { key: 'sla', label: 'SLA warnings and breaches', description: 'An SLA clock is about to run out or has run out.', audience: 'staff', events: ['sla.warning', 'sla.breached'], seed: { emailDefault: true, emailLocked: true, whatsappDefault: true, whatsappLocked: false }, whatsapp: true },

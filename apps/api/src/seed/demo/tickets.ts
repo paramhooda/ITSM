@@ -573,7 +573,12 @@ async function runIncident(state: DemoState, tx: Tx, plan: Plan): Promise<Ticket
   if (times.pauseStart && assignee) {
     r.mark(times.pauseStart);
     const vendor = times.outcome === 'pending_vendor' || (!!t.pendingVendor && times.outcome === 'resolved');
-    await changeStatus(resolveCtx(), ticket.id, { statusId: refs.option('ticket_status', vendor ? 'pending_vendor' : 'pending_customer'), comment: vendor ? 'Waiting for the vendor / ISP to complete their action; we will update as soon as we hear back.' : 'We need a confirmation from your side before we can proceed - please see the question above.' });
+    await changeStatus(resolveCtx(), ticket.id, {
+      statusId: refs.option('ticket_status', vendor ? 'pending_vendor' : 'pending_customer'),
+      pendingReason: vendor ? 'Waiting for the vendor / ISP to complete their action; we will update as soon as we hear back.' : 'We need a confirmation from your side before we can proceed - please see the question above.',
+      tellCustomer: true,
+      ...(vendor ? { pendingReference: `VND-${10000 + ((plan.vars.n * 7919) % 90000)}`, expectedAt: new Date(times.pauseStart.getTime() + (1 + (plan.vars.n % 3)) * DAY) } : {}),
+    });
     if (times.pauseEnd) {
       r.mark(times.pauseEnd);
       await changeStatus(resolveCtx(), ticket.id, { statusId: refs.option('ticket_status', 'in_progress'), comment: vendor ? 'Vendor update received; resuming work.' : 'Thanks for the confirmation; resuming work.' });
@@ -700,7 +705,7 @@ async function runRequest(state: DemoState, tx: Tx, plan: Plan): Promise<TicketR
   if (plan.outcome === 'pending_customer' && !resolvedAt) {
     const at = new Date(Math.max(from.getTime() + 5 * MINUTE, now.getTime() - rng.int(30, 600) * MINUTE));
     r.mark(at);
-    await changeStatus(r.ctx(assignee), ticket.id, { statusId: refs.option('ticket_status', 'pending_customer'), comment: 'Could you confirm the details requested above so we can proceed?' });
+    await changeStatus(r.ctx(assignee), ticket.id, { statusId: refs.option('ticket_status', 'pending_customer'), pendingReason: 'Could you confirm the details requested above so we can proceed?', tellCustomer: true });
     tl.pauses.push([at, null]);
   }
   if (resolvedAt) {

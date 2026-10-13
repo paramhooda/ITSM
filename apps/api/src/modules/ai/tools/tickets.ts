@@ -9,8 +9,10 @@ import { addComment, timeline, addLink, removeLink, setCis, listTasks, createTas
 import { listForTicket as approvalsForTicket } from '@/modules/tickets/approvals';
 import { escalationHistory } from '@/modules/tickets/escalation';
 import { scopePreview } from '@/modules/tickets/scope';
-import { optionByKey, type TicketRow } from '@/modules/tickets/common';
-import { applicableStatuses } from '@/modules/tickets/status';
+import { optionByKey, optionById, isWait, type TicketRow } from '@/modules/tickets/common';
+import { applicableStatuses, assertWaitEntry } from '@/modules/tickets/status';
+import { activeSlaRows, PAUSABLE_METRICS, statusPausesSla, metricLabel } from '@/modules/sla/engine';
+import { WAITING_ON, waitingOnLabels } from '@itsm/shared';
 import { reopenPortalTicket, confirmResolution } from '@/modules/portal/service';
 import { engineerDirectory } from '@/modules/iam/service';
 import { define, type PreviewDetail } from './types';
@@ -456,8 +458,23 @@ export const TICKETS: ReturnType<typeof define>[] = [
     name: 'set_status',
     toolset: 'tickets',
     tier: 'write',
-    description: 'Move a ticket to another status (key or label, e.g. "in_progress", "pending_customer", "pending_vendor"). To resolve, close, reopen or cancel use the dedicated tools.',
-    inputSchema: z.object({ ticket: ticketRef, status: z.string().max(60), resolutionNotes: z.string().max(20000).optional(), comment: z.string().max(20000).optional() }),
+    description:
+      'Move a ticket to another status (key or label, e.g. "in_progress", "pending_customer", "pending_vendor", "on_hold"). Any pending status needs a reason and, for on_hold, the party waited on (agreement with the customer, or internal); the preview says which clocks pause and whether the customer is told. Leaving a pending status brings the ticket back to work with the clocks resumed. To resolve, close, reopen or cancel use the dedicated tools; to await an approval use request_approval.',
+    inputSchema: z.object({
+      ticket: ticketRef,
+      status: z.string().max(60),
+      /** The pending reason (what is being waited for), or the comment of a reopen. */
+      reason: z.string().max(2000).optional(),
+      waitingOn: z.enum(WAITING_ON).optional(),
+      /** When the wait is expected to end (ISO date). */
+      expectedAt: z.string().max(40).optional(),
+      /** The supplier's or third party's reference, the change number. */
+      reference: z.string().max(200).optional(),
+      /** Post the reason as a reply the customer can read (default: yes for a customer wait, no otherwise). */
+      notifyCustomer: z.boolean().optional(),
+      resolutionNotes: z.string().max(20000).optional(),
+      comment: z.string().max(20000).optional(),
+    }),
     requires: ['tickets:update'],
     portal: null,
     action: true,
@@ -466,16 +483,57 @@ export const TICKETS: ReturnType<typeof define>[] = [
       const t = await resolveTicket(ctx, input.ticket);
       const to = await resolveStatus(ctx, t, input.status);
       if (to.statusCategory === 'cancelled') throw new ValidationError('Use cancel_ticket to cancel a ticket');
-      const updated = await changeStatus(ctx, t.id, { statusId: to.id, resolutionNotes: input.resolutionNotes ?? null, comment: input.comment ?? null });
+      const wait = isWait(to);
+      const updated = await changeStatus(ctx, t.id, {
+        statusId: to.id,
+        resolutionNotes: input.resolutionNotes ?? null,
+        comment: input.comment ?? (!wait ? (input.reason ?? null) : null),
+        pendingReason: wait ? (input.reason ?? null) : null,
+        waitingOn: input.waitingOn ?? null,
+        expectedAt: parseWhen(input.expectedAt, 'expected date'),
+        pendingReference: input.reference ?? null,
+        tellCustomer: input.notifyCustomer,
+      });
       const d = await getTicket(ctx, updated.id);
-      return { updated: true, ticket: d.number, status: d.status?.label, statusCategory: d.status?.category, link: ticketLink(ctx, d.id) };
+      return { updated: true, ticket: d.number, status: d.status?.label, statusCategory: d.status?.category, pending: d.pending, slas: d.slas.map((x) => ({ metric: x.metric, state: x.state })), link: ticketLink(ctx, d.id) };
     },
     summary: (input, result) => `Set ${input.ticket.toUpperCase()} to ${(result as { status: string }).status}`,
     preview: async (ctx, input) => {
       const t = await resolveTicket(ctx, input.ticket);
       const to = await resolveStatus(ctx, t, input.status);
       if (to.statusCategory === 'cancelled') throw new ValidationError('Use cancel_ticket to cancel a ticket');
-      return `Set ${short(t)} to ${to.label}${input.resolutionNotes ? ` with the resolution notes "${input.resolutionNotes.slice(0, 120)}"` : ''}${input.comment ? ` and the comment "${input.comment.slice(0, 120)}"` : ''}`;
+      if (to.key === 'awaiting_approval') throw new ValidationError('Use request_approval to put a ticket in Awaiting Approval');
+      const from = await optionById(ctx.tx, t.statusId);
+      const expectedAt = parseWhen(input.expectedAt, 'expected date');
+      // The service's own rules decide here too, so a refused move fails in the preview with the same message.
+      const entry = assertWaitEntry(t, from, to, { pendingReason: input.reason, waitingOn: input.waitingOn, expectedAt });
+      const fromEnded = ['resolved', 'closed', 'cancelled'].includes(from?.statusCategory ?? '');
+      if (fromEnded && !input.reason && !input.comment) throw new ValidationError(`A reason is required to reopen ${t.number}`);
+      const lines: string[] = [`Status: ${from?.label ?? '—'} → ${to.label}`];
+      const rows = await activeSlaRows(ctx.tx, t.id);
+      const policyId = rows[0]?.policyId ?? t.slaPolicyId;
+      if (entry.toWait && entry.waitingOn) {
+        const labels = waitingOnLabels(entry.waitingOn);
+        lines.push(`${labels.staff}: ${entry.reason}`);
+        if (expectedAt) lines.push(`Expected by ${expectedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`);
+        if (input.reference) lines.push(`Reference: ${input.reference}`);
+        const pauses = entry.waitingOn !== 'internal' && (await statusPausesSla(ctx.tx, to.id, policyId));
+        const order = ['resolution', 'restoration', 'response', 'acknowledgement'];
+        const running = rows.filter((r) => r.state === 'running').sort((a, b) => order.indexOf(a.metric) - order.indexOf(b.metric));
+        const pausable = running.filter((r) => PAUSABLE_METRICS.includes(r.metric));
+        const others = running.filter((r) => !PAUSABLE_METRICS.includes(r.metric));
+        if (!pauses) lines.push(entry.waitingOn === 'internal' ? 'Clocks keep running (internal hold)' : 'Clocks keep running (this status does not pause the SLA)');
+        else if (!pausable.length) lines.push(rows.some((r) => r.state === 'paused') ? 'The resolution and restoration clocks are already paused' : 'No resolution or restoration clock is running');
+        else lines.push(`${pausable.map((r) => metricLabel(r.metric)).join(' and ')} ${pausable.length > 1 ? 'clocks pause' : 'clock pauses'}${others.length ? `; the ${others.map((r) => metricLabel(r.metric).toLowerCase()).join(' and ')} ${others.length > 1 ? 'clocks keep' : 'clock keeps'} running` : ''}`);
+        const tell = entry.waitingOn !== 'internal' && (input.notifyCustomer ?? entry.waitingOn === 'customer');
+        lines.push(tell ? `The customer is told: ${entry.reason}` : entry.waitingOn === 'internal' ? 'The customer is not told (an internal hold is not shown in the portal)' : 'The customer is not told the reason (kept as a work note)');
+      } else {
+        const paused = rows.filter((r) => r.state === 'paused');
+        if (paused.length && isWait(from)) lines.push(`${paused.map((r) => metricLabel(r.metric)).join(' and ')} ${paused.length > 1 ? 'clocks resume' : 'clock resumes'} with the paused time credited`);
+        if (input.resolutionNotes) lines.push(`Resolution notes: ${trunc(input.resolutionNotes, 120)}`);
+        if (input.comment ?? input.reason) lines.push(`Comment: ${trunc(input.comment ?? input.reason, 120)}`);
+      }
+      return { text: `Set ${short(t)} to ${to.label}`, lines };
     },
   }),
   define({

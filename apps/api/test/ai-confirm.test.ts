@@ -184,7 +184,7 @@ describe('autonomy', () => {
     const two = scripted(
       [
         { name: 'link_tickets', input: { ticket: numbers.a, target: numbers.b, linkType: 'related' } },
-        { name: 'set_status', input: { ticket: numbers.a, status: 'pending_customer' } },
+        { name: 'set_status', input: { ticket: numbers.a, status: 'pending_customer', reason: 'Need the serial number' } },
       ],
       () => 'Linked them. Shall I proceed with the status change?',
     );

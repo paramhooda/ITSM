@@ -1,5 +1,5 @@
 import { eq, and, inArray, asc, desc, sql } from 'drizzle-orm';
-import type { TicketType } from '@itsm/shared';
+import { waitingOnLabels, type TicketType, type WaitingOn } from '@itsm/shared';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { enqueue } from '@/jobs/queues';
@@ -16,6 +16,7 @@ import { notifyTicketEvent } from './notify';
 import { escalateManually, escalationHistory } from './escalation';
 import { startApproval } from './approvals';
 import { changeStatusCore, statusByKey, applicableStatuses, RESOLVE_KEY, REOPEN_KEY } from './status';
+import type { SlaMetricSummary } from '@/modules/sla/engine';
 import {
   type TicketRow,
   type OptionRow,
@@ -24,6 +25,7 @@ import {
   addActivity,
   defaultStatusFor,
   isCustomerUser,
+  isWait,
   loadTicket,
   optionById,
   optionByKey,
@@ -315,7 +317,7 @@ export async function getTicket(ctx: Ctx, id: string) {
   const [service] = t.serviceId ? await ctx.tx.select({ id: schema.services.id, name: schema.services.name, key: schema.services.key }).from(schema.services).where(eq(schema.services.id, t.serviceId)).limit(1) : [];
   const [contract] = t.contractId ? await ctx.tx.select({ id: schema.contracts.id, number: schema.contracts.number, name: schema.contracts.name, slaPolicyId: schema.contracts.slaPolicyId, status: schema.contracts.status, endDate: schema.contracts.endDate }).from(schema.contracts).where(eq(schema.contracts.id, t.contractId)).limit(1) : [];
   const [scopeContract] = t.scopeContractId && t.scopeContractId !== t.contractId ? await ctx.tx.select({ id: schema.contracts.id, number: schema.contracts.number, name: schema.contracts.name }).from(schema.contracts).where(eq(schema.contracts.id, t.scopeContractId)).limit(1) : [];
-  const userIds = [t.assigneeId, t.requesterUserId, t.createdBy, t.scopeClassifiedBy].filter((x): x is string => !!x);
+  const userIds = [t.assigneeId, t.requesterUserId, t.createdBy, t.scopeClassifiedBy, t.pendingSetBy].filter((x): x is string => !!x);
   const users = userIds.length ? await ctx.tx.select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, userType: schema.users.userType }).from(schema.users).where(inArray(schema.users.id, userIds)) : [];
   const userOf = (id: string | null) => (id ? (users.find((u) => u.id === id) ?? null) : null);
   const [team] = t.assignedTeamId ? await ctx.tx.select({ id: schema.teams.id, name: schema.teams.name, key: schema.teams.key, managerUserId: schema.teams.managerUserId }).from(schema.teams).where(eq(schema.teams.id, t.assignedTeamId)).limit(1) : [];
@@ -342,10 +344,13 @@ export async function getTicket(ctx: Ctx, id: string) {
   const statuses = await applicableStatuses(ctx, t.type);
 
   const base = customer ? stripInternal(t) : stripVector(t);
+  const statusRow = opts.get(t.statusId) ?? null;
   return {
     ...base,
     typeLabel: TYPE_LABEL[t.type],
-    status: toLabel(opts.get(t.statusId)),
+    status: toLabel(statusRow),
+    // The wait the ticket is in: staff read the whole block; a customer reads their own words and the reason only when it was shown to them.
+    pending: customer ? customerPendingView(t, statusRow, { canApprove: ctx.can('portal:approve', t.customerId) }) : staffPendingView(t, statusRow, slas, userOf(t.pendingSetBy)),
     priority: toLabel(opts.get(t.priorityId ?? '')),
     impact: toLabel(opts.get(t.impactId ?? '')),
     urgency: toLabel(opts.get(t.urgencyId ?? '')),
@@ -416,8 +421,41 @@ async function enrichChange(ctx: Ctx, t: TicketRow, change: typeof schema.change
 }
 
 function stripInternal(t: TicketRow) {
-  const { customFields: _cf, integrationEventId: _ie, externalRef: _er, ...rest } = stripVector(t);
+  const { customFields: _cf, integrationEventId: _ie, externalRef: _er, pendingReason: _pr, pendingWaitingOn: _pw, pendingExpectedAt: _pe, pendingReference: _pf, pendingReasonVisible: _pv, pendingSetBy: _pb, pendingSetAt: _pa, ...rest } = stripVector(t);
   return rest;
+}
+
+/** The staff view of the wait a ticket is in (null outside a wait): the block plus since when the clocks are paused. */
+export function staffPendingView(t: Pick<TicketRow, 'pendingReason' | 'pendingWaitingOn' | 'pendingExpectedAt' | 'pendingReference' | 'pendingReasonVisible' | 'pendingSetAt' | 'approvalStatus'>, status: Pick<OptionRow, 'statusCategory' | 'metadata'> | null, slas: SlaMetricSummary[], setBy: { id: string; name: string } | null) {
+  if (!isWait(status) || !t.pendingWaitingOn) return null;
+  const waitingOn = t.pendingWaitingOn as WaitingOn;
+  const paused = slas.filter((s) => s.state === 'paused' && s.pausedAt && !s.completedAt).map((s) => new Date(s.pausedAt!).getTime());
+  return {
+    reason: t.pendingReason,
+    waitingOn,
+    waitingOnLabel: waitingOnLabels(waitingOn, { approval: t.approvalStatus === 'pending' }).staff,
+    expectedAt: t.pendingExpectedAt,
+    reference: t.pendingReference,
+    reasonVisible: !!t.pendingReasonVisible,
+    setBy: setBy ? { id: setBy.id, name: setBy.name } : null,
+    setAt: t.pendingSetAt,
+    slaPausedSince: paused.length ? new Date(Math.min(...paused)) : null,
+  };
+}
+
+/**
+ * The customer's view of a wait: exactly `{ waitingOn, waitingOnLabel, reason, expectedAt }`, the reason only when it
+ * was shown to them, and null for an internal hold (the customer reads the type's working status and no wait).
+ */
+export function customerPendingView(t: Pick<TicketRow, 'pendingReason' | 'pendingWaitingOn' | 'pendingExpectedAt' | 'pendingReasonVisible' | 'approvalStatus'>, status: Pick<OptionRow, 'statusCategory' | 'metadata'> | null, opts: { canApprove: boolean }) {
+  if (!isWait(status) || !t.pendingWaitingOn || t.pendingWaitingOn === 'internal') return null;
+  const waitingOn = t.pendingWaitingOn as WaitingOn;
+  return {
+    waitingOn,
+    waitingOnLabel: waitingOnLabels(waitingOn, { approval: t.approvalStatus === 'pending', canApprove: opts.canApprove }).customer,
+    reason: t.pendingReasonVisible ? t.pendingReason : null,
+    expectedAt: t.pendingExpectedAt,
+  };
 }
 
 /** Drops the search vector and the raw risk/sentiment columns (exposed as objects above, staff only). */
@@ -548,15 +586,30 @@ export interface StatusInput {
   resolutionNotes?: string | null;
   closureCodeId?: string | null;
   comment?: string | null;
+  /** Entering a wait: the mandatory reason, the party waited on, when it is expected to end, a reference, whether the reason is a reply the customer reads. */
+  pendingReason?: string | null;
+  waitingOn?: WaitingOn | null;
+  expectedAt?: Date | null;
+  pendingReference?: string | null;
+  tellCustomer?: boolean;
 }
 
+const ENDED = ['resolved', 'closed', 'cancelled'];
+
+/**
+ * The status endpoint's rules by actor: a portal user may only reopen (in the window) or cancel their own new ticket;
+ * staff need tickets:resolve to end a ticket, tickets:update otherwise; resolving needs notes; staff cancelling or
+ * reopening need a reason; a wait called again with a reason is a rewrite of the wait rather than a no-op.
+ */
 export async function changeStatus(ctx: Ctx, id: string, input: StatusInput): Promise<TicketRow> {
   const t = await loadTicket(ctx, id);
   const to = await optionById(ctx.tx, input.statusId);
   if (!to || to.type !== 'ticket_status' || !to.isActive) throw new ValidationError('Invalid status');
-  if (to.id === t.statusId) return t;
+  const rewrite = isWait(to) && !!input.pendingReason?.trim();
+  if (to.id === t.statusId && !rewrite) return t;
   const from = await optionById(ctx.tx, t.statusId);
   const cat = to.statusCategory;
+  const fromEnded = ENDED.includes(from?.statusCategory ?? '');
   if (isCustomerUser(ctx)) {
     // Portal users may only reopen (or cancel their own request before work starts).
     const reopening = (from?.statusCategory === 'resolved' || from?.statusCategory === 'closed') && (cat === 'open' || cat === 'new');
@@ -565,11 +618,23 @@ export async function changeStatus(ctx: Ctx, id: string, input: StatusInput): Pr
     if (reopening) await assertReopenWindow(ctx, t);
     requireAction(ctx, t, 'tickets:resolve', 'portal:tickets');
   } else if (cat === 'resolved' || cat === 'closed' || cat === 'cancelled') requireAction(ctx, t, 'tickets:resolve');
-  else if (from?.statusCategory === 'resolved' || from?.statusCategory === 'closed' || from?.statusCategory === 'cancelled') {
+  else if (fromEnded) {
     if (!ctx.can('tickets:resolve', t.customerId) && !ctx.can('tickets:update', t.customerId)) throw new ForbiddenError('Missing permission: tickets:resolve');
   } else requireAction(ctx, t, 'tickets:update');
   if (cat === 'resolved' && !input.resolutionNotes && !t.resolutionNotes && !input.comment) throw new ValidationError('Resolution notes are required to resolve a ticket');
-  return changeStatusCore(ctx, t, to, { resolutionCodeId: input.resolutionCodeId, resolutionNotes: input.resolutionNotes, closureCodeId: input.closureCodeId, comment: input.comment });
+  if (!isCustomerUser(ctx) && cat === 'cancelled' && !input.comment?.trim()) throw new ValidationError(`A reason is required to cancel ${t.number}`);
+  if (!isCustomerUser(ctx) && fromEnded && (cat === 'open' || cat === 'new') && !input.comment?.trim()) throw new ValidationError(`A reason is required to reopen ${t.number}`);
+  return changeStatusCore(ctx, t, to, {
+    resolutionCodeId: input.resolutionCodeId,
+    resolutionNotes: input.resolutionNotes,
+    closureCodeId: input.closureCodeId,
+    comment: input.comment,
+    pendingReason: input.pendingReason,
+    waitingOn: input.waitingOn ?? undefined,
+    expectedAt: input.expectedAt ?? null,
+    pendingReference: input.pendingReference ?? null,
+    tellCustomer: input.tellCustomer,
+  });
 }
 
 async function assertReopenWindow(ctx: Ctx, t: TicketRow) {
@@ -603,6 +668,7 @@ export async function reopenTicket(ctx: Ctx, id: string, input: { comment?: stri
     requireAction(ctx, t, 'tickets:resolve', 'portal:tickets');
     await assertReopenWindow(ctx, t);
   } else if (!ctx.can('tickets:resolve', t.customerId) && !ctx.can('tickets:update', t.customerId)) throw new ForbiddenError('Missing permission: tickets:resolve');
+  if (!isCustomerUser(ctx) && !input.comment?.trim()) throw new ValidationError(`A reason is required to reopen ${t.number}`);
   const to = (await optionByKey(ctx.tx, 'ticket_status', REOPEN_KEY[t.type])) ?? (await defaultStatusFor(ctx.tx, t.type));
   if (!statusApplies(to, t.type)) throw new ValidationError('No reopen status configured for this ticket type');
   return changeStatusCore(ctx, t, to, { comment: input.comment, action: 'reopen' });
@@ -614,7 +680,10 @@ export async function cancelTicket(ctx: Ctx, id: string, input: { closureCodeId?
     const from = await optionById(ctx.tx, t.statusId);
     if (from?.statusCategory !== 'new' || t.requesterUserId !== ctx.user.id) throw new ForbiddenError('Only your own tickets that have not been started can be cancelled');
     requireAction(ctx, t, 'tickets:resolve', 'portal:tickets');
-  } else requireAction(ctx, t, 'tickets:resolve');
+  } else {
+    requireAction(ctx, t, 'tickets:resolve');
+    if (!input.comment?.trim()) throw new ValidationError(`A reason is required to cancel ${t.number}`);
+  }
   const to = await statusByKey(ctx, 'cancelled', t.type);
   let codeId = input.closureCodeId ?? null;
   if (!codeId && isCustomerUser(ctx)) codeId = (await optionByKey(ctx.tx, 'closure_code', 'cancelled_by_customer'))?.id ?? null;
@@ -759,7 +828,7 @@ export async function updateChangeDetails(ctx: Ctx, id: string, patch: ChangeDet
 
 // ---------------------------------------------------------------- bulk
 
-export async function bulkAction(ctx: Ctx, input: { ids: string[]; action: 'assign' | 'status' | 'priority'; payload: { teamId?: string | null; assigneeId?: string | null; statusId?: string; priorityId?: string; comment?: string | null } }) {
+export async function bulkAction(ctx: Ctx, input: { ids: string[]; action: 'assign' | 'status' | 'priority'; payload: { teamId?: string | null; assigneeId?: string | null; statusId?: string; priorityId?: string; comment?: string | null; pendingReason?: string | null; waitingOn?: WaitingOn | null; expectedAt?: Date | null; pendingReference?: string | null; tellCustomer?: boolean } }) {
   const results: { id: string; ok: boolean; error?: string }[] = [];
   for (const id of input.ids) {
     // Savepoint per item so one failure does not poison the request transaction.
@@ -768,7 +837,8 @@ export async function bulkAction(ctx: Ctx, input: { ids: string[]; action: 'assi
       if (input.action === 'assign') await assignTicket(ctx, id, { teamId: input.payload.teamId, assigneeId: input.payload.assigneeId, comment: input.payload.comment });
       else if (input.action === 'status') {
         if (!input.payload.statusId) throw new ValidationError('statusId required');
-        await changeStatus(ctx, id, { statusId: input.payload.statusId, comment: input.payload.comment });
+        // One reason for the batch; a wait target without one fails per item with the service's message, as other item failures do.
+        await changeStatus(ctx, id, { statusId: input.payload.statusId, comment: input.payload.comment, pendingReason: input.payload.pendingReason, waitingOn: input.payload.waitingOn, expectedAt: input.payload.expectedAt, pendingReference: input.payload.pendingReference, tellCustomer: input.payload.tellCustomer });
       } else {
         if (!input.payload.priorityId) throw new ValidationError('priorityId required');
         await updateTicket(ctx, id, { priorityId: input.payload.priorityId });

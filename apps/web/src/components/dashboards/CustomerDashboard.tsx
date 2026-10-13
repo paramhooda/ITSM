@@ -102,14 +102,16 @@ export function CustomerDashboard({ days, siteId, sites }: { days: number; siteI
   const typesHint = t.byType.length ? t.byType.map((b) => `${fmtNumber(b.count)} ${plural(b.count, TYPE_SINGULAR[b.type] ?? b.type)}`).join(' · ') : 'nothing open';
   const tiles: KpiItem[] = [
     { label: 'Open tickets', value: fmtNumber(t.open), icon: <Inbox className="h-4 w-4" />, delta: d.deltas.open, lowerIsBetter: true, hint: typesHint, spark: spark.map((s) => s.opened), sparkLabel: `Tickets opened per day, last ${sparkDays} days`, to: path(open) },
+    // One word with the list chip and the brief: what waits on the organisation (a reply or an approval), door `waitingOn=customer`;
+    // the hint narrows it to the approvals through the awaiting-approval status.
     {
-      label: 'Awaiting your reply',
-      value: fmtNumber(t.awaitingReply),
+      label: 'Waiting on you',
+      value: fmtNumber(t.waitingOnYou),
       icon: <Reply className="h-4 w-4" />,
-      tone: t.awaitingReply > 0 ? 'warn' : 'good',
+      tone: t.waitingOnYou > 0 ? 'warn' : 'good',
       hint: t.awaitingApproval > 0 ? `${fmtNumber(t.awaitingApproval)} awaiting your approval` : 'nothing waiting on you',
-      to: t.awaitingStatusId ? path({ ...open, statusIds: [t.awaitingStatusId] }) : path(open),
-      hintTo: t.awaitingApproval > 0 && t.awaitingApprovalStatusId ? path({ ...open, statusIds: [t.awaitingApprovalStatusId] }) : undefined,
+      to: path({ ...open, waitingOn: ['customer'] }),
+      hintTo: t.awaitingApproval > 0 && t.awaitingApprovalStatusId ? path({ ...open, waitingOn: ['customer'], statusIds: [t.awaitingApprovalStatusId] }) : undefined,
     },
     { label: 'Breached', value: fmtNumber(t.breached), icon: <Timer className="h-4 w-4" />, tone: t.breached > 0 ? 'bad' : 'good', hint: `${fmtNumber(t.atRisk)} at risk`, spark: spark.map((s) => s.breaches), sparkLabel: `SLA breaches per day, last ${sparkDays} days`, to: path({ ...open, sla: 'breached' }), hintTo: path({ ...open, sla: 'at_risk' }) },
     { label: `Resolved · ${days}d`, value: fmtNumber(t.resolvedInPeriod), icon: <CheckCircle2 className="h-4 w-4" />, delta: d.deltas.resolvedInPeriod, hint: `${fmtNumber(t.openedInPeriod)} opened in the period`, spark: spark.map((s) => s.resolved), sparkLabel: `Tickets resolved per day, last ${sparkDays} days`, to: resolvedInPeriod, hintTo: openedInPeriod },

@@ -1,6 +1,6 @@
 import { eq, and, or, inArray, isNull, isNotNull, gte, lte, lt, ne, sql, desc, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
-import type { TicketType } from '@itsm/shared';
+import type { TicketType, WaitingOn } from '@itsm/shared';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ForbiddenError, ValidationError } from '@/core/errors';
@@ -92,6 +92,9 @@ export function buildWhere(ctx: Ctx, q: StatsQuery, opts: WhereOpts = {}): SQL |
   if (statusIds.length) conds.push(inArray(T.statusId, statusIds));
   const cats = csv(q.statusCategory);
   if (cats.length) conds.push(statusIdsOfCategories(cats));
+  // Who the ticket waits on: the one predicate behind "Awaiting customer" / "Waiting on you" (`waitingOn=customer`) and the staff pills for the other parties.
+  const waits = csv(q.waitingOn);
+  if (waits.length) conds.push(inArray(T.pendingWaitingOn, waits));
   if (q.open) conds.push(statusIdsOfCategories(OPEN_CATEGORIES));
   const prios = csv(q.priorityId);
   if (prios.length) conds.push(inArray(T.priorityId, prios));
@@ -222,6 +225,7 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
       csatRating: T.csatRating,
       surveyStatus: schema.ticketSurveys.status,
       surveyExpiresAt: schema.ticketSurveys.expiresAt,
+      pendingWaitingOn: T.pendingWaitingOn,
     })
     .from(T)
     .leftJoin(schema.ticketSurveys, eq(schema.ticketSurveys.ticketId, T.id))
@@ -278,6 +282,8 @@ export async function listTickets(ctx: Ctx, q: ListQuery) {
     isKnownError: !!r.isKnownError,
     // The customer's rating and the survey state (the portal "Rate" badge needs them too); a pending survey past its expiry reads as expired until the sweep marks it.
     csatRating: r.csatRating ?? null,
+    /** Who the ticket waits on (null when not in a wait); the portal re-reads it through its own fence. */
+    waitingOn: r.pendingWaitingOn as WaitingOn | null,
     surveyStatus: r.surveyStatus === 'pending' && r.surveyExpiresAt && r.surveyExpiresAt.getTime() <= Date.now() ? 'expired' : r.surveyStatus ?? null,
     // Staff only: the risk forecast and the customer's mood are internal signals.
     breachRisk: staff && r.breachRisk ? { level: r.breachRisk as RiskLevel, score: r.breachRiskScore ?? 0, reason: r.breachRiskReason ?? '' } : null,
@@ -334,9 +340,11 @@ export const strip = (q: StatsQuery, keys: readonly (keyof StatsQuery)[]): Stats
  * the type, so the chips describe the current tab. `byPriority`, `byStatus`,
  * `byTeam` and the series describe exactly what is in the list (full query).
  * `opts.tileKeys` replaces `TILE_KEYS` for a caller whose tiles differ (the
- * portal strips `csat` as well); `awaitingCustomer` (open, status key
- * `pending_customer`) and `surveyPending` (`surveyPendingCond`) sit in the tile
- * set for the portal's Awaiting your reply and To rate tiles.
+ * portal strips `csat` and `waitingOn` as well); `awaitingCustomer` (open and
+ * `pending_waiting_on = 'customer'`: the one predicate for "waiting on the
+ * customer", its door `waitingOn=customer`) and `surveyPending`
+ * (`surveyPendingCond`) sit in the tile set for the portal's Waiting on you and
+ * To rate tiles; on the staff list `waitingOn` is a pill (base scope).
  */
 export async function ticketStats(ctx: Ctx, q: StatsQuery, opts: { tileKeys?: readonly (keyof StatsQuery)[] } = {}) {
   const wo = await whereOpts(ctx, q);
@@ -375,7 +383,7 @@ export async function ticketStats(ctx: Ctx, q: StatsQuery, opts: { tileKeys?: re
       createdToday: sql<number>`count(*) FILTER (WHERE ${T.createdAt} >= ${todayStart})::int`,
       resolvedToday: sql<number>`count(*) FILTER (WHERE ${T.resolvedAt} >= ${todayStart})::int`,
       knownErrors: sql<number>`count(*) FILTER (WHERE EXISTS (SELECT 1 FROM problem_details pd WHERE pd.ticket_id = ${T.id} AND pd.is_known_error))::int`,
-      awaitingCustomer: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${T.statusId} IN (SELECT id FROM config_options WHERE type = 'ticket_status' AND key = 'pending_customer'))::int`,
+      awaitingCustomer: sql<number>`count(*) FILTER (WHERE ${openCond} AND ${T.pendingWaitingOn} = 'customer')::int`,
       surveyPending: sql<number>`count(*) FILTER (WHERE ${surveyPendingCond(T.id)})::int`,
     })
     .from(T)

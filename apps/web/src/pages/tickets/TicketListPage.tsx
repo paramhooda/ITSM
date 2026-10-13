@@ -25,7 +25,8 @@ import { ScopeBadge } from '@/components/tickets/ScopeBadge';
 import { SlaIndicator, slaTone } from '@/components/tickets/SlaIndicator';
 import { RiskBadge, SentimentBadge, isUnhappy } from '@/components/tickets/RiskBadge';
 import { RatingBadge } from '@/components/surveys/RatingBadge';
-import type { TicketListRow, TicketType, SavedView } from '@/components/tickets/types';
+import type { TicketListRow, TicketType, SavedView, WaitingOn } from '@/components/tickets/types';
+import { PendingDialog, type PendingTarget } from '@/components/tickets/detail/PendingDialog';
 
 type Tab = 'all' | TicketType;
 const TABS: { key: Tab; label: string }[] = [
@@ -71,12 +72,20 @@ const ASSIGNEE_VIEWS = [
 ];
 const DOMAIN_LABELS: Record<string, string> = { general: 'General', noc: 'NOC', soc: 'SOC', amc: 'AMC', service_desk: 'Service desk' };
 /** Every filter the page owns; sort/order/page live beside them in the URL but are not filters. */
-const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'statusId', 'priorityId', 'assignee', 'teamId', 'serviceId', 'siteId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'];
+const FILTER_KEYS = ['q', 'customerId', 'statusCategory', 'statusId', 'waitingOn', 'priorityId', 'assignee', 'teamId', 'serviceId', 'siteId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'isMajor', 'type', 'domain', 'categoryId', 'securitySeverityId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'knownError', 'csat', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'];
+/** Who an open ticket waits on (`pending_waiting_on`): one word with the dashboards' "Awaiting customer" and the portal's "Waiting on you" (`customer`); the other parties are the desk's own pills. */
+const WAITING_ON_OPTIONS: { value: WaitingOn; label: string; dot: string }[] = [
+  { value: 'customer', label: 'Customer', dot: 'amber' },
+  { value: 'vendor', label: 'Supplier or third party', dot: 'violet' },
+  { value: 'change', label: 'A scheduled change', dot: 'blue' },
+  { value: 'agreement', label: 'Agreed with the customer', dot: 'slate' },
+  { value: 'internal', label: 'Internal hold', dot: 'slate' },
+];
 /** The customer's satisfaction rating after resolution: rated, low, awaiting a reply, never surveyed. */
 const CSAT_OPTIONS: { value: string; label: string; dot: string | null }[] = [
   { value: 'rated', label: 'Rated', dot: 'green' },
   { value: 'low', label: 'Low rating', dot: 'red' },
-  { value: 'pending', label: 'Awaiting reply', dot: 'amber' },
+  { value: 'pending', label: 'Survey pending', dot: 'amber' },
   { value: 'unrated', label: 'Not surveyed', dot: null },
 ];
 /** The Change group (shown on the Changes tab): type, questionnaire level and the scheduled window. */
@@ -229,6 +238,8 @@ export default function TicketListPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.views }),
     onError: (e: Error) => toast.error(e.message),
   });
+  // Set status… onto a wait asks for one reason for the whole selection before anything moves.
+  const [bulkPending, setBulkPending] = useState<PendingTarget | null>(null);
   const bulk = useMutation({
     mutationFn: (body: Record<string, unknown>) => ticketsApi.bulk({ ...body, ids: [...selected] }),
     onSuccess: (r) => {
@@ -371,6 +382,7 @@ export default function TicketListPage() {
         if (anyStatus) return addApplied('statusCategory', 'Any status');
         return state.statusCategory !== DEFAULTS.statusCategory && addApplied('statusCategory', `Status: ${cats.map((c) => STATUS_CATEGORIES.find((x) => x.key === c)?.label ?? c).join(', ')}`);
       case 'statusId': return state.statusId && addApplied('statusId', `Status: ${labelsOf(state.statusId, (id) => byId(id)?.label)}`);
+      case 'waitingOn': return state.waitingOn && addApplied('waitingOn', `Waiting on: ${labelsOf(state.waitingOn, (v) => WAITING_ON_OPTIONS.find((o) => o.value === v)?.label)}`);
       case 'priorityId': return state.priorityId && addApplied('priorityId', `Priority: ${labelsOf(state.priorityId, (id) => priorities.find((p) => p.id === id)?.label)}`);
       case 'customerId': return state.customerId && addApplied('customerId', `Customer: ${customerItems.find((c) => c.id === state.customerId)?.name ?? '…'}`);
       case 'assignee': return assigneeFilter && addApplied('assignee', ASSIGNEE_VIEWS.find((v) => v.value === assigneeFilter)?.label ?? `Assignee: ${engineerItems.find((u) => u.id === assigneeFilter)?.name ?? '…'}`);
@@ -431,6 +443,9 @@ export default function TicketListPage() {
       </FilterGroup>
       <FilterGroup label="SLA">
         <FilterOptions options={SLA_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(o.color) }))} value={splitCsv(state.slaState)} onChange={(v) => set({ slaState: v as string | undefined })} />
+      </FilterGroup>
+      <FilterGroup label="Waiting on" hint="Who an open ticket waits on; the Customer pill is the dashboards' Awaiting customer" defaultOpen={!!state.waitingOn}>
+        <FilterOptions options={WAITING_ON_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(o.dot) }))} value={splitCsv(state.waitingOn)} onChange={(v) => set({ waitingOn: v as string | undefined })} />
       </FilterGroup>
       <FilterGroup label="Breach risk" hint="Forecast from the clock, how long similar tickets take and who owns it" defaultOpen={!!state.breachRisk}>
         <FilterOptions options={RISK_OPTIONS.map((o) => ({ value: o.value, label: o.label, dot: dotClass(BREACH_RISK_COLORS[o.value]) }))} value={state.breachRisk} onChange={(v) => set({ breachRisk: v as string | undefined })} />
@@ -602,7 +617,24 @@ export default function TicketListPage() {
                 </Select>
               )}
               {can('tickets:update') && <Select className="h-8 py-0 w-36 text-[12.5px]" placeholder="Set priority…" value="" onChange={(e) => e.target.value && bulk.mutate({ action: 'priority', payload: { priorityId: e.target.value } })} options={priorities.map((o) => ({ value: o.id, label: o.label }))} />}
-              {can('tickets:update') && <Select className="h-8 py-0 w-40 text-[12.5px]" placeholder="Set status…" value="" onChange={(e) => e.target.value && bulk.mutate({ action: 'status', payload: { statusId: e.target.value } })} options={options('ticket_status', tab !== 'all' ? { ticketType: tab } : undefined).map((o) => ({ value: o.id, label: o.label }))} />}
+              {can('tickets:update') && (
+                <Select
+                  className="h-8 py-0 w-40 text-[12.5px]"
+                  placeholder="Set status…"
+                  value=""
+                  data-testid="bulk-status"
+                  onChange={(e) => {
+                    const o = byId(e.target.value);
+                    if (!o) return;
+                    // A wait needs a reason: the dialog opens once for the selection; Awaiting Approval is never set by hand.
+                    if (o.statusCategory === 'pending' && o.metadata?.wait !== false) setBulkPending({ id: o.id, key: o.key, label: o.label, pausesSla: o.pausesSla });
+                    else bulk.mutate({ action: 'status', payload: { statusId: o.id } });
+                  }}
+                  options={options('ticket_status', tab !== 'all' ? { ticketType: tab } : undefined)
+                    .filter((o) => o.key !== 'awaiting_approval')
+                    .map((o) => ({ value: o.id, label: o.statusCategory === 'pending' && o.metadata?.wait !== false ? `${o.label}…` : o.label }))}
+                />
+              )}
               <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
                 Clear
               </Button>
@@ -672,6 +704,7 @@ export default function TicketListPage() {
       </ListShell>
 
       <SaveViewDialog open={saveOpen} onClose={() => setSaveOpen(false)} onSave={(name, isShared) => saveView.mutate({ name, isShared })} saving={saveView.isPending} />
+      <PendingDialog open={!!bulkPending} onClose={() => setBulkPending(null)} ticketNumber="" count={selected.size} status={bulkPending} busy={bulk.isPending} onSubmit={(body) => { bulk.mutate({ action: 'status', payload: body }); setBulkPending(null); }} />
     </div>
   );
 }

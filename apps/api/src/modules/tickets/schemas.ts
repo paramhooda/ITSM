@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TICKET_TYPES, LINK_TYPES, CHANGE_TYPES, SCOPE_STATUSES, SLA_OUTCOMES } from '@itsm/shared';
+import { TICKET_TYPES, LINK_TYPES, CHANGE_TYPES, SCOPE_STATUSES, SLA_OUTCOMES, WAITING_ON } from '@itsm/shared';
 import { paginationSchema, sortSchema } from '@/core/pagination';
 import { knownErrorPatchSchema } from '@/modules/known-errors/schemas';
 import { SLA_STATES } from '@/modules/sla/predicates';
@@ -117,12 +117,22 @@ export const updateTicketSchema = z.object({
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
 
+/** Entering a wait: the reason (mandatory, enforced by the service), the party, the expected end, a reference, and whether the reason is a reply the customer reads. */
+const pendingFields = {
+  pendingReason: z.string().trim().max(2000).nullable().optional(),
+  waitingOn: z.enum(WAITING_ON).nullable().optional(),
+  expectedAt: z.coerce.date().nullable().optional(),
+  pendingReference: z.string().trim().max(200).nullable().optional(),
+  tellCustomer: z.boolean().optional(),
+};
+
 export const statusChangeSchema = z.object({
   statusId: uuid,
   resolutionCodeId: nullableUuid,
   resolutionNotes: z.string().max(20000).nullable().optional(),
   closureCodeId: nullableUuid,
   comment: z.string().max(20000).nullable().optional(),
+  ...pendingFields,
 });
 
 export const resolveSchema = z.object({
@@ -193,6 +203,8 @@ export const commentSchema = z.object({
   minutesSpent: z.number().int().min(1).max(24 * 60).nullable().optional(),
   workType: z.string().max(40).optional(),
   billable: z.boolean().optional(),
+  /** Reply and wait: the status the ticket moves to after the comment, which becomes the reason (staff only). */
+  then: z.object({ statusId: uuid, expectedAt: z.coerce.date().nullable().optional(), pendingReference: z.string().trim().max(200).nullable().optional(), waitingOn: z.enum(WAITING_ON).nullable().optional() }).nullable().optional(),
 });
 
 export const commentEditSchema = z.object({ body: z.string().trim().min(1).max(50000) });
@@ -230,7 +242,7 @@ export const requestApprovalSchema = z.object({ approvalWorkflowId: nullableUuid
 export const bulkSchema = z.object({
   ids: z.array(uuid).min(1).max(200),
   action: z.enum(['assign', 'status', 'priority']),
-  payload: z.object({ teamId: nullableUuid, assigneeId: nullableUuid, statusId: uuid.optional(), priorityId: uuid.optional(), comment: z.string().max(2000).nullable().optional() }).default({}),
+  payload: z.object({ teamId: nullableUuid, assigneeId: nullableUuid, statusId: uuid.optional(), priorityId: uuid.optional(), comment: z.string().max(2000).nullable().optional(), ...pendingFields }).default({}),
 });
 
 /** A comma-separated list (`?priorityId=a,b`): every element must satisfy `item`; the raw string is kept so `csv()` splits it once in `buildWhere`. */
@@ -245,6 +257,8 @@ export const listQuerySchema = paginationSchema.merge(sortSchema).extend({
   serviceId: uuid.optional(),
   statusId: csvOf(uuid).optional(),
   statusCategory: z.string().optional(),
+  /** Who the ticket waits on (`pending_waiting_on`), a comma list of customer, vendor, change, agreement, internal; `customer` is the one word for "waiting on the customer" on every surface. */
+  waitingOn: csvOf(z.enum(WAITING_ON), 80).optional(),
   /** Comma lists: a dashboard breakdown ("P1 and P2", "breached or at risk", "every domain but security") opens the list with exactly its predicate. */
   priorityId: csvOf(uuid).optional(),
   assigneeId: uuid.optional(),

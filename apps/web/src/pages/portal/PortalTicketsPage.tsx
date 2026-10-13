@@ -20,7 +20,7 @@ import { RatingBadge } from '@/components/surveys/RatingBadge';
 
 /**
  * The organisation's tickets on the staff list's conventions: the URL holds the
- * conditions in the list vocabulary (`statusCategory`, `statusId`, `csat`,
+ * conditions in the list vocabulary (`statusCategory`, `statusId`, `waitingOn`, `csat`,
  * `priorityId`, `siteId`, `serviceId`, `slaState`, the created and resolved
  * ranges, `type`, `mine`, `q`), one mapping (`toPortalParams`) turns them into
  * the list and stats queries, the breadcrumb reads them back in the order they
@@ -43,8 +43,8 @@ const CATEGORY_LABELS: Record<string, string> = { new: 'New', open: 'Open', pend
 const SLA_LABELS: Record<string, string> = { breached: 'Breached', at_risk: 'At risk', ok: 'On track' };
 /** The page's default view ("All open", the breadcrumb root): the open categories, newest activity first, 25 a page. */
 const DEFAULTS = PORTAL_LIST_DEFAULTS;
-/** The status keys a chip writes exclusively. */
-const STATUS_KEYS = ['statusCategory', 'statusId', 'csat'];
+/** The status keys a chip writes exclusively (`waitingOn` is the Waiting on you chip: what waits on the organisation, a reply or an approval). */
+const STATUS_KEYS = ['statusCategory', 'statusId', 'waitingOn', 'csat'];
 const FILTER_KEYS = ['q', 'type', ...STATUS_KEYS, 'priorityId', 'siteId', 'serviceId', 'slaState', 'mine', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'];
 /** The portal's older link keys (the home's "by priority" bars, the assistant, bookmarks): rewritten into the list keys on arrival. */
 const LEGACY_KEYS = ['status', 'priority'];
@@ -53,12 +53,12 @@ const CLOSED_CATEGORIES = 'closed,cancelled';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** What a chip writes: its own keys, the other status keys cleared (the Open chip is the default view, so it clears them all). */
-function chipPatch(chip: PortalStatusChip, pendingId?: string): Record<string, string | undefined> {
-  const clear: Record<string, string | undefined> = { statusCategory: undefined, statusId: undefined, csat: undefined };
+function chipPatch(chip: PortalStatusChip): Record<string, string | undefined> {
+  const clear: Record<string, string | undefined> = { statusCategory: undefined, statusId: undefined, waitingOn: undefined, csat: undefined };
   switch (chip) {
     case 'open': return clear;
-    // Awaiting your reply is the `pending_customer` status; without that option the pending category stands in, as the service does.
-    case 'awaiting': return pendingId ? { ...clear, statusId: pendingId } : { ...clear, statusCategory: 'pending' };
+    // Waiting on you is one word everywhere: open tickets waiting on the organisation (`waitingOn=customer`, the open categories by default).
+    case 'awaiting': return { ...clear, waitingOn: 'customer' };
     case 'resolved': return { ...clear, statusCategory: 'resolved' };
     case 'closed': return { ...clear, statusCategory: CLOSED_CATEGORIES };
     case 'rate': return { ...clear, statusCategory: RATE_CATEGORIES, csat: 'pending' };
@@ -66,41 +66,43 @@ function chipPatch(chip: PortalStatusChip, pendingId?: string): Record<string, s
   }
 }
 
-/** The chip the URL's status keys stand for, or null when they name a status no chip covers (a link with another status id, two categories, a pending survey inside the open categories). */
-function chipOf(state: Record<string, string>, pendingId: string | undefined, lookupsReady: boolean): PortalStatusChip | null {
+/** The chip the URL's status keys stand for, or null when they name a status no chip covers (a link with a status id, two categories, a pending survey inside the open categories, the awaiting-approval door). */
+function chipOf(state: Record<string, string>): PortalStatusChip | null {
   // To rate is the pending survey on a resolved or closed ticket: the chip stands only when the categories say so (or no category stands in the way).
-  if (state.csat === 'pending') return !state.statusId && (state.statusCategory === RATE_CATEGORIES || state.statusCategory === 'any') ? 'rate' : null;
-  if (state.statusId) return !lookupsReady || state.statusId === pendingId ? 'awaiting' : null;
+  if (state.csat === 'pending') return !state.statusId && !state.waitingOn && (state.statusCategory === RATE_CATEGORIES || state.statusCategory === 'any') ? 'rate' : null;
+  if (state.statusId) return null;
   const cat = state.statusCategory;
+  // Waiting on you is `waitingOn=customer` on the open categories; with a status narrowing it (the approval door) no chip stands.
+  if (state.waitingOn) return state.waitingOn === 'customer' && (!cat || cat === DEFAULTS.statusCategory) ? 'awaiting' : null;
   if (cat === 'any') return 'any';
   if (cat === DEFAULTS.statusCategory) return 'open';
   if (cat === 'resolved') return 'resolved';
   if (cat === CLOSED_CATEGORIES) return 'closed';
-  if (cat === 'pending' && lookupsReady && !pendingId) return 'awaiting';
   return null;
 }
 
 /**
  * Older links carry `status=open|awaiting|resolved|closed|rate|all` and
  * `priority=p1`; they are rewritten once into the list keys so one breadcrumb
- * describes every list. The rewrite needs the option ids, so it waits for the
- * lookups ('wait') and the queries stay off until it has run. A link with
- * `csat=pending` and no status key is the To rate door: it gains the rateable
- * categories (as `portalStateForLink` and the portal API do), so the page's
- * default open categories never hide the tickets still to rate.
+ * describes every list (`status=awaiting` becomes `waitingOn=customer`, as
+ * `portalStateForLink` reads it). The priority rewrite needs the option ids, so
+ * it waits for the lookups ('wait') and the queries stay off until it has run. A
+ * link with `csat=pending` and no status key is the To rate door: it gains the
+ * rateable categories (as `portalStateForLink` and the portal API do), so the
+ * page's default open categories never hide the tickets still to rate.
  */
-function legacyPatch(raw: URLSearchParams, lookups: { ready: boolean; pendingId?: string; priorityIdOf: (key: string) => string | undefined }): Record<string, string | undefined> | 'wait' | null {
+function legacyPatch(raw: URLSearchParams, lookups: { ready: boolean; priorityIdOf: (key: string) => string | undefined }): Record<string, string | undefined> | 'wait' | null {
   const bareCsat = raw.get('csat') === 'pending' && !raw.has('statusCategory') && !raw.has('statusId');
   const legacy = LEGACY_KEYS.some((k) => raw.has(k));
   if (!legacy && !bareCsat) return null;
   if (!legacy) return { statusCategory: RATE_CATEGORIES };
-  if (!lookups.ready) return 'wait';
+  if (raw.has('priority') && !lookups.ready) return 'wait';
   const patch: Record<string, string | undefined> = { status: undefined, priority: undefined };
   if (bareCsat) patch.statusCategory = RATE_CATEGORIES;
   const status = raw.get('status');
   if (status && !STATUS_KEYS.some((k) => raw.has(k))) {
     const chip = (status === 'all' ? 'any' : status) as PortalStatusChip;
-    if (['open', 'awaiting', 'resolved', 'closed', 'rate', 'any'].includes(chip)) Object.assign(patch, chipPatch(chip, lookups.pendingId));
+    if (['open', 'awaiting', 'resolved', 'closed', 'rate', 'any'].includes(chip)) Object.assign(patch, chipPatch(chip));
   }
   const priority = raw.get('priority');
   if (priority && !raw.has('priorityId')) {
@@ -134,9 +136,8 @@ export default function PortalTicketsPage() {
   // Read-only view of the URL: its key order is the order the conditions were applied, which the breadcrumb follows.
   const [urlParams] = useSearchParams();
   const lookupsQuery = useLookups();
-  const { byId, byKey, service } = lookupsQuery;
+  const { byId, service } = lookupsQuery;
   const lookupsReady = !lookupsQuery.isPending;
-  const pendingId = byKey('ticket_status', 'pending_customer')?.id;
   const me = useQuery({ queryKey: pk.me, queryFn: portalApi.me, staleTime: 5 * 60_000 });
   const sites = me.data?.sites ?? [];
   const canServices = me.data?.permissions.includes('portal:contracts') ?? false;
@@ -149,14 +150,14 @@ export default function PortalTicketsPage() {
   const priorities = useMemo(() => (priorityOptions ?? []).filter((o) => o.isActive).map((o) => ({ id: o.id, key: o.key.toLowerCase(), label: o.label, level: o.level ?? (Number(o.key.replace(/\D/g, '')) || 5) })).sort((a, b) => a.level - b.level), [priorityOptions]);
 
   // Older links arrive with the portal's own `status=` and `priority=` keys; normalise them once, then query.
-  const legacy = useMemo(() => legacyPatch(urlParams, { ready: lookupsReady, pendingId, priorityIdOf: (key) => priorities.find((p) => p.key === key)?.id }), [urlParams, lookupsReady, pendingId, priorities]);
+  const legacy = useMemo(() => legacyPatch(urlParams, { ready: lookupsReady, priorityIdOf: (key) => priorities.find((p) => p.key === key)?.id }), [urlParams, lookupsReady, priorities]);
   useEffect(() => {
     if (legacy && legacy !== 'wait') set(legacy, false);
   }, [legacy, set]);
 
   // A type outside the four the organisation can see reads as All; `toPortalParams` drops it as well, so the route never refuses it.
   const tab: Tab = TABS.some((t) => t.key === state.type) ? (state.type as Tab) : 'all';
-  const chip = chipOf(state, pendingId, lookupsReady);
+  const chip = chipOf(state);
   // One mapping from the URL state to the API (shared with the dashboards guard test), so a link reproduces its number.
   const filterParams = useMemo(() => toPortalParams({ ...state, type: tab }) as Record<string, unknown>, [state, tab]);
   const params = useMemo(() => ({ ...filterParams, page, pageSize, sort: state.sort, order: state.order }), [filterParams, page, pageSize, state.sort, state.order]);
@@ -167,7 +168,7 @@ export default function PortalTicketsPage() {
   // The type pills: All always, then a pill for every type the organisation has in the scope (`byType` ignores the type pill, so the set is stable while clicking), plus the pill in effect even at zero so its chip can be read back; All is the sum of the pills.
   const tabs = TABS.filter((t) => t.key === 'all' || t.key === tab || (s ? (s.byType[t.key] ?? 0) > 0 : false));
 
-  const pickChip = (next: PortalStatusChip) => set(chipPatch(next, pendingId));
+  const pickChip = (next: PortalStatusChip) => set(chipPatch(next));
   const clearFilters = () => set(Object.fromEntries(FILTER_KEYS.map((k) => [k, undefined])));
 
   // The breadcrumb: one chip per condition in effect, in the order they were applied (the URL's key order);
@@ -188,9 +189,10 @@ export default function PortalTicketsPage() {
         if (chip === 'rate') return addApplied('rate', chipLabel('rate'), ['statusCategory', 'csat']);
         if (key === 'csat') return state.csat && addApplied('csat', chipLabel('rate'));
         if (chip === 'any' || chip === 'resolved' || chip === 'closed') return addApplied('statusCategory', chipLabel(chip));
-        if (chip === 'awaiting' && !state.statusId) return addApplied('statusCategory', chipLabel('awaiting'));
         return state.statusCategory && state.statusCategory !== DEFAULTS.statusCategory && addApplied('statusCategory', `Status: ${labelsOf(state.statusCategory, (c) => CATEGORY_LABELS[c])}`);
-      case 'statusId': return state.statusId && addApplied('statusId', chip === 'awaiting' ? chipLabel('awaiting') : `Status: ${labelsOf(state.statusId, (id) => byId(id)?.label)}`);
+      // The Waiting on you chip (one word with the home tile and the brief); any other party is refused by the portal route, so it never reads back.
+      case 'waitingOn': return state.waitingOn && addApplied('waitingOn', state.waitingOn === 'customer' ? chipLabel('awaiting') : `Waiting on: ${state.waitingOn}`);
+      case 'statusId': return state.statusId && addApplied('statusId', `Status: ${labelsOf(state.statusId, (id) => byId(id)?.label)}`);
       case 'priorityId': return state.priorityId && addApplied('priorityId', `Priority: ${labelsOf(state.priorityId, (id) => priorities.find((p) => p.id === id)?.label)}`);
       case 'siteId': return state.siteId && addApplied('siteId', `Site: ${sites.find((x) => x.id === state.siteId)?.name ?? '…'}`);
       case 'serviceId': return state.serviceId && addApplied('serviceId', `Service: ${serviceName(state.serviceId) ?? '…'}`);
@@ -212,7 +214,7 @@ export default function PortalTicketsPage() {
   const total = list.data?.total;
   const noun = plural(total ?? 0, TYPE_NOUN[tab]);
   const before = chip === 'open' ? 'open ' : chip === 'resolved' ? 'resolved ' : chip === 'closed' ? 'closed ' : '';
-  const after = chip === 'awaiting' ? ' awaiting your reply' : chip === 'rate' ? ' to rate' : '';
+  const after = chip === 'awaiting' ? ' waiting on you' : chip === 'rate' ? ' to rate' : '';
   const countLine = total === undefined ? undefined : total === 0 ? `0 ${before}${noun}${after}` : `${fmtNumber((page - 1) * pageSize + 1)}–${fmtNumber(Math.min(total, page * pageSize))} of ${fmtNumber(total)} ${before}${noun}${after}`;
 
   // The four tiles: Open is the baseline every other number is a slice of; the others toggle one condition in place.
@@ -224,7 +226,7 @@ export default function PortalTicketsPage() {
   const tiles: KpiItem[] = s
     ? [
         { label: 'Open tickets', value: fmtNumber(s.open), icon: <Inbox className="h-4 w-4" />, hint: `${fmtNumber(windowOpened)} opened · ${fmtNumber(windowResolved)} resolved ${windowLabel}`, spark: s.series.map((d) => d.opened), sparkLabel: 'Tickets opened per day' },
-        { label: 'Awaiting your reply', value: fmtNumber(s.awaiting), tone: s.awaiting > 0 ? 'warn' : 'default', icon: <Reply className="h-4 w-4" />, hint: s.awaiting > 0 ? 'the engineer is waiting on you' : 'nothing waiting on you', onClick: () => pickChip(chip === 'awaiting' ? 'open' : 'awaiting'), active: chip === 'awaiting' },
+        { label: 'Waiting on you', value: fmtNumber(s.awaiting), tone: s.awaiting > 0 ? 'warn' : 'default', icon: <Reply className="h-4 w-4" />, hint: s.awaiting > 0 ? 'a reply or an approval the service desk needs from you' : 'nothing waiting on you', onClick: () => pickChip(chip === 'awaiting' ? 'open' : 'awaiting'), active: chip === 'awaiting' },
         { label: 'Breached', value: fmtNumber(s.breached), tone: s.breached > 0 ? 'bad' : 'default', icon: <Timer className="h-4 w-4" />, hint: `${fmtNumber(s.atRisk)} at risk`, onClick: () => set({ slaState: state.slaState === 'breached' ? undefined : 'breached' }), active: state.slaState === 'breached' },
         { label: 'To rate', value: fmtNumber(s.toRate), tone: s.toRate > 0 ? 'accent' : 'default', icon: <Star className="h-4 w-4" />, hint: s.toRate > 0 ? 'resolved tickets waiting for your rating' : 'every resolved ticket is rated', onClick: () => pickChip(chip === 'rate' ? 'open' : 'rate'), active: chip === 'rate' },
       ]

@@ -18,6 +18,8 @@ import * as portal from '@/modules/portal/service';
 import { portalTicketStatsQuery } from '@/modules/portal/schemas';
 import { pendingForPortal } from '@/modules/surveys/portal';
 import { ValidationError } from '@/core/errors';
+import { hashPassword } from '@/lib/crypto';
+import { buildApp } from '@/core/app';
 
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const ids = {
@@ -102,7 +104,7 @@ beforeAll(async () => {
     ids.catalogApproval = withApproval.id;
 
     // Portal users: customer_admin for A, customer_user for B (roles scoped to their customer).
-    const [userA] = await tx.insert(schema.users).values({ email: `portal.a.${suffix}@example.test`, name: 'Alice Admin', userType: 'customer', customerId: a.id, status: 'active' }).returning();
+    const [userA] = await tx.insert(schema.users).values({ email: `portal.a.${suffix}@example.test`, name: 'Alice Admin', userType: 'customer', customerId: a.id, status: 'active', passwordHash: await hashPassword('Demo@12345') }).returning();
     const [userB] = await tx.insert(schema.users).values({ email: `portal.b.${suffix}@example.test`, name: 'Bob User', userType: 'customer', customerId: b.id, status: 'active' }).returning();
     ids.userA = userA.id;
     ids.userB = userB.id;
@@ -230,10 +232,14 @@ describe('customer portal', () => {
 
   it('a customer reply on a ticket awaiting the customer sends it back to the service desk and resumes the SLA', async () => {
     const pendingId = await withSystem((tx) => optionId(tx, 'ticket_status', 'pending_customer'));
-    await asAdmin((ctx) => changeStatus(ctx, ids.ticketA, { statusId: pendingId }));
+    // A wait needs a reason; for a customer wait it is posted as a reply the customer reads.
+    await expect(asAdmin((ctx) => changeStatus(ctx, ids.ticketA, { statusId: pendingId }))).rejects.toThrow(/reason is required/);
+    await asAdmin((ctx) => changeStatus(ctx, ids.ticketA, { statusId: pendingId, pendingReason: 'Please send the serial number of the switch.' }));
     const paused = await withSystem((tx) => tx.select().from(schema.ticketSlas).where(eq(schema.ticketSlas.ticketId, ids.ticketA)));
     expect(paused.length).toBeGreaterThan(0);
-    expect(paused.every((r) => r.state === 'paused')).toBe(true);
+    // Only the resolution and restoration clocks stop; the first-answer clocks keep running.
+    expect(paused.filter((r) => r.metric === 'resolution' || r.metric === 'restoration').every((r) => r.state === 'paused')).toBe(true);
+    expect(paused.filter((r) => r.metric === 'response' || r.metric === 'acknowledgement').every((r) => r.state !== 'paused')).toBe(true);
 
     // The portal shows it as waiting on the customer.
     const waiting = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, status: 'awaiting' } as Parameters<typeof portal.listPortalTickets>[1]));
@@ -244,6 +250,8 @@ describe('customer portal', () => {
     await asAdmin((ctx) => addComment(ctx, ids.ticketA, { kind: 'comment', body: 'Still waiting for the serial number.' }));
     let detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
     expect(detail.status?.key).toBe('pending_customer');
+    // The customer reads the wait in their own words, with the reason because it was shown to them, and nothing else.
+    expect(detail.pending).toEqual({ waitingOn: 'customer', waitingOnLabel: 'We need something from you', reason: 'Please send the serial number of the switch.', expectedAt: null });
 
     await asA((ctx) => portal.commentOnTicket(ctx, ids.ticketA, 'The serial number is SN-12345.'));
     detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
@@ -258,6 +266,52 @@ describe('customer portal', () => {
 
     // A further customer comment on a ticket that is already in progress changes nothing.
     await asA((ctx) => portal.commentOnTicket(ctx, ids.ticketA, 'Thanks.'));
+    detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
+    expect(detail.status?.key).toBe('in_progress');
+    expect(detail.pending).toBeNull();
+  });
+
+  it('a supplier wait whose reason stays with the desk reaches the customer without the reason; an internal hold shows the customer no wait', async () => {
+    const vendorId = await withSystem((tx) => optionId(tx, 'ticket_status', 'pending_vendor'));
+    const holdId = await withSystem((tx) => optionId(tx, 'ticket_status', 'on_hold'));
+    const inProgressId = await withSystem((tx) => optionId(tx, 'ticket_status', 'in_progress'));
+    const secret = `ISP case 4411, their engineer is late ${suffix}`;
+    await asAdmin((ctx) => changeStatus(ctx, ids.ticketA, { statusId: vendorId, pendingReason: secret, tellCustomer: false, pendingReference: 'ISP-4411', expectedAt: new Date('2030-01-15T00:00:00Z') }));
+    let detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
+    expect(detail.status?.key).toBe('pending_vendor');
+    expect(detail.pending).toEqual({ waitingOn: 'vendor', waitingOnLabel: 'Waiting on a supplier or third party', reason: null, expectedAt: new Date('2030-01-15T00:00:00Z') });
+    expect(Object.keys(detail.pending!).sort()).toEqual(['expectedAt', 'reason', 'waitingOn', 'waitingOnLabel']);
+    // The conversation never carries the hidden reason or the reference; the customer row names the wait and the date.
+    const text = JSON.stringify(detail.timeline);
+    expect(text).not.toContain(secret);
+    expect(text).not.toContain('ISP-4411');
+    expect(detail.timeline.some((i) => i.kind === 'activity' && i.type === 'pending' && /Waiting on a supplier or third party · expected 15 Jan 2030/.test(i.summary ?? ''))).toBe(true);
+    // A customer comment does not end a supplier wait.
+    await asA((ctx) => portal.commentOnTicket(ctx, ids.ticketA, 'Any news from the supplier?'));
+    detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
+    expect(detail.status?.key).toBe('pending_vendor');
+
+    // An internal hold: the customer's pending block is null and nothing about the hold reaches the conversation; on the portal list row and the
+    // detail the ticket reads as the type's working status (In Progress), while the staff record keeps On Hold.
+    await asAdmin((ctx) => changeStatus(ctx, ids.ticketA, { statusId: holdId, pendingReason: 'Waiting for the storage team', waitingOn: 'internal' }));
+    detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
+    expect(detail.pending).toBeNull();
+    expect(detail.status?.key).toBe('in_progress');
+    expect(detail.status?.label).toBe('In Progress');
+    const held = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50 } as Parameters<typeof portal.listPortalTickets>[1]));
+    const heldRow = held.items.find((t) => t.id === ids.ticketA)!;
+    expect(heldRow.status.key).toBe('in_progress');
+    expect([heldRow.awaitingCustomer, heldRow.waitingOn]).toEqual([false, null]);
+    // The Waiting on you number counts the rows flagged as waiting on the organisation (the request awaiting its approval), never the held ticket.
+    expect(held.counts.awaiting).toBe(held.items.filter((t) => t.awaitingCustomer).length);
+    expect(held.items.filter((t) => t.awaitingCustomer).map((t) => t.id)).not.toContain(ids.ticketA);
+    // Nothing of the hold leaves: no "internal", no "On Hold" and no reason in the whole portal payload.
+    expect(JSON.stringify(detail)).not.toMatch(/On Hold|internal|storage team/);
+    const [staffRow] = await withSystem((tx) => tx.select({ statusId: schema.tickets.statusId, pendingWaitingOn: schema.tickets.pendingWaitingOn }).from(schema.tickets).where(eq(schema.tickets.id, ids.ticketA)));
+    expect([staffRow.statusId, staffRow.pendingWaitingOn]).toEqual([holdId, 'internal']);
+    expect(JSON.stringify(detail.timeline)).not.toContain('storage team');
+    expect(detail.timeline.some((i) => i.kind === 'activity' && i.type === 'status' && /On Hold/.test(i.summary ?? ''))).toBe(false);
+    await asAdmin((ctx) => changeStatus(ctx, ids.ticketA, { statusId: inProgressId }));
     detail = await asA((ctx) => portal.getPortalTicket(ctx, ids.ticketA));
     expect(detail.status?.key).toBe('in_progress');
   });
@@ -394,7 +448,8 @@ describe('portal ticket list vocabulary', () => {
       await tx.update(schema.tickets).set({ statusId: await optionId(tx, 'ticket_status', 'in_progress') }).where(eq(schema.tickets.id, reopened));
       await tx.execute(sql`UPDATE ticket_slas SET state = 'breached', breached_at = now() WHERE ticket_id = ${ids.ticketA}::uuid AND metric = 'resolution'`);
       const [req] = await tx.select({ id: schema.tickets.id }).from(schema.tickets).where(and(eq(schema.tickets.customerId, ids.customerA), eq(schema.tickets.title, `Portal request ${suffix}`)));
-      await tx.update(schema.tickets).set({ statusId: pendingCustomerId }).where(eq(schema.tickets.id, req!.id));
+      // The wait is the column (what `changeStatus` writes with the status); the status key alone counts nowhere.
+      await tx.update(schema.tickets).set({ statusId: pendingCustomerId, pendingWaitingOn: 'customer', pendingReason: 'Please confirm the delivery address', pendingSetAt: new Date() }).where(eq(schema.tickets.id, req!.id));
     });
   });
 
@@ -410,6 +465,9 @@ describe('portal ticket list vocabulary', () => {
     expect(await count({ status: 'rate' })).toBe(1);
     expect(await count({ statusId: pendingCustomerId })).toBe(1);
     expect(await count({ status: 'awaiting' })).toBe(1);
+    // One word for what waits on the organisation: the chip alias and the key are the same list.
+    expect(await count({ waitingOn: 'customer' })).toBe(1);
+    expect(await count({ waitingOn: 'customer', statusCategory: 'any' })).toBe(1);
     expect(await count({ slaState: 'breached' })).toBe(1);
     expect(await count({ slaState: 'at_risk,ok' })).toBe(4);
     // A resolved range counts by resolution day whatever the current status (the reopened ticket keeps its resolution time).
@@ -427,6 +485,32 @@ describe('portal ticket list vocabulary', () => {
     expect(Object.keys(list.items[0]!)).not.toContain('customerName');
     const toRate = await asA((ctx) => portal.listPortalTickets(ctx, { page: 1, pageSize: 50, status: 'rate' }));
     expect(toRate.items.map((t) => t.id)).toEqual([resolved]);
+  });
+
+  it('accepts waitingOn=customer alone: any other party is the desk\'s business and the route refuses it', async () => {
+    expect(portalTicketStatsQuery.safeParse({ waitingOn: 'customer' }).success).toBe(true);
+    for (const party of ['vendor', 'change', 'agreement', 'internal', 'customer,vendor']) expect(portalTicketStatsQuery.safeParse({ waitingOn: party }).success, party).toBe(false);
+    const app = await buildApp();
+    try {
+      const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: `portal.a.${suffix}@example.test`, password: 'Demo@12345' } });
+      expect(login.statusCode).toBe(200);
+      const headers = { authorization: `Bearer ${(login.json() as { accessToken: string }).accessToken}` };
+      const ok = await app.inject({ method: 'GET', url: '/api/portal/tickets?waitingOn=customer', headers });
+      expect(ok.statusCode).toBe(200);
+      expect((ok.json() as { total: number; items: { awaitingCustomer: boolean }[] }).total).toBe(1);
+      expect((ok.json() as { items: { awaitingCustomer: boolean }[] }).items.every((t) => t.awaitingCustomer)).toBe(true);
+      // The route's own schema refuses every other party (the app answers a schema refusal with 400 `validation_error`, as every route does).
+      for (const url of ['/api/portal/tickets?waitingOn=vendor', '/api/portal/tickets/stats?waitingOn=vendor', '/api/portal/tickets?waitingOn=internal', '/api/portal/tickets?waitingOn=customer,vendor']) {
+        const res = await app.inject({ method: 'GET', url, headers });
+        expect(res.statusCode, url).toBe(400);
+        expect((res.json() as { error: string }).error, url).toBe('validation_error');
+      }
+      // The legacy chip alias still answers through the one key.
+      const alias = await app.inject({ method: 'GET', url: '/api/portal/tickets?status=awaiting', headers });
+      expect((alias.json() as { total: number }).total).toBe(1);
+    } finally {
+      await app.close();
+    }
   });
 
   it('accepts the SLA outcome keys (the home\'s compliance doors), refuses the window alone, and the rows stay the portal\'s own', async () => {
@@ -460,6 +544,7 @@ describe('portal ticket list vocabulary', () => {
       [{ status: 'resolved' }, 1],
       [{ statusId: pendingCustomerId }, 1],
       [{ status: 'awaiting' }, 1],
+      [{ waitingOn: 'customer' }, 1],
       [{ statusCategory: 'resolved,closed', csat: 'pending' }, 1],
       [{ status: 'rate' }, 1],
       [{ slaState: 'breached' }, 1],

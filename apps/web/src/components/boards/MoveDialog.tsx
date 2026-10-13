@@ -50,7 +50,7 @@ export function MoveDialog({ open, onClose, title, lanes, currentLane, refusals,
   );
 }
 
-export type TerminalKind = 'resolve' | 'close' | 'cancel';
+export type TerminalKind = 'resolve' | 'close' | 'cancel' | 'reopen';
 export interface PendingTerminal {
   ticketId: string;
   number: string;
@@ -60,13 +60,15 @@ export interface PendingTerminal {
   laneLabel?: string;
 }
 
-export const terminalKindOf = (category: string | null | undefined): TerminalKind | null => (category === 'resolved' ? 'resolve' : category === 'closed' ? 'close' : category === 'cancelled' ? 'cancel' : null);
+/** The dialog a move into an end state opens, or `reopen` when an ended card is dropped on a working lane (a reason is required). */
+export const terminalKindOf = (category: string | null | undefined, fromCategory?: string | null): TerminalKind | null =>
+  category === 'resolved' ? 'resolve' : category === 'closed' ? 'close' : category === 'cancelled' ? 'cancel' : fromCategory && ['resolved', 'closed', 'cancelled'].includes(fromCategory) && (category === 'open' || category === 'new') ? 'reopen' : null;
 
 /**
  * The dialogs a terminal move opens before anything changes: Resolve asks for the
  * resolution notes (the record's own `ResolveDialog`, which needs the full ticket, so
- * it is fetched first), Close and Cancel ask for a closure code and a comment. Cancelling
- * the dialog leaves the card where it was.
+ * it is fetched first), Close and Cancel ask for a closure code and a comment, Reopen
+ * asks why. Cancelling the dialog leaves the card where it was.
  */
 export function TerminalDropDialog({ pending, onClose, onDone }: { pending: PendingTerminal | null; onClose: () => void; onDone: (message: string) => void }) {
   const { options } = useLookups();
@@ -83,14 +85,14 @@ export function TerminalDropDialog({ pending, onClose, onDone }: { pending: Pend
   const run = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
       const p = pending!;
-      if (p.statusId) return ticketsApi.status(p.ticketId, { statusId: p.statusId, ...body });
+      if (p.statusId) return ticketsApi.status(p.ticketId, { statusId: p.statusId, ...body } as Parameters<typeof ticketsApi.status>[1]);
       if (p.kind === 'resolve') return ticketsApi.resolve(p.ticketId, body);
       if (p.kind === 'close') return ticketsApi.close(p.ticketId, body);
       return ticketsApi.cancel(p.ticketId, body);
     },
     onSuccess: () => {
       const p = pending!;
-      onDone(p.laneLabel ? `${p.number} moved to ${p.laneLabel}` : p.kind === 'resolve' ? `${p.number} resolved` : p.kind === 'close' ? `${p.number} closed` : `${p.number} cancelled`);
+      onDone(p.kind === 'reopen' ? `${p.number} reopened${p.laneLabel ? ` as ${p.laneLabel}` : ''}` : p.laneLabel ? `${p.number} moved to ${p.laneLabel}` : p.kind === 'resolve' ? `${p.number} resolved` : p.kind === 'close' ? `${p.number} closed` : `${p.number} cancelled`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -98,6 +100,9 @@ export function TerminalDropDialog({ pending, onClose, onDone }: { pending: Pend
   if (pending.kind === 'resolve') {
     if (!detail.data) return null;
     return <ResolveDialog open ticket={detail.data} busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ resolutionCodeId: v.resolutionCodeId, resolutionNotes: v.resolutionNotes })} />;
+  }
+  if (pending.kind === 'reopen') {
+    return <CommentDialog open title={`Reopen ${pending.number}`} confirmLabel="Reopen" label="Why is this being reopened?" required busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ comment: v.comment })} />;
   }
   if (pending.kind === 'close') {
     return <CommentDialog open title={`Close ${pending.number}`} confirmLabel="Close ticket" label="Closing comment" codes={closureCodes} busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ closureCodeId: v.codeId, comment: v.comment || null })} />;

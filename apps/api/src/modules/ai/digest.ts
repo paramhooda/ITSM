@@ -34,11 +34,6 @@ async function priorityIds(ctx: Ctx, levels: number[]) {
   return rows.map((r) => r.id);
 }
 
-async function statusIdsByKey(ctx: Ctx, keys: string[]) {
-  const rows = await ctx.tx.select({ id: schema.configOptions.id }).from(schema.configOptions).where(and(eq(schema.configOptions.type, 'ticket_status'), sql`${schema.configOptions.key} = ANY(ARRAY[${sql.join(keys.map((k) => sql`${k}`), sql`, `)}])`));
-  return rows.map((r) => r.id);
-}
-
 type Row = Awaited<ReturnType<typeof listTickets>>['items'][number];
 const compact = (t: Row): HandoverFacts['tickets'][number]['items'][number] => ({ id: t.id, number: t.number, title: t.title, priority: t.priority?.label ?? null, status: t.status?.label ?? null, customer: t.customerName ?? null, assignee: t.assigneeName ?? null, slaDueAt: iso(t.dueAt), breachRisk: t.breachRisk?.level ?? null });
 
@@ -51,14 +46,14 @@ export async function buildDigest(ctx: Ctx, opts: DigestOptions): Promise<Handov
   const base = { teamId: team.id, open: true, page: 1, pageSize: limit } as const;
   // one client per transaction: the lists run one after another
   const p12 = await priorityIds(ctx, [1, 2]);
-  const awaiting = await statusIdsByKey(ctx, ['pending_customer']);
   const all = await listTickets(ctx, listQuery({ ...base, pageSize: 1 }));
   const p1p2 = p12.length ? await listTickets(ctx, listQuery({ ...base, priorityId: p12.join(','), sort: 'priority', order: 'asc' })) : { items: [] as Row[], total: 0 };
   const breached = await listTickets(ctx, listQuery({ ...base, slaState: 'breached', sort: 'dueAt', order: 'asc' }));
   const atRisk = await listTickets(ctx, listQuery({ ...base, slaState: 'at_risk', sort: 'dueAt', order: 'asc' }));
   const highRisk = await listTickets(ctx, listQuery({ ...base, breachRisk: 'high', sort: 'dueAt', order: 'asc' }));
   const unassigned = await listTickets(ctx, listQuery({ ...base, unassigned: true, sort: 'priority', order: 'asc' }));
-  const awaitingCustomer = awaiting.length ? await listTickets(ctx, listQuery({ ...base, statusId: awaiting.join(','), sort: 'updatedAt', order: 'asc' })) : { items: [] as Row[], total: 0 };
+  // Waiting on the customer: the one predicate (`pending_waiting_on = 'customer'`), the same the list's `waitingOn=customer` door counts with.
+  const awaitingCustomer = await listTickets(ctx, listQuery({ ...base, waitingOn: 'customer', sort: 'updatedAt', order: 'asc' }));
   const major = await listMajor(ctx, { status: 'active', pageSize: 20 });
   const changes = await changeCalendar(ctx, { from: to, to: new Date(to.getTime() + 12 * 3_600_000), blackouts: false });
   const movement = await ctx.tx.execute(sql`

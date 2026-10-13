@@ -291,9 +291,9 @@ describe('ticket stats', () => {
   });
 
   it('awaitingCustomer and surveyPending sit in the tile set; csat stays base scope for staff and is stripped only through tileKeys', async () => {
-    // t2 waits on the customer; t3 (resolved above) carries a live pending survey.
+    // t2 waits on the customer (the column, which the status change writes; set with the status here); t3 (resolved above) carries a live pending survey.
     await withSystem(async (tx) => {
-      await tx.update(schema.tickets).set({ statusId: await optionId(tx, 'ticket_status', 'pending_customer') }).where(eq(schema.tickets.id, ids.t2));
+      await tx.update(schema.tickets).set({ statusId: await optionId(tx, 'ticket_status', 'pending_customer'), pendingWaitingOn: 'customer', pendingReason: 'Please send the serial number', pendingSetAt: new Date() }).where(eq(schema.tickets.id, ids.t2));
       const [t3] = await tx.select({ customerId: schema.tickets.customerId, type: schema.tickets.type }).from(schema.tickets).where(eq(schema.tickets.id, ids.t3));
       await tx.delete(schema.ticketSurveys).where(eq(schema.ticketSurveys.ticketId, ids.t3));
       await tx.insert(schema.ticketSurveys).values({ ticketId: ids.t3, customerId: t3!.customerId, ticketType: t3!.type, trigger: 'resolved', question: 'How did we do?', tokenHash: `stats-${suffix}`, tokenPrefix: 'stats', tokenEnc: 'x', status: 'pending', expiresAt: new Date(Date.now() + 7 * 86_400_000) });
@@ -321,6 +321,21 @@ describe('ticket stats', () => {
     expect(strippedPending.byStatusCategory).toEqual(base.byStatusCategory);
     // The list's own csat=pending predicate is the same one the tile counts with.
     expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, csat: 'pending' }))).toBe(1);
+    // `waitingOn` is the tile's own predicate (open and waiting on the customer) and, on the staff list, a scope pill: it narrows the total and leaves the tiles.
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, waitingOn: 'customer' }))).toBe(1);
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, waitingOn: 'vendor' }))).toBe(0);
+    expect(await asAdmin((ctx) => countTickets(ctx, { customerId: ids.customerId, waitingOn: 'vendor,customer' }))).toBe(1);
+    // Staff: `waitingOn` is a scope pill like `csat`, so a party nothing waits on narrows every tile with the total.
+    const vendor = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, waitingOn: 'vendor' }));
+    expect([vendor.total, vendor.open, vendor.awaitingCustomer, vendor.surveyPending]).toEqual([0, 0, 0, 0]);
+    const waiting = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, waitingOn: 'customer' }));
+    expect([waiting.total, waiting.open, waiting.awaitingCustomer, waiting.surveyPending]).toEqual([1, 1, 1, 0]);
+    // The portal strips it through `tileKeys` (there it is the Waiting on you tile): the total follows, every tile keeps the base scope.
+    const portalWaiting = await asAdmin((ctx) => ticketStats(ctx, { customerId: ids.customerId, waitingOn: 'customer' }, { tileKeys: [...TILE_KEYS, 'csat', 'waitingOn'] }));
+    expect([portalWaiting.total, portalWaiting.open, portalWaiting.awaitingCustomer, portalWaiting.surveyPending, portalWaiting.allTypes]).toEqual([1, 2, 1, 1, 2]);
+    expect(strip({ customerId: ids.customerId, waitingOn: 'customer', statusCategory: 'pending' }, [...STATUS_KEYS, ...TILE_KEYS, 'waitingOn'])).toEqual({ customerId: ids.customerId });
+    expect(statsQuerySchema.safeParse({ waitingOn: 'vendor,customer' }).success).toBe(true);
+    expect(statsQuerySchema.safeParse({ waitingOn: 'supplier' }).success).toBe(false);
     // A ticket reopened with its survey still live is "to rate" nowhere until it ends again.
     await withSystem(async (tx) => {
       await tx.update(schema.tickets).set({ statusId: await optionId(tx, 'ticket_status', 'in_progress') }).where(eq(schema.tickets.id, ids.t3));

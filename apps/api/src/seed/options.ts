@@ -26,7 +26,7 @@ export const OPTION_SEEDS: Record<string, OptionSeed[]> = {
     { key: 'in_progress', label: 'In Progress', statusCategory: 'open', color: 'indigo' },
     { key: 'pending_customer', label: 'Pending Customer', statusCategory: 'pending', pausesSla: true, color: 'amber' },
     { key: 'pending_vendor', label: 'Pending Vendor', statusCategory: 'pending', pausesSla: true, color: 'amber' },
-    { key: 'pending_change', label: 'Pending Change', statusCategory: 'pending', color: 'amber', appliesTo: ['incident', 'problem'] },
+    { key: 'pending_change', label: 'Pending Change', statusCategory: 'pending', pausesSla: true, color: 'amber', appliesTo: ['incident', 'problem'] },
     { key: 'on_hold', label: 'On Hold', statusCategory: 'pending', pausesSla: true, color: 'slate' },
     { key: 'resolved', label: 'Resolved', statusCategory: 'resolved', color: 'green' },
     { key: 'closed', label: 'Closed', statusCategory: 'closed', color: 'gray' },
@@ -45,7 +45,8 @@ export const OPTION_SEEDS: Record<string, OptionSeed[]> = {
     { key: 'approved', label: 'Approved', statusCategory: 'open', color: 'teal', appliesTo: ['change'] },
     { key: 'scheduled', label: 'Scheduled', statusCategory: 'open', color: 'cyan', appliesTo: ['change'] },
     { key: 'implementing', label: 'Implementing', statusCategory: 'open', color: 'indigo', appliesTo: ['change'] },
-    { key: 'review', label: 'Post-Implementation Review', statusCategory: 'pending', color: 'purple', appliesTo: ['change'] },
+    // A stage of the change's own work, not a wait on anyone: no reason, no pending block, no pause (`metadata.wait`).
+    { key: 'review', label: 'Post-Implementation Review', statusCategory: 'pending', color: 'purple', appliesTo: ['change'], metadata: { wait: false } },
     { key: 'implemented', label: 'Implemented', statusCategory: 'resolved', color: 'green', appliesTo: ['change'] },
     { key: 'failed', label: 'Failed / Backed Out', statusCategory: 'resolved', color: 'red', appliesTo: ['change'] },
   ],

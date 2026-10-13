@@ -24,6 +24,8 @@ import { TicketCardView } from '@/components/boards/TicketCard';
 import { TaskCardView } from '@/components/boards/TaskCard';
 import { LanesDialog } from '@/components/boards/LanesPopover';
 import { MoveDialog, TerminalDropDialog, terminalKindOf, type PendingTerminal } from '@/components/boards/MoveDialog';
+import { PendingDialog, type PendingTarget } from '@/components/tickets/detail/PendingDialog';
+import type { PendingBody } from '@/components/tickets/types';
 import { HandoverPanel } from '@/components/boards/HandoverPanel';
 import { StickyNotes } from '@/components/boards/StickyNotes';
 
@@ -206,13 +208,15 @@ export default function TaskBoardsPage() {
   const { prefs, update } = useBoardPrefs();
   const { state, set } = useListState();
   const [ready, setReady] = useState(false);
-  const { options, lookups } = useLookups();
+  const { options, lookups, byId } = useLookups();
   const engineers = useEngineers();
   const customers = useCustomersLookup();
   const desktop = useMediaQuery('(min-width: 768px)');
   const [lanesOpen, setLanesOpen] = useState(false);
   const [picker, setPicker] = useState<{ kind: 'ticket'; card: TicketCard } | { kind: 'task'; card: TaskCard } | null>(null);
   const [pending, setPending] = useState<PendingTerminal | null>(null);
+  // A drop (or Move to…) onto a wait lane asks for the reason before the card moves.
+  const [pendingWait, setPendingWait] = useState<{ card: TicketCard; lane: BoardLane; status: PendingTarget } | null>(null);
   const [addTaskFor, setAddTaskFor] = useState<TicketCard | null>(null);
   const [deleteTask, setDeleteTask] = useState<TaskCard | null>(null);
   const [mobileLane, setMobileLane] = useState<string | null>(null);
@@ -319,7 +323,7 @@ export default function TaskBoardsPage() {
     void qc.invalidateQueries({ queryKey: ['dashboard'] });
   };
   const moveTicket = useMutation({
-    mutationFn: ({ card, lane }: { card: TicketCard; lane: BoardLane }) => (lane.kind === 'assignee' ? ticketsApi.assign(card.id, { assigneeId: lane.key === 'unassigned' ? null : lane.key }) : ticketsApi.status(card.id, { statusId: lane.key })),
+    mutationFn: ({ card, lane, body }: { card: TicketCard; lane: BoardLane; body?: PendingBody }) => (lane.kind === 'assignee' ? ticketsApi.assign(card.id, { assigneeId: lane.key === 'unassigned' ? null : lane.key }) : ticketsApi.status(card.id, body ?? { statusId: lane.key })),
     onMutate: async ({ card, lane }) => {
       await qc.cancelQueries({ queryKey: ticketKey });
       const prev = qc.getQueryData<TicketBoard>(ticketKey);
@@ -368,10 +372,17 @@ export default function TaskBoardsPage() {
       if (board === 'tickets') {
         const card = (data as TicketBoard).cards.find((c) => c.id === cardId);
         if (!card || card.lane === laneKey) return;
-        const kind = lane.kind === 'status' ? terminalKindOf(lane.category) : null;
+        const kind = lane.kind === 'status' ? terminalKindOf(lane.category, card.status.category) : null;
         if (kind) {
           setPending({ ticketId: card.id, number: card.number, kind, statusId: lane.key, laneLabel: lane.label });
           return;
+        }
+        if (lane.kind === 'status' && lane.category === 'pending') {
+          const opt = byId(lane.key);
+          if (!opt || opt.metadata?.wait !== false) {
+            setPendingWait({ card, lane, status: { id: lane.key, key: lane.statusKey ?? opt?.key ?? '', label: lane.label, pausesSla: opt?.pausesSla } });
+            return;
+          }
         }
         moveTicket.mutate({ card, lane });
       } else {
@@ -381,7 +392,7 @@ export default function TaskBoardsPage() {
         moveTask.mutate({ card, lane, index, items: lane.kind === 'status' ? buildReorder(tasks, card, lane, index) : [] });
       }
     },
-    [orderedLanes, data, board, moveTicket, moveTask],
+    [orderedLanes, data, board, moveTicket, moveTask, byId],
   );
   const refuse = useCallback((reason: string) => toast.error(reason), []);
   const dnd = useDragDrop(handleMove, refuse);
@@ -612,6 +623,18 @@ export default function TaskBoardsPage() {
         onReset={() => update({ laneOrder: omit(prefs.laneOrder, layoutKey), hiddenLanes: omit(prefs.hiddenLanes, layoutKey), collapsedLanes: omit(prefs.collapsedLanes, layoutKey), wipLimits: Object.fromEntries(Object.entries(prefs.wipLimits).filter(([k]) => !orderedLanes.some((l) => l.key === k))) })}
       />
       {picker && <MoveDialog open onClose={() => setPicker(null)} title={picker.kind === 'ticket' ? `Move ${picker.card.number}` : `Move the task “${picker.card.title}”`} lanes={pickerLanes} currentLane={picker.card.lane} refusals={refusalsFor(picker.card)} onPick={(key) => handleMove(picker.card.id, key, Number.MAX_SAFE_INTEGER)} />}
+      <PendingDialog
+        open={!!pendingWait}
+        onClose={() => setPendingWait(null)}
+        ticketNumber={pendingWait?.card.number ?? ''}
+        status={pendingWait?.status ?? null}
+        busy={moveTicket.isPending}
+        onSubmit={(body) => {
+          if (!pendingWait) return;
+          moveTicket.mutate({ card: pendingWait.card, lane: pendingWait.lane, body });
+          setPendingWait(null);
+        }}
+      />
       <TerminalDropDialog
         pending={pending}
         onClose={() => setPending(null)}

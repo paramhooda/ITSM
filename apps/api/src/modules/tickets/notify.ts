@@ -41,7 +41,15 @@ export interface NotifyExtra {
   channels?: NotificationChannel[];
   /** Users who must not be notified in addition to the actor. */
   excludeUserIds?: string[];
+  /** Drop every portal recipient (an internal hold is never announced to the customer). */
+  staffOnly?: boolean;
+  /** The customer-facing words of a wait (`waitingOnLabels().customer`), carried by ticket.pending / ticket.resumed and the reply template. */
+  waitingOnLabel?: string | null;
+  /** When a wait is expected to end. */
+  expectedAt?: Date | null;
 }
+
+const fmtDay = (d: Date | null | undefined) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '');
 
 interface UserLite {
   id: string;
@@ -188,6 +196,8 @@ async function templateData(tx: Tx, ticket: TicketRow, actorName: string, extra:
     previousStatus: extra.previousStatus ?? '',
     level: extra.level ?? ticket.escalationLevel,
     reason: extra.reason ?? '',
+    waitingOnLabel: extra.waitingOnLabel ?? '',
+    expectedAt: fmtDay(extra.expectedAt),
     sla: extra.sla ? { metric: extra.sla.metric, dueAt: extra.sla.dueAt?.toISOString() ?? '', pct: Math.round(extra.sla.pct) } : { metric: '', dueAt: '', pct: 0 },
     reopenDays: Number(reopen?.value ?? 14),
   };
@@ -232,7 +242,7 @@ export async function notifyTicketEvent(ctx: Ctx, event: NotificationEvent, tick
     const actorEmail = isSystemCtx(ctx) ? null : ctx.user.email.toLowerCase();
     const keep = (r: Recipient) => !(r.userId && exclude.has(r.userId)) && !(r.email && actorEmail && r.email.toLowerCase() === actorEmail);
     const mspList = msp.filter(keep);
-    const portalList = portal.filter(keep);
+    const portalList = extra.staffOnly ? [] : portal.filter(keep);
     let queued = 0;
     const channelList = [...channels];
     if (mspList.length) {

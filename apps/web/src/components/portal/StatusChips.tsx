@@ -3,14 +3,15 @@ import { cn } from '@/lib/utils';
 /**
  * The portal list's status vocabulary, one exclusive chip each. The chips are
  * presentational: the page maps a click to the list keys (`statusCategory`,
- * `statusId`, `csat`) and derives which chip is on from the URL, so a link
- * that arrives with the same keys lights the same chip.
+ * `waitingOn`, `csat`) and derives which chip is on from the URL, so a link
+ * that arrives with the same keys lights the same chip. "Waiting on you" is
+ * `waitingOn=customer`: a reply or an approval the organisation owes.
  */
 export type PortalStatusChip = 'open' | 'awaiting' | 'resolved' | 'closed' | 'rate' | 'any';
 
 export const PORTAL_STATUS_CHIPS: { key: PortalStatusChip; label: string }[] = [
   { key: 'open', label: 'Open' },
-  { key: 'awaiting', label: 'Awaiting your reply' },
+  { key: 'awaiting', label: 'Waiting on you' },
   { key: 'resolved', label: 'Resolved' },
   { key: 'closed', label: 'Closed' },
   { key: 'rate', label: 'To rate' },

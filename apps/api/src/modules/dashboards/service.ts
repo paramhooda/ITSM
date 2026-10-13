@@ -13,6 +13,7 @@ import { arrivalHeatmap, backlogAgeing, responsiveness, scopeTimezone } from '@/
 import { visibleAnnouncements } from '@/modules/status/announcements';
 import { TICKET_TYPES } from '@itsm/shared';
 import * as approvalsSvc from '@/modules/tickets/approvals';
+import { portalStatusOf } from '@/modules/portal/service';
 import { plannedChangeBuckets, upcomingVisitCond, upcomingOccurrenceCond, occurrenceStandaloneCond, visitWindowCond, occurrenceWindowCond, visitDate, occurrenceDate, upcomingHorizon, PORTAL_UPCOMING_DAYS } from '@/modules/portal/upcoming';
 import { q, one, num, pct, asDate, isCustomerUser, openCond, custCond, socCond, BREACHED, AT_RISK, AGE_BUCKET, TICKET_LIST_COLS, TICKET_LIST_COLS_STAFF, TICKET_LIST_JOINS, EMPTY, dailySeries, ticketFlowSeries, domainFlowSeries, arrivalsWeek, attentionByCustomer, accountCounts, clampDays, NOT_SOC_DOMAINS, sumOf, weightedOf, delta, toDay, addDays, daysBetween, METRIC_KEYS, type MetricKey } from './common';
 import { nocTotals, socTotals, amcTotals, nocScope, socScope, amcScope } from './totals';
@@ -513,17 +514,18 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
   const cust = sql`${org} ${siteId ? sql`AND t.site_id = ${siteId}::uuid` : EMPTY}`;
   const timezone = await scopeTimezone(ctx, customerId);
   const [info] = await q<Row>(ctx, sql`SELECT c.id, c.name, c.code, c.timezone, c.account_manager_id, am.name AS account_manager_name, am.email AS account_manager_email, am.phone AS account_manager_phone FROM customers c LEFT JOIN users am ON am.id = c.account_manager_id WHERE c.id = ${customerId}::uuid`);
-  // The two statuses the "awaiting" tiles count by id (the same id their doors carry as `statusId`).
-  const statusRows = await q<Row>(ctx, sql`SELECT id, key FROM config_options WHERE type = 'ticket_status' AND key IN ('pending_customer', 'awaiting_approval')`);
-  const awaitingStatusId = statusRows.find((r) => r.key === 'pending_customer')?.id ? String(statusRows.find((r) => r.key === 'pending_customer')!.id) : null;
-  const awaitingApprovalStatusId = statusRows.find((r) => r.key === 'awaiting_approval')?.id ? String(statusRows.find((r) => r.key === 'awaiting_approval')!.id) : null;
+  // "Waiting on you" is one predicate everywhere: open and `pending_waiting_on = 'customer'` (a reply or an approval addressed to the
+  // organisation; door `waitingOn=customer`); "awaiting your approval" narrows it to the awaiting-approval status (door `waitingOn` + `statusId`).
+  const statusRows = await q<Row>(ctx, sql`SELECT id, key FROM config_options WHERE type = 'ticket_status' AND key = 'awaiting_approval'`);
+  const awaitingApprovalStatusId = statusRows[0]?.id ? String(statusRows[0].id) : null;
   const byStatus = (id: string | null) => (id ? sql`t.status_id = ${id}::uuid` : sql`false`);
+  const waitingOnYou = sql`t.pending_waiting_on = 'customer'`;
   const inRange = (col: ReturnType<typeof sql>, f: string, t: string) => sql`${col} >= ${f}::date AND ${col} < ${t}::date + interval '1 day'`;
 
   // ---- the tiles: one live statement over the fence
   const live = await one<Row>(ctx, sql`
     SELECT count(*) FILTER (WHERE ${openCond()})::int AS open, count(*) FILTER (WHERE ${openCond()} AND ${BREACHED})::int AS breached, count(*) FILTER (WHERE ${openCond()} AND ${AT_RISK})::int AS at_risk,
-      count(*) FILTER (WHERE ${openCond()} AND ${byStatus(awaitingStatusId)})::int AS awaiting_reply, count(*) FILTER (WHERE ${openCond()} AND ${byStatus(awaitingApprovalStatusId)})::int AS awaiting_approval,
+      count(*) FILTER (WHERE ${openCond()} AND ${waitingOnYou})::int AS waiting_on_you, count(*) FILTER (WHERE ${openCond()} AND ${waitingOnYou} AND ${byStatus(awaitingApprovalStatusId)})::int AS awaiting_approval,
       count(*) FILTER (WHERE ${inRange(sql`t.created_at`, from, today)})::int AS opened_period, count(*) FILTER (WHERE ${inRange(sql`t.resolved_at`, from, today)})::int AS resolved_period,
       count(*) FILTER (WHERE ${inRange(sql`t.created_at`, prevFrom, prevTo)})::int AS opened_previous, count(*) FILTER (WHERE ${inRange(sql`t.resolved_at`, prevFrom, prevTo)})::int AS resolved_previous,
       count(*) FILTER (WHERE t.created_at < ${from}::date AND (t.resolved_at IS NULL OR t.resolved_at >= ${from}::date) AND (t.closed_at IS NULL OR t.closed_at >= ${from}::date))::int AS open_at_start,
@@ -589,7 +591,17 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
     SELECT r.id, r.name, r.report_key, r.format, r.created_at, r.attachment_id, a.filename, a.size, r.parameters->>'period' AS period FROM report_runs r LEFT JOIN attachments a ON a.id = r.attachment_id
     WHERE r.customer_id = ${customerId}::uuid AND r.portal_visible AND r.status = 'completed' ORDER BY r.created_at DESC LIMIT 5`);
   // Your open tickets: the newest activity under the fence (the panel's "View all" is the Open tile's door).
-  const recent = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`SELECT ${TICKET_LIST_COLS} FROM tickets t ${TICKET_LIST_JOINS} WHERE true ${cust} AND ${openCond()} ORDER BY t.last_activity_at DESC LIMIT 8`));
+  // A portal principal reads an internal hold as the type's working status (the fence every portal row obeys); the party itself never leaves.
+  const statusOf = isCustomerUser(ctx) ? await portalStatusOf(ctx) : null;
+  const recentRaw = await q<Row & { id: string }>(ctx, sql`SELECT ${TICKET_LIST_COLS}, t.pending_waiting_on AS waiting_on FROM tickets t ${TICKET_LIST_JOINS} WHERE true ${cust} AND ${openCond()} ORDER BY t.last_activity_at DESC LIMIT 8`);
+  const recent = await withSla(
+    ctx,
+    recentRaw.map(({ waiting_on, ...r }) => {
+      if (!statusOf) return r;
+      const shown = statusOf({ type: String(r.type), pendingWaitingOn: (waiting_on as string | null) ?? null }, { id: '', key: '', label: String(r.status), color: (r.status_color as string | null) ?? null });
+      return { ...r, status: shown.label, status_color: shown.color };
+    }),
+  );
   const teams = await q<Row>(ctx, sql`
     SELECT te.id, te.name, te.team_type, te.email, m.name AS manager_name FROM teams te LEFT JOIN users m ON m.id = te.manager_user_id
     WHERE te.is_active AND (te.id IN (SELECT ct.team_id FROM customer_teams ct WHERE ct.customer_id = ${customerId}::uuid) OR te.team_type = 'service_desk') ORDER BY (te.team_type = 'service_desk') DESC, te.name LIMIT 10`);
@@ -626,9 +638,10 @@ export async function customer(ctx: Ctx, opts: { customerId?: string | null; day
       open: num(live.open),
       breached: num(live.breached),
       atRisk: num(live.at_risk),
-      awaitingReply: num(live.awaiting_reply),
+      /** Open tickets waiting on the organisation (a reply or an approval): the one "Waiting on you" number, door `waitingOn=customer`. */
+      waitingOnYou: num(live.waiting_on_you),
+      /** Of them, those awaiting the organisation's approval: door `waitingOn=customer` with `statusId=awaitingApprovalStatusId`. */
       awaitingApproval: num(live.awaiting_approval),
-      awaitingStatusId,
       awaitingApprovalStatusId,
       openedInPeriod: num(live.opened_period),
       resolvedInPeriod: num(live.resolved_period),
@@ -712,7 +725,7 @@ export async function amc(ctx: Ctx, opts: { days?: number; customerId?: string |
   const base = amcScope({ customerId });
   const kpis = await amcTotals(ctx, { customerId });
   const queue = await withSla(ctx, await q<Row & { id: string }>(ctx, sql`
-    SELECT ${TICKET_LIST_COLS_STAFF}, st.key AS status_key, si.name AS site_name, t.due_at, (t.due_at >= current_date AND t.due_at < current_date + 1) AS due_today,
+    SELECT ${TICKET_LIST_COLS_STAFF}, st.key AS status_key, t.pending_waiting_on AS waiting_on, si.name AS site_name, t.due_at, (t.due_at >= current_date AND t.due_at < current_date + 1) AS due_today,
       v.number AS visit_number, v.id AS visit_id
     FROM tickets t ${TICKET_LIST_JOINS} LEFT JOIN sites si ON si.id = t.site_id
     LEFT JOIN LATERAL (SELECT fv.id, fv.number FROM field_visits fv WHERE fv.ticket_id = t.id ORDER BY fv.created_at DESC LIMIT 1) v ON true
@@ -789,7 +802,8 @@ export async function amc(ctx: Ctx, opts: { days?: number; customerId?: string |
         unassigned: queue.filter((t) => !t.assignee_id).length,
         dueToday: queue.filter((t) => t.due_today === true).length,
         breached: queue.filter((t) => t.sla?.breached).length,
-        awaitingCustomer: queue.filter((t) => t.status_key === 'pending_customer').length,
+        // One word with the tile and the list: open and waiting on the customer (`pending_waiting_on`), whatever the status key.
+        awaitingCustomer: queue.filter((t) => t.waiting_on === 'customer').length,
       },
     },
     visits,

@@ -180,7 +180,7 @@ describe('the person\'s matrix', () => {
     expect(theirs.audience).toBe('customer');
     expect(theirs.rows.map((r) => r.key)).toEqual(['tickets', 'replies', 'closure', 'escalations', 'approvals', 'changes', 'field', 'feedback', 'knowledge', 'reports']);
     for (const key of ['sla', 'paging', 'handover', 'briefing', 'contracts']) expect(theirs.rows.map((r) => r.key)).not.toContain(key);
-    expect(theirs.rows.find((r) => r.key === 'tickets')).toMatchObject({ label: 'Ticket updates', description: 'Your ticket is logged, assigned or changes status.' });
+    expect(theirs.rows.find((r) => r.key === 'tickets')).toMatchObject({ label: 'Ticket updates', description: 'Your ticket is logged, assigned, changes status, needs something from you or is back with the service desk.' });
     expect(theirs.rows.find((r) => r.key === 'escalations')!.label).toBe('Major incident updates');
     const text = theirs.rows.map((r) => `${r.label} ${r.description}`).join(' ').toLowerCase();
     for (const word of ['escalat', 'sentiment', 'overdue', 'unhappy', 'you handled', 'missed']) expect(text, word).not.toContain(word);

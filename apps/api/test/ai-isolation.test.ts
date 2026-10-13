@@ -244,6 +244,17 @@ describe('every portal-reachable tool answers for the user’s own organisation 
     expect(articles.hits.some((h) => h.title.includes('HA runbook'))).toBe(false);
   });
 
+  it('query_tickets as a portal user may ask what waits on the organisation and nothing else (the portal list fence)', async () => {
+    // `waitingOn=customer` is the one word a customer may ask for (a reply or an approval the organisation owes); a supplier, change, agreement or internal wait is the desk's business.
+    const mine = (await asAlpha((ctx) => toolByName('query_tickets')!.run(ctx, { mode: 'count', waitingOn: 'customer' }))) as { total: number; definition: string; facts: string[] };
+    expect(mine.total).toBe(0);
+    expect(mine.definition).toContain('waiting on the customer');
+    expect(text(mine)).not.toContain(BETA);
+    const bucket = (await asAlpha((ctx) => toolByName('query_tickets')!.run(ctx, { mode: 'count', status: 'awaiting_customer' }))) as { total: number };
+    expect(bucket.total).toBe(mine.total);
+    for (const party of ['vendor', 'change', 'agreement', 'internal'] as const) await expect(asAlpha((ctx) => toolByName('query_tickets')!.run(ctx, { mode: 'count', waitingOn: party })), party).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
   it('list_tickets, ticket_stats and similar_tickets ignore a request for Beta', async () => {
     const list = (await asAlpha((ctx) => toolByName('list_tickets')!.run(ctx, { customer: BETA, openOnly: false, q: 'Firewall' }))) as { items: { number: string; customer: string }[] };
     expect(list.items.length).toBeGreaterThan(0);
@@ -303,7 +314,7 @@ describe('every portal-reachable tool answers for the user’s own organisation 
     expect(d.view).toBe('customer');
     expect(d.link).toBe('/?days=7');
     expect(d.customer.id).toBe(ids.a);
-    expect(d.facts).toEqual(expect.arrayContaining(['open tickets now: 1', 'awaiting your reply: 0', 'opened in the last 7 days: 2', 'resolved in the last 7 days: 1', 'upcoming site visits (next 90 days): 0', 'upcoming maintenance (next 90 days): 1', 'resolution SLA compliance (7 days): 100% (1 met, 0 breached, clocks that ended in the period)']));
+    expect(d.facts).toEqual(expect.arrayContaining(['open tickets now: 1', 'waiting on you: 0', 'opened in the last 7 days: 2', 'resolved in the last 7 days: 1', 'upcoming site visits (next 90 days): 0', 'upcoming maintenance (next 90 days): 1', 'resolution SLA compliance (7 days): 100% (1 met, 0 breached, clocks that ended in the period)']));
     for (const prefix of ['tickets to rate:', 'planned changes coming up:']) expect(d.facts.some((f) => f.startsWith(prefix)), prefix).toBe(true);
     for (const needle of [BETA, BETA_CODE, ids.b, numbers.b1!, `Beta firewall PM ${S}`, `Beta site visit ${S}`]) expect(text(d)).not.toContain(needle);
     const month = (await asAlpha((ctx) => toolByName('dashboard_kpis')!.run(ctx, { days: 30 }))) as { link: string };

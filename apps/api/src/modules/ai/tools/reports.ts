@@ -167,7 +167,7 @@ export const REPORTS: ReturnType<typeof define>[] = [
         const t = d.tickets;
         const facts = [
           `open tickets now: ${t.open}`,
-          `awaiting your reply: ${t.awaitingReply}`,
+          `waiting on you: ${t.waitingOnYou}`,
           `awaiting your approval: ${t.awaitingApproval}`,
           `breached SLA on open tickets: ${t.breached}`,
           `at risk: ${t.atRisk}`,

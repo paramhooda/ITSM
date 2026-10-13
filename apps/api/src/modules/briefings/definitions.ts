@@ -432,9 +432,10 @@ const customerDef: BriefingDefinition = {
     // The portal door: the home's number with the portal list it opens, or a figure without the list permission.
     const pdoor = (label: string, value: number, link: TicketListLink): BriefingDoor => (canTickets ? door(label, value, portalTicketListPath(link)) : figure(label, value));
     const open = pdoor('Open', d.tickets.open, { status: 'open' });
-    // Without the status the home counts with, there is no list predicate behind the number: a figure, never the Open list.
-    const awaiting = d.tickets.awaitingStatusId ? pdoor('Awaiting your reply', d.tickets.awaitingReply, { statusIds: [d.tickets.awaitingStatusId] }) : figure('Awaiting your reply', d.tickets.awaitingReply);
-    const approval = canApprove ? (d.tickets.awaitingApprovalStatusId ? pdoor('Awaiting your approval', d.tickets.awaitingApproval, { statusIds: [d.tickets.awaitingApprovalStatusId] }) : figure('Awaiting your approval', d.tickets.awaitingApproval)) : null;
+    // One word with the home tile and the list chip: what waits on the organisation (a reply or an approval), door `waitingOn=customer`;
+    // of them, those awaiting its approval narrow by the status (a figure when that status is not configured, never the Open list).
+    const awaiting = pdoor('Waiting on you', d.tickets.waitingOnYou, { status: 'open', waitingOn: ['customer'] });
+    const approval = canApprove ? (d.tickets.awaitingApprovalStatusId ? pdoor('Awaiting your approval', d.tickets.awaitingApproval, { status: 'open', waitingOn: ['customer'], statusIds: [d.tickets.awaitingApprovalStatusId] }) : figure('Awaiting your approval', d.tickets.awaitingApproval)) : null;
     const breached = pdoor('Breached', d.tickets.breached, { sla: 'breached' });
     const atRisk = pdoor('At risk', d.tickets.atRisk, { sla: 'at_risk' });
     const toRate = pdoor('To rate', d.csat.pending.count, { statusCategories: ['resolved', 'closed'], csat: 'pending' });
@@ -443,7 +444,7 @@ const customerDef: BriefingDefinition = {
     const slaBreached = pdoor('Breached', d.sla.breached, ended('breached'));
     const pct = d.sla.compliancePct;
     // Rows second, through the portal list (the organisation pinned, the portal aliases).
-    const awaitingRows = canTickets ? (await listPortalTickets(ctx, portalListQuery.parse({ status: 'awaiting', pageSize: 5 }))).items : [];
+    const awaitingRows = canTickets ? (await listPortalTickets(ctx, portalListQuery.parse({ waitingOn: 'customer', pageSize: 5 }))).items : [];
     const breachedRows = canTickets ? (await listPortalTickets(ctx, portalListQuery.parse({ slaState: 'breached', pageSize: 5 }))).items : [];
     const u = d.upcoming;
     const scheduled = [`${plural(u.counts.visits, 'visit')}`, `${plural(u.counts.maintenance, 'maintenance window')}`, ...(u.counts.changes !== null ? [`${plural(u.counts.changes, 'change')}`] : [])];

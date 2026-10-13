@@ -127,8 +127,8 @@ export async function amcTotals(ctx: Ctx, s: OperationsScope): Promise<AmcTotals
   const totals = await one<Row>(ctx, sql`
     SELECT count(*)::int AS open, count(*) FILTER (WHERE t.assignee_id IS NULL)::int AS unassigned, count(*) FILTER (WHERE ${BREACHED})::int AS breached,
       count(*) FILTER (WHERE ${AT_RISK})::int AS at_risk, count(*) FILTER (WHERE t.due_at >= current_date AND t.due_at < current_date + 1)::int AS due_today,
-      count(*) FILTER (WHERE st.key = 'pending_customer')::int AS awaiting_customer
-    FROM tickets t JOIN config_options st ON st.id = t.status_id WHERE ${scope} AND ${openCond()}`);
+      count(*) FILTER (WHERE t.pending_waiting_on = 'customer')::int AS awaiting_customer
+    FROM tickets t WHERE ${scope} AND ${openCond()}`);
   const openedToday = await one<Row>(ctx, sql`SELECT count(*)::int AS n FROM tickets t WHERE ${scope} AND t.created_at >= current_date`);
   const resolved = await one<Row>(ctx, sql`SELECT count(*) FILTER (WHERE t.resolved_at >= date_trunc('week', now()))::int AS week, count(*) FILTER (WHERE t.resolved_at >= current_date)::int AS today FROM tickets t WHERE ${scope} AND t.resolved_at IS NOT NULL AND t.resolved_at >= date_trunc('week', now())`);
   const visitsWeek = await one<Row>(ctx, sql`

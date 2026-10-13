@@ -90,29 +90,47 @@ describe('tickets + SLA engine', () => {
     expect(detail.priority?.key).toBe('p1');
   });
 
-  it('pauses SLA clocks in a pausing status and resumes with the paused time added', async () => {
-    const paused = await asAdmin((ctx) => changeStatus(ctx, ticketId, { statusId: ids.pendingCustomer }));
+  it('pauses only the resolution and restoration clocks in a pausing status (response and acknowledgement keep running) and resumes with the paused time added', async () => {
+    // The clock rule: a wait outside the provider's control stops the clocks that measure the fix, never the ones that measure the first answer.
+    const paused = await asAdmin((ctx) => changeStatus(ctx, ticketId, { statusId: ids.pendingCustomer, pendingReason: 'Please send the serial number of the PSU' }));
     expect(paused.statusId).toBe(ids.pendingCustomer);
+    expect(paused.pendingWaitingOn).toBe('customer');
+    expect(paused.pendingReason).toBe('Please send the serial number of the PSU');
+    const pausable = (metric: string) => metric === 'resolution' || metric === 'restoration';
     const pausedRows = await withSystem((tx) => tx.select().from(schema.ticketSlas).where(eq(schema.ticketSlas.ticketId, ticketId)));
+    expect(pausedRows.some((r) => pausable(r.metric))).toBe(true);
+    expect(pausedRows.some((r) => !pausable(r.metric))).toBe(true);
     for (const r of pausedRows) {
-      expect(r.state).toBe('paused');
-      expect(r.pausedAt).not.toBeNull();
+      if (pausable(r.metric)) {
+        expect(r.state, r.metric).toBe('paused');
+        expect(r.pausedAt, r.metric).not.toBeNull();
+      } else {
+        expect(r.state, r.metric).toBe('running');
+        expect(r.pausedAt, r.metric).toBeNull();
+      }
     }
     const before = new Map(pausedRows.map((r) => [r.metric, r.dueAt.getTime()]));
     // Pretend the ticket sat with the customer for 10 minutes.
-    await withSystem((tx) => tx.update(schema.ticketSlas).set({ pausedAt: sql`now() - interval '10 minutes'` }).where(eq(schema.ticketSlas.ticketId, ticketId)));
+    await withSystem((tx) => tx.update(schema.ticketSlas).set({ pausedAt: sql`now() - interval '10 minutes'` }).where(and(eq(schema.ticketSlas.ticketId, ticketId), eq(schema.ticketSlas.state, 'paused'))));
 
     const resumed = await asAdmin((ctx) => changeStatus(ctx, ticketId, { statusId: ids.inProgress }));
     expect(resumed.statusId).toBe(ids.inProgress);
+    expect(resumed.pendingWaitingOn).toBeNull();
+    expect(resumed.pendingReason).toBeNull();
     const rows = await withSystem((tx) => tx.select().from(schema.ticketSlas).where(eq(schema.ticketSlas.ticketId, ticketId)));
     for (const r of rows) {
-      expect(r.state).toBe('running');
-      expect(r.pausedAt).toBeNull();
-      expect(r.pausedMinutes).toBe(10);
-      expect(r.dueAt.getTime()).toBe(before.get(r.metric)! + 10 * 60_000);
+      expect(r.state, r.metric).toBe('running');
+      expect(r.pausedAt, r.metric).toBeNull();
+      if (pausable(r.metric)) {
+        expect(r.pausedMinutes, r.metric).toBe(10);
+        expect(r.dueAt.getTime(), r.metric).toBe(before.get(r.metric)! + 10 * 60_000);
+      } else {
+        expect(r.pausedMinutes, r.metric).toBe(0);
+        expect(r.dueAt.getTime(), r.metric).toBe(before.get(r.metric)!);
+      }
     }
     const events = await withSystem((tx) => tx.select().from(schema.ticketSlaEvents).where(inArray(schema.ticketSlaEvents.ticketSlaId, rows.map((r) => r.id))));
-    expect(events.some((e) => e.eventType === 'paused')).toBe(true);
+    expect(events.some((e) => e.eventType === 'paused' && (e.details as { waitingOn?: string }).waitingOn === 'customer')).toBe(true);
     expect(events.some((e) => e.eventType === 'resumed')).toBe(true);
   });
 

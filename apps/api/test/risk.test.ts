@@ -171,6 +171,22 @@ describe('scoreOpenTickets (job)', () => {
     const calmRow = await ticketRow(calm);
     expect(calmRow.breachRisk).toBe('low');
   });
+  it('reads "waiting on the customer" from the pending block: a customer wait takes from the score, an internal hold does not', async () => {
+    const t = await newTicket(`Waiting ticket ${S}`, { assigneeId: ids.engineer });
+    await consume(t.id, 60);
+    const onHold = await withSystem((tx) => optionId(tx, 'ticket_status', 'on_hold'));
+    const pendingCustomer = await withSystem((tx) => optionId(tx, 'ticket_status', 'pending_customer'));
+    // The job's feeder reads the column, so the rows are set directly here (the lifecycle tests cover the transition itself).
+    await withSystem((tx) => tx.update(schema.tickets).set({ statusId: onHold, pendingWaitingOn: 'internal', pendingReason: 'parked' }).where(eq(schema.tickets.id, t.id)));
+    await scoreOpenTickets();
+    const held = await ticketRow(t.id);
+    expect(held.breachRiskReason).not.toContain('waiting on the customer');
+    await withSystem((tx) => tx.update(schema.tickets).set({ statusId: pendingCustomer, pendingWaitingOn: 'customer', pendingReason: 'needs the serial number', breachRiskAt: new Date(Date.now() - 2 * 3600_000) }).where(eq(schema.tickets.id, t.id)));
+    await scoreOpenTickets();
+    const waiting = await ticketRow(t.id);
+    expect(waiting.breachRiskReason).toContain('waiting on the customer');
+    expect(waiting.breachRiskScore!).toBeLessThan(held.breachRiskScore!);
+  });
   it('is idempotent: a second run with nothing moved rewrites nothing and logs nothing more', async () => {
     const before = await ticketRow(hot);
     await scoreOpenTickets();

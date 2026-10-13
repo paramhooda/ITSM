@@ -11,7 +11,8 @@ import { useUiStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useLookups, useEngineers } from '@/hooks/useLookups';
 import { fmtDuration, relativeTime, fmtDateTime } from '@/lib/format';
-import { ticketsApi, qk } from '@/components/tickets/api';
+import { TICKET_TRANSITIONS } from '@itsm/shared';
+import { ticketsApi, qk, type StatusBody } from '@/components/tickets/api';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
 import { ScopeBadge } from '@/components/tickets/ScopeBadge';
@@ -30,6 +31,7 @@ import { ChangeRiskCard } from '@/components/changes/ChangeRiskCard';
 import { MajorIncidentPanel } from '@/components/tickets/detail/MajorIncidentPanel';
 import { TicketDetailsRail, TicketAssistRail } from '@/components/tickets/detail/TicketRail';
 import { ResolveDialog, CommentDialog, ScopeDialog } from '@/components/tickets/detail/ActionDialogs';
+import { PendingDialog, type PendingTarget } from '@/components/tickets/detail/PendingDialog';
 import { SlaCard } from '@/components/tickets/SlaCard';
 import { PageDialog } from '@/components/oncall/PageDialog';
 import { TriageChips } from '@/components/ai/TriageChips';
@@ -117,7 +119,7 @@ export default function TicketDetailPage() {
       },
       onError: (e: Error) => toast.error(e.message),
     });
-  const status = act((statusId: string) => ticketsApi.status(id, { statusId }));
+  const status = act((body: StatusBody) => ticketsApi.status(id, body));
   const update = act((body: Record<string, unknown>) => ticketsApi.update(id, body));
   const assign = act((body: Record<string, unknown>) => ticketsApi.assign(id, body));
   const resolve = act((v: { resolutionCodeId: string | null; resolutionNotes: string }) => ticketsApi.resolve(id, v), 'Resolved');
@@ -148,7 +150,10 @@ export default function TicketDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const [dialog, setDialog] = useState<null | 'resolve' | 'close' | 'reopen' | 'cancel' | 'escalate' | 'scope' | 'major-declare' | 'major-demote' | 'page' | 'handover'>(null);
+  const [dialog, setDialog] = useState<null | 'resolve' | 'close' | 'reopen' | 'cancel' | 'escalate' | 'scope' | 'major-declare' | 'major-demote' | 'page' | 'handover' | 'pending'>(null);
+  // A wait chosen in the status menu opens the pending dialog for that status; an open status chosen on an ended ticket reopens into it.
+  const [pendingTarget, setPendingTarget] = useState<PendingTarget | null>(null);
+  const [reopenTo, setReopenTo] = useState<string | null>(null);
   const [editDesc, setEditDesc] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
   const entries = useMemo(() => (timelineQ.data?.items ?? []).map(fromTimeline), [timelineQ.data]);
@@ -166,7 +171,24 @@ export default function TicketDetailPage() {
   const isOpen = !isResolved && !isClosed;
   const closureCodes = options('closure_code').map((c) => ({ id: c.id, label: c.label }));
   const resolveLabel = ticket.type === 'request' ? 'Fulfil' : ticket.type === 'change' ? 'Implemented' : 'Resolve';
-  const statusChoices = ticket.statuses.filter((s) => s.id !== ticket.statusId && (p.update || (p.resolve && ['resolved', 'closed', 'cancelled'].includes(s.category ?? '')) || (isCustomer && p.reopen && (isResolved || isClosed) && ['open', 'new'].includes(s.category ?? ''))));
+  // Awaiting Approval is reached through Request approval (the Approvals tab), never picked by hand.
+  // The menu offers only the moves the lifecycle allows from the current category (one table, applied by the API on every path).
+  const allowedNext = TICKET_TRANSITIONS[cat as keyof typeof TICKET_TRANSITIONS] ?? [];
+  const statusChoices = ticket.statuses.filter((s) => s.id !== ticket.statusId && s.key !== 'awaiting_approval' && (!s.category || (allowedNext as string[]).includes(s.category)) && (p.update || (p.resolve && ['resolved', 'closed', 'cancelled'].includes(s.category ?? '')) || (isCustomer && p.reopen && (isResolved || isClosed) && ['open', 'new'].includes(s.category ?? ''))));
+  const pickStatus = (s: (typeof statusChoices)[number]) => {
+    if (s.category === 'resolved' && p.resolve) return setDialog('resolve');
+    if (s.category === 'closed' && p.close) return setDialog('close');
+    if (s.category === 'cancelled' && p.cancel) return setDialog('cancel');
+    if ((isResolved || isClosed) && (s.category === 'open' || s.category === 'new')) {
+      setReopenTo(s.id);
+      return setDialog('reopen');
+    }
+    if (s.category === 'pending' && s.wait !== false) {
+      setPendingTarget({ id: s.id, key: s.key, label: s.label, pausesSla: s.pausesSla });
+      return setDialog('pending');
+    }
+    status.mutate({ statusId: s.id });
+  };
   const priorityChoices = options('ticket_priority');
   const subcats = options('ticket_subcategory').filter((o) => o.parentId === ticket.categoryId);
   const isSoc = ticket.domain === 'soc' || ticket.category?.domain === 'soc';
@@ -214,7 +236,7 @@ export default function TicketDetailPage() {
   const controls = (
     <>
       {statusChoices.length > 0 ? (
-        <Menu align="left" trigger={<button className="inline-flex items-center gap-1 rounded-md hover:bg-surface-2 pr-1" disabled={status.isPending}><TicketStatusBadge status={ticket.status} /><ChevronDown className="h-3 w-3 text-subtle" /></button>} items={statusChoices.map((s) => ({ label: s.label, onClick: () => (['resolved'].includes(s.category ?? '') && p.resolve ? setDialog('resolve') : ['closed'].includes(s.category ?? '') && p.close ? setDialog('close') : ['cancelled'].includes(s.category ?? '') && p.cancel ? setDialog('cancel') : status.mutate(s.id)) }))} />
+        <Menu align="left" trigger={<button className="inline-flex items-center gap-1 rounded-md hover:bg-surface-2 pr-1" disabled={status.isPending}><TicketStatusBadge status={ticket.status} /><ChevronDown className="h-3 w-3 text-subtle" /></button>} items={statusChoices.map((s) => ({ label: s.category === 'pending' && s.wait !== false ? `${s.label}…` : s.label, onClick: () => pickStatus(s) }))} />
       ) : (
         <TicketStatusBadge status={ticket.status} />
       )}
@@ -433,7 +455,8 @@ export default function TicketDetailPage() {
       <ResolveDialog open={dialog === 'resolve'} onClose={() => setDialog(null)} ticket={ticket} busy={resolve.isPending} onSubmit={(v) => resolve.mutateAsync(v).then(() => setDialog(null))} onDraftNotes={aiFeature('draft') ? () => aiApi.draftResolution(id) : undefined} />
       {aiOn && <HandoverSummaryDialog open={dialog === 'handover'} onClose={() => setDialog(null)} ticketId={ticket.id} ticketNumber={ticket.number} />}
       <CommentDialog open={dialog === 'close'} onClose={() => setDialog(null)} title={`Close ${ticket.number}`} confirmLabel="Close ticket" busy={close.isPending} codes={closureCodes} label="Closing comment" onSubmit={(v) => close.mutateAsync(v).then(() => setDialog(null))} />
-      <CommentDialog open={dialog === 'reopen'} onClose={() => setDialog(null)} title={`Reopen ${ticket.number}`} confirmLabel="Reopen" busy={reopen.isPending} label="Why is this being reopened?" required onSubmit={(v) => reopen.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
+      <CommentDialog open={dialog === 'reopen'} onClose={() => { setDialog(null); setReopenTo(null); }} title={`Reopen ${ticket.number}`} confirmLabel="Reopen" busy={reopen.isPending || status.isPending} label="Why is this being reopened?" required onSubmit={(v) => (reopenTo ? status.mutateAsync({ statusId: reopenTo, comment: v.comment }) : reopen.mutateAsync({ comment: v.comment })).then(() => { setDialog(null); setReopenTo(null); })} />
+      <PendingDialog open={dialog === 'pending'} onClose={() => setDialog(null)} ticketNumber={ticket.number} status={pendingTarget} busy={status.isPending} onSubmit={(body) => status.mutateAsync(body).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'cancel'} onClose={() => setDialog(null)} title={`Cancel ${ticket.number}`} confirmLabel="Cancel ticket" danger busy={cancel.isPending} codes={isCustomer ? undefined : closureCodes} label="Reason" required onSubmit={(v) => cancel.mutateAsync(v).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'escalate'} onClose={() => setDialog(null)} title={`Escalate ${ticket.number} to level ${ticket.escalationLevel + 1}`} confirmLabel="Escalate" busy={escalate.isPending} label="Reason" required onSubmit={(v) => escalate.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'major-declare'} onClose={() => setDialog(null)} title={`Declare ${ticket.number} a major incident`} confirmLabel="Declare major incident" danger busy={declareMajor.isPending} label="Why is this a major incident? (sent to the response team)" onSubmit={(v) => declareMajor.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />

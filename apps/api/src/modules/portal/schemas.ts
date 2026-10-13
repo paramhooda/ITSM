@@ -17,7 +17,7 @@ export type PortalStatusChip = (typeof PORTAL_STATUS_CHIPS)[number];
 
 /**
  * The portal ticket list on the staff list's vocabulary (`statusCategory`,
- * `statusId`, `priorityId`, `serviceId`, `slaState`, `csat`, the created and
+ * `statusId`, `waitingOn` (customer only), `priorityId`, `serviceId`, `slaState`, `csat`, the created and
  * resolved ranges, the SLA outcome with its window), so a dashboard number links into it with exactly the
  * predicate it was counted with. The portal's own chip (`status`) and priority
  * key (`priority`) stay as aliases; the service maps them (`portalListParams`).
@@ -28,8 +28,10 @@ export type PortalStatusChip = (typeof PORTAL_STATUS_CHIPS)[number];
  */
 export const ticketListQuery = paginationSchema.extend({
   customerId: uuid.optional(),
-  /** The portal status chip (alias): open, awaiting (status key pending_customer), resolved, closed, rate (resolved or closed with a live survey) or all. */
+  /** The portal status chip (alias): open, awaiting (= `waitingOn=customer` on the open categories), resolved, closed, rate (resolved or closed with a live survey) or all. */
   status: z.enum(PORTAL_STATUS_CHIPS).optional(),
+  /** What waits on the organisation (`pending_waiting_on = 'customer'`: a reply or an approval); the only value a customer may ask for, every other party is the desk's business (422). */
+  waitingOn: z.literal('customer').optional(),
   /** Every ticket type: the organisation sees its problems and changes as well, so the list's type pills (and the home's open-by-type slices) cover all four. */
   type: z.enum(TICKET_TYPES).optional(),
   q: z.string().max(200).optional(),

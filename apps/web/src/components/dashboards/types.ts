@@ -21,6 +21,8 @@ export interface TicketRow {
   status: string | null;
   status_color: string | null;
   status_category: string | null;
+  /** Who the ticket waits on (`pending_waiting_on`), on the queues that segment by it. */
+  waiting_on?: string | null;
   category: string | null;
   assignee_id: string | null;
   assignee: string | null;

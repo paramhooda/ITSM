@@ -358,10 +358,14 @@ describe('roles and content', () => {
     expect(facts.headline[0]).toBe('Your organisation has 2 open tickets, 0 waiting on you and 0 with a breached SLA.');
     // the administrator holds portal:approve, so the approval door exists; a customer user has no such door
     const awaiting = facts.sections.find((s) => s.key === 'awaiting')!;
-    expect(awaiting.doors.map((d) => d.label)).toEqual(['Awaiting your reply', 'Awaiting your approval']);
+    expect(awaiting.doors.map((d) => d.label)).toEqual(['Waiting on you', 'Awaiting your approval']);
+    // One word, one key: the door is the portal list's Waiting on you chip; the approval door narrows it by the status.
+    expect(awaiting.doors[0]!.href).toBe('/portal/tickets?waitingOn=customer');
+    expect(awaiting.doors[1]!.href).toMatch(/^\/portal\/tickets\?statusId=[0-9a-f-]+&waitingOn=customer$/);
+    expect(facts.kpis.find((k) => k.key === 'awaiting')).toMatchObject({ label: 'Waiting on you', href: '/portal/tickets?waitingOn=customer' });
     const { briefing: u } = await as(portalUser)((ctx) => briefings.generate(ctx));
     expect(u.role).toBe('customer');
-    expect(u.facts!.sections.find((s) => s.key === 'awaiting')!.doors.map((d) => d.label)).toEqual(['Awaiting your reply']);
+    expect(u.facts!.sections.find((s) => s.key === 'awaiting')!.doors.map((d) => d.label)).toEqual(['Waiting on you']);
     expect(JSON.stringify(u.facts)).not.toContain('Awaiting your approval');
     // a role the customer may not take falls through to theirs; a customer account without portal access is refused
     const forced = await as(portalUser)((ctx) => briefings.generate(ctx, { role: 'engineer' }));

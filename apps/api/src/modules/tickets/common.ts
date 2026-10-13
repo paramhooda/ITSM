@@ -138,7 +138,15 @@ export async function defaultStatusFor(tx: Tx, type: TicketType): Promise<Option
 
 export const statusApplies = (opt: Pick<OptionRow, 'appliesTo'>, type: TicketType) => !opt.appliesTo.length || opt.appliesTo.includes(type);
 
-export const toLabel = (o: OptionRow | null | undefined) => (o ? { id: o.id, key: o.key, label: o.label, color: o.color ?? null, category: o.statusCategory ?? null, level: o.level ?? null, domain: o.domain } : null);
+/**
+ * A wait: a pending-category status whose option metadata does not say `wait: false`.
+ * A ticket in a wait carries a reason and the party waited on; a non-wait pending
+ * status (a post-implementation review) is a stage of the work and behaves like an
+ * open status: no reason, no pending block, no pause.
+ */
+export const isWait = (opt: Pick<OptionRow, 'statusCategory' | 'metadata'> | null | undefined): boolean => !!opt && opt.statusCategory === 'pending' && (opt.metadata as { wait?: unknown } | null)?.wait !== false;
+
+export const toLabel = (o: OptionRow | null | undefined) => (o ? { id: o.id, key: o.key, label: o.label, color: o.color ?? null, category: o.statusCategory ?? null, level: o.level ?? null, domain: o.domain, pausesSla: o.pausesSla, wait: isWait(o) } : null);
 
 // ---------------------------------------------------------------- activities
 

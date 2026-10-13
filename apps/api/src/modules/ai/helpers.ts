@@ -320,6 +320,14 @@ export const compactTicket = (ctx: Ctx, t: ListItem) => ({
 });
 
 type Detail = Awaited<ReturnType<typeof getTicket>>;
+/** The wait block of a detail (the staff shape or the customer's four keys) with its dates as ISO strings. */
+function pendingOf(p: Detail['pending']): Record<string, unknown> | null {
+  if (!p) return null;
+  const out: Record<string, unknown> = { ...p, expectedAt: iso(p.expectedAt) };
+  if ('setAt' in p) out.setAt = iso(p.setAt as Date | null);
+  if ('slaPausedSince' in p) out.slaPausedSince = iso(p.slaPausedSince as Date | null);
+  return out;
+}
 export function compactDetail(ctx: Ctx, d: Detail) {
   return {
     number: d.number,
@@ -350,6 +358,15 @@ export function compactDetail(ctx: Ctx, d: Detail) {
     cis: d.cis.map((c) => ({ name: c.name, hostname: c.hostname, ip: c.ipAddress })),
     links: d.links.map((l) => ({ type: l.linkType, direction: l.direction, number: l.ticket.number, title: l.ticket.title, status: l.ticket.status?.label ?? null })),
     slas: d.slas.map((s) => ({ metric: s.metric, state: s.state, dueAt: iso(s.dueAt), remainingMinutes: s.remainingMinutes, pctConsumed: s.pctConsumed, breached: s.breached })),
+    // The wait the ticket is in (the staff block: reason, party, expected end, reference, since when the clocks are paused), null outside a wait.
+    pending: pendingOf(d.pending),
+    approval: {
+      status: d.approvalStatus,
+      pending: (() => {
+        const step = d.approvals.find((a) => a.status === 'pending');
+        return step ? { purpose: step.purpose ?? null, approver: step.approverUserId ?? step.approverRoleKey ?? step.approverTeamId ?? null, dueAt: iso(step.dueAt), requestedBy: step.requestedBy ?? null, requestedAt: iso(step.createdAt) } : null;
+      })(),
+    },
     resolutionNotes: trunc(d.resolutionNotes, 1000),
     createdAt: iso(d.createdAt),
     updatedAt: iso(d.updatedAt),

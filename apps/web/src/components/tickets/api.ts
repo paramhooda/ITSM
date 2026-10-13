@@ -1,5 +1,15 @@
 import { get, post, put, patch, del } from '@/api/client';
-import type { TicketDetail, TicketListRow, TicketStats, TimelineEntry, SimilarTicket, SavedView, TimeEntry, Task, Approval, SlaMetricSummary, ProblemDetails, ChangeDetails, MyApproval, MajorDetail, MajorUpdate, MajorList } from './types';
+import type { TicketDetail, TicketListRow, TicketStats, TimelineEntry, SimilarTicket, SavedView, TimeEntry, Task, Approval, SlaMetricSummary, ProblemDetails, ChangeDetails, MyApproval, MajorDetail, MajorUpdate, MajorList, PendingBody, WaitingOn } from './types';
+
+/** The status endpoint's body: a wait needs `pendingReason` (and `waitingOn` for On Hold); a cancel or a staff reopen needs `comment`. */
+export type StatusBody = { statusId: string; comment?: string | null; resolutionCodeId?: string | null; resolutionNotes?: string | null; closureCodeId?: string | null } | PendingBody;
+/** A comment, optionally followed by a status move with the comment as the reason (reply and wait). */
+export interface CommentBody {
+  kind: 'comment' | 'work_note';
+  body: string;
+  minutesSpent?: number | null;
+  then?: { statusId: string; expectedAt?: string | null; pendingReference?: string | null; waitingOn?: WaitingOn | null } | null;
+}
 
 export interface Paginated<T> {
   items: T[];
@@ -32,7 +42,7 @@ export const ticketsApi = {
   get: (id: string) => get<TicketDetail>(`/tickets/${id}`),
   create: (body: Record<string, unknown>) => post<TicketDetail>('/tickets', body),
   update: (id: string, body: Record<string, unknown>) => patch<TicketDetail>(`/tickets/${id}`, body),
-  status: (id: string, body: Record<string, unknown>) => post<TicketDetail>(`/tickets/${id}/status`, body),
+  status: (id: string, body: StatusBody) => post<TicketDetail>(`/tickets/${id}/status`, body),
   resolve: (id: string, body: Record<string, unknown>) => post<TicketDetail>(`/tickets/${id}/resolve`, body),
   close: (id: string, body: Record<string, unknown> = {}) => post<TicketDetail>(`/tickets/${id}/close`, body),
   reopen: (id: string, body: Record<string, unknown> = {}) => post<TicketDetail>(`/tickets/${id}/reopen`, body),
@@ -42,7 +52,7 @@ export const ticketsApi = {
   scope: (id: string, body: Record<string, unknown>) => post<TicketDetail>(`/tickets/${id}/scope`, body),
   scopePreview: (body: Record<string, unknown>) => post<{ status: string; reason: string; contract: { id: string; number: string; name: string; slaPolicyName: string | null } | null }>('/tickets/scope-preview', body),
   timeline: (id: string) => get<{ items: TimelineEntry[] }>(`/tickets/${id}/timeline`),
-  comment: (id: string, body: Record<string, unknown>) => post(`/tickets/${id}/comments`, body),
+  comment: (id: string, body: CommentBody) => post(`/tickets/${id}/comments`, body),
   slas: (id: string) => get<{ items: SlaMetricSummary[] }>(`/tickets/${id}/slas`),
   similar: (id: string) => get<{ items: SimilarTicket[] }>(`/tickets/${id}/similar`),
   lookup: (q: string, customerId?: string | null, excludeId?: string | null) => get<{ items: { id: string; number: string; title: string; type: string; status: { label: string; color: string | null } | null }[] }>('/tickets/lookup', { q, customerId: customerId ?? undefined, excludeId: excludeId ?? undefined }),

@@ -73,6 +73,20 @@ export const tickets = pgTable('tickets', {
   closureCodeId: uuid('closure_code_id').references(() => configOptions.id, { onDelete: 'set null' }),
   resolutionNotes: text('resolution_notes'),
   approvalStatus: text('approval_status'),
+  /**
+   * The pending block: written by the one status transition on every entry into a wait (a pending-category status that
+   * is not marked `wait: false`) and cleared on every exit. The reason is mandatory; the party is one of WAITING_ON
+   * (customer, vendor, change, agreement, internal); only waits outside the provider's control pause the clocks.
+   */
+  pendingReason: text('pending_reason'),
+  pendingWaitingOn: text('pending_waiting_on'),
+  pendingExpectedAt: timestamp('pending_expected_at', { withTimezone: true }),
+  /** The supplier's or third party's reference, the change number (staff only). */
+  pendingReference: text('pending_reference'),
+  /** The reason was shown to the customer (posted as a reply or carried in the notification). */
+  pendingReasonVisible: boolean('pending_reason_visible'),
+  pendingSetBy: uuid('pending_set_by').references(() => users.id, { onDelete: 'set null' }),
+  pendingSetAt: timestamp('pending_set_at', { withTimezone: true }),
   firstResponseAt: timestamp('first_response_at', { withTimezone: true }),
   acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
   restoredAt: timestamp('restored_at', { withTimezone: true }),
@@ -117,6 +131,8 @@ export const tickets = pgTable('tickets', {
   index('tickets_last_activity_idx').on(t.lastActivityAt),
   /** The resolved range of the list and the dashboards' "resolved in the period" counts (resolved tickets only). */
   index('tickets_resolved_at_idx').on(t.resolvedAt).where(sql`${t.resolvedAt} IS NOT NULL`),
+  /** "What waits on the customer" (and on a supplier, a change, an agreement, the desk itself): one predicate on this column. */
+  index('tickets_waiting_on_idx').on(t.pendingWaitingOn).where(sql`${t.pendingWaitingOn} IS NOT NULL`),
 ]);
 
 export const ticketComments = pgTable('ticket_comments', {
@@ -223,12 +239,24 @@ export const approvals = pgTable('approvals', {
   approverUserId: uuid('approver_user_id').references(() => users.id, { onDelete: 'set null' }),
   approverRoleKey: text('approver_role_key'),
   approverTeamId: uuid('approver_team_id'),
+  /** pending | waiting | approved | rejected | skipped | superseded | cancelled (withdrawn, or the ticket ended) | expired */
   status: text('status').notNull().default('pending'),
   decidedBy: uuid('decided_by'),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
+  /** The decision note (or the reason a request was withdrawn). */
   comment: text('comment'),
+  /** Who asked, what needs approving (shown to the approver), by when, and when the approvers were last reminded. */
+  requestedBy: uuid('requested_by').references(() => users.id, { onDelete: 'set null' }),
+  purpose: text('purpose'),
+  dueAt: timestamp('due_at', { withTimezone: true }),
+  remindedAt: timestamp('reminded_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [index('approvals_ticket_idx').on(t.ticketId), index('approvals_approver_idx').on(t.approverUserId, t.status)]);
+}, (t) => [
+  index('approvals_ticket_idx').on(t.ticketId),
+  index('approvals_approver_idx').on(t.approverUserId, t.status),
+  /** The reminder and expiry sweep reads pending steps by their due date. */
+  index('approvals_pending_due_idx').on(t.dueAt).where(sql`${t.status} = 'pending'`),
+]);
 
 export const problemDetails = pgTable('problem_details', {
   ticketId: uuid('ticket_id').primaryKey().references(() => tickets.id, { onDelete: 'cascade' }),

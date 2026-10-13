@@ -6,11 +6,14 @@ import { OPTION_SEEDS, PRIORITY_MATRIX, TEAM_SEEDS, CI_TYPE_SEEDS, RELATIONSHIP_
 import { NOTIFICATION_TEMPLATE_SEEDS_ALL, NOTIFICATION_RULE_SEEDS } from './templates';
 import { DEFAULT_BUSINESS_HOURS } from '@/lib/calendar';
 import { INDIA_HOLIDAY_CALENDAR, holidaysFor } from './holidays';
+import { applyOptionUpgrades, applyTicketUpgrades } from './upgrades';
 import { logger } from '@/core/logger';
 
 export async function seedDefaults(tx: Tx) {
   await seedRoles(tx);
   await seedOptions(tx);
+  // Seed values that changed after an installation was first seeded (idempotent; an administrator's edits survive).
+  await applyOptionUpgrades(tx);
   await seedPriorityMatrix(tx);
   await seedTeams(tx);
   await seedCalendars(tx);
@@ -26,6 +29,8 @@ export async function seedDefaults(tx: Tx) {
   await seedChangeConfig(tx);
   await seedCatalogItems(tx);
   await seedSystemSettings(tx);
+  // Tickets already in a wait before reasons were recorded get their pending block (idempotent: rows still NULL only).
+  await applyTicketUpgrades(tx);
 }
 
 async function seedRoles(tx: Tx) {

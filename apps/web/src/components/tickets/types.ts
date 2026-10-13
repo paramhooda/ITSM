@@ -15,6 +15,38 @@ export interface OptionLabel {
   category?: string | null;
   level?: number | null;
   domain?: string;
+  /** Ticket statuses: the status stops the resolution and restoration clocks (never for an internal hold). */
+  pausesSla?: boolean;
+  /** Ticket statuses: a pending status that is a wait on someone (needs a reason and a party); false for a stage such as a post-implementation review. */
+  wait?: boolean;
+}
+
+/** The party a ticket in a wait is waiting on. */
+export type WaitingOn = 'customer' | 'vendor' | 'change' | 'agreement' | 'internal';
+export const WAITING_ON_LABELS: Record<WaitingOn, string> = { customer: 'Waiting on the customer', vendor: 'Waiting on a supplier or third party', change: 'Waiting for a scheduled change', agreement: 'On hold as agreed with the customer', internal: 'On hold (internal)' };
+
+/** The staff view of the wait a ticket is in (null outside a wait). */
+export interface TicketPending {
+  reason: string | null;
+  waitingOn: WaitingOn;
+  waitingOnLabel: string;
+  expectedAt: string | null;
+  reference: string | null;
+  reasonVisible: boolean;
+  setBy: { id: string; name: string } | null;
+  setAt: string | null;
+  /** The earliest pause of an open clock, null while nothing is paused (an internal hold). */
+  slaPausedSince: string | null;
+}
+
+/** What a status change to a wait posts: the reason is mandatory. */
+export interface PendingBody {
+  statusId: string;
+  pendingReason: string;
+  waitingOn?: WaitingOn;
+  expectedAt?: string | null;
+  pendingReference?: string | null;
+  tellCustomer?: boolean;
 }
 
 export interface SlaCompact {
@@ -102,6 +134,8 @@ export interface TicketListRow {
   /** The customer's satisfaction rating once answered, and the state of the ticket's survey. */
   csatRating?: number | null;
   surveyStatus?: string | null;
+  /** Who the ticket waits on (`pending_waiting_on`); null when not in a wait. */
+  waitingOn?: WaitingOn | null;
 }
 
 export interface TicketStats {
@@ -480,6 +514,8 @@ export interface TicketDetail {
   escalations: { id: string; level: number; reason: string; occurredAt: string }[];
   statuses: OptionLabel[];
   permissions: TicketPermissions;
+  /** The wait the ticket is in, with why, who is waited on, until when and since when the clocks are paused. */
+  pending?: TicketPending | null;
   /** Present once the ticket has ever been declared a major incident (status says whether it still is). */
   major?: MajorSummary | null;
   /** Incidents only: the linked known error, or the best matches while nothing is linked; null without kedb:read. */

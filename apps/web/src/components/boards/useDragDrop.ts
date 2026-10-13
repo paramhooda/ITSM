@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type DragEvent } from 'react';
+import { TICKET_TRANSITIONS } from '@itsm/shared';
 import type { TicketType } from '@/components/tickets/types';
 import { TYPE_LABELS } from '@/components/tickets/types';
 import { TERMINAL_CATEGORIES, type BoardLane, type LanesBy, type TaskCard, type TicketCard } from './api';
@@ -38,6 +39,15 @@ export function ticketRefusals(card: TicketCard, lanes: BoardLane[], lanesBy: La
     }
     if (!(statusesByType[card.type] ?? []).includes(lane.key)) {
       out[lane.key] = `${lane.label} does not apply to ${plural(card.type)}`;
+      continue;
+    }
+    if (lane.statusKey === 'awaiting_approval') {
+      out[lane.key] = 'Use Request approval on the ticket';
+      continue;
+    }
+    const fromCat = card.status.category as keyof typeof TICKET_TRANSITIONS | null | undefined;
+    if (fromCat && lane.category && TICKET_TRANSITIONS[fromCat] && !(TICKET_TRANSITIONS[fromCat] as string[]).includes(lane.category)) {
+      out[lane.key] = `A ${card.status.label ?? fromCat} ticket cannot move to ${lane.label}`;
       continue;
     }
     if (TERMINAL_CATEGORIES.has(lane.category ?? '')) {

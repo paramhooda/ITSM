@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import type { TicketType } from '@itsm/shared';
+import { WAITING_ON, type TicketType, type WaitingOn } from '@itsm/shared';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
-import { ValidationError } from '@/core/errors';
+import { ForbiddenError, ValidationError } from '@/core/errors';
 import { listTickets, countTickets, groupTickets, GROUP_DIMENSIONS, type GroupDimension } from '@/modules/tickets/list';
 import { optionByKey } from '@/modules/tickets/common';
 import type { ListQuery } from '@/modules/tickets/schemas';
@@ -66,6 +66,7 @@ export const queryTicketsSchema = z.object({
   breachRisk: z.enum(['high', 'medium', 'low']).optional().describe('Forecast of an SLA breach (scored every few minutes from the clock, how long similar tickets take and who is working on it); staff only'),
   sentiment: z.enum(['unhappy', 'angry', 'negative', 'neutral', 'positive']).optional().describe("Mood of the customer's last comment; 'unhappy' = negative or angry; staff only"),
   isMajor: z.boolean().optional(),
+  waitingOn: z.enum(WAITING_ON).optional().describe("Who an open ticket waits on: 'customer' (a reply or an approval from the customer; the one word for \"awaiting customer\"), 'vendor', 'change', 'agreement' or 'internal'. Portal users may ask for 'customer' only."),
   createdWithinDays: z.number().int().min(1).max(3650).optional().describe('Only tickets raised in the last N days'),
   createdFrom: z.string().max(30).optional().describe('ISO date (inclusive)'),
   createdTo: z.string().max(30).optional().describe('ISO date (inclusive)'),
@@ -106,6 +107,7 @@ const resolved = (q: TicketQueryInput, names: { customer?: string | null; assign
   else if (q.slaState === 'at_risk') parts.push('with an SLA at risk');
   else if (q.slaState === 'ok') parts.push('with SLAs on track');
   if (q.breachRisk) parts.push(`at ${q.breachRisk} risk of an SLA breach`);
+  if (q.waitingOn) parts.push(WAITING_TEXT[q.waitingOn]);
   if (q.sentiment === 'unhappy') parts.push('whose customer sounded unhappy in the last comment');
   else if (q.sentiment) parts.push(`whose customer sounded ${q.sentiment} in the last comment`);
   if (q.createdWithinDays) parts.push(`raised in the last ${q.createdWithinDays} day${q.createdWithinDays === 1 ? '' : 's'}`);
@@ -116,8 +118,12 @@ const resolved = (q: TicketQueryInput, names: { customer?: string | null; assign
   return parts.join(' ');
 };
 
+const WAITING_TEXT: Record<WaitingOn, string> = { customer: 'waiting on the customer', vendor: 'waiting on a supplier or third party', change: 'waiting for a scheduled change', agreement: 'on hold as agreed with the customer', internal: 'on an internal hold' };
+
 /** Resolves names to ids (within the caller's visibility) and turns the bucket into list predicates. */
 async function toListQuery(ctx: Ctx, input: TicketQueryInput) {
+  // The portal fence: a customer may ask what waits on them; a supplier, change, agreement or internal wait is the desk's business (the portal list route refuses it the same way).
+  if (isCustomerUser(ctx) && input.waitingOn && input.waitingOn !== 'customer') throw new ForbiddenError('Portal users can only ask for tickets waiting on them (waitingOn: customer)');
   const customerId = await resolveCustomerId(ctx, input.customer);
   const priority = await resolveOption(ctx, 'ticket_priority', input.priority);
   const service = await resolveService(ctx, input.service);
@@ -140,6 +146,7 @@ async function toListQuery(ctx: Ctx, input: TicketQueryInput) {
     breachRisk: isCustomerUser(ctx) ? undefined : input.breachRisk,
     sentiment: isCustomerUser(ctx) ? undefined : input.sentiment,
     isMajor: input.isMajor,
+    waitingOn: input.waitingOn,
     createdFrom: input.createdWithinDays ? new Date(Date.now() - input.createdWithinDays * 86_400_000).toISOString() : input.createdFrom,
     createdTo: input.createdWithinDays ? undefined : input.createdTo,
     q: input.q,
@@ -160,9 +167,12 @@ async function toListQuery(ctx: Ctx, input: TicketQueryInput) {
       q.statusCategory = 'pending';
       break;
     case 'awaiting_customer':
+      // One predicate with the list tile, the dashboards and the portal: open and `pending_waiting_on = 'customer'` (a reply or an approval).
+      q.open = true;
+      q.waitingOn = 'customer';
+      break;
     case 'awaiting_approval': {
-      const key = bucket === 'awaiting_customer' ? 'pending_customer' : 'awaiting_approval';
-      const opt = await optionByKey(ctx.tx, 'ticket_status', key);
+      const opt = await optionByKey(ctx.tx, 'ticket_status', 'awaiting_approval');
       q.statusId = opt?.id ?? '00000000-0000-0000-0000-000000000000';
       break;
     }

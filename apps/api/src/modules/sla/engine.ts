@@ -1,5 +1,5 @@
 import { eq, and, inArray, or, isNull, sql } from 'drizzle-orm';
-import type { SlaMetric } from '@itsm/shared';
+import { waitingOnLabels, type SlaMetric, type WaitingOn } from '@itsm/shared';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import { addWorkingMinutes, workingMinutesBetween, type CalendarDef } from '@/lib/calendar';
@@ -28,6 +28,28 @@ export const SYSTEM_ACTOR: SlaActor = { id: null, name: 'System' };
 
 const METRIC_LABEL: Record<SlaMetric, string> = { acknowledgement: 'Acknowledgement', response: 'Response', restoration: 'Restoration', resolution: 'Resolution' };
 export const metricLabel = (m: string) => METRIC_LABEL[m as SlaMetric] ?? m;
+
+/**
+ * The clocks a wait may stop. The response and acknowledgement clocks measure
+ * the first response and the first assignment and are governed by those alone
+ * (`markResponded`, `markAcknowledged`): a ticket put on hold before anyone
+ * answered still owes an answer, so they keep running through any pending state.
+ */
+export const PAUSABLE_METRICS: SlaMetric[] = ['resolution', 'restoration'];
+const isPausable = (r: Pick<SlaRow, 'metric'>) => PAUSABLE_METRICS.includes(r.metric);
+
+/**
+ * Whether the clocks pause in the ticket's current state: the status (or the
+ * policy's extra pause statuses) says so, and the wait is outside the
+ * provider's control. An internal hold (`pending_waiting_on = 'internal'`)
+ * never stops the customer's clock.
+ */
+export async function ticketPausesSla(tx: Tx, ticket: Pick<TicketRow, 'statusId' | 'pendingWaitingOn'>, policyId: string | null | undefined): Promise<boolean> {
+  if (ticket.pendingWaitingOn === 'internal') return false;
+  return statusPausesSla(tx, ticket.statusId, policyId);
+}
+
+const pauseWords = (ticket: Pick<TicketRow, 'pendingWaitingOn'>) => (ticket.pendingWaitingOn ? waitingOnLabels(ticket.pendingWaitingOn as WaitingOn).staff.toLowerCase() : null);
 
 /** Ticket timestamp that satisfies each metric. */
 const SATISFIED_AT: Record<SlaMetric, 'acknowledgedAt' | 'firstResponseAt' | 'restoredAt' | 'resolvedAt'> = {
@@ -161,7 +183,8 @@ export async function applySlas(tx: Tx, ticket: TicketRow, actor: SlaActor, opts
     const cur = chosen.get(t.metric);
     if (!cur || (cur.priorityId === null && t.priorityId !== null)) chosen.set(t.metric, t);
   }
-  const paused = opts.statusPausesSla ?? (await statusPausesSla(tx, ticket.statusId, policy.id));
+  // Only the resolution and restoration clocks start paused, and never for an internal hold.
+  const paused = (opts.statusPausesSla ?? (await statusPausesSla(tx, ticket.statusId, policy.id))) && ticket.pendingWaitingOn !== 'internal';
   const result: SlaRow[] = [];
   const applied: string[] = [];
   for (const [metric, t] of chosen) {
@@ -199,7 +222,7 @@ export async function applySlas(tx: Tx, ticket: TicketRow, actor: SlaActor, opts
       const elapsed = Math.max(0, Math.round(workingMinutesBetween(startedAt, satisfiedAt, cal) - pausedMinutes));
       const met = elapsed <= t.minutes;
       Object.assign(values, { state: met ? 'met' : 'breached', completedAt: satisfiedAt, breachedAt: met ? null : satisfiedAt, elapsedMinutesAtCompletion: elapsed });
-    } else if (paused) {
+    } else if (paused && PAUSABLE_METRICS.includes(metric)) {
       Object.assign(values, { state: 'paused', pausedAt: prev?.pausedAt ?? now });
     } else if (dueAt.getTime() < now.getTime()) {
       // Recalculated into the past (e.g. priority raised late): the processor would breach it on the next tick; do it now for consistency.
@@ -223,10 +246,14 @@ export async function applySlas(tx: Tx, ticket: TicketRow, actor: SlaActor, opts
 }
 
 /**
- * Status transition hook. Pausing statuses stop running clocks; leaving them
- * resumes with the paused working time added to the target; resolved/closed
- * complete the clocks; cancelled cancels them; reopening restarts
- * resolution/restoration from now.
+ * Status transition hook. A pausing status stops the running resolution and
+ * restoration clocks (never the response or acknowledgement clocks, and never
+ * for an internal hold: `ticket` is the reloaded row, so its pending block says
+ * who is waited on); leaving it resumes every paused clock with the paused
+ * working time added to the target; resolved/closed complete the clocks;
+ * cancelled cancels them; reopening restarts resolution/restoration from now.
+ * A move from one wait to another applies the same rule, so an approval that
+ * moves from an internal step to the customer pauses, and the reverse resumes.
  */
 export async function onStatusChange(tx: Tx, ticket: TicketRow, fromStatus: StatusOption | null, toStatus: StatusOption, actor: SlaActor) {
   const now = new Date();
@@ -248,7 +275,7 @@ export async function onStatusChange(tx: Tx, ticket: TicketRow, fromStatus: Stat
     }
     await addActivity(tx, ticket, actor, 'SLA clocks cancelled', { reason: 'ticket_cancelled' });
   } else {
-    const toPauses = await statusPausesSla(tx, toStatus.id, policyId);
+    const toPauses = (await statusPausesSla(tx, toStatus.id, policyId)) && ticket.pendingWaitingOn !== 'internal';
     const reopened = fromCat === 'resolved' || fromCat === 'closed' || fromCat === 'cancelled';
     if (reopened) {
       for (const metric of ['resolution', 'restoration'] as SlaMetric[]) {
@@ -265,12 +292,13 @@ export async function onStatusChange(tx: Tx, ticket: TicketRow, fromStatus: Stat
       await addActivity(tx, ticket, actor, 'SLA clocks restarted after reopen', { reopenCount: ticket.reopenCount });
     }
     if (toPauses) {
-      const running = open.filter((r) => r.state === 'running');
+      const running = open.filter((r) => r.state === 'running' && isPausable(r));
+      const words = pauseWords(ticket);
       for (const r of running) {
         await tx.update(schema.ticketSlas).set({ state: 'paused', pausedAt: now, updatedAt: now }).where(eq(schema.ticketSlas.id, r.id));
-        await addEvent(tx, r, 'paused', { status: toStatus.key }, now);
+        await addEvent(tx, r, 'paused', { status: toStatus.key, waitingOn: ticket.pendingWaitingOn ?? null, reason: ticket.pendingReason ?? null }, now);
       }
-      if (running.length) await addActivity(tx, ticket, actor, `SLA clock paused (${toStatus.label})`, { status: toStatus.key, metrics: running.map((r) => r.metric) });
+      if (running.length) await addActivity(tx, ticket, actor, `${running.map((r) => metricLabel(r.metric)).join(' and ')} ${running.length > 1 ? 'clocks' : 'clock'} paused (${toStatus.label})${words ? ` · ${words}` : ''}`, { status: toStatus.key, waitingOn: ticket.pendingWaitingOn ?? null, metrics: running.map((r) => r.metric) });
     } else {
       const paused = open.filter((r) => r.state === 'paused' && r.pausedAt);
       for (const r of paused) {
@@ -280,7 +308,7 @@ export async function onStatusChange(tx: Tx, ticket: TicketRow, fromStatus: Stat
         await tx.update(schema.ticketSlas).set({ state: 'running', pausedAt: null, pausedMinutes, dueAt, updatedAt: now }).where(eq(schema.ticketSlas.id, r.id));
         await addEvent(tx, r, 'resumed', { status: toStatus.key, pausedMinutes, dueAt }, now);
       }
-      if (paused.length) await addActivity(tx, ticket, actor, `SLA clock resumed (${toStatus.label})`, { status: toStatus.key, metrics: paused.map((r) => r.metric) });
+      if (paused.length) await addActivity(tx, ticket, actor, `${paused.map((r) => metricLabel(r.metric)).join(' and ')} ${paused.length > 1 ? 'clocks' : 'clock'} resumed (${toStatus.label})`, { status: toStatus.key, metrics: paused.map((r) => r.metric) });
     }
   }
   await refreshTicketDue(tx, ticket.id);

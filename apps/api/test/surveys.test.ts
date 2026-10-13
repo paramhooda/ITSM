@@ -315,6 +315,9 @@ describe('customer satisfaction surveys', () => {
     expect(await rowFor(t4.id)).toMatchObject({ sendCount: 2, status: 'pending' });
 
     const t5 = await mk({ title: 'Closed from open', requesterUserId: ids.alphaUser });
+    // Closing straight from work is allowed; closing a New ticket is not (the lifecycle: cancel it instead).
+    const [inProgress5] = await withSystem((tx) => tx.select({ id: schema.configOptions.id }).from(schema.configOptions).where(and(eq(schema.configOptions.type, 'ticket_status'), eq(schema.configOptions.key, 'in_progress'))).limit(1));
+    await withSystem((tx) => tx.update(schema.tickets).set({ statusId: inProgress5!.id }).where(eq(schema.tickets.id, t5.id)));
     await close(t5.id);
     expect(await rowFor(t5.id)).toMatchObject({ status: 'pending', trigger: 'closed' });
 
@@ -329,12 +332,12 @@ describe('customer satisfaction surveys', () => {
 
   it('7. cancel and reopen withdraw a pending survey, a second resolution re-issues it, an answer stands, and a link used after a silent reopen is refused', async () => {
     const open = await mk({ title: 'Cancelled while open', requesterUserId: ids.alphaUser });
-    await asEng((ctx) => cancelTicket(ctx, open.id, {}));
+    await asEng((ctx) => cancelTicket(ctx, open.id, { comment: 'Raised in error' }));
     expect(await rowFor(open.id)).toBeNull();
 
     const t1 = await mk({ title: 'Cancelled after resolution', requesterUserId: ids.alphaUser });
     await resolve(t1.id);
-    await asEng((ctx) => cancelTicket(ctx, t1.id, {}));
+    await asEng((ctx) => cancelTicket(ctx, t1.id, { comment: 'Raised in error' }));
     expect((await rowFor(t1.id))?.status).toBe('cancelled');
     expect((await activitiesOf(t1.id)).map((a) => a.summary)).toContain('Satisfaction survey withdrawn (ticket cancelled)');
     expect(await auditsOf(t1.id, 'survey.cancel')).toHaveLength(1);
@@ -413,7 +416,7 @@ describe('customer satisfaction surveys', () => {
     const cancelled = await mk({ title: 'Revoked link', requesterUserId: ids.alphaUser });
     await resolve(cancelled.id);
     const revokedToken = tokenOf((await rowFor(cancelled.id))!);
-    await asEng((ctx) => cancelTicket(ctx, cancelled.id, {}));
+    await asEng((ctx) => cancelTicket(ctx, cancelled.id, { comment: 'Raised in error' }));
     expect(await publicSurvey(revokedToken)).toBeNull();
     expect(await publicSurvey('A'.repeat(32))).toBeNull();
     expect(await publicSurvey('not a token!')).toBeNull();

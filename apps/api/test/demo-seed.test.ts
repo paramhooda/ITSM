@@ -150,6 +150,15 @@ describe('demo dataset', () => {
     expect(await count('tickets', "where created_at > now() - interval '7 days'")).toBeGreaterThan(15);
   });
 
+  it('gives every ticket in a wait a reason and a party, and at least five wait on the customer', async () => {
+    const waits = "t join config_options s on s.id = t.status_id where s.status_category = 'pending' and coalesce((s.metadata->>'wait')::boolean, true)";
+    expect(await count('tickets', waits)).toBeGreaterThan(0);
+    expect(await count('tickets', `${waits} and (t.pending_reason is null or t.pending_waiting_on is null)`)).toBe(0);
+    expect(await count('tickets', "where pending_waiting_on = 'customer'")).toBeGreaterThanOrEqual(5);
+    // Nothing outside a wait carries a party.
+    expect(await count('tickets', "t join config_options s on s.id = t.status_id where t.pending_waiting_on is not null and (s.status_category <> 'pending' or (s.metadata->>'wait')::boolean = false)")).toBe(0);
+  });
+
   it('keeps its dates current', async () => {
     // Every assertion is relative to the load date and scoped to the demo rows (CTR- numbers, the demo customer codes, the demo
     // licence names): the database is shared with other test files that create their own contracts and licences.

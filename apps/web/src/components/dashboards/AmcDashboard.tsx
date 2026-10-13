@@ -14,7 +14,6 @@ import { EntitlementAlerts, type EntitlementAlert } from './EntitlementAlerts';
 import { Panel, KpiSkeleton, Skeleton, Segmented, Stat, RowList } from './Panel';
 import { STATUS_COLORS } from './chartTheme';
 import { useLocalControl } from './localControls';
-import { useLookups } from '@/hooks/useLookups';
 import { AgeingPanel, RateTable } from './DeskPanels';
 import type { TicketRow } from './types';
 import type { AgeBucket, AmcStrip } from './overviewApi';
@@ -87,7 +86,6 @@ export function AmcDashboard({ days = 30, customerId = '' }: { days?: number; cu
   const [filter, setFilter] = useLocalControl<QueueView>('queue', 'all', QUEUE_VIEWS);
   const [workView, setWorkView] = useLocalControl<WorkView>('work', 'both', WORK_VIEWS);
   const [loadBy, setLoadBy] = useLocalControl<LoadBy>('by', 'customer', LOAD_BY);
-  const { options } = useLookups();
   const d = q.data;
   const rows = useMemo(() => {
     const items = d?.queue.items ?? [];
@@ -99,7 +97,7 @@ export function AmcDashboard({ days = 30, customerId = '' }: { days?: number; cu
       case 'breached':
         return items.filter((t) => t.sla?.breached);
       case 'awaitingCustomer':
-        return items.filter((t) => t.status_key === 'pending_customer');
+        return items.filter((t) => t.waiting_on === 'customer');
       default:
         return items;
     }
@@ -119,10 +117,9 @@ export function AmcDashboard({ days = 30, customerId = '' }: { days?: number; cu
   // Tiles are doors: each opens the list its number was counted on (the scope, the AMC domain, open status).
   const open: TicketListLink = { customerId: customerId || null, domain: 'amc', status: 'open' };
   const work = d.series.some((s) => s.visitsCompleted || s.pmCompleted) ? d.series : [];
-  // The queue's "View all" follows the segment where the list has the predicate: unassigned, breached and awaiting customer (the pending-customer status); "due today" has none, so it opens all open.
-  const pendingCustomer = options('ticket_status').find((o) => o.key === 'pending_customer')?.id;
-  const queueLink = filter === 'unassigned' ? { ...open, assignee: 'unassigned' as const } : filter === 'breached' ? { ...open, sla: 'breached' as const } : filter === 'awaitingCustomer' && pendingCustomer ? { ...open, statusIds: [pendingCustomer] } : open;
-  const queueLabel = filter === 'unassigned' ? 'All unassigned' : filter === 'breached' ? 'All breached' : filter === 'awaitingCustomer' && pendingCustomer ? 'All awaiting customer' : 'All open';
+  // The queue's "View all" follows the segment where the list has the predicate: unassigned, breached and awaiting customer (`waitingOn=customer`, the one word for what waits on the customer); "due today" has none, so it opens all open.
+  const queueLink: TicketListLink = filter === 'unassigned' ? { ...open, assignee: 'unassigned' } : filter === 'breached' ? { ...open, sla: 'breached' } : filter === 'awaitingCustomer' ? { ...open, waitingOn: ['customer'] } : open;
+  const queueLabel = filter === 'unassigned' ? 'All unassigned' : filter === 'breached' ? 'All breached' : filter === 'awaitingCustomer' ? 'All awaiting customer' : 'All open';
   const loadRows = loadBy === 'customer' ? d.byCustomer.map((r) => ({ key: r.id, label: r.name, open: r.open, breached: r.breached, href: ticketListPath({ customerId: r.id, domain: 'amc', status: 'open' }) })) : d.bySite.map((r) => ({ key: `${r.customerId}-${r.id ?? 'none'}`, label: customerId ? r.name : `${r.name} · ${r.customerName}`, open: r.open, breached: r.breached, href: r.id ? ticketListPath({ customerId: r.customerId, domain: 'amc', status: 'open', siteId: r.id }) : undefined }));
   // Visit and maintenance links carry the dashboard's customer scope and only keys those lists read (`engineerId`, `status`, `from`/`to` on the scheduled start or the planned date).
   const scopeCustomer = customerId || undefined;

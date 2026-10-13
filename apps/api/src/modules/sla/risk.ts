@@ -158,7 +158,7 @@ export async function scoreOpenTickets(now = new Date(), batch = 1000): Promise<
         breached: worst.breached,
         paused: worst.state === 'paused',
         unassigned: !t.assigneeId,
-        pendingCustomer: category === 'pending',
+        pendingCustomer: t.pendingWaitingOn === 'customer',
         escalationLevel: t.escalationLevel,
         reopenCount: t.reopenCount,
       });

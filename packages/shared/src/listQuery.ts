@@ -16,7 +16,7 @@ import { TICKET_LIST_OPEN_CATEGORIES, PORTAL_TICKET_LINK_KEYS } from './ticketLi
 export const TICKET_LIST_DEFAULTS: Record<string, string> = { statusCategory: TICKET_LIST_OPEN_CATEGORIES, sort: 'lastActivityAt', order: 'desc' };
 
 /** Keys copied to the API as they are when set (comma lists included). */
-export const PASS_THROUGH = ['customerId', 'priorityId', 'teamId', 'serviceId', 'siteId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'domain', 'categoryId', 'securitySeverityId', 'statusId', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'csat', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'] as const;
+export const PASS_THROUGH = ['customerId', 'priorityId', 'teamId', 'serviceId', 'siteId', 'scopeStatus', 'slaState', 'breachRisk', 'sentiment', 'createdFrom', 'createdTo', 'resolvedFrom', 'resolvedTo', 'domain', 'categoryId', 'securitySeverityId', 'statusId', 'waitingOn', 'changeType', 'riskLevel', 'scheduledFrom', 'scheduledTo', 'csat', 'slaOutcome', 'slaEndedFrom', 'slaEndedTo'] as const;
 
 export type ListState = Record<string, string | undefined>;
 
@@ -81,7 +81,8 @@ export function toPortalParams(state: ListState): Record<string, string> {
  * portal defaults, then the link's keys. `csat=pending` without a status key is
  * the To rate door (the page rewrites the URL the same way on arrival, and the
  * portal API applies the same categories), so the defaults' open categories
- * never hide the tickets still to rate.
+ * never hide the tickets still to rate. The legacy `status=awaiting` reads as
+ * `waitingOn=customer` (the page rewrites it the same way).
  */
 export function portalStateForLink(href: string): ListState {
   const query = href.includes('?') ? href.slice(href.indexOf('?') + 1) : href.startsWith('/') ? '' : href;
@@ -91,6 +92,11 @@ export function portalStateForLink(href: string): ListState {
     state[k] = v;
   });
   if (link.get('csat') === 'pending' && !link.has('statusCategory') && !link.has('statusId')) state.statusCategory = PORTAL_RATE_CATEGORIES;
+  // The portal's older chip alias `status=awaiting` is the "Waiting on you" door: one word, one key (`waitingOn=customer`) on the open categories.
+  if (link.get('status') === 'awaiting' && !link.has('statusCategory') && !link.has('statusId') && !link.has('waitingOn')) {
+    state.waitingOn = 'customer';
+    delete state.status;
+  }
   return state;
 }
 

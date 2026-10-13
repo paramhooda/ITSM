@@ -2,9 +2,10 @@ import { eq, and, asc, desc, inArray, or, sql } from 'drizzle-orm';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
+import type { WaitingOn } from '@itsm/shared';
 import { type TicketRow, addActivity, isCustomerUser, loadTicket, reloadTicket, requireAction, userIdOf, optionMap, toLabel } from './common';
 import { notifyTicketEvent } from './notify';
-import { changeStatusCore, statusByKey } from './status';
+import { changeStatusCore, resumeFromPending, statusByKey } from './status';
 
 export type ApprovalRow = typeof schema.approvals.$inferSelect;
 
@@ -16,6 +17,19 @@ interface WorkflowStep {
 }
 
 const CUSTOMER_ROLE_KEYS = ['customer_admin', 'customer_user'];
+
+/**
+ * The party an approval step waits on: the customer when the step is addressed to a customer role or a customer user,
+ * else the desk itself. A customer party pauses the resolution clock; an internal one never does.
+ */
+export async function partyOf(ctx: Ctx, step: Pick<ApprovalRow, 'approverRoleKey' | 'approverUserId'>): Promise<WaitingOn> {
+  if (step.approverRoleKey && CUSTOMER_ROLE_KEYS.includes(step.approverRoleKey)) return 'customer';
+  if (step.approverUserId) {
+    const [u] = await ctx.tx.select({ userType: schema.users.userType }).from(schema.users).where(eq(schema.users.id, step.approverUserId)).limit(1);
+    if (u?.userType === 'customer') return 'customer';
+  }
+  return 'internal';
+}
 
 /**
  * Creates one `approvals` row per workflow step and moves the ticket to awaiting_approval.
@@ -62,10 +76,12 @@ export async function startApproval(ctx: Ctx, ticket: TicketRow, workflowId: str
   }
   await ctx.tx.update(schema.tickets).set({ approvalStatus: 'pending', updatedAt: new Date(), lastActivityAt: new Date() }).where(eq(schema.tickets.id, ticket.id));
   let current = await reloadTicket(ctx.tx, ticket.id);
-  await addActivity(ctx, ticket, { type: 'approval', summary: `Approval requested (${wf.name}): ${steps.map((s) => s.name ?? 'step').join(' → ')}`, data: { workflowId: wf.id, workflowName: wf.name, steps: rows.map((r) => ({ id: r.id, step: r.step, stepName: r.stepName })) }, customerVisible: true });
+  // The request's activity is customer-visible only when the approver is a customer party (an internal approver is no wait the customer sees).
+  const party = await partyOf(ctx, rows[0]!);
+  await addActivity(ctx, ticket, { type: 'approval', summary: `Approval requested (${wf.name}): ${steps.map((s) => s.name ?? 'step').join(' → ')}`, data: { workflowId: wf.id, workflowName: wf.name, steps: rows.map((r) => ({ id: r.id, step: r.step, stepName: r.stepName })) }, customerVisible: party === 'customer' });
   await ctx.audit({ entityType: 'ticket', entityId: ticket.id, entityLabel: ticket.number, action: 'approval.request', customerId: ticket.customerId, metadata: { workflowId: wf.id, steps: rows.length } });
   const awaiting = await statusByKey(ctx, 'awaiting_approval', ticket.type).catch(() => null);
-  if (awaiting && current.statusId !== awaiting.id) current = await changeStatusCore(ctx, current, awaiting, { action: 'approval', silent: true });
+  if (awaiting) current = await changeStatusCore(ctx, current, awaiting, { action: 'approval', silent: true, pendingReason: `Approval requested (${wf.name})`, waitingOn: party, tellCustomer: false, postReason: false });
   if (!opts.silent) await notifyTicketEvent(ctx, ticket.type === 'change' ? 'change.approval_requested' : 'request.approval_requested', current, {});
   return rows;
 }
@@ -200,15 +216,25 @@ export async function decide(ctx: Ctx, ticketId: string, approvalId: string, dec
     const [nextStep] = await ctx.tx.select().from(schema.approvals).where(and(eq(schema.approvals.ticketId, ticket.id), eq(schema.approvals.status, 'waiting'))).orderBy(asc(schema.approvals.step)).limit(1);
     if (nextStep) {
       await ctx.tx.update(schema.approvals).set({ status: 'pending' }).where(eq(schema.approvals.id, nextStep.id));
-      await addActivity(ctx, ticket, { type: 'approval', summary: `${nextStep.stepName ?? `Step ${nextStep.step}`} is now awaiting approval`, data: { approvalId: nextStep.id, step: nextStep.step }, customerVisible: true });
+      const party = await partyOf(ctx, nextStep);
+      await addActivity(ctx, ticket, { type: 'approval', summary: `${nextStep.stepName ?? `Step ${nextStep.step}`} is now awaiting approval`, data: { approvalId: nextStep.id, step: nextStep.step }, customerVisible: party === 'customer' });
+      // The party is re-derived on every step: the clocks pause when the step moves to the customer and resume when it moves inside.
+      const awaiting = await statusByKey(ctx, 'awaiting_approval', ticket.type).catch(() => null);
+      if (awaiting && current.statusId === awaiting.id) current = await changeStatusCore(ctx, current, awaiting, { action: 'approval', silent: true, pendingReason: current.pendingReason ?? `Approval requested (${nextStep.stepName ?? `step ${nextStep.step}`})`, waitingOn: party, expectedAt: nextStep.dueAt, tellCustomer: false, postReason: false });
       await notifyTicketEvent(ctx, ticket.type === 'change' ? 'change.approval_requested' : 'request.approval_requested', current, {});
     }
     const [{ pending }] = await ctx.tx.select({ pending: sql<number>`count(*)::int` }).from(schema.approvals).where(and(eq(schema.approvals.ticketId, ticket.id), inArray(schema.approvals.status, ['pending', 'waiting'])));
     if (pending === 0) {
+      // The approval status is set before any status change it triggers, so ending the wait never trips the auto-cancel.
       await ctx.tx.update(schema.tickets).set({ approvalStatus: 'approved', updatedAt: now }).where(eq(schema.tickets.id, ticket.id));
       current = await reloadTicket(ctx.tx, ticket.id);
-      const next = await statusByKey(ctx, ticket.type === 'change' ? 'approved' : 'in_fulfilment', ticket.type).catch(() => null);
-      if (next) current = await changeStatusCore(ctx, current, next, { action: 'approval', silent: true });
+      const resumed = await resumeFromPending(ctx, current, { trigger: 'approval', note: comment });
+      if (resumed) current = resumed;
+      else {
+        // Not in a wait (the status was moved by hand while the approval ran): the type's after-approval status as before.
+        const next = await statusByKey(ctx, ticket.type === 'change' ? 'approved' : 'in_fulfilment', ticket.type).catch(() => null);
+        if (next && next.id !== current.statusId) current = await changeStatusCore(ctx, current, next, { action: 'approval', silent: true });
+      }
       await notifyTicketEvent(ctx, ticket.type === 'change' ? 'change.approved' : 'request.approved', current, { comment: comment ?? null });
     }
   }

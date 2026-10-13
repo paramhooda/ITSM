@@ -175,10 +175,10 @@ describe('dashboards', () => {
     expect(t.openedInPeriod).toBe(4);
     expect(t.resolvedInPeriod).toBe(2);
     expect(t.open).toBe(2);
-    expect([t.breached, t.atRisk, t.awaitingReply, t.awaitingApproval, t.openedPrevious, t.resolvedPrevious, t.openAtStart]).toEqual([0, 0, 0, 0, 0, 0, 0]);
-    // Staff read the major count; the status ids the awaiting tiles count by travel with the payload for the doors.
+    expect([t.breached, t.atRisk, t.waitingOnYou, t.awaitingApproval, t.openedPrevious, t.resolvedPrevious, t.openAtStart]).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    // Staff read the major count; "Waiting on you" is the column (door `waitingOn=customer`), so only the awaiting-approval status id travels with the payload (its door narrows by it).
     expect(t.majorOpen).toBe(0);
-    expect(typeof t.awaitingStatusId).toBe('string');
+    expect('awaitingStatusId' in t).toBe(false);
     expect(typeof t.awaitingApprovalStatusId).toBe('string');
     expect(d.deltas.open).toEqual({ current: 2, previous: 0, deltaPct: null });
     expect(d.deltas.openedInPeriod.current).toBe(4);
