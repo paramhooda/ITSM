@@ -11,8 +11,10 @@ import { escalationHistory } from '@/modules/tickets/escalation';
 import { scopePreview } from '@/modules/tickets/scope';
 import { optionByKey, optionById, isWait, type TicketRow } from '@/modules/tickets/common';
 import { applicableStatuses, assertWaitEntry } from '@/modules/tickets/status';
-import { activeSlaRows, PAUSABLE_METRICS, statusPausesSla, metricLabel } from '@/modules/sla/engine';
-import { WAITING_ON, waitingOnLabels } from '@itsm/shared';
+import { loadLifecycleSettings, reasonRequired } from '@/modules/tickets/settings';
+import { activeSlaRows, statusPausesSla, metricLabel } from '@/modules/sla/engine';
+import { loadPauseRule, metricPauses, waitPauses } from '@/modules/sla/pause';
+import { WAITING_ON, waitingOnLabels, type WaitingOn } from '@itsm/shared';
 import { reopenPortalTicket, confirmResolution } from '@/modules/portal/service';
 import { engineerDirectory } from '@/modules/iam/service';
 import { define, type PreviewDetail } from './types';
@@ -58,6 +60,9 @@ const listTicketsSchema = z.object({
   sort: z.enum(['createdAt', 'updatedAt', 'dueAt', 'priority']).optional(),
   limit: z.number().int().min(1).max(20).optional(),
 });
+
+/** The short name of a wait by party, for the preview's sentences. */
+const WAIT_WORDS: Record<WaitingOn, string> = { customer: 'a customer wait', vendor: 'a supplier wait', change: 'a change wait', agreement: 'an agreed hold', internal: 'an internal hold' };
 
 export const TICKETS: ReturnType<typeof define>[] = [
   // ---------------------------------------------------------------- read
@@ -459,7 +464,7 @@ export const TICKETS: ReturnType<typeof define>[] = [
     toolset: 'tickets',
     tier: 'write',
     description:
-      'Move a ticket to another status (key or label, e.g. "in_progress", "pending_customer", "pending_vendor", "on_hold"). Any pending status needs a reason and, for on_hold, the party waited on (agreement with the customer, or internal); the preview says which clocks pause and whether the customer is told. Leaving a pending status brings the ticket back to work with the clocks resumed. To resolve, close, reopen or cancel use the dedicated tools; to await an approval use request_approval.',
+      'Move a ticket to another status (key or label, e.g. "in_progress", "pending_customer", "pending_vendor", "on_hold"). A customer wait needs a reason by default (the lifecycle settings say when) and on_hold needs the party waited on (agreement with the customer, or internal); the preview says which clocks pause under the ticket\'s SLA policy and whether the customer is told. Leaving a pending status brings the ticket back to work with the clocks resumed. To resolve, close, reopen or cancel use the dedicated tools; to await an approval use request_approval.',
     inputSchema: z.object({
       ticket: ticketRef,
       status: z.string().max(60),
@@ -488,7 +493,8 @@ export const TICKETS: ReturnType<typeof define>[] = [
         statusId: to.id,
         resolutionNotes: input.resolutionNotes ?? null,
         comment: input.comment ?? (!wait ? (input.reason ?? null) : null),
-        pendingReason: wait ? (input.reason ?? null) : null,
+        // No reason given on a wait leaves the field undefined: a rewrite of the same wait keeps the stored reason, a fresh wait stores none.
+        pendingReason: wait ? input.reason : undefined,
         waitingOn: input.waitingOn ?? null,
         expectedAt: parseWhen(input.expectedAt, 'expected date'),
         pendingReference: input.reference ?? null,
@@ -505,28 +511,35 @@ export const TICKETS: ReturnType<typeof define>[] = [
       if (to.key === 'awaiting_approval') throw new ValidationError('Use request_approval to put a ticket in Awaiting Approval');
       const from = await optionById(ctx.tx, t.statusId);
       const expectedAt = parseWhen(input.expectedAt, 'expected date');
-      // The service's own rules decide here too, so a refused move fails in the preview with the same message.
-      const entry = assertWaitEntry(t, from, to, { pendingReason: input.reason, waitingOn: input.waitingOn, expectedAt });
+      // The service's own rules decide here too (the transition profile, the reason rule of the lifecycle settings), so a refused move fails in the preview with the same message.
+      const settings = await loadLifecycleSettings(ctx.tx);
+      const entry = assertWaitEntry(t, from, to, { pendingReason: input.reason, waitingOn: input.waitingOn, expectedAt }, settings);
       const fromEnded = ['resolved', 'closed', 'cancelled'].includes(from?.statusCategory ?? '');
-      if (fromEnded && !input.reason && !input.comment) throw new ValidationError(`A reason is required to reopen ${t.number}`);
+      if (fromEnded && settings.reopenCommentRequired && !input.reason && !input.comment) throw new ValidationError(`A reason is required to reopen ${t.number}`);
       const lines: string[] = [`Status: ${from?.label ?? '—'} → ${to.label}`];
       const rows = await activeSlaRows(ctx.tx, t.id);
       const policyId = rows[0]?.policyId ?? t.slaPolicyId;
       if (entry.toWait && entry.waitingOn) {
         const labels = waitingOnLabels(entry.waitingOn);
-        lines.push(`${labels.staff}: ${entry.reason}`);
+        lines.push(entry.reason ? `${labels.staff}: ${entry.reason}` : labels.staff);
+        // The setting did not require a reason for this party: said rather than refused (a customer wait needs one by default).
+        if (!entry.reason) lines.push(`No reason given (not required for ${WAIT_WORDS[entry.waitingOn]}${reasonRequired(settings, 'customer') && entry.waitingOn !== 'customer' ? '; a customer wait needs one' : ''})`);
         if (expectedAt) lines.push(`Expected by ${expectedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`);
         if (input.reference) lines.push(`Reference: ${input.reference}`);
-        const pauses = entry.waitingOn !== 'internal' && (await statusPausesSla(ctx.tx, to.id, policyId));
+        // The clock line comes from the ticket's SLA policy: which clocks a wait stops and whether this party's wait stops them.
+        const rule = await loadPauseRule(ctx.tx, policyId);
+        const partyPauses = waitPauses(rule, entry.waitingOn);
+        const pauses = partyPauses && (await statusPausesSla(ctx.tx, to.id, policyId));
         const order = ['resolution', 'restoration', 'response', 'acknowledgement'];
         const running = rows.filter((r) => r.state === 'running').sort((a, b) => order.indexOf(a.metric) - order.indexOf(b.metric));
-        const pausable = running.filter((r) => PAUSABLE_METRICS.includes(r.metric));
-        const others = running.filter((r) => !PAUSABLE_METRICS.includes(r.metric));
-        if (!pauses) lines.push(entry.waitingOn === 'internal' ? 'Clocks keep running (internal hold)' : 'Clocks keep running (this status does not pause the SLA)');
-        else if (!pausable.length) lines.push(rows.some((r) => r.state === 'paused') ? 'The resolution and restoration clocks are already paused' : 'No resolution or restoration clock is running');
+        const pausable = running.filter((r) => metricPauses(rule, r.metric));
+        const others = running.filter((r) => !metricPauses(rule, r.metric));
+        const ruleWords = rule.metrics.length ? `${rule.metrics.map((m) => metricLabel(m).toLowerCase()).join(' and ')} ${rule.metrics.length > 1 ? 'clocks' : 'clock'}` : 'no clock';
+        if (!pauses) lines.push(!partyPauses ? (entry.waitingOn === 'internal' ? 'Clocks keep running (internal hold)' : `Clocks keep running (the SLA policy does not pause for this wait)`) : 'Clocks keep running (this status does not pause the SLA)');
+        else if (!pausable.length) lines.push(rows.some((r) => r.state === 'paused' && metricPauses(rule, r.metric)) ? `The ${ruleWords} ${rule.metrics.length > 1 ? 'are' : 'is'} already paused` : `No ${rule.metrics.map((m) => metricLabel(m).toLowerCase()).join(' or ')} clock is running`);
         else lines.push(`${pausable.map((r) => metricLabel(r.metric)).join(' and ')} ${pausable.length > 1 ? 'clocks pause' : 'clock pauses'}${others.length ? `; the ${others.map((r) => metricLabel(r.metric).toLowerCase()).join(' and ')} ${others.length > 1 ? 'clocks keep' : 'clock keeps'} running` : ''}`);
         const tell = entry.waitingOn !== 'internal' && (input.notifyCustomer ?? entry.waitingOn === 'customer');
-        lines.push(tell ? `The customer is told: ${entry.reason}` : entry.waitingOn === 'internal' ? 'The customer is not told (an internal hold is not shown in the portal)' : 'The customer is not told the reason (kept as a work note)');
+        lines.push(tell ? (entry.reason ? `The customer is told: ${entry.reason}` : 'The customer is told the ticket waits on them') : entry.waitingOn === 'internal' ? 'The customer is not told (an internal hold is not shown in the portal)' : 'The customer is not told the reason (kept as a work note)');
       } else {
         const paused = rows.filter((r) => r.state === 'paused');
         if (paused.length && isWait(from)) lines.push(`${paused.map((r) => metricLabel(r.metric)).join(' and ')} ${paused.length > 1 ? 'clocks resume' : 'clock resumes'} with the paused time credited`);

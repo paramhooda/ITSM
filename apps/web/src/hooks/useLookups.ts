@@ -62,6 +62,35 @@ export function useLookups() {
   return { ...q, lookups: q.data, options, byId, byKey, team, service, ciType };
 }
 
+/**
+ * The lifecycle rules an administrator can change (Administration → Settings, Tickets group), read the way the API's
+ * `loadLifecycleSettings` reads them: an unknown or malformed value falls back to the ServiceNow-like default, a boolean
+ * accepts true or 'true'. The transition profile filters the status menu and the board drops; the reason rule marks the
+ * pending dialog's Reason field; the two comment rules mark the cancel and reopen dialogs.
+ */
+export interface LifecycleSettings {
+  transitionRules: string;
+  pendingReasonRequired: 'customer' | 'always' | 'never';
+  cancelCommentRequired: boolean;
+  reopenCommentRequired: boolean;
+}
+const settingOn = (v: unknown) => v === true || v === 'true';
+export function lifecycleSettingsOf(settings: Record<string, unknown> | undefined): LifecycleSettings {
+  const reason = settings?.['tickets.pending_reason_required'];
+  return {
+    transitionRules: typeof settings?.['tickets.transition_rules'] === 'string' ? (settings['tickets.transition_rules'] as string) : 'standard',
+    pendingReasonRequired: reason === 'always' || reason === 'never' ? reason : 'customer',
+    cancelCommentRequired: settingOn(settings?.['tickets.cancel_comment_required']),
+    reopenCommentRequired: settingOn(settings?.['tickets.reopen_comment_required']),
+  };
+}
+/** Whether a wait on `waitingOn` needs a written reason under the setting (a customer wait by default). */
+export const reasonRequiredFor = (s: LifecycleSettings, waitingOn: string | null | undefined) => s.pendingReasonRequired === 'always' || (s.pendingReasonRequired === 'customer' && waitingOn === 'customer');
+export function useLifecycleSettings(): LifecycleSettings {
+  const { lookups } = useLookups();
+  return lifecycleSettingsOf(lookups?.settings);
+}
+
 export function useEngineers() {
   return useQuery({ queryKey: ['engineers'], queryFn: () => get<{ id: string; name: string; email: string; title?: string | null; teamIds: string[] }[]>('/iam/directory/engineers'), staleTime: 60_000 });
 }

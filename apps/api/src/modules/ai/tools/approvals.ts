@@ -3,8 +3,10 @@ import { and, eq, ilike, or } from 'drizzle-orm';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ValidationError, NotFoundError } from '@/core/errors';
-import { listMine, listForTicket, decide, requestApproval, planApproval, withdraw, partyOf, approverLabel } from '@/modules/tickets/approvals';
-import { AFTER_APPROVAL_KEY, AFTER_REJECTION, REOPEN_KEY, statusByKey } from '@/modules/tickets/status';
+import { listMine, listForTicket, decide, requestApproval, planApproval, withdraw, partyOf, approverLabel, resubmitKey } from '@/modules/tickets/approvals';
+import { AFTER_APPROVAL_KEY, REJECTED_RETURN_KEY, REOPEN_KEY, afterRejection, statusByKey } from '@/modules/tickets/status';
+import { loadLifecycleSettings, rejectionNoteRequired } from '@/modules/tickets/settings';
+import { loadPauseRule, metricPauses, waitPauses } from '@/modules/sla/pause';
 import { listPortalApprovals, decidePortalApproval } from '@/modules/portal/service';
 import { type TicketRow, optionById } from '@/modules/tickets/common';
 import { activeSlaRows } from '@/modules/sla/engine';
@@ -130,7 +132,7 @@ export const APPROVALS: ReturnType<typeof define>[] = [
     toolset: 'approvals',
     tier: 'write',
     description:
-      'Request an approval on any open ticket (incident, request, problem or change) naming who decides: an administrator of the customer organisation (any, or one by name), a staff user, a role, a team or a configured workflow; with the purpose and a due date. The ticket waits in Awaiting Approval; the resolution and restoration clocks pause while a customer decides and keep running for an internal approver. The approvers are notified and the requester is told when the wait is on their organisation.',
+      'Request an approval on any open ticket (incident, request, problem or change) naming who decides: an administrator of the customer organisation (any, or one by name), a staff user, a role, a team or a configured workflow; with the purpose and a due date. The ticket waits in Awaiting Approval; the clocks the SLA policy names pause while a customer decides (resolution and restoration by default) and keep running for an internal approver. A request on a rejected ticket resubmits it (a change returns to Draft first). The approvers are notified and the requester is told when the wait is on their organisation.',
     inputSchema: requestInput,
     requires: ['tickets:update'],
     portal: null,
@@ -150,10 +152,18 @@ export const APPROVALS: ReturnType<typeof define>[] = [
       lines.push(plan.steps.length > 1 ? `Start the "${plan.name}" workflow (${plan.steps.map((s) => s.name ?? 'step').join(' → ')}), first asking ${who} to approve: ${plan.purpose}` : `Ask ${who} to approve: ${plan.purpose}`);
       lines.push(plan.dueAt ? `Due ${fmtDay(plan.dueAt)}` : 'Due by the default (approvals.default_due_days)');
       const awaiting = await statusByKey(ctx, 'awaiting_approval', t.type);
+      if (plan.resubmits) {
+        const back = await statusByKey(ctx, resubmitKey(t.type), t.type);
+        lines.push(t.type === 'change' ? `${t.number} returns to ${back.label} and is resubmitted` : `${t.number} is reopened and resubmitted`);
+      }
       const rows = await activeSlaRows(ctx.tx, t.id);
-      const hasClocks = rows.some((r) => r.state === 'running' && (r.metric === 'resolution' || r.metric === 'restoration'));
-      if (plan.party === 'customer') lines.push(`${t.number} moves to ${awaiting.label}; ${hasClocks ? 'the resolution and restoration clocks pause' : 'no resolution clock is running to pause'}`);
-      else lines.push(`${t.number} moves to ${awaiting.label}; the clocks keep running (internal approver)`);
+      // The clock line reads the ticket's SLA policy: which clocks pause and whether a wait on this party pauses them.
+      const rule = await loadPauseRule(ctx.tx, rows[0]?.policyId ?? t.slaPolicyId);
+      const pausable = rows.filter((r) => r.state === 'running' && metricPauses(rule, r.metric));
+      const ruleWords = rule.metrics.length ? `the ${rule.metrics.join(' and ')} ${rule.metrics.length > 1 ? 'clocks pause' : 'clock pauses'}` : 'no clock pauses';
+      if (plan.party === 'customer' && waitPauses(rule, 'customer')) lines.push(`${t.number} moves to ${awaiting.label}; ${pausable.length ? ruleWords : `no ${rule.metrics.join(' or ') || 'pausable'} clock is running to pause`}`);
+      else if (plan.party === 'customer') lines.push(`${t.number} moves to ${awaiting.label}; the clocks keep running (the SLA policy does not pause for the customer's approval)`);
+      else lines.push(`${t.number} moves to ${awaiting.label}; ${waitPauses(rule, 'internal') && pausable.length ? `${ruleWords} (the SLA policy pauses for an internal approver)` : 'the clocks keep running (internal approver)'}`);
       lines.push(plan.party === 'customer' ? 'Approvers are notified by email, in-app and WhatsApp; the requester is told the ticket waits on their organisation' : 'Approvers are notified by email, in-app and WhatsApp');
       return { text: `Request approval on ${short(t)}`, lines };
     },
@@ -187,7 +197,9 @@ export const APPROVALS: ReturnType<typeof define>[] = [
       // A step addressed to a named person already carries the name ("Approval by Manish Agarwal"): the approver is not repeated.
       const stepLabel = first ? `${first.stepName ?? `step ${first.step}`}${(first.stepName ?? '').includes(who) ? '' : `, waiting for ${who}`} since ${fmtDay(first.createdAt)}` : '';
       const lines = [`Withdraw the pending approval on ${t.number}${first ? ` (${stepLabel})` : ''}`];
-      if (status?.key === 'awaiting_approval') lines.push(`${t.number} returns to ${back.label}${party === 'customer' ? ' and the clocks resume' : '; the clocks were never paused (internal approver)'}`);
+      // Whether the clocks were paused for this approver's party is the SLA policy's rule, not a constant.
+      const paused = (await activeSlaRows(ctx.tx, t.id)).some((r) => r.state === 'paused');
+      if (status?.key === 'awaiting_approval') lines.push(`${t.number} returns to ${back.label}${paused ? ' and the clocks resume' : party === 'customer' ? '; no clock was paused' : '; the clocks were never paused (internal approver)'}`);
       lines.push(input.reason ? `Reason: ${trunc(input.reason, 160)}` : 'The approvers and the requester are told');
       return { text: `Withdraw the approval on ${short(t)}`, lines };
     },
@@ -196,7 +208,7 @@ export const APPROVALS: ReturnType<typeof define>[] = [
   define({
     name: 'decide_approval',
     toolset: 'approvals',
-    description: 'Approve or reject the approval step on a ticket that is waiting for the user. Only on explicit instruction naming the ticket and the decision; a rejection from the portal needs a comment.',
+    description: 'Approve or reject the approval step on a ticket that is waiting for the user. Only on explicit instruction naming the ticket and the decision; a rejection needs a comment when the lifecycle settings say so (from the portal by default). A rejected change returns to Draft by default; a rejected request ends as Rejected.',
     inputSchema: z.object({ ticket: ticketRef, decision: z.enum(['approved', 'rejected']), comment: z.string().max(2000).optional(), step: z.union([z.string().max(100), z.number().int()]).optional().describe('Step number or name when several wait') }),
     requires: ['tickets:read'],
     portal: ['portal:approve'],
@@ -212,7 +224,8 @@ export const APPROVALS: ReturnType<typeof define>[] = [
     preview: async (ctx, input) => {
       const t = await resolveTicket(ctx, input.ticket);
       const step = await pendingStep(ctx, t, input.step);
-      if (isCustomerUser(ctx) && input.decision === 'rejected' && !input.comment?.trim()) throw new ValidationError('Say why you are rejecting the request; the note is shown to the requester');
+      const settings = await loadLifecycleSettings(ctx.tx);
+      if (input.decision === 'rejected' && rejectionNoteRequired(settings, isCustomerUser(ctx)) && !input.comment?.trim()) throw new ValidationError('Say why you are rejecting the request; the note is shown to the requester');
       const lines = [`${input.decision === 'approved' ? 'Approve' : 'Reject'} step ${step.step}${step.stepName ? ` "${step.stepName}"` : ''}${step.purpose ? `: ${trunc(step.purpose, 160)}` : ''}`];
       if (input.comment) lines.push(`Comment: ${trunc(input.comment, 120)}`);
       // The steps still waiting (a portal user's read is fenced to the organisation's ticket; the count names nobody): the card promises a return to work only when this is the last step.
@@ -221,12 +234,16 @@ export const APPROVALS: ReturnType<typeof define>[] = [
         if (remaining) lines.push(`The next step is released (${remaining} more to decide)`);
         else {
           const next = await statusByKey(ctx, AFTER_APPROVAL_KEY[t.type], t.type);
-          lines.push(`${t.number} ${t.type === 'change' ? 'moves to' : 'returns to'} ${next.label}${t.pendingWaitingOn === 'customer' ? ' and the clocks resume' : ''}`);
+          const paused = (await activeSlaRows(ctx.tx, t.id)).some((r) => r.state === 'paused');
+          lines.push(`${t.number} ${t.type === 'change' ? 'moves to' : 'returns to'} ${next.label}${paused ? ' and the clocks resume' : ''}`);
         }
-      } else if (AFTER_REJECTION[t.type] === 'rejected') lines.push(`${t.number} ends as Rejected${input.comment ? ' with the note posted to the requester' : ''}`);
-      else {
-        const back = await statusByKey(ctx, REOPEN_KEY[t.type], t.type);
-        lines.push(`${t.number} returns to ${back.label} with the note posted to the requester`);
+      } else {
+        const outcome = afterRejection(t.type, settings);
+        if (outcome === 'rejected') lines.push(`${t.number} ends as Rejected${input.comment ? ' with the note posted to the requester' : ''}`);
+        else {
+          const back = await statusByKey(ctx, outcome === 'return' ? REJECTED_RETURN_KEY[t.type]! : REOPEN_KEY[t.type], t.type);
+          lines.push(outcome === 'return' ? `${t.number} returns to ${back.label} with the note posted${input.comment ? '' : ' (no note given)'}` : `${t.number} returns to ${back.label} with the note posted to the requester`);
+        }
       }
       return { text: `${input.decision === 'approved' ? 'Approve' : 'Reject'} the approval on ${short(t)}`, lines };
     },

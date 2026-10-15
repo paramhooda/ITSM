@@ -39,14 +39,33 @@ export interface TicketPending {
   slaPausedSince: string | null;
 }
 
-/** What a status change to a wait posts: the reason is mandatory. */
+/** What a status change to a wait posts: the reason is needed only when the lifecycle setting says (a customer wait by default). */
 export interface PendingBody {
   statusId: string;
-  pendingReason: string;
+  pendingReason?: string | null;
   waitingOn?: WaitingOn;
   expectedAt?: string | null;
   pendingReference?: string | null;
   tellCustomer?: boolean;
+}
+
+/** The clock rule of the ticket's SLA policy (staff only): which clocks a wait stops and which parties' waits stop them. */
+export interface PauseRule {
+  metrics: string[];
+  waitingOn: WaitingOn[];
+}
+const PAUSE_METRIC_ORDER = ['resolution', 'restoration', 'response', 'acknowledgement'];
+const PARTY_WORDS: Record<WaitingOn, string> = { customer: 'the customer', vendor: 'a supplier or third party', change: 'a scheduled change', agreement: 'on hold as agreed with the customer', internal: 'an internal hold' };
+const listWords = (words: string[]) => (words.length <= 1 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
+/** The clock sentence of a wait, from the policy's rule (the same words the API's `pauseWords` gives the assistant). */
+export function pauseWords(rule: PauseRule, waitingOn?: WaitingOn | '' | null): string {
+  if (waitingOn && !rule.waitingOn.includes(waitingOn)) return waitingOn === 'internal' ? 'No clock pauses for an internal hold.' : `No clock pauses while the ticket waits on ${PARTY_WORDS[waitingOn]}.`;
+  const paused = PAUSE_METRIC_ORDER.filter((m) => rule.metrics.includes(m));
+  const running = PAUSE_METRIC_ORDER.filter((m) => !rule.metrics.includes(m));
+  if (!paused.length) return 'No clock pauses while it waits.';
+  const head = `${listWords(paused)} ${paused.length > 1 ? 'clocks pause' : 'clock pauses'} while it waits`;
+  const sentence = running.length ? `${head}; the ${listWords(running)} ${running.length > 1 ? 'clocks keep' : 'clock keeps'} running.` : `${head}.`;
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
 export interface SlaCompact {
@@ -516,6 +535,8 @@ export interface TicketDetail {
   permissions: TicketPermissions;
   /** The wait the ticket is in, with why, who is waited on, until when and since when the clocks are paused. */
   pending?: TicketPending | null;
+  /** The clock rule of the ticket's SLA policy (the defaults when it has none); absent for customer users. */
+  pauseRule?: PauseRule | null;
   /** Present once the ticket has ever been declared a major incident (status says whether it still is). */
   major?: MajorSummary | null;
   /** Incidents only: the linked known error, or the best matches while nothing is linked; null without kedb:read. */

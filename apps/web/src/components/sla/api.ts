@@ -38,6 +38,10 @@ export interface SlaPolicy {
   targets: SlaTarget[];
   pauseStatusIds: string[];
   pauseStatuses: { id: string; label: string }[];
+  /** The clocks a wait stops (values of `SLA_METRICS`). */
+  pauseMetrics: string[];
+  /** The parties whose wait stops them (values of `WAITING_ON`; `internal` absent means an internal hold keeps them running). */
+  pauseWaitingOn: string[];
   usage: SlaPolicyUsage;
   /** Incident targets per priority (response / resolution minutes), provided by the list endpoint. */
   targetSummary?: { priorityLabel: string; priorityLevel: number | null; response: number | null; resolution: number | null }[];

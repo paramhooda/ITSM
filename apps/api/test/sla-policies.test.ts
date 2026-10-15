@@ -135,6 +135,32 @@ describe('SLA policies', () => {
     expect(replaced.targets).toHaveLength(2);
   });
 
+  it('carries the pause rule (the clocks and the waits that pause) with the shipped defaults, round-trips it on create, patch and clone, and refuses an unknown value', async () => {
+    const id = createdPolicyIds[0];
+    const current = await asAdmin((ctx) => policies.getPolicy(ctx, id));
+    expect(current.pauseMetrics).toEqual(['resolution', 'restoration']);
+    expect(current.pauseWaitingOn).toEqual(['customer', 'vendor', 'change', 'agreement']);
+    const patched = await asAdmin((ctx) => policies.updatePolicy(ctx, id, { pauseMetrics: ['resolution', 'response'], pauseWaitingOn: ['customer', 'internal'] }));
+    expect(patched.pauseMetrics).toEqual(['resolution', 'response']);
+    expect(patched.pauseWaitingOn).toEqual(['customer', 'internal']);
+    const created = await asAdmin((ctx) => policies.createPolicy(ctx, { name: `Pause rule ${suffix}`, pauseMetrics: ['resolution'], pauseWaitingOn: ['customer'] }));
+    createdPolicyIds.push(created.id);
+    expect(created.pauseMetrics).toEqual(['resolution']);
+    expect(created.pauseWaitingOn).toEqual(['customer']);
+    const cloned = await asAdmin((ctx) => policies.clonePolicy(ctx, id));
+    expect(cloned.pauseMetrics).toEqual(['resolution', 'response']);
+    expect(cloned.pauseWaitingOn).toEqual(['customer', 'internal']);
+    expect((await asAdmin((ctx) => policies.deletePolicy(ctx, cloned.id))).deleted).toBe(true);
+    await expect(asAdmin((ctx) => policies.updatePolicy(ctx, id, { pauseMetrics: ['speed' as never] }))).rejects.toThrow(/Unknown clock in Clocks that pause: speed/);
+    await expect(asAdmin((ctx) => policies.updatePolicy(ctx, id, { pauseWaitingOn: ['nobody' as never] }))).rejects.toThrow(/Unknown party in Waits that pause: nobody/);
+    await expect(asAdmin((ctx) => policies.createPolicy(ctx, { name: `Bad rule ${suffix}`, pauseMetrics: ['nope' as never] }))).rejects.toBeInstanceOf(ValidationError);
+    // An empty list is a policy whose waits stop nothing.
+    const none = await asAdmin((ctx) => policies.updatePolicy(ctx, id, { pauseMetrics: [] }));
+    expect(none.pauseMetrics).toEqual([]);
+    const restored = await asAdmin((ctx) => policies.updatePolicy(ctx, id, { pauseMetrics: ['resolution', 'restoration'], pauseWaitingOn: ['customer', 'vendor', 'change', 'agreement'] }));
+    expect(restored.pauseMetrics).toEqual(['resolution', 'restoration']);
+  });
+
   it('validates pause statuses and stores them', async () => {
     const id = createdPolicyIds[0];
     await expect(asAdmin((ctx) => policies.setPauseStatuses(ctx, id, [p1]))).rejects.toBeInstanceOf(ValidationError);

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { SLA_METRICS, TICKET_TYPES } from '@itsm/shared';
+import { SLA_METRICS, TICKET_TYPES, WAITING_ON } from '@itsm/shared';
 import { h } from '@/core/context';
 import * as policies from './policies';
 
@@ -23,6 +23,9 @@ const policyBody = z.object({
   holidayCalendarId: z.string().uuid().nullable().optional(),
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
+  /** The clocks a wait stops and the parties whose wait stops them (the policy's pause rule). */
+  pauseMetrics: z.array(z.enum(SLA_METRICS)).max(4).optional(),
+  pauseWaitingOn: z.array(z.enum(WAITING_ON)).max(5).optional(),
   targets: z.array(targetSchema).optional(),
 });
 

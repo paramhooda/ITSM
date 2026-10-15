@@ -150,10 +150,11 @@ describe('demo dataset', () => {
     expect(await count('tickets', "where created_at > now() - interval '7 days'")).toBeGreaterThan(15);
   });
 
-  it('gives every ticket in a wait a reason and a party, and at least five wait on the customer', async () => {
+  it('gives every ticket in a wait a party and every ticket waiting on the customer a reason, and at least five wait on the customer', async () => {
     const waits = "t join config_options s on s.id = t.status_id where s.status_category = 'pending' and coalesce((s.metadata->>'wait')::boolean, true)";
     expect(await count('tickets', waits)).toBeGreaterThan(0);
-    expect(await count('tickets', `${waits} and (t.pending_reason is null or t.pending_waiting_on is null)`)).toBe(0);
+    expect(await count('tickets', `${waits} and t.pending_waiting_on is null`)).toBe(0);
+    expect(await count('tickets', `${waits} and t.pending_waiting_on = 'customer' and t.pending_reason is null`)).toBe(0);
     expect(await count('tickets', "where pending_waiting_on = 'customer'")).toBeGreaterThanOrEqual(5);
     // Nothing outside a wait carries a party.
     expect(await count('tickets', "t join config_options s on s.id = t.status_id where t.pending_waiting_on is not null and (s.status_category <> 'pending' or (s.metadata->>'wait')::boolean = false)")).toBe(0);
@@ -164,6 +165,20 @@ describe('demo dataset', () => {
     expect(await count('tickets', "where type = 'incident' and approval_status = 'pending' and pending_waiting_on = 'internal'")).toBeGreaterThanOrEqual(1);
     expect(await count('approvals', "where status = 'pending' and (purpose is null or due_at is null)")).toBe(0);
     expect(await count('approvals', "a join tickets t on t.id = a.ticket_id where t.type = 'change' and a.status = 'pending' and a.purpose not like 'CAB approval for %'")).toBe(0);
+  });
+
+  it('shows both outcomes of a rejected change under the default setting: one returned change in Draft, the others withdrawn to Rejected; no open ticket carries closed_at; the six lifecycle settings are seeded with their defaults', async () => {
+    expect(await count('tickets', "t join config_options s on s.id = t.status_id where t.type = 'change' and s.key = 'rejected' and t.approval_status = 'rejected'")).toBeGreaterThanOrEqual(1);
+    expect(await count('tickets', "t join config_options s on s.id = t.status_id where t.type = 'change' and s.key = 'draft' and t.approval_status = 'rejected'")).toBe(1);
+    expect(await count('tickets', "t join config_options s on s.id = t.status_id where s.status_category in ('new','open','pending') and t.closed_at is not null")).toBe(0);
+    const settings = await withSystem((tx) => tx.select({ key: schema.systemSettings.key, value: schema.systemSettings.value }).from(schema.systemSettings));
+    const value = (k: string) => settings.find((s) => s.key === k)?.value;
+    expect(value('tickets.transition_rules')).toBe('standard');
+    expect(value('tickets.pending_reason_required')).toBe('customer');
+    expect(value('tickets.cancel_comment_required')).toBe(false);
+    expect(value('tickets.reopen_comment_required')).toBe(false);
+    expect(value('approvals.rejected_change')).toBe('return');
+    expect(value('approvals.rejection_note_required')).toBe('portal');
   });
 
   it('keeps its dates current', async () => {

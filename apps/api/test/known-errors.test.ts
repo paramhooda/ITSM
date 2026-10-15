@@ -123,6 +123,8 @@ afterAll(async () => {
     await tx.delete(schema.users).where(inArray(schema.users.id, [ids.mgr, ids.desk, ids.userA, ids.userB, ids.userC]));
     await tx.delete(schema.roles).where(eq(schema.roles.id, ids.role));
     await tx.delete(schema.customers).where(inArray(schema.customers.id, [ids.a, ids.b]));
+    // The fixture service goes too: a leftover row shifts the demo seed's random stream when demo-seed.test.ts runs after this file.
+    if (ids.service) await tx.delete(schema.services).where(eq(schema.services.id, ids.service));
   });
   await closeDb();
 });

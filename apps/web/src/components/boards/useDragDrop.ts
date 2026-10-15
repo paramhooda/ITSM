@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type DragEvent } from 'react';
-import { TICKET_TRANSITIONS } from '@itsm/shared';
+import type { StatusCategory } from '@itsm/shared';
 import type { TicketType } from '@/components/tickets/types';
 import { TYPE_LABELS } from '@/components/tickets/types';
 import { TERMINAL_CATEGORIES, type BoardLane, type LanesBy, type TaskCard, type TicketCard } from './api';
@@ -24,8 +24,8 @@ export interface DragState {
 
 const plural = (t: TicketType) => `${TYPE_LABELS[t].toLowerCase()}s`;
 
-/** Where a ticket card may be dropped: the statuses of its type and the person's permissions on its customer. */
-export function ticketRefusals(card: TicketCard, lanes: BoardLane[], lanesBy: LanesBy, statusesByType: Record<TicketType, string[]>): Refusals {
+/** Where a ticket card may be dropped: the statuses of its type, the transition profile (`transitionsFor` of the lifecycle setting) and the person's permissions on its customer. */
+export function ticketRefusals(card: TicketCard, lanes: BoardLane[], lanesBy: LanesBy, statusesByType: Record<TicketType, string[]>, transitions: Record<StatusCategory, StatusCategory[]>): Refusals {
   const out: Refusals = {};
   const fromTerminal = TERMINAL_CATEGORIES.has(card.status.category ?? '');
   for (const lane of lanes) {
@@ -45,8 +45,8 @@ export function ticketRefusals(card: TicketCard, lanes: BoardLane[], lanesBy: La
       out[lane.key] = 'Use Request approval on the ticket';
       continue;
     }
-    const fromCat = card.status.category as keyof typeof TICKET_TRANSITIONS | null | undefined;
-    if (fromCat && lane.category && TICKET_TRANSITIONS[fromCat] && !(TICKET_TRANSITIONS[fromCat] as string[]).includes(lane.category)) {
+    const fromCat = card.status.category as StatusCategory | null | undefined;
+    if (fromCat && lane.category && transitions[fromCat] && !(transitions[fromCat] as string[]).includes(lane.category)) {
       out[lane.key] = `A ${card.status.label ?? fromCat} ticket cannot move to ${lane.label}`;
       continue;
     }

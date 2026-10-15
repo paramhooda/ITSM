@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Check } from 'lucide-react';
 import { Avatar, Dialog } from '@/components/ui';
-import { useLookups } from '@/hooks/useLookups';
+import { useLookups, useLifecycleSettings } from '@/hooks/useLookups';
 import { ticketsApi, qk } from '@/components/tickets/api';
 import { ResolveDialog, CommentDialog } from '@/components/tickets/detail/ActionDialogs';
 import { cn } from '@/lib/utils';
@@ -60,7 +60,7 @@ export interface PendingTerminal {
   laneLabel?: string;
 }
 
-/** The dialog a move into an end state opens, or `reopen` when an ended card is dropped on a working lane (a reason is required). */
+/** The dialog a move into an end state opens, or `reopen` when an ended card is dropped on a working lane (it asks why; the lifecycle setting says whether an answer is required). */
 export const terminalKindOf = (category: string | null | undefined, fromCategory?: string | null): TerminalKind | null =>
   category === 'resolved' ? 'resolve' : category === 'closed' ? 'close' : category === 'cancelled' ? 'cancel' : fromCategory && ['resolved', 'closed', 'cancelled'].includes(fromCategory) && (category === 'open' || category === 'new') ? 'reopen' : null;
 
@@ -72,6 +72,7 @@ export const terminalKindOf = (category: string | null | undefined, fromCategory
  */
 export function TerminalDropDialog({ pending, onClose, onDone }: { pending: PendingTerminal | null; onClose: () => void; onDone: (message: string) => void }) {
   const { options } = useLookups();
+  const lifecycle = useLifecycleSettings();
   const closureCodes = options('closure_code').map((c) => ({ id: c.id, label: c.label }));
   const needsTicket = pending?.kind === 'resolve';
   const detail = useQuery({ queryKey: qk.detail(pending?.ticketId ?? ''), queryFn: () => ticketsApi.get(pending!.ticketId), enabled: !!pending && needsTicket, staleTime: 15_000 });
@@ -102,10 +103,10 @@ export function TerminalDropDialog({ pending, onClose, onDone }: { pending: Pend
     return <ResolveDialog open ticket={detail.data} busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ resolutionCodeId: v.resolutionCodeId, resolutionNotes: v.resolutionNotes })} />;
   }
   if (pending.kind === 'reopen') {
-    return <CommentDialog open title={`Reopen ${pending.number}`} confirmLabel="Reopen" label="Why is this being reopened?" required busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ comment: v.comment })} />;
+    return <CommentDialog open title={`Reopen ${pending.number}`} confirmLabel="Reopen" label="Why is this being reopened?" required={lifecycle.reopenCommentRequired} busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ comment: v.comment })} />;
   }
   if (pending.kind === 'close') {
     return <CommentDialog open title={`Close ${pending.number}`} confirmLabel="Close ticket" label="Closing comment" codes={closureCodes} busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ closureCodeId: v.codeId, comment: v.comment || null })} />;
   }
-  return <CommentDialog open title={`Cancel ${pending.number}`} confirmLabel="Cancel ticket" label="Reason" danger required codes={closureCodes} busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ closureCodeId: v.codeId, comment: v.comment || null })} />;
+  return <CommentDialog open title={`Cancel ${pending.number}`} confirmLabel="Cancel ticket" label="Reason" danger required={lifecycle.cancelCommentRequired} codes={closureCodes} busy={run.isPending} onClose={onClose} onSubmit={(v) => run.mutate({ closureCodeId: v.codeId, comment: v.comment || null })} />;
 }

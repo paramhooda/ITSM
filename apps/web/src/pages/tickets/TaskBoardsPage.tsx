@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Kanban, Columns3, ExternalLink, UserPlus, MoveRight, CheckCircle2, ListPlus, Eye, RotateCcw, Trash2, CheckCheck, List } from 'lucide-react';
-import { TICKET_TYPES } from '@itsm/shared';
+import { TICKET_TYPES, transitionsFor } from '@itsm/shared';
 import { PageHeader, ListShell, FilterGroup, FilterOptions, FilterSelect, FilterToggle, Button, Select, EmptyState, LoadingBlock, ErrorBlock, Dialog, Field, Input, Checkbox, ConfirmDialog, type AppliedFilter } from '@/components/ui';
 import { Segmented } from '@/components/dashboards/Panel';
 import type { MenuItem } from '@/components/Menu';
 import { useListState } from '@/hooks/useListState';
-import { useLookups, useEngineers, useCustomersLookup } from '@/hooks/useLookups';
+import { useLookups, useEngineers, useCustomersLookup, useLifecycleSettings } from '@/hooks/useLookups';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useAuthStore } from '@/stores/auth';
 import { fmtNumber } from '@/lib/format';
@@ -209,6 +209,7 @@ export default function TaskBoardsPage() {
   const { state, set } = useListState();
   const [ready, setReady] = useState(false);
   const { options, lookups, byId } = useLookups();
+  const lifecycle = useLifecycleSettings();
   const engineers = useEngineers();
   const customers = useCustomersLookup();
   const desktop = useMediaQuery('(min-width: 768px)');
@@ -314,7 +315,7 @@ export default function TaskBoardsPage() {
     if (board === 'tasks') for (const arr of m.values()) arr.sort((a, b) => (a as TaskCard).sortOrder - (b as TaskCard).sortOrder);
     return m;
   }, [data, board]);
-  const refusalsFor = (card: TicketCard | TaskCard): Refusals => (isTask(card) ? taskRefusals(card, orderedLanes) : ticketRefusals(card, orderedLanes, lanesBy, statusesByType ?? ({} as Record<TicketType, string[]>)));
+  const refusalsFor = (card: TicketCard | TaskCard): Refusals => (isTask(card) ? taskRefusals(card, orderedLanes) : ticketRefusals(card, orderedLanes, lanesBy, statusesByType ?? ({} as Record<TicketType, string[]>), transitionsFor(lifecycle.transitionRules)));
   const canDrag = (card: TicketCard | TaskCard) => desktop && (isTask(card) ? card.can.update : lanesBy === 'assignee' ? card.can.assign : card.can.update || card.can.resolve);
 
   // ---- moves: optimistic, snapped back with the server's message when refused

@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Save, RotateCcw } from 'lucide-react';
 import { get, put } from '@/api/client';
-import { Button, Card, Input, Toggle, LoadingBlock, ErrorBlock } from '@/components/ui';
+import { PENDING_REASON_MODES, REJECTED_CHANGE_MODES, REJECTION_NOTE_MODES, TRANSITION_PROFILE_KEYS } from '@itsm/shared';
+import { Button, Card, Input, Select, Toggle, LoadingBlock, ErrorBlock } from '@/components/ui';
 import { useAuthStore } from '@/stores/auth';
 import { titleCase, fmtDateTime } from '@/lib/format';
 import { SectionHeader } from '@/components/admin/AdminLayout';
@@ -20,9 +21,20 @@ interface Setting {
 const GROUP_LABELS: Record<string, string> = { platform: 'Platform', tickets: 'Tickets', approvals: 'Approvals', changes: 'Change management', known_errors: 'Known errors', boards: 'Task boards', surveys: 'Customer satisfaction', reports: 'Reports', contracts: 'Contracts', entitlements: 'Entitlements', software: 'Software assets', portal: 'Customer portal', security: 'Security', audit: 'Audit retention', events: 'Integration events retention', ai: 'AI', smtp: 'Email delivery', notifications: 'Notifications', whatsapp: 'WhatsApp' };
 const GROUP_ORDER = ['platform', 'tickets', 'approvals', 'changes', 'known_errors', 'boards', 'surveys', 'reports', 'contracts', 'entitlements', 'software', 'portal', 'security', 'audit', 'events', 'ai', 'smtp', 'notifications', 'whatsapp'];
 
-type Kind = 'boolean' | 'number' | 'number[]' | 'string[]' | 'string' | 'secret' | 'json';
+/** The settings whose value is one of a fixed list: rendered as a select so a typo cannot silently fall back to the default. */
+const ENUM_SETTINGS: Record<string, readonly string[]> = {
+  'tickets.transition_rules': TRANSITION_PROFILE_KEYS,
+  'tickets.pending_reason_required': PENDING_REASON_MODES,
+  'approvals.rejected_change': REJECTED_CHANGE_MODES,
+  'approvals.rejection_note_required': REJECTION_NOTE_MODES,
+  'approvals.expiry_policy': ['return', 'reject', 'none'],
+};
+const ENUM_LABELS: Record<string, string> = { strict: 'Strict', standard: 'Standard', loose: 'Loose', customer: 'Customer waits only', always: 'Always', never: 'Never', return: 'Return', rejected: 'Rejected', none: 'None', portal: 'Portal', all: 'All', reject: 'Reject' };
+
+type Kind = 'boolean' | 'number' | 'number[]' | 'string[]' | 'string' | 'secret' | 'json' | 'enum';
 function kindOf(key: string, value: unknown): Kind {
   if (value === '********' || key.endsWith('.password') || key.endsWith('.secret') || key.endsWith('.api_key')) return 'secret';
+  if (key in ENUM_SETTINGS) return 'enum';
   if (typeof value === 'boolean') return 'boolean';
   if (typeof value === 'number') return 'number';
   if (Array.isArray(value)) return value.every((v) => typeof v === 'number') ? 'number[]' : 'string[]';
@@ -97,7 +109,7 @@ export default function SettingsPage() {
                       <div className="text-[12px] text-muted">{s.description ?? <span className="font-mono">{s.key}</span>}</div>
                     </div>
                     <div className="md:col-span-2 flex items-center">
-                      <SettingInput kind={kind} value={value} onChange={setValue} disabled={!canWrite} />
+                      <SettingInput kind={kind} value={value} onChange={setValue} disabled={!canWrite} options={ENUM_SETTINGS[s.key]} settingKey={s.key} />
                     </div>
                   </div>
                 );
@@ -111,8 +123,20 @@ export default function SettingsPage() {
   );
 }
 
-function SettingInput({ kind, value, onChange, disabled }: { kind: Kind; value: unknown; onChange: (v: unknown) => void; disabled: boolean }) {
+function SettingInput({ kind, value, onChange, disabled, options, settingKey }: { kind: Kind; value: unknown; onChange: (v: unknown) => void; disabled: boolean; options?: readonly string[]; settingKey?: string }) {
   switch (kind) {
+    case 'enum': {
+      // A stored value outside the list (written through the API, which does not validate) is shown as the default the loaders apply, and said so.
+      const list = options ?? [];
+      const stored = String(value ?? '');
+      const known = list.includes(stored);
+      return (
+        <div className="space-y-1">
+          <Select value={known ? stored : (list[0] ?? '')} disabled={disabled} options={list.map((o) => ({ value: o, label: ENUM_LABELS[o] ?? titleCase(o) }))} onChange={(e) => onChange(e.target.value)} aria-label={settingKey} data-testid={`setting-${settingKey}`} />
+          {!known && <p className="text-xs text-amber-700">Not a recognised value ("{stored}"); the default applies until you save a choice.</p>}
+        </div>
+      );
+    }
     case 'boolean':
       return <Toggle checked={!!value} onChange={(v) => !disabled && onChange(v)} label={value ? 'Enabled' : 'Disabled'} />;
     case 'number':

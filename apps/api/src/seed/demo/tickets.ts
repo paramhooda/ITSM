@@ -844,8 +844,28 @@ async function runChange(state: DemoState, tx: Tx, plan: Plan): Promise<TicketRu
     await decide(r.ctx(approver), ticket.id, a.id, decision, decision === 'approved' ? (t.changeType === 'emergency' ? 'Approved under the emergency change procedure.' : 'CAB approved for the proposed window.') : 'Rejected: insufficient test evidence; please resubmit with the DR validation results.');
     r.actorAudit(approver, `approval.${decision}`, decidedAt);
     if (decision === 'rejected') {
-      tl.cancelledAt = decidedAt;
       tl.pauses.push([reqAt, decidedAt]);
+      // Under the default `approvals.rejected_change = return` the board's rejection returns the change to Draft with the note
+      // posted and the clocks running. The demo keeps exactly one such change per run in Draft (the first the loop meets) and
+      // withdraws the others to Rejected as the requester would (New → Cancelled is allowed in every profile). Under `rejected`
+      // the change already ended as Rejected and nothing more happens.
+      const [cur] = await tx.select({ statusId: schema.tickets.statusId }).from(schema.tickets).where(eq(schema.tickets.id, ticket.id)).limit(1);
+      if (cur?.statusId === refs.option('ticket_status', 'draft')) {
+        if (!state.counts.rejected_change_in_draft) {
+          state.counts.rejected_change_in_draft = 1;
+          tl.lastActivityAt = decidedAt;
+          return r.result(ticket, tl);
+        }
+        const withdrawnAt = addMinutes(decidedAt, rng.int(10, 120));
+        times.push(withdrawnAt);
+        r.mark(withdrawnAt);
+        await changeStatus(r.ctx('rajesh'), ticket.id, { statusId: refs.option('ticket_status', 'rejected'), comment: "Withdrawn after the board's decision; to be resubmitted with the DR validation results." });
+        r.actorAudit('rajesh', 'ticket.cancel', withdrawnAt);
+        tl.cancelledAt = withdrawnAt;
+        tl.lastActivityAt = withdrawnAt;
+        return r.result(ticket, tl);
+      }
+      tl.cancelledAt = decidedAt;
       tl.lastActivityAt = decidedAt;
       return r.result(ticket, tl);
     }

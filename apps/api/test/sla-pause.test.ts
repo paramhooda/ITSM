@@ -15,8 +15,9 @@ import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/
 import { config } from '../src/config';
 import { createTicket, changeStatus, resolveTicket, reopenTicket } from '../src/modules/tickets/service';
 import { requestApproval, decide } from '../src/modules/tickets/approvals';
-import { applySlas, SYSTEM_ACTOR } from '../src/modules/sla/engine';
+import { applySlas, markResponded, SYSTEM_ACTOR } from '../src/modules/sla/engine';
 import { slaTick } from '../src/jobs/processors/sla';
+import { withPolicyPause, withSetting } from './_settings';
 
 const S = Math.random().toString(36).slice(2, 8);
 const meta = { requestId: `test-sla-pause-${S}` };
@@ -40,8 +41,9 @@ async function roleId(tx: Tx, key: string) {
 }
 const slas = (id: string) => withSystem((tx) => tx.select().from(schema.ticketSlas).where(eq(schema.ticketSlas.ticketId, id)));
 const stateOf = async (id: string) => Object.fromEntries((await slas(id)).map((r) => [r.metric, r.state]));
-const PAUSABLE = ['resolution', 'restoration'];
-const FIRST_ANSWER = ['response', 'acknowledgement'];
+/** The clocks the default policy pauses: read from its `pause_metrics` (the shipped rule seeded as the column default), never a constant here. */
+let PAUSABLE: string[] = [];
+let FIRST_ANSWER: string[] = [];
 const expectPaused = async (id: string, why: string) => {
   const s = await stateOf(id);
   for (const m of PAUSABLE) if (s[m]) expect(s[m], `${why}: ${m}`).toBe('paused');
@@ -68,8 +70,12 @@ beforeAll(async () => {
     if (!adm) throw new Error('admin user missing (seed not applied?)');
     ids.adminUser = adm.id;
     for (const k of ['new', 'in_progress', 'pending_customer', 'pending_vendor', 'pending_change', 'on_hold', 'awaiting_approval', 'resolved', 'in_fulfilment']) st[k] = await optionId(tx, k);
-    const [policy] = await tx.select({ id: schema.slaPolicies.id }).from(schema.slaPolicies).where(eq(schema.slaPolicies.isDefault, true)).limit(1);
+    const [policy] = await tx.select({ id: schema.slaPolicies.id, pauseMetrics: schema.slaPolicies.pauseMetrics, pauseWaitingOn: schema.slaPolicies.pauseWaitingOn }).from(schema.slaPolicies).where(eq(schema.slaPolicies.isDefault, true)).limit(1);
     ids.policy = policy!.id;
+    PAUSABLE = policy!.pauseMetrics;
+    FIRST_ANSWER = ['acknowledgement', 'response', 'restoration', 'resolution'].filter((m) => !PAUSABLE.includes(m));
+    expect(PAUSABLE).toEqual(['resolution', 'restoration']);
+    expect(policy!.pauseWaitingOn).toEqual(['customer', 'vendor', 'change', 'agreement']);
     const [p1] = await tx.select({ id: schema.configOptions.id }).from(schema.configOptions).where(and(eq(schema.configOptions.type, 'ticket_priority'), eq(schema.configOptions.key, 'p1'))).limit(1);
     ids.p1 = p1!.id;
     const [c] = await tx.insert(schema.customers).values({ code: `SP${S}`.toUpperCase(), name: `Pause Customer ${S}` }).returning();
@@ -186,10 +192,17 @@ describe('which clocks pause', () => {
   });
 
   it('reopening into a wait restarts resolution and restoration paused; starting in a wait applies the clocks paused; a policy pause status still pauses', async () => {
-    // The matrix lets an ended ticket reopen only into work; the one reopen into a wait is a rejected request resubmitted for the customer's approval.
+    // Under the strict profile an ended ticket reopens only into work; the default profile lets a resolved ticket go back to a wait.
     const t = await incident('Reopen into a wait');
     await asAdmin((ctx) => resolveTicket(ctx, t.id, { resolutionNotes: 'Done' }));
-    await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!, pendingReason: 'back', comment: 'back' }))).rejects.toThrow(/cannot move from Resolved to Pending Customer/);
+    await withSetting('tickets.transition_rules', 'strict', async () => {
+      await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!, pendingReason: 'back', comment: 'back' }))).rejects.toThrow(/cannot move from Resolved to Pending Customer/);
+    });
+    const back = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!, pendingReason: 'back', comment: 'back' }));
+    expect(back.statusId).toBe(st.pending_customer!);
+    expect(back.reopenCount).toBe(1);
+    await expectPaused(t.id, 'reopened into a customer wait');
+    // A rejected request resubmitted for the customer's approval: the request reopens it (no manual reopen) and the clocks restart paused.
     const r = await asAdmin((ctx) => createTicket(ctx, { type: 'request', customerId: ids.customer, siteId: ids.site, serviceId: ids.service, title: `Resubmitted request ${S}`, description: 'resubmission' }));
     tickets.push(r.id);
     const first = await asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.customerWorkflow, purpose: 'Approval for the pause test' }));
@@ -197,9 +210,6 @@ describe('which clocks pause', () => {
     await asPortalAdmin((ctx) => decide(ctx, r.id, [...first.items].sort((a, b) => a.step - b.step)[0]!.id, 'rejected', 'Not now'));
     const rejected = await slas(r.id);
     for (const x of rejected.filter((x) => PAUSABLE.includes(x.metric))) expect(x.state, x.metric).toBe('cancelled');
-    // A rejected request is an ended ticket: a new approval is refused until it is reopened (with a comment), then requested again.
-    await expect(asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.customerWorkflow, purpose: 'Approval for the pause test' }))).rejects.toThrow(/is rejected; reopen it/);
-    await asAdmin((ctx) => reopenTicket(ctx, r.id, { comment: 'Resubmitting with the revised quote' }));
     const again = await asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.customerWorkflow, purpose: 'Approval for the pause test' }));
     expect(again.ticket.statusId).toBe(st.awaiting_approval!);
     expect(again.ticket.reopenCount).toBe(1);
@@ -233,5 +243,100 @@ describe('which clocks pause', () => {
     const v = await incident('Policy pause');
     await asAdmin((ctx) => changeStatus(ctx, v.id, { statusId: st.pending_vendor!, pendingReason: 'with the supplier' }));
     await expectPaused(v.id, 'policy pause status');
+  });
+});
+
+describe('the clock rule lives on the policy', () => {
+  const metricStates = async (id: string) => stateOf(id);
+
+  it('pause_metrics = {resolution} leaves the restoration clock running; adding response pauses the response clock before the first answer and the sweep does not breach it', async () => {
+    await withPolicyPause(ids.policy, { metrics: ['resolution'] }, async () => {
+      const t = await incident('Resolution only');
+      await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!, pendingReason: 'Need the serial number' }));
+      const s = await metricStates(t.id);
+      expect(s.resolution).toBe('paused');
+      if (s.restoration) expect(s.restoration).toBe('running');
+      expect(s.response).toBe('running');
+    });
+    await withPolicyPause(ids.policy, { metrics: ['resolution', 'restoration', 'response'] }, async () => {
+      const t = await incident('Response pauses too');
+      expect((await metricStates(t.id)).response).toBe('running');
+      await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!, pendingReason: 'Need the serial number' }));
+      const s = await metricStates(t.id);
+      expect(s.response).toBe('paused');
+      expect(s.resolution).toBe('paused');
+      if (s.acknowledgement) expect(s.acknowledgement).not.toBe('paused');
+      await withSystem((tx) => tx.update(schema.ticketSlas).set({ dueAt: sql`now() - interval '1 minute'` }).where(and(eq(schema.ticketSlas.ticketId, t.id), eq(schema.ticketSlas.metric, 'response'))));
+      await slaTick();
+      expect((await metricStates(t.id)).response).toBe('paused');
+      // The record reads the rule from the policy, not a constant.
+      const detail = await asAdmin(async (ctx) => (await import('../src/modules/tickets/service')).getTicket(ctx, t.id));
+      expect((detail as { pauseRule?: { metrics: string[]; waitingOn: string[] } }).pauseRule).toEqual({ metrics: ['resolution', 'restoration', 'response'], waitingOn: ['customer', 'vendor', 'change', 'agreement'] });
+    });
+  });
+
+  it('pause_waiting_on with internal added pauses an internal hold and an internal approver step; with vendor removed a supplier wait keeps the clocks running', async () => {
+    await withPolicyPause(ids.policy, { waitingOn: ['customer', 'vendor', 'change', 'agreement', 'internal'] }, async () => {
+      const t = await incident('Internal pauses');
+      await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.on_hold!, pendingReason: 'Waiting for the storage team', waitingOn: 'internal' }));
+      await expectPaused(t.id, 'internal hold under a policy that pauses for it');
+      await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress! }));
+      await expectRunning(t.id, 'back to work');
+      const r = await asAdmin((ctx) => createTicket(ctx, { type: 'request', customerId: ids.customer, siteId: ids.site, serviceId: ids.service, title: `Internal approver pauses ${S}`, description: 'policy', priorityId: ids.p1 }));
+      tickets.push(r.id);
+      const started = await asAdmin((ctx) => requestApproval(ctx, r.id, { approvalWorkflowId: ids.workflow, purpose: 'Approval for the pause test' }));
+      expect(started.ticket.pendingWaitingOn).toBe('internal');
+      await expectPaused(r.id, 'internal approver under a policy that pauses for it');
+    });
+    await withPolicyPause(ids.policy, { waitingOn: ['customer', 'change', 'agreement'] }, async () => {
+      const t = await incident('Supplier runs');
+      await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!, pendingReason: 'ISP case open' }));
+      await expectRunning(t.id, 'supplier wait under a policy that does not pause for it');
+      await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!, pendingReason: 'Need the site contact' }));
+      await expectPaused(t.id, 'customer wait still pauses');
+    });
+  });
+
+  it('the reopen restart restarts resolution and restoration only, whatever the policy pauses: a met response row is untouched', async () => {
+    await withPolicyPause(ids.policy, { metrics: ['resolution', 'restoration', 'response'] }, async () => {
+      const t = await incident('Reopen restart');
+      await withSystem(async (tx) => {
+        const [rowT] = await tx.select().from(schema.tickets).where(eq(schema.tickets.id, t.id));
+        await markResponded(tx, rowT!, SYSTEM_ACTOR);
+      });
+      const responded = (await slas(t.id)).find((r) => r.metric === 'response')!;
+      expect(responded.state).toBe('met');
+      await asAdmin((ctx) => resolveTicket(ctx, t.id, { resolutionNotes: 'Done' }));
+      await asAdmin((ctx) => reopenTicket(ctx, t.id, { comment: 'It came back' }));
+      const after = await slas(t.id);
+      const response = after.find((r) => r.metric === 'response')!;
+      expect(response.state).toBe('met');
+      expect(response.completedAt?.toISOString()).toBe(responded.completedAt?.toISOString());
+      for (const r of after.filter((x) => x.metric === 'resolution' || x.metric === 'restoration')) {
+        expect(r.state, r.metric).toBe('running');
+        expect(r.completedAt, r.metric).toBeNull();
+      }
+    });
+  });
+
+  it('applySlas on a ticket created in a wait honours both fields', async () => {
+    await withPolicyPause(ids.policy, { metrics: ['resolution', 'response'], waitingOn: ['customer', 'internal'] }, async () => {
+      const u = await incident('Starts waiting on the policy');
+      await withSystem((tx) => tx.update(schema.tickets).set({ statusId: st.on_hold!, pendingWaitingOn: 'internal', pendingReason: 'parked' }).where(eq(schema.tickets.id, u.id)));
+      await withSystem(async (tx) => {
+        const [rowU] = await tx.select().from(schema.tickets).where(eq(schema.tickets.id, u.id));
+        await applySlas(tx, rowU!, SYSTEM_ACTOR, { reason: 'recalculated' });
+      });
+      const s = await metricStates(u.id);
+      expect(s.resolution).toBe('paused');
+      expect(s.response).toBe('paused');
+      if (s.restoration) expect(s.restoration).toBe('running');
+      await withSystem((tx) => tx.update(schema.tickets).set({ statusId: st.pending_vendor!, pendingWaitingOn: 'vendor', pendingReason: 'ISP' }).where(eq(schema.tickets.id, u.id)));
+      await withSystem(async (tx) => {
+        const [rowU] = await tx.select().from(schema.tickets).where(eq(schema.tickets.id, u.id));
+        await applySlas(tx, rowU!, SYSTEM_ACTOR, { reason: 'recalculated' });
+      });
+      await expectRunning(u.id, 'a supplier wait the policy does not pause for');
+    });
   });
 });

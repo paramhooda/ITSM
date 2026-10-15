@@ -50,21 +50,65 @@ export function waitingOnLabels(waitingOn: WaitingOn, opts: { approval?: boolean
 }
 
 /**
- * The transitions the lifecycle allows, by status category (ITIL: work moves
- * forward through pending into an end state, an ended ticket reopens into
- * work, nothing jumps from new to closed; a ticket in work with no fix to record
- * may close straight away, and a resolved ticket raised in error may still be
- * cancelled before it closes). Applied inside the one status
- * transition of the API and read by the web to build its status menus.
+ * The transitions the lifecycle allows, by status category and by profile
+ * (`tickets.transition_rules`). `strict` is the shipped matrix (ITIL: work moves
+ * forward through pending into an end state, an ended ticket reopens into work,
+ * nothing jumps from new to closed; a ticket in work with no fix to record may
+ * close straight away, and a resolved ticket raised in error may still be
+ * cancelled before it closes). `standard`, the default, is the ServiceNow base:
+ * any move among new, open, pending and resolved; closed and cancelled tickets
+ * come back to work through a reopen. `loose` keeps only Closed final. Closed
+ * is final in every profile; Awaiting Approval is always reached through
+ * Request approval (a rule of the transition core, not of the table). Applied
+ * inside the one status transition of the API and read by the web to build its
+ * status menus.
  */
-export const TICKET_TRANSITIONS: Record<StatusCategory, StatusCategory[]> = {
-  new: ['open', 'pending', 'resolved', 'cancelled'],
-  open: ['open', 'pending', 'resolved', 'closed', 'cancelled'],
-  pending: ['open', 'pending', 'resolved', 'cancelled'],
-  resolved: ['resolved', 'closed', 'open', 'new', 'cancelled'],
-  closed: ['open', 'new'],
-  cancelled: ['open', 'new'],
+export const TRANSITION_PROFILE_KEYS = ['strict', 'standard', 'loose'] as const;
+export type TransitionProfile = (typeof TRANSITION_PROFILE_KEYS)[number];
+const ALL_CATEGORIES: StatusCategory[] = ['new', 'open', 'pending', 'resolved', 'closed', 'cancelled'];
+const WORK_AND_ENDED: StatusCategory[] = ['new', 'open', 'pending', 'resolved', 'closed', 'cancelled'];
+export const TRANSITION_PROFILES: Record<TransitionProfile, Record<StatusCategory, StatusCategory[]>> = {
+  strict: {
+    new: ['open', 'pending', 'resolved', 'cancelled'],
+    open: ['open', 'pending', 'resolved', 'closed', 'cancelled'],
+    pending: ['open', 'pending', 'resolved', 'cancelled'],
+    resolved: ['resolved', 'closed', 'open', 'new', 'cancelled'],
+    closed: ['open', 'new'],
+    cancelled: ['open', 'new'],
+  },
+  standard: {
+    new: [...WORK_AND_ENDED],
+    open: [...WORK_AND_ENDED],
+    pending: [...WORK_AND_ENDED],
+    resolved: [...WORK_AND_ENDED],
+    closed: ['open', 'new'],
+    cancelled: ['open', 'new'],
+  },
+  loose: {
+    new: [...ALL_CATEGORIES],
+    open: [...ALL_CATEGORIES],
+    pending: [...ALL_CATEGORIES],
+    resolved: [...ALL_CATEGORIES],
+    closed: ['open', 'new'],
+    cancelled: [...ALL_CATEGORIES],
+  },
 };
+/** The shipped matrix, kept under its old name as the `strict` profile; read by nothing but `TRANSITION_PROFILES`. */
+export const TICKET_TRANSITIONS: Record<StatusCategory, StatusCategory[]> = TRANSITION_PROFILES.strict;
+/** The transition table of a profile; an unknown or missing value is the default (`standard`). */
+export function transitionsFor(profile: string | null | undefined): Record<StatusCategory, StatusCategory[]> {
+  return TRANSITION_PROFILES[(profile ?? 'standard') as TransitionProfile] ?? TRANSITION_PROFILES.standard;
+}
+
+/** When putting a ticket on hold needs a written reason (`tickets.pending_reason_required`): only for a customer wait, always, or never. */
+export const PENDING_REASON_MODES = ['customer', 'always', 'never'] as const;
+export type PendingReasonMode = (typeof PENDING_REASON_MODES)[number];
+/** Who must give a note when rejecting an approval (`approvals.rejection_note_required`). */
+export const REJECTION_NOTE_MODES = ['none', 'portal', 'all'] as const;
+export type RejectionNoteMode = (typeof REJECTION_NOTE_MODES)[number];
+/** What a rejected change becomes (`approvals.rejected_change`): back to Draft to be revised, or ended as Rejected. */
+export const REJECTED_CHANGE_MODES = ['return', 'rejected'] as const;
+export type RejectedChangeMode = (typeof REJECTED_CHANGE_MODES)[number];
 
 /** Scope classification of a ticket relative to the customer's contracts. Never a blocker. */
 export const SCOPE_STATUSES = ['in_scope', 'out_of_scope', 'unknown'] as const;

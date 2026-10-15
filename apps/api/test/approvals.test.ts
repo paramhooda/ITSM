@@ -19,6 +19,7 @@ import { createTicket, resolveTicket, cancelTicket, reopenTicket, getTicket, cha
 import { addComment } from '../src/modules/tickets/activity';
 import * as approvals from '../src/modules/tickets/approvals';
 import * as portal from '../src/modules/portal/service';
+import { withSetting } from './_settings';
 
 const S = Math.random().toString(36).slice(2, 8);
 const meta = { requestId: `test-approvals-${S}`, ip: '127.0.0.1' };
@@ -36,8 +37,9 @@ const asPortalUser = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(portalUser, meta
 const asPortalAdminB = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(portalAdminB, meta, fn);
 const asManager = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(manager, meta, fn);
 
-const PAUSABLE = ['resolution', 'restoration'];
-const FIRST_ANSWER = ['response', 'acknowledgement'];
+/** The clocks the default policy pauses, read from its `pause_metrics` in beforeAll (the shipped rule is the column default). */
+let PAUSABLE: string[] = [];
+let FIRST_ANSWER: string[] = [];
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000);
 const dayStr = (offset: number) => day(offset).toISOString().slice(0, 10);
 
@@ -94,7 +96,13 @@ beforeAll(async () => {
     ids.cab = cab.id;
     const [mixed] = await tx.insert(schema.approvalWorkflows).values({ name: `Manager then customer ${S}`, steps: [{ name: 'Service manager', approverType: 'role', approverRef: 'service_manager' }, { name: 'Customer approval', approverType: 'customer_admin' }], isActive: true }).returning();
     ids.mixed = mixed.id;
-    const [policy] = await tx.select({ id: schema.slaPolicies.id }).from(schema.slaPolicies).where(eq(schema.slaPolicies.isDefault, true)).limit(1);
+    const [policy] = await tx.select({ id: schema.slaPolicies.id, pauseMetrics: schema.slaPolicies.pauseMetrics }).from(schema.slaPolicies).where(eq(schema.slaPolicies.isDefault, true)).limit(1);
+    PAUSABLE = policy?.pauseMetrics ?? ['resolution', 'restoration'];
+    FIRST_ANSWER = ['acknowledgement', 'response', 'restoration', 'resolution'].filter((m) => !PAUSABLE.includes(m));
+    for (const k of ['draft']) {
+      const [o] = await tx.select({ id: schema.configOptions.id }).from(schema.configOptions).where(and(eq(schema.configOptions.type, 'ticket_status'), eq(schema.configOptions.key, k))).limit(1);
+      st[k] = o!.id;
+    }
     const [c] = await tx.insert(schema.customers).values({ code: `APR${S.toUpperCase()}`, name: `Approvals Customer ${S}` }).returning();
     ids.customer = c!.id;
     const [cb] = await tx.insert(schema.customers).values({ code: `APB${S.toUpperCase()}`, name: `Other Organisation ${S}` }).returning();
@@ -165,19 +173,75 @@ describe('approval steps run in order (the CAB workflow on a change)', () => {
     expect((await row(t.id)).statusId).toBe(st.approved);
   });
 
-  it('a rejection at the first step skips the rest and rejects the change; a new request needs a reopen first', async () => {
-    const t = await newTicket('change', 'Rejected change', { requesterUserId: null });
-    const started = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approvalWorkflowId: ids.cab, purpose: 'CAB approval for the rejected change' }));
-    const res = await asAdmin((ctx) => approvals.decide(ctx, t.id, firstStep(started.items).id, 'rejected', 'Not this week'));
+  it('approvals.rejected_change = rejected: a rejection at the first step skips the rest and ends the change as Rejected; a new request resubmits it through Draft', async () => {
+    await withSetting('approvals.rejected_change', 'rejected', async () => {
+      const t = await newTicket('change', 'Rejected change', { requesterUserId: null });
+      const started = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approvalWorkflowId: ids.cab, purpose: 'CAB approval for the rejected change' }));
+      const res = await asAdmin((ctx) => approvals.decide(ctx, t.id, firstStep(started.items).id, 'rejected', 'Not this week'));
+      expect(statusesOf(res.items)).toEqual(['rejected', 'skipped']);
+      expect(res.approvalStatus).toBe('rejected');
+      expect((await row(t.id)).statusId).toBe(st.rejected);
+      // A rejected change is resubmitted by the next request: reopened to Draft (never to its working status), then requested; the old steps are superseded and it starts again at step 1.
+      const again = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approvalWorkflowId: ids.cab, purpose: 'CAB approval, second submission' }));
+      expect(statusesOf(again.items.filter((a) => a.status !== 'superseded' && a.status !== 'rejected' && a.status !== 'skipped'))).toEqual(['pending', 'waiting']);
+      const r = await row(t.id);
+      expect(r.statusId).toBe(st.awaiting_approval);
+      expect(r.reopenCount).toBe(1);
+      const trail = (await activities(t.id, 'status')).map((a) => (a.data as { to?: { key: string } }).to?.key).reverse();
+      expect(trail.slice(-3)).toEqual(['rejected', 'draft', 'awaiting_approval']);
+      expect((await comments(t.id)).some((c) => c.body === 'Resubmitted for approval: CAB approval, second submission' && !c.isInternal)).toBe(true);
+    });
+  });
+
+  it('approvals.rejected_change = return (the default): the change returns to Draft with the note posted, the requester is told, and a new request moves it straight to Awaiting Approval', async () => {
+    const t = await newTicket('change', 'Returned change');
+    const started = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approvalWorkflowId: ids.cab, purpose: 'CAB approval for the returned change' }));
+    const res = await asManager((ctx) => approvals.decide(ctx, t.id, firstStep(started.items).id, 'rejected', 'Add the DR validation results'));
     expect(statusesOf(res.items)).toEqual(['rejected', 'skipped']);
     expect(res.approvalStatus).toBe('rejected');
-    expect((await row(t.id)).statusId).toBe(st.rejected);
-    // A rejected change is an ended ticket: the request is refused until the change is reopened; then the old steps are superseded and it starts again at step 1.
-    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approvalWorkflowId: ids.cab, purpose: 'Again' }))).rejects.toThrow(/is rejected; reopen it/);
-    await asAdmin((ctx) => reopenTicket(ctx, t.id, { comment: 'Resubmitting with the test evidence' }));
+    const r = await row(t.id);
+    expect(r.statusId).toBe(st.draft);
+    expect(r.approvalStatus).toBe('rejected');
+    expect(r.pendingWaitingOn).toBeNull();
+    expect(r.closedAt).toBeNull();
+    expect((await comments(t.id)).some((c) => c.body === 'Add the DR validation results' && !c.isInternal)).toBe(true);
+    expect((await activities(t.id, 'status'))[0]!.summary).toMatch(/^Rejected by Sana Manager: Add the DR validation results · back to Draft to be revised$/);
+    expect((await activities(t.id, 'pending'))[0]!.summary).toBe('Resumed · the request was rejected');
+    const told = await outbox(t.id, 'approval.rejected');
+    expect(told.map((o) => o.recipient)).toContain(`apr.user.${S}@example.test`);
+    // Draft → Awaiting Approval is a plain move: the next request needs no reopen.
     const again = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approvalWorkflowId: ids.cab, purpose: 'CAB approval, second submission' }));
+    const r2 = await row(t.id);
+    expect(r2.statusId).toBe(st.awaiting_approval);
+    expect(r2.reopenCount).toBe(0);
     expect(statusesOf(again.items.filter((a) => a.status !== 'superseded' && a.status !== 'rejected' && a.status !== 'skipped'))).toEqual(['pending', 'waiting']);
-    expect((await row(t.id)).statusId).toBe(st.awaiting_approval);
+    expect((await comments(t.id)).some((c) => /Resubmitted for approval/.test(c.body))).toBe(false);
+
+    // A wait entered by hand while the approval ran stays: the note is posted, the status is left alone.
+    const v = await newTicket('change', 'Held change');
+    const s2 = await asAdmin((ctx) => approvals.requestApproval(ctx, v.id, { approvalWorkflowId: ids.cab, purpose: 'CAB approval for the held change' }));
+    await asAdmin((ctx) => changeStatus(ctx, v.id, { statusId: st.pending_vendor!, pendingReason: 'Waiting for the vendor quote' }));
+    await asManager((ctx) => approvals.decide(ctx, v.id, firstStep(s2.items).id, 'rejected', 'Not without the quote'));
+    const held = await row(v.id);
+    expect(held.statusId).toBe(st.pending_vendor);
+    expect(held.approvalStatus).toBe('rejected');
+    expect((await comments(v.id)).some((c) => c.body === 'Not without the quote' && !c.isInternal)).toBe(true);
+
+    // A rejected request resubmits to Awaiting Approval through In Fulfilment (a request ends as Rejected whatever the setting).
+    const q = await newTicket('request', 'Resubmitted request');
+    const s3 = await asAdmin((ctx) => approvals.requestApproval(ctx, q.id, { approver: { kind: 'customer_admin' }, purpose: 'Approve the licence' }));
+    await asPortalAdmin((ctx) => approvals.decide(ctx, q.id, firstStep(s3.items).id, 'rejected', 'Not this quarter'));
+    expect((await row(q.id)).statusId).toBe(st.rejected);
+    const s4 = await asAdmin((ctx) => approvals.requestApproval(ctx, q.id, { approver: { kind: 'customer_admin' }, purpose: 'Approve the licence (revised quote)' }));
+    expect(s4.ticket.statusId).toBe(st.awaiting_approval);
+    expect(s4.ticket.reopenCount).toBe(1);
+    const qTrail = (await activities(q.id, 'status')).map((a) => (a.data as { to?: { key: string } }).to?.key).reverse();
+    expect(qTrail.slice(-3)).toEqual(['rejected', 'in_fulfilment', 'awaiting_approval']);
+    expect((await comments(q.id)).some((c) => c.body === 'Approve the licence (revised quote)' || c.body === 'Resubmitted for approval: Approve the licence (revised quote)')).toBe(true);
+    // A resolved ticket is still refused: resolving is not a rejection.
+    const done = await newTicket('incident', 'Resolved, not rejected');
+    await asAdmin((ctx) => resolveTicket(ctx, done.id, { resolutionNotes: 'Fixed' }));
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, done.id, { approver: { kind: 'customer_admin' }, purpose: 'Approve something' }))).rejects.toThrow(/is resolved; reopen it/);
   });
 });
 
@@ -332,6 +396,54 @@ describe('rejection per type', () => {
     expect(r.statusId).toBe(st.under_investigation);
     expect(r.approvalStatus).toBe('rejected');
   });
+
+  it('approvals.rejected_change changes only the change: the other types reject the same way under both values', async () => {
+    for (const value of ['return', 'rejected'] as const) {
+      await withSetting('approvals.rejected_change', value, async () => {
+        const inc = await newTicket('incident', `Rejected incident under ${value}`);
+        const si = await asAdmin((ctx) => approvals.requestApproval(ctx, inc.id, { approver: { kind: 'customer_admin' }, purpose: 'Approve the chargeable replacement' }));
+        await asPortalAdmin((ctx) => approvals.decide(ctx, inc.id, firstStep(si.items).id, 'rejected', 'Repair it instead'));
+        expect((await row(inc.id)).statusId, `incident under ${value}`).toBe(st.in_progress);
+        const req = await newTicket('request', `Rejected request under ${value}`);
+        const sr = await asAdmin((ctx) => approvals.requestApproval(ctx, req.id, { approver: { kind: 'customer_admin' }, purpose: 'Approve the licence' }));
+        await asPortalAdmin((ctx) => approvals.decide(ctx, req.id, firstStep(sr.items).id, 'rejected', 'No budget'));
+        expect((await row(req.id)).statusId, `request under ${value}`).toBe(st.rejected);
+        const prb = await newTicket('problem', `Rejected problem under ${value}`, { requesterUserId: null });
+        const sp = await asAdmin((ctx) => approvals.requestApproval(ctx, prb.id, { approver: { kind: 'role', ref: 'service_manager' }, purpose: 'Approve the vendor engagement' }));
+        await asAdmin((ctx) => approvals.decide(ctx, prb.id, firstStep(sp.items).id, 'rejected', 'Workaround first'));
+        expect((await row(prb.id)).statusId, `problem under ${value}`).toBe(st.under_investigation);
+        const chg = await newTicket('change', `Rejected change under ${value}`, { requesterUserId: null });
+        const sc = await asAdmin((ctx) => approvals.requestApproval(ctx, chg.id, { approvalWorkflowId: ids.cab, purpose: 'CAB approval for the change' }));
+        await asManager((ctx) => approvals.decide(ctx, chg.id, firstStep(sc.items).id, 'rejected', 'Not yet'));
+        expect((await row(chg.id)).statusId, `change under ${value}`).toBe(value === 'return' ? st.draft : st.rejected);
+      });
+    }
+  });
+
+  it('approvals.rejection_note_required: portal (the default) holds customer approvers to a note, none holds nobody, all holds staff too', async () => {
+    const mk = async (title: string) => {
+      const t = await newTicket('incident', title);
+      const started = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer_admin' }, purpose: 'Approve the chargeable work' }));
+      return { t, step: firstStep(started.items) };
+    };
+    const a = await mk('Note by default');
+    await expect(asPortalAdmin((ctx) => portal.decidePortalApproval(ctx, a.t.id, a.step.id, 'rejected', '  '))).rejects.toThrow(/Say why/);
+    await asAdmin((ctx) => approvals.decide(ctx, a.t.id, a.step.id, 'rejected'));
+    expect((await row(a.t.id)).approvalStatus).toBe('rejected');
+    await withSetting('approvals.rejection_note_required', 'none', async () => {
+      const b = await mk('Note never');
+      const res = await asPortalAdmin((ctx) => portal.decidePortalApproval(ctx, b.t.id, b.step.id, 'rejected', ''));
+      expect(res.approvalStatus).toBe('rejected');
+      expect((await row(b.t.id)).statusId).toBe(st.in_progress);
+    });
+    await withSetting('approvals.rejection_note_required', 'all', async () => {
+      const c = await mk('Note always');
+      await expect(asAdmin((ctx) => approvals.decide(ctx, c.t.id, c.step.id, 'rejected'))).rejects.toThrow(/Say why/);
+      await expect(asPortalAdmin((ctx) => portal.decidePortalApproval(ctx, c.t.id, c.step.id, 'rejected', null))).rejects.toThrow(/Say why/);
+      await asAdmin((ctx) => approvals.decide(ctx, c.t.id, c.step.id, 'approved'));
+      expect((await row(c.t.id)).approvalStatus).toBe('approved');
+    });
+  });
 });
 
 describe('internal approvers and refusals', () => {
@@ -447,7 +559,7 @@ describe('the reminder and expiry job', () => {
 
   it('expires under return (back to work), reject (the type\'s rejection path) and none (reminders only)', async () => {
     const past = day(-10);
-    const mk = async (type: 'incident' | 'request', title: string) => {
+    const mk = async (type: 'incident' | 'request' | 'change', title: string) => {
       const t = await newTicket(type, title);
       await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer_admin' }, purpose: `Approve ${title}` }));
       await withSystem((tx) => tx.update(schema.approvals).set({ dueAt: past }).where(eq(schema.approvals.ticketId, t.id)));
@@ -480,6 +592,13 @@ describe('the reminder and expiry job', () => {
     expect(r.statusId).toBe(st.in_progress);
     expect(r.approvalStatus).toBe('rejected');
     expect((await comments(inc.id)).some((c) => /No decision by/.test(c.body) && !c.isInternal)).toBe(true);
+    // A change under reject follows approvals.rejected_change (return by default): back to Draft, and the status row says so.
+    const chg = await mk('change', 'Expired, returned change');
+    await approvals.remindAndExpire(new Date());
+    r = await row(chg.id);
+    expect(r.statusId).toBe(st.draft);
+    expect(r.approvalStatus).toBe('rejected');
+    expect((await activities(chg.id, 'status'))[0]!.summary).toMatch(/^Approval expired without a decision · back to Draft to be revised$/);
 
     // none: reminders only; the overdue step stays pending.
     await setSetting('approvals.expiry_policy', 'none');
@@ -522,7 +641,9 @@ describe('the outcome reaches the customer when the ticket shows it; the desk ke
     const rejectedChange = await newTicket('change', 'Customer change, CAB says no');
     const started = await asAdmin((ctx) => approvals.requestApproval(ctx, rejectedChange.id, { approvalWorkflowId: ids.cab, purpose: 'CAB approval for the firewall change' }));
     await asManager((ctx) => approvals.decide(ctx, rejectedChange.id, firstStep(started.items).id, 'rejected', 'Not during the freeze'));
-    expect((await row(rejectedChange.id)).statusId).toBe(st.rejected);
+    // Under the default `return` the change goes back to Draft with the note: the requester is told of the return (the outcome shows on the ticket).
+    expect((await row(rejectedChange.id)).statusId).toBe(st.draft);
+    expect((await activities(rejectedChange.id, 'status'))[0]!.summary).toMatch(/back to Draft to be revised/);
     const told = await outbox(rejectedChange.id, 'approval.rejected');
     expect(told.map((o) => o.recipient)).toContain(`apr.user.${S}@example.test`);
     expect(told.find((o) => o.recipient === `apr.user.${S}@example.test`)!.body).toMatch(/Not during the freeze/);

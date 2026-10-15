@@ -16,6 +16,8 @@ import { notifyTicketEvent } from './notify';
 import { escalateManually, escalationHistory } from './escalation';
 import { startApproval } from './approvals';
 import { changeStatusCore, statusByKey, applicableStatuses, RESOLVE_KEY, REOPEN_KEY } from './status';
+import { loadLifecycleSettings } from './settings';
+import { loadPauseRule } from '@/modules/sla/pause';
 import type { SlaMetricSummary } from '@/modules/sla/engine';
 import {
   type TicketRow,
@@ -329,6 +331,8 @@ export async function getTicket(ctx: Ctx, id: string) {
   const policyIds = [...new Set([...slas.map((s) => s.policyId), t.slaPolicyId, contract?.slaPolicyId].filter((x): x is string => !!x))];
   const policies = policyIds.length ? await ctx.tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name }).from(schema.slaPolicies).where(inArray(schema.slaPolicies.id, policyIds)) : [];
   const slaPolicyId = slas[0]?.policyId ?? t.slaPolicyId ?? contract?.slaPolicyId ?? null;
+  // Staff only: the clock rule of the ticket's policy (the defaults when it has none), so the dialogs and the SLA card read the policy, not a constant.
+  const pauseRule = customer ? null : await loadPauseRule(ctx.tx, slaPolicyId);
 
   const watchers = await ctx.tx.select({ userId: schema.ticketWatchers.userId, name: schema.users.name, email: schema.users.email }).from(schema.ticketWatchers).innerJoin(schema.users, eq(schema.users.id, schema.ticketWatchers.userId)).where(eq(schema.ticketWatchers.ticketId, t.id));
   const cis = await ctx.tx.select({ id: schema.cis.id, name: schema.cis.name, hostname: schema.cis.hostname, ipAddress: schema.cis.ipAddress, status: schema.cis.status, role: schema.ticketCis.role, typeId: schema.cis.typeId }).from(schema.ticketCis).innerJoin(schema.cis, eq(schema.cis.id, schema.ticketCis.ciId)).where(eq(schema.ticketCis.ticketId, t.id));
@@ -374,6 +378,7 @@ export async function getTicket(ctx: Ctx, id: string) {
     catalogItem: catalogItem ?? null,
     parent: parent ?? null,
     slaPolicy: slaPolicyId ? { id: slaPolicyId, name: policies.find((p) => p.id === slaPolicyId)?.name ?? null } : null,
+    ...(customer ? {} : { pauseRule }),
     slas,
     sla: worstSla(slas),
     // Staff only: the breach forecast and the customer's mood are internal signals.
@@ -599,14 +604,16 @@ const ENDED = ['resolved', 'closed', 'cancelled'];
 /**
  * The status endpoint's rules by actor: a portal user may only reopen (in the window) or cancel their own new ticket;
  * staff need tickets:resolve to end a ticket, tickets:update otherwise; resolving needs notes; staff cancelling or
- * reopening need a reason; a wait called again with a reason is a rewrite of the wait rather than a no-op.
+ * reopening need a reason when the lifecycle settings say so; a wait called again with any of its fields is a
+ * rewrite of the wait rather than a no-op.
  */
 export async function changeStatus(ctx: Ctx, id: string, input: StatusInput): Promise<TicketRow> {
   const t = await loadTicket(ctx, id);
   const to = await optionById(ctx.tx, input.statusId);
   if (!to || to.type !== 'ticket_status' || !to.isActive) throw new ValidationError('Invalid status');
-  const rewrite = isWait(to) && !!input.pendingReason?.trim();
+  const rewrite = isWait(to) && (!!input.pendingReason?.trim() || !!input.expectedAt || !!input.waitingOn || !!input.pendingReference?.trim());
   if (to.id === t.statusId && !rewrite) return t;
+  const settings = await loadLifecycleSettings(ctx.tx);
   const from = await optionById(ctx.tx, t.statusId);
   const cat = to.statusCategory;
   const fromEnded = ENDED.includes(from?.statusCategory ?? '');
@@ -622,9 +629,10 @@ export async function changeStatus(ctx: Ctx, id: string, input: StatusInput): Pr
     if (!ctx.can('tickets:resolve', t.customerId) && !ctx.can('tickets:update', t.customerId)) throw new ForbiddenError('Missing permission: tickets:resolve');
   } else requireAction(ctx, t, 'tickets:update');
   if (cat === 'resolved' && !input.resolutionNotes && !t.resolutionNotes && !input.comment) throw new ValidationError('Resolution notes are required to resolve a ticket');
-  if (!isCustomerUser(ctx) && cat === 'cancelled' && !input.comment?.trim()) throw new ValidationError(`A reason is required to cancel ${t.number}`);
-  if (!isCustomerUser(ctx) && fromEnded && (cat === 'open' || cat === 'new') && !input.comment?.trim()) throw new ValidationError(`A reason is required to reopen ${t.number}`);
+  if (!isCustomerUser(ctx) && cat === 'cancelled' && settings.cancelCommentRequired && !input.comment?.trim()) throw new ValidationError(`A reason is required to cancel ${t.number}`);
+  if (!isCustomerUser(ctx) && fromEnded && (cat === 'open' || cat === 'new') && settings.reopenCommentRequired && !input.comment?.trim()) throw new ValidationError(`A reason is required to reopen ${t.number}`);
   return changeStatusCore(ctx, t, to, {
+    settings,
     resolutionCodeId: input.resolutionCodeId,
     resolutionNotes: input.resolutionNotes,
     closureCodeId: input.closureCodeId,
@@ -668,10 +676,11 @@ export async function reopenTicket(ctx: Ctx, id: string, input: { comment?: stri
     requireAction(ctx, t, 'tickets:resolve', 'portal:tickets');
     await assertReopenWindow(ctx, t);
   } else if (!ctx.can('tickets:resolve', t.customerId) && !ctx.can('tickets:update', t.customerId)) throw new ForbiddenError('Missing permission: tickets:resolve');
-  if (!isCustomerUser(ctx) && !input.comment?.trim()) throw new ValidationError(`A reason is required to reopen ${t.number}`);
+  const settings = await loadLifecycleSettings(ctx.tx);
+  if (!isCustomerUser(ctx) && settings.reopenCommentRequired && !input.comment?.trim()) throw new ValidationError(`A reason is required to reopen ${t.number}`);
   const to = (await optionByKey(ctx.tx, 'ticket_status', REOPEN_KEY[t.type])) ?? (await defaultStatusFor(ctx.tx, t.type));
   if (!statusApplies(to, t.type)) throw new ValidationError('No reopen status configured for this ticket type');
-  return changeStatusCore(ctx, t, to, { comment: input.comment, action: 'reopen' });
+  return changeStatusCore(ctx, t, to, { settings, comment: input.comment, action: 'reopen' });
 }
 
 export async function cancelTicket(ctx: Ctx, id: string, input: { closureCodeId?: string | null; comment?: string | null }) {
@@ -682,7 +691,8 @@ export async function cancelTicket(ctx: Ctx, id: string, input: { closureCodeId?
     requireAction(ctx, t, 'tickets:resolve', 'portal:tickets');
   } else {
     requireAction(ctx, t, 'tickets:resolve');
-    if (!input.comment?.trim()) throw new ValidationError(`A reason is required to cancel ${t.number}`);
+    const settings = await loadLifecycleSettings(ctx.tx);
+    if (settings.cancelCommentRequired && !input.comment?.trim()) throw new ValidationError(`A reason is required to cancel ${t.number}`);
   }
   const to = await statusByKey(ctx, 'cancelled', t.type);
   let codeId = input.closureCodeId ?? null;

@@ -219,6 +219,22 @@ describe('skills, one scripted conversation each', () => {
     expect(back).toMatchObject({ approvalStatus: 'withdrawn', pendingWaitingOn: null });
   });
 
+  it('act: set_status on a supplier wait without a reason is proposed, not refused, under the default; the card says no reason was given and which clocks pause', async () => {
+    const fake = new Scripted().script(tool('set_status', { ticket: numbers.a1, status: 'pending_vendor', expectedAt: '2030-06-01' }), say('I will put it on hold for the supplier. Shall I proceed?'));
+    ai.setProviderForTests(fake);
+    const res = await asAdmin((ctx) => ai.chat(ctx, { message: `put ${numbers.a1} on hold for the supplier` }));
+    expect(res.pendingAction?.tool).toBe('set_status');
+    const preview = [res.pendingAction!.preview, ...(res.pendingAction!.lines ?? [])].join('\n');
+    expect(preview).toMatch(/Pending Vendor/);
+    expect(preview).toMatch(/No reason given \(not required for a supplier wait/);
+    expect(preview).toMatch(/Waiting on a supplier or third party/);
+    expect(preview).toMatch(/clocks? pauses?|Clocks keep running|clock is running/);
+    expect(preview).not.toMatch(/reason is required/);
+    await asAdmin((ctx) => ai.chat(ctx, { conversationId: res.conversationId, confirm: { actionId: res.pendingAction!.id, decision: 'cancel' } }));
+    const [t] = await withSystem((tx) => tx.select({ pendingWaitingOn: schema.tickets.pendingWaitingOn }).from(schema.tickets).where(eq(schema.tickets.id, ticketIds[0]!)));
+    expect(t?.pendingWaitingOn).toBeNull();
+  });
+
   it('approvals: a reply that drops the figure gets the facts first', async () => {
     const fake = new Scripted().script(tool('my_approvals', {}), say('Nothing is waiting for you.'));
     ai.setProviderForTests(fake);

@@ -18,7 +18,8 @@ import { eq, and, inArray, asc, sql } from 'drizzle-orm';
 import { withSystem, closeDb, schema, type Tx } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
-import { createTicket, getTicket, updateChangeDetails } from '../src/modules/tickets/service';
+import { createTicket, getTicket, updateChangeDetails, changeStatus } from '../src/modules/tickets/service';
+import { withSetting } from './_settings';
 import { requestApproval, listForTicket } from '../src/modules/tickets/approvals';
 import { listTickets } from '../src/modules/tickets/list';
 import { listQuerySchema } from '../src/modules/tickets/schemas';
@@ -568,28 +569,65 @@ describe('gap closure (database)', () => {
     expect(again.items.map((i) => i.ticketId)).toContain(queueB.id);
   });
 
-  it('a rejection with no approval step pending moves a pre-approved change to Rejected, with an audit entry and the status notification', async () => {
-    const t = await newChange(`Pre-approved rejected ${S}`, { changeTemplateId: catTpl.id, requesterUserId: ids.engineer, change: { scheduledStart: hour(140), scheduledEnd: hour(141) } });
-    expect(t.approvalStatus).toBe('not_required');
-    const m = await asAdmin((ctx) => changes.createMeeting(ctx, { title: `Reject CAB ${S}`, scheduledAt: hour(135), ticketIds: [t.id] }));
-    created.meetings.push(m.id);
-    const r = await asAdmin((ctx) => changes.decideItem(ctx, m.id, m.items[0]!.id, { decision: 'rejected', notes: 'Not this quarter.' }));
-    expect(r.approval).toMatchObject({ applied: false, note: expect.stringContaining('moved to Rejected') });
-    expect(await statusKeyOf(t.id)).toEqual({ key: 'rejected', approvalStatus: 'rejected' });
-    const audit = await withSystem((tx) => tx.select().from(schema.auditLog).where(and(eq(schema.auditLog.entityId, t.id), eq(schema.auditLog.action, 'cab.rejected_change'))));
-    expect(audit).toHaveLength(1);
-    const notified = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.event, 'ticket.status_changed'), eq(schema.notificationOutbox.entityId, t.id))));
-    expect(notified.length).toBeGreaterThanOrEqual(1);
-    // The board's notes stay internal: no customer-visible comment and no status message carries them.
-    for (const n of notified) expect(`${n.body} ${n.bodyText ?? ''} ${n.subject ?? ''}`).not.toContain('Not this quarter');
-    const visible = await withSystem((tx) => tx.select().from(schema.ticketComments).where(and(eq(schema.ticketComments.ticketId, t.id), eq(schema.ticketComments.isInternal, false))));
-    expect(visible.some((c) => c.body.includes('Not this quarter'))).toBe(false);
-    // Deciding it again does not move it twice.
-    const m2 = await asAdmin((ctx) => changes.createMeeting(ctx, { title: `Reject CAB 2 ${S}`, scheduledAt: hour(136) }));
-    created.meetings.push(m2.id);
-    const v = await asAdmin((ctx) => changes.addItem(ctx, m2.id, { ticketId: t.id }));
-    const r2 = await asAdmin((ctx) => changes.decideItem(ctx, m2.id, v.items[0]!.id, { decision: 'rejected' }));
-    expect(r2.approval.note).toBe('No approval step was pending on the change');
+  it('a rejection with no approval step pending applies approvals.rejected_change: under rejected the pre-approved change ends as Rejected, with an audit entry and the status notification', async () => {
+    await withSetting('approvals.rejected_change', 'rejected', async () => {
+      const t = await newChange(`Pre-approved rejected ${S}`, { changeTemplateId: catTpl.id, requesterUserId: ids.engineer, change: { scheduledStart: hour(140), scheduledEnd: hour(141) } });
+      expect(t.approvalStatus).toBe('not_required');
+      const m = await asAdmin((ctx) => changes.createMeeting(ctx, { title: `Reject CAB ${S}`, scheduledAt: hour(135), ticketIds: [t.id] }));
+      created.meetings.push(m.id);
+      const r = await asAdmin((ctx) => changes.decideItem(ctx, m.id, m.items[0]!.id, { decision: 'rejected', notes: 'Not this quarter.' }));
+      expect(r.approval).toMatchObject({ applied: false, note: expect.stringContaining('moved to Rejected') });
+      expect(await statusKeyOf(t.id)).toEqual({ key: 'rejected', approvalStatus: 'rejected' });
+      const audit = await withSystem((tx) => tx.select().from(schema.auditLog).where(and(eq(schema.auditLog.entityId, t.id), eq(schema.auditLog.action, 'cab.rejected_change'))));
+      expect(audit).toHaveLength(1);
+      const notified = await withSystem((tx) => tx.select().from(schema.notificationOutbox).where(and(eq(schema.notificationOutbox.event, 'ticket.status_changed'), eq(schema.notificationOutbox.entityId, t.id))));
+      expect(notified.length).toBeGreaterThanOrEqual(1);
+      // The board's notes stay internal: no customer-visible comment and no status message carries them.
+      for (const n of notified) expect(`${n.body} ${n.bodyText ?? ''} ${n.subject ?? ''}`).not.toContain('Not this quarter');
+      const visible = await withSystem((tx) => tx.select().from(schema.ticketComments).where(and(eq(schema.ticketComments.ticketId, t.id), eq(schema.ticketComments.isInternal, false))));
+      expect(visible.some((c) => c.body.includes('Not this quarter'))).toBe(false);
+      // Deciding it again does not move it twice.
+      const m2 = await asAdmin((ctx) => changes.createMeeting(ctx, { title: `Reject CAB 2 ${S}`, scheduledAt: hour(136) }));
+      created.meetings.push(m2.id);
+      const v = await asAdmin((ctx) => changes.addItem(ctx, m2.id, { ticketId: t.id }));
+      const r2 = await asAdmin((ctx) => changes.decideItem(ctx, m2.id, v.items[0]!.id, { decision: 'rejected' }));
+      expect(r2.approval.note).toBe('No approval step was pending on the change');
+    });
+  });
+
+  it('a rejection with no approval step pending under return (the default) and the strict profile: a scheduled change returns to Draft through the board\'s flow-set move', async () => {
+    await withSetting('tickets.transition_rules', 'strict', async () => {
+      const t = await newChange(`Pre-approved returned ${S}`, { changeTemplateId: catTpl.id, requesterUserId: ids.engineer, change: { scheduledStart: hour(142), scheduledEnd: hour(143) } });
+      expect(t.approvalStatus).toBe('not_required');
+      const [scheduled] = await withSystem((tx) => tx.select({ id: schema.configOptions.id }).from(schema.configOptions).where(and(eq(schema.configOptions.type, 'ticket_status'), eq(schema.configOptions.key, 'scheduled'))));
+      await withSystem((tx) => tx.update(schema.tickets).set({ statusId: scheduled!.id }).where(eq(schema.tickets.id, t.id)));
+      // A person cannot move Scheduled (open) back to Draft (new) under strict.
+      const [draft] = await withSystem((tx) => tx.select({ id: schema.configOptions.id }).from(schema.configOptions).where(and(eq(schema.configOptions.type, 'ticket_status'), eq(schema.configOptions.key, 'draft'))));
+      await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: draft!.id }))).rejects.toThrow(/cannot move from Scheduled to Draft/);
+      const m = await asAdmin((ctx) => changes.createMeeting(ctx, { title: `Return CAB ${S}`, scheduledAt: hour(137), ticketIds: [t.id] }));
+      created.meetings.push(m.id);
+      const r = await asAdmin((ctx) => changes.decideItem(ctx, m.id, m.items[0]!.id, { decision: 'rejected', notes: 'Revise the backout plan.' }));
+      expect(r.approval).toMatchObject({ applied: false, note: 'No approval step was pending; the change was returned to Draft' });
+      expect(await statusKeyOf(t.id)).toEqual({ key: 'draft', approvalStatus: 'rejected' });
+      expect((await activities(t.id, 'status')).some((a) => /the change returns to Draft to be revised/.test(a.summary))).toBe(true);
+      const audit = await withSystem((tx) => tx.select().from(schema.auditLog).where(and(eq(schema.auditLog.entityId, t.id), eq(schema.auditLog.action, 'cab.rejected_change'))));
+      expect(audit).toHaveLength(1);
+      expect((audit[0]!.metadata as { outcome?: string }).outcome).toBe('return');
+      const visible = await withSystem((tx) => tx.select().from(schema.ticketComments).where(and(eq(schema.ticketComments.ticketId, t.id), eq(schema.ticketComments.isInternal, false))));
+      expect(visible.some((c) => c.body.includes('Revise the backout plan'))).toBe(false);
+      // A second rejection does not move it twice.
+      const m2 = await asAdmin((ctx) => changes.createMeeting(ctx, { title: `Return CAB 2 ${S}`, scheduledAt: hour(138) }));
+      created.meetings.push(m2.id);
+      const v = await asAdmin((ctx) => changes.addItem(ctx, m2.id, { ticketId: t.id }));
+      const r2 = await asAdmin((ctx) => changes.decideItem(ctx, m2.id, v.items[0]!.id, { decision: 'rejected' }));
+      expect(r2.approval.note).toBe('No approval step was pending; the change stays in Draft, marked rejected');
+      expect(await statusKeyOf(t.id)).toEqual({ key: 'draft', approvalStatus: 'rejected' });
+      // The board's second decision still leaves its mark: a second audit entry, no second status row.
+      const audit2 = await withSystem((tx) => tx.select().from(schema.auditLog).where(and(eq(schema.auditLog.entityId, t.id), eq(schema.auditLog.action, 'cab.rejected_change'))));
+      expect(audit2).toHaveLength(2);
+      expect((audit2.map((a) => (a.metadata as { moved?: boolean }).moved)).sort()).toEqual([false, true]);
+      expect((await activities(t.id, 'status')).filter((a) => /the change returns to Draft to be revised/.test(a.summary))).toHaveLength(1);
+    });
   });
 
   it('tells a customer contact who raised the change that it is on an agenda without the meeting location', async () => {

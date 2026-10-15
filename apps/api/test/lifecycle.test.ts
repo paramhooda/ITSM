@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { eq, and, inArray, desc } from 'drizzle-orm';
-import { TICKET_TRANSITIONS, type StatusCategory } from '@itsm/shared';
+import { TRANSITION_PROFILES, TRANSITION_PROFILE_KEYS, type StatusCategory } from '@itsm/shared';
 import { withSystem, closeDb, schema, type Tx } from '../src/db/client';
 import { runAs, type Ctx } from '../src/core/context';
 import { loadPrincipal, invalidatePrincipal, type Principal } from '../src/core/principal';
@@ -19,8 +19,9 @@ import { config } from '../src/config';
 import { createTicket, changeStatus, cancelTicket, reopenTicket, resolveTicket, getTicket, bulkAction } from '../src/modules/tickets/service';
 import { addComment, timeline } from '../src/modules/tickets/activity';
 import { changeStatusCore, resumeFromPending } from '../src/modules/tickets/status';
-import { requestApproval } from '../src/modules/tickets/approvals';
+import { requestApproval, decide } from '../src/modules/tickets/approvals';
 import { applyTicketUpgrades, applyOptionUpgrades } from '../src/seed/upgrades';
+import { withSetting } from './_settings';
 import { toolByName } from '../src/modules/ai/tools';
 import { compactDetail } from '../src/modules/ai/helpers';
 import type { PreviewDetail } from '../src/modules/ai/tools/types';
@@ -122,43 +123,102 @@ afterAll(async () => {
 const BY_CATEGORY: Record<StatusCategory, string> = { new: 'new', open: 'in_progress', pending: 'pending_customer', resolved: 'resolved', closed: 'closed', cancelled: 'cancelled' };
 
 describe('the transition matrix', () => {
-  it('lets every allowed pair through changeStatusCore and refuses every other pair naming both statuses', async () => {
-    const t = await newIncident('Matrix');
-    const cats = Object.keys(TICKET_TRANSITIONS) as StatusCategory[];
+  /** Every pair of categories through changeStatusCore under one profile: the table's pairs pass, every other pair is refused naming both statuses. */
+  async function runMatrix(ticketId: string, profile: (typeof TRANSITION_PROFILE_KEYS)[number]) {
+    const table = TRANSITION_PROFILES[profile];
+    const cats = Object.keys(table) as StatusCategory[];
     for (const from of cats) {
       for (const to of cats) {
         if (from === to && from !== 'pending') continue;
         const fromKey = BY_CATEGORY[from];
         const toKey = BY_CATEGORY[to];
-        await force(t.id, fromKey, from === 'pending' ? { waitingOn: 'customer', reason: 'earlier' } : undefined);
-        const allowed = TICKET_TRANSITIONS[from].includes(to);
+        await force(ticketId, fromKey, from === 'pending' ? { waitingOn: 'customer', reason: 'earlier' } : undefined);
+        const allowed = table[from].includes(to);
         const attempt = asAdmin(async (ctx) => {
-          const [cur] = await ctx.tx.select().from(schema.tickets).where(eq(schema.tickets.id, t.id));
+          const [cur] = await ctx.tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId));
           const [opt] = await ctx.tx.select().from(schema.configOptions).where(eq(schema.configOptions.id, st[toKey]!.id));
           return changeStatusCore(ctx, cur!, opt!, { pendingReason: 'matrix', silent: true });
         });
         if (allowed) {
           const res = await attempt;
-          expect(res.statusId, `${from} → ${to}`).toBe(st[toKey]!.id);
+          expect(res.statusId, `${profile}: ${from} → ${to}`).toBe(st[toKey]!.id);
         } else {
-          await expect(attempt, `${from} → ${to}`).rejects.toThrow(new RegExp(`cannot move from ${st[fromKey]!.label} to ${st[toKey]!.label}`));
+          await expect(attempt, `${profile}: ${from} → ${to}`).rejects.toThrow(new RegExp(`cannot move from ${st[fromKey]!.label} to ${st[toKey]!.label}`));
         }
       }
     }
-    // The two the owner asked about by name.
+  }
+  const move = (id: string, key: string, extra: Record<string, unknown> = {}) => asAdmin((ctx) => changeStatus(ctx, id, { statusId: st[key]!.id, ...extra }));
+
+  it('strict: the shipped matrix, once per pair; New cannot close, Resolved can', async () => {
+    const t = await newIncident('Matrix strict');
+    await withSetting('tickets.transition_rules', 'strict', async () => {
+      await runMatrix(t.id, 'strict');
+      await force(t.id, 'new');
+      await expect(move(t.id, 'closed')).rejects.toThrow(/cannot move from New to Closed/);
+      await force(t.id, 'resolved');
+      expect((await move(t.id, 'closed')).statusId).toBe(st.closed!.id);
+    });
+  });
+
+  it('standard (the default): any move among new, open, pending and resolved; closed and cancelled come back to work only', async () => {
+    const t = await newIncident('Matrix standard');
+    expect((await withSystem((tx) => tx.select({ value: schema.systemSettings.value }).from(schema.systemSettings).where(eq(schema.systemSettings.key, 'tickets.transition_rules'))))[0]?.value).toBe('standard');
+    await runMatrix(t.id, 'standard');
     await force(t.id, 'new');
-    await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.closed!.id }))).rejects.toThrow(/cannot move from New to Closed/);
+    expect((await move(t.id, 'closed')).statusId).toBe(st.closed!.id);
+    await force(t.id, 'pending_customer', { waitingOn: 'customer', reason: 'x' });
+    expect((await move(t.id, 'closed')).statusId).toBe(st.closed!.id);
+    await force(t.id, 'in_progress');
+    expect((await move(t.id, 'new')).statusId).toBe(st.new!.id);
     await force(t.id, 'resolved');
-    const closed = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.closed!.id }));
-    expect(closed.statusId).toBe(st.closed!.id);
+    expect((await move(t.id, 'pending_customer', { pendingReason: 'one more thing' })).statusId).toBe(st.pending_customer!.id);
+    await force(t.id, 'closed');
+    await expect(move(t.id, 'pending_customer', { pendingReason: 'x' })).rejects.toThrow(/cannot move from Closed to Pending Customer/);
+    await force(t.id, 'cancelled');
+    await expect(move(t.id, 'resolved', { resolutionNotes: 'x' })).rejects.toThrow(/cannot move from Cancelled to Resolved/);
+    // A malformed value is read as the default.
+    await withSetting('tickets.transition_rules', 'whatever', async () => {
+      await force(t.id, 'new');
+      expect((await move(t.id, 'closed')).statusId).toBe(st.closed!.id);
+    });
+  });
+
+  it('loose: only Closed is final', async () => {
+    const t = await newIncident('Matrix loose');
+    await withSetting('tickets.transition_rules', 'loose', async () => {
+      await runMatrix(t.id, 'loose');
+      await force(t.id, 'cancelled');
+      expect((await move(t.id, 'resolved', { resolutionNotes: 'raised in error, then fixed' })).statusId).toBe(st.resolved!.id);
+      await force(t.id, 'closed');
+      await expect(move(t.id, 'resolved', { resolutionNotes: 'x' })).rejects.toThrow(/cannot move from Closed to Resolved/);
+    });
+  });
+
+  it('the flow-set exemption: the approvals service returns a rejected change to Draft under strict, while a person\'s move back to Draft is refused', async () => {
+    const c = await asAdmin((ctx) => createTicket(ctx, { type: 'change', customerId: ids.customer, title: `Flow-set change ${S}`, description: 'exempt', requesterUserId: ids.portalUser }));
+    tickets.push(c.id);
+    await withSetting('tickets.transition_rules', 'strict', async () => {
+      await force(c.id, 'implementing');
+      await expect(move(c.id, 'draft')).rejects.toThrow(/cannot move from Implementing to Draft/);
+      const started = await asAdmin((ctx) => requestApproval(ctx, c.id, { approvalWorkflowId: ids.workflow, purpose: 'Approval for the flow-set test' }));
+      expect((await row(c.id)).statusId).toBe(st.awaiting_approval!.id);
+      // Awaiting Approval (pending) → Draft (new) is not in the strict table; the service's own move passes.
+      await asPortalAdmin((ctx) => decide(ctx, c.id, started.items[0]!.id, 'rejected', 'Revise the plan'));
+      const r = await row(c.id);
+      expect(r.statusId).toBe(st.draft!.id);
+      expect(r.approvalStatus).toBe('rejected');
+      // The person is still held to the profile: Draft (new) → Pending Customer (pending) is allowed, Draft → Closed is not.
+      await expect(move(c.id, 'closed')).rejects.toThrow(/cannot move from Draft to Closed/);
+    });
   });
 });
 
 describe('entering a wait', () => {
-  it('needs a reason on the status endpoint, in bulk (per item), through the assistant and on reply-and-wait', async () => {
+  it('needs a reason for a customer wait by default (on the status endpoint, in bulk, through the assistant and on reply-and-wait); a supplier wait passes without one, with no reason stored and no comment posted', async () => {
     const t = await newIncident('Reason rule');
     await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!.id }))).rejects.toThrow(/A reason is required to put .* on hold/);
-    const bulk = await asAdmin((ctx) => bulkAction(ctx, { ids: [t.id], action: 'status', payload: { statusId: st.pending_vendor!.id } }));
+    const bulk = await asAdmin((ctx) => bulkAction(ctx, { ids: [t.id], action: 'status', payload: { statusId: st.pending_customer!.id } }));
     expect(bulk.failed).toBe(1);
     expect(bulk.results[0]!.error).toMatch(/reason is required/);
     const tool = toolByName('set_status')!;
@@ -166,6 +226,50 @@ describe('entering a wait', () => {
     await expect(asAdmin((ctx) => tool.run(ctx, { ticket: t.number, status: 'pending_customer' }))).rejects.toThrow(/reason is required/);
     await expect(asAdmin((ctx) => addComment(ctx, t.id, { kind: 'comment', body: '   ', then: { statusId: st.pending_customer!.id } }))).rejects.toThrow();
     expect((await row(t.id)).statusId).toBe(st.new!.id);
+    // A supplier wait: the party is recorded, the reason is null, nothing is posted, the staff row reads the label alone.
+    const before = (await comments(t.id)).length;
+    const v = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!.id }));
+    expect(v.statusId).toBe(st.pending_vendor!.id);
+    expect(v.pendingWaitingOn).toBe('vendor');
+    expect(v.pendingReason).toBeNull();
+    expect((await comments(t.id)).length).toBe(before);
+    const rows = await activities(t.id, 'pending');
+    expect(rows.find((r) => !r.customerVisible)!.summary).toBe('Waiting on a supplier or third party');
+    expect(rows.find((r) => r.customerVisible)!.summary).toBe('Waiting on a supplier or third party');
+    const staff = await asAdmin((ctx) => getTicket(ctx, t.id));
+    expect(staff.pending).toMatchObject({ waitingOn: 'vendor', reason: null });
+    // The bulk bar and the assistant pass the same way.
+    await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id }));
+    const ok = await asAdmin((ctx) => bulkAction(ctx, { ids: [t.id], action: 'status', payload: { statusId: st.pending_vendor!.id } }));
+    expect(ok.failed).toBe(0);
+    await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id }));
+    const res = (await asAdmin((ctx) => tool.run(ctx, { ticket: t.number, status: 'on_hold', waitingOn: 'agreement' }))) as { pending: { waitingOn: string; reason: string | null } };
+    expect(res.pending).toMatchObject({ waitingOn: 'agreement', reason: null });
+  });
+
+  it('tickets.pending_reason_required = always refuses every wait without a reason; never accepts every wait without one', async () => {
+    const t = await newIncident('Reason modes');
+    await withSetting('tickets.pending_reason_required', 'always', async () => {
+      await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!.id }))).rejects.toThrow(/A reason is required to put .* on hold/);
+      await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!.id }))).rejects.toThrow(/A reason is required to put .* on hold/);
+      await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.on_hold!.id, waitingOn: 'internal' }))).rejects.toThrow(/A reason is required to put .* on hold/);
+      await expect(asAdmin((ctx) => toolByName('set_status')!.preview!(ctx, { ticket: t.number, status: 'pending_vendor' }))).rejects.toThrow(/reason is required/);
+      expect((await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!.id, pendingReason: 'with the ISP' }))).pendingReason).toBe('with the ISP');
+    });
+    await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id }));
+    await withSetting('tickets.pending_reason_required', 'never', async () => {
+      const c = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_customer!.id }));
+      expect(c).toMatchObject({ pendingWaitingOn: 'customer', pendingReason: null, pendingReasonVisible: true });
+      // The customer is still told the ticket waits on them, without a reason.
+      const mail = (await outbox(t.id, 'ticket.pending')).filter((r) => r.recipient === `lc.user.${S}@example.test`);
+      expect(mail.length).toBeGreaterThan(0);
+      expect(mail[mail.length - 1]!.body).toContain('We need something from you');
+      await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id }));
+      expect((await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!.id }))).pendingReason).toBeNull();
+      // The On Hold party choice stays a rule whatever the setting.
+      await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id }));
+      await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.on_hold!.id }))).rejects.toThrow(/Say who the hold waits on/);
+    });
   });
 
   it('Awaiting Approval by hand is refused; a post-implementation review is not a wait and needs nothing', async () => {
@@ -202,6 +306,14 @@ describe('entering a wait', () => {
     // A same-status call without a reason is still a no-op.
     const same = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!.id }));
     expect(same.pendingReason).toBe('ISP confirmed the part is on its way');
+    // A rewrite that gives only the expected date keeps the stored reason (the field was not sent); an explicit null clears it.
+    const dated = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!.id, expectedAt: when }));
+    expect(dated.pendingReason).toBe('ISP confirmed the part is on its way');
+    expect(dated.pendingExpectedAt?.toISOString()).toBe(when.toISOString());
+    const cleared = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!.id, pendingReason: null, expectedAt: when }));
+    expect(cleared.pendingReason).toBeNull();
+    const again = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.pending_vendor!.id, pendingReason: 'ISP confirmed the part is on its way' }));
+    expect(again.pendingReason).toBe('ISP confirmed the part is on its way');
     // Wait to wait: the party moves with the status.
     await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.on_hold!.id, pendingReason: 'parked' }))).rejects.toThrow(/Say who the hold waits on/);
     const c = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.on_hold!.id, pendingReason: 'parked as agreed', waitingOn: 'agreement' }));
@@ -366,19 +478,44 @@ describe('resuming', () => {
     expect((await activities(r.id, 'status'))[0]!.summary).toMatch(/Approved by Meera Approver · back with the service desk/);
   });
 
-  it('cancelling needs a reason for staff but not for the customer cancelling their own new ticket; reopening needs a reason', async () => {
-    const t = await newIncident('Cancel');
-    await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.cancelled!.id }))).rejects.toThrow(/reason is required to cancel/);
-    await expect(asAdmin((ctx) => cancelTicket(ctx, t.id, {}))).rejects.toThrow(/reason is required to cancel/);
+  it('cancelling and reopening need no comment by default (the audit row and the reopen count carry the trace); a customer may still cancel their own new ticket', async () => {
+    const t = await newIncident('Cancel default');
+    const cancelled = await asAdmin((ctx) => cancelTicket(ctx, t.id, {}));
+    expect(cancelled.statusId).toBe(st.cancelled!.id);
+    const audit = await withSystem((tx) => tx.select().from(schema.auditLog).where(and(eq(schema.auditLog.entityId, t.id), eq(schema.auditLog.action, 'ticket.cancel'))));
+    expect(audit.length).toBe(1);
+    const reopened = await asAdmin((ctx) => reopenTicket(ctx, t.id, {}));
+    expect(reopened.reopenCount).toBe(1);
+    expect((await withSystem((tx) => tx.select().from(schema.auditLog).where(and(eq(schema.auditLog.entityId, t.id), eq(schema.auditLog.action, 'ticket.reopen'))))).length).toBe(1);
+    expect((await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.cancelled!.id }))).statusId).toBe(st.cancelled!.id);
+    expect((await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id }))).reopenCount).toBe(2);
     const own = await asPortal((ctx) => createTicket(ctx, { type: 'incident', customerId: ids.customer, title: `Own ticket ${S}`, description: 'mine' }));
     tickets.push(own.id);
-    const cancelled = await asPortal((ctx) => cancelTicket(ctx, own.id, {}));
-    expect(cancelled.statusId).toBe(st.cancelled!.id);
-    await asAdmin((ctx) => resolveTicket(ctx, t.id, { resolutionNotes: 'Fixed' }));
-    await expect(asAdmin((ctx) => reopenTicket(ctx, t.id, {}))).rejects.toThrow(/reason is required to reopen/);
-    await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id }))).rejects.toThrow(/reason is required to reopen/);
-    const reopened = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id, comment: 'It came back' }));
-    expect(reopened.reopenCount).toBe(1);
+    expect((await asPortal((ctx) => cancelTicket(ctx, own.id, {}))).statusId).toBe(st.cancelled!.id);
+  });
+
+  it('tickets.cancel_comment_required and tickets.reopen_comment_required hold staff to a reason, never the customer', async () => {
+    const t = await newIncident('Cancel required');
+    await withSetting('tickets.cancel_comment_required', true, async () => {
+      await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.cancelled!.id }))).rejects.toThrow(/reason is required to cancel/);
+      await expect(asAdmin((ctx) => cancelTicket(ctx, t.id, {}))).rejects.toThrow(/reason is required to cancel/);
+      const own = await asPortal((ctx) => createTicket(ctx, { type: 'incident', customerId: ids.customer, title: `Own ticket 2 ${S}`, description: 'mine' }));
+      tickets.push(own.id);
+      expect((await asPortal((ctx) => cancelTicket(ctx, own.id, {}))).statusId).toBe(st.cancelled!.id);
+      expect((await asAdmin((ctx) => cancelTicket(ctx, t.id, { comment: 'Duplicate of another ticket' }))).statusId).toBe(st.cancelled!.id);
+    });
+    await withSetting('tickets.reopen_comment_required', true, async () => {
+      await expect(asAdmin((ctx) => reopenTicket(ctx, t.id, {}))).rejects.toThrow(/reason is required to reopen/);
+      await expect(asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id }))).rejects.toThrow(/reason is required to reopen/);
+      await expect(asAdmin((ctx) => toolByName('set_status')!.preview!(ctx, { ticket: t.number, status: 'in_progress' }))).rejects.toThrow(/reason is required to reopen/);
+      const reopened = await asAdmin((ctx) => changeStatus(ctx, t.id, { statusId: st.in_progress!.id, comment: 'It came back' }));
+      expect(reopened.reopenCount).toBe(1);
+      // A boolean written as text still counts.
+      await asAdmin((ctx) => resolveTicket(ctx, t.id, { resolutionNotes: 'Fixed' }));
+      await withSetting('tickets.reopen_comment_required', 'true', async () => {
+        await expect(asAdmin((ctx) => reopenTicket(ctx, t.id, {}))).rejects.toThrow(/reason is required to reopen/);
+      });
+    });
   });
 });
 
@@ -432,10 +569,18 @@ describe('the assistant', () => {
     expect(p.lines!.some((l) => /^Resolution( and Restoration)? clocks? pauses?; the (response|acknowledgement)( and \w+)? clocks? keeps? running$/.test(l)), JSON.stringify(p.lines)).toBe(true);
     const hold = (await asAdmin((ctx) => tool.preview!(ctx, { ticket: t.number, status: 'on_hold', reason: 'capacity', waitingOn: 'internal' }))) as PreviewDetail;
     expect(hold.lines).toEqual(expect.arrayContaining(['Clocks keep running (internal hold)', 'The customer is not told (an internal hold is not shown in the portal)']));
+    // A supplier wait without a reason is said, not refused, under the default; the clock line comes from the policy.
+    const vendor = (await asAdmin((ctx) => tool.preview!(ctx, { ticket: t.number, status: 'pending_vendor' }))) as PreviewDetail;
+    expect(vendor.lines).toEqual(expect.arrayContaining(['Waiting on a supplier or third party', 'No reason given (not required for a supplier wait; a customer wait needs one)']));
+    expect(vendor.lines!.some((l) => /^Resolution( and Restoration)? clocks? pauses?/.test(l)), JSON.stringify(vendor.lines)).toBe(true);
     const req = await asAdmin((ctx) => createTicket(ctx, { type: 'request', customerId: ids.customer, title: `Approval by hand ${S}`, description: 'x' }));
     tickets.push(req.id);
     await expect(asAdmin((ctx) => tool.preview!(ctx, { ticket: req.number, status: 'awaiting_approval', reason: 'x' }))).rejects.toThrow(/request_approval/);
-    await expect(asAdmin((ctx) => tool.preview!(ctx, { ticket: t.number, status: 'closed' }))).rejects.toThrow(/cannot move from New to Closed/);
+    // New → Closed is refused under strict only.
+    await withSetting('tickets.transition_rules', 'strict', async () => {
+      await expect(asAdmin((ctx) => tool.preview!(ctx, { ticket: t.number, status: 'closed' }))).rejects.toThrow(/cannot move from New to Closed/);
+    });
+    expect(((await asAdmin((ctx) => tool.preview!(ctx, { ticket: t.number, status: 'closed' }))) as PreviewDetail).lines).toContain('Status: New → Closed');
     const res = (await asAdmin((ctx) => tool.run(ctx, { ticket: t.number, status: 'pending_customer', reason: 'needs the serial number', expectedAt: '2030-05-15', notifyCustomer: true }))) as { status: string; pending: { waitingOn: string }; slas: { metric: string; state: string }[] };
     expect(res.status).toBe('Pending Customer');
     expect(res.pending.waitingOn).toBe('customer');

@@ -1,13 +1,14 @@
 import { syncMajorOnStatus } from './major';
 import { cancelPages } from '@/modules/oncall/paging';
 import { eq, and, inArray } from 'drizzle-orm';
-import { TICKET_TRANSITIONS, WAITING_ON, waitingOnLabels, type StatusCategory, type TicketType, type WaitingOn } from '@itsm/shared';
+import { WAITING_ON, transitionsFor, waitingOnLabels, type StatusCategory, type TicketType, type WaitingOn } from '@itsm/shared';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ValidationError } from '@/core/errors';
 import { onStatusChange } from '@/modules/sla/engine';
 import { type TicketRow, type OptionRow, actorOf, addActivity, isWait, optionById, optionByKey, optionsOfType, reloadTicket, requireOption, statusApplies, userIdOf } from './common';
 import { notifyTicketEvent } from './notify';
+import { loadLifecycleSettings, reasonRequired, type LifecycleSettings } from './settings';
 import { onTicketEnded, onTicketReopened } from '@/modules/surveys/service';
 
 /** Why a wait ended (the words of the "Resumed" line and the customer-facing notification). */
@@ -24,7 +25,7 @@ export interface StatusChangeOptions {
   silent?: boolean;
   /** Replaces the default "Status changed from X to Y" activity line. */
   summary?: string;
-  /** Entering a wait: what is being waited for (mandatory on every path, system ones included). */
+  /** Entering a wait: what is being waited for (required when `tickets.pending_reason_required` says so; by default for a customer wait). */
   pendingReason?: string | null;
   /** Entering a wait: who is waited on. Derived from the status key when not given; `on_hold` must say agreement or internal. */
   waitingOn?: WaitingOn | null;
@@ -38,6 +39,15 @@ export interface StatusChangeOptions {
   postReason?: boolean;
   /** Leaving a wait: why (the "Resumed · …" line). */
   trigger?: ResumeTrigger;
+  /**
+   * The move is the approvals service's own (into the approval wait, a step re-pointed, the outcome of a decision, a
+   * return to Draft, the resubmission reopen) or the CAB's no-step rejection: exempt from the transition profile. An
+   * explicit flag, passed by those callers only; never inferred from the action or the status keys. The Awaiting
+   * Approval guard still holds (`action === 'approval'`).
+   */
+  flowSet?: boolean;
+  /** The lifecycle settings, when the caller already loaded them (one select per request). */
+  settings?: LifecycleSettings;
 }
 
 const WAIT_BY_KEY: Record<string, WaitingOn> = { pending_customer: 'customer', pending_vendor: 'vendor', pending_change: 'change' };
@@ -61,20 +71,33 @@ export const RESOLVE_KEY: Record<TicketType, string> = { incident: 'resolved', r
 export const REOPEN_KEY: Record<TicketType, string> = { incident: 'in_progress', request: 'in_fulfilment', problem: 'under_investigation', change: 'implementing' };
 /** Where a ticket goes when its approval completes: the working status, except a change that is now approved. */
 export const AFTER_APPROVAL_KEY: Record<TicketType, string> = { incident: 'in_progress', request: 'in_fulfilment', problem: 'under_investigation', change: 'approved' };
-/** What a rejection does per type: request fulfilment and change enablement end as Rejected; an incident or problem returns to the engineer with the note. */
+/**
+ * What a rejection does per type under `approvals.rejected_change = rejected`: request fulfilment and change
+ * enablement end as Rejected; an incident or problem returns to the engineer with the note. Kept as the table of
+ * that profile; `afterRejection` reads the setting.
+ */
 export const AFTER_REJECTION: Record<TicketType, 'rejected' | 'working'> = { incident: 'working', request: 'rejected', problem: 'working', change: 'rejected' };
+/** Where a rejected ticket returns under `approvals.rejected_change = return`: a change to Draft (ServiceNow's New), to be revised and resubmitted; the other types never return this way. */
+export const REJECTED_RETURN_KEY: Partial<Record<TicketType, string>> = { change: 'draft' };
+export type RejectionOutcome = 'rejected' | 'working' | 'return';
+/** The rejection path of a type under the settings: a change returns to Draft by default, ends as Rejected when the setting says so. */
+export function afterRejection(type: TicketType, settings: Pick<LifecycleSettings, 'rejectedChange'>): RejectionOutcome {
+  if (type === 'change' && settings.rejectedChange === 'return') return 'return';
+  return AFTER_REJECTION[type];
+}
 
 /**
- * The transition matrix by category: a `ValidationError` naming both statuses when the move is not one the
- * lifecycle allows. No exception for approvals: a rejected request or change is an ended ticket, and the approvals
- * service refuses a new request on it; the path back is a reopen with its comment (ended → work), then the request.
+ * The transition table of the profile (`tickets.transition_rules`) by category: a `ValidationError` naming both
+ * statuses when the move is not one the lifecycle allows. The approvals service's own moves (`flowSet`) are exempt:
+ * a rejected change returns to Draft under every profile. A person's moves obey the profile on every path.
  */
-export function assertTransition(ticket: Pick<TicketRow, 'number'>, from: OptionRow | null, to: OptionRow) {
+export function assertTransition(ticket: Pick<TicketRow, 'number'>, from: OptionRow | null, to: OptionRow, profile: string | null | undefined, opts: Pick<StatusChangeOptions, 'flowSet'> = {}) {
+  if (opts.flowSet) return;
   if (!from || from.id === to.id) return;
   const fromCat = from.statusCategory as StatusCategory | null;
   const toCat = to.statusCategory as StatusCategory | null;
   if (!fromCat || !toCat) return;
-  if (!TICKET_TRANSITIONS[fromCat].includes(toCat)) throw new ValidationError(`${ticket.number} cannot move from ${from.label} to ${to.label}`);
+  if (!transitionsFor(profile)[fromCat].includes(toCat)) throw new ValidationError(`${ticket.number} cannot move from ${from.label} to ${to.label}`);
 }
 
 /**
@@ -93,15 +116,22 @@ export function deriveWaitingOn(to: OptionRow, opts: Pick<StatusChangeOptions, '
   return 'internal';
 }
 
-/** The rules of entering a wait, shared with the assistant's preview: the matrix, the mandatory reason, the approval guard. */
-export function assertWaitEntry(ticket: Pick<TicketRow, 'number'>, from: OptionRow | null, to: OptionRow, opts: StatusChangeOptions): { toWait: boolean; waitingOn: WaitingOn | null; reason: string | null } {
+/**
+ * The rules of entering a wait, shared with the assistant's preview: the profile's transitions, the approval guard,
+ * the party (always recorded) and the reason (required only when `tickets.pending_reason_required` says so for the
+ * party; null otherwise).
+ */
+export function assertWaitEntry(ticket: Pick<TicketRow, 'number' | 'pendingReason' | 'pendingWaitingOn'>, from: OptionRow | null, to: OptionRow, opts: StatusChangeOptions, settings: LifecycleSettings): { toWait: boolean; waitingOn: WaitingOn | null; reason: string | null } {
   if (to.key === APPROVAL_KEY && opts.action !== 'approval') throw new ValidationError('Use Request approval to move a ticket to Awaiting Approval');
-  assertTransition(ticket, from, to);
+  assertTransition(ticket, from, to, settings.transitionRules, opts);
   const toWait = isWait(to);
   if (!toWait) return { toWait, waitingOn: null, reason: null };
-  const reason = opts.pendingReason?.trim() ?? '';
-  if (!reason) throw new ValidationError(`A reason is required to put ${ticket.number} on hold (${to.label})`);
-  return { toWait, waitingOn: deriveWaitingOn(to, opts), reason };
+  const waitingOn = deriveWaitingOn(to, opts);
+  // A rewrite of the same wait (the date, the reference or the party edited) that gives no reason keeps the stored one; an explicit null clears it.
+  const rewrite = !!from && from.id === to.id && isWait(from) && !!ticket.pendingWaitingOn;
+  const reason = opts.pendingReason === undefined && rewrite ? (ticket.pendingReason?.trim() || null) : opts.pendingReason?.trim() || null;
+  if (!reason && reasonRequired(settings, waitingOn)) throw new ValidationError(`A reason is required to put ${ticket.number} on hold (${to.label})`);
+  return { toWait, waitingOn, reason };
 }
 
 const fmtDay = (d: Date | null | undefined) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : null);
@@ -126,8 +156,8 @@ const resumeWords = (ctx: Ctx, trigger: ResumeTrigger | undefined, comment: stri
 /**
  * Core status transition shared by the status endpoint, convenience actions,
  * approvals, the CAB, the auto-close job, the portal's confirm, the customer-reply
- * hook and the composer's reply-and-wait. Applies the transition matrix, the
- * mandatory reason of a wait, sets the lifecycle timestamps and the pending block,
+ * hook and the composer's reply-and-wait. Applies the transition profile and the
+ * reason rule of the lifecycle settings, sets the lifecycle timestamps and the pending block,
  * records the activity + audit (the customer-visible rows never carry a reason
  * the engineer kept internal), drives the SLA engine and notifies. It never
  * short-circuits a same-status call: a wait called again with a reason is a
@@ -137,7 +167,8 @@ export async function changeStatusCore(ctx: Ctx, ticket: TicketRow, to: OptionRo
   if (to.type !== 'ticket_status') throw new ValidationError('Invalid status');
   if (!statusApplies(to, ticket.type)) throw new ValidationError(`Status "${to.label}" does not apply to ${ticket.type} tickets`);
   const from = await optionById(ctx.tx, ticket.statusId);
-  const { toWait, waitingOn, reason } = assertWaitEntry(ticket, from, to, opts);
+  const settings = opts.settings ?? (await loadLifecycleSettings(ctx.tx));
+  const { toWait, waitingOn, reason } = assertWaitEntry(ticket, from, to, opts, settings);
   const fromWait = isWait(from) && !!ticket.pendingWaitingOn;
   const fromWaitingOn = (fromWait ? ticket.pendingWaitingOn : null) as WaitingOn | null;
   const now = new Date();
@@ -343,34 +374,39 @@ export async function cancelPendingApprovals(ctx: Ctx, ticket: TicketRow, why: s
  * approval is pending, their words are a comment, not a decision (the approval
  * wait ends through a decision, a withdrawal, the expiry or the auto-cancel).
  */
-export async function resumeFromPending(ctx: Ctx, ticket: TicketRow, opts: { trigger: ResumeTrigger; note?: string | null }): Promise<TicketRow | null> {
+export async function resumeFromPending(ctx: Ctx, ticket: TicketRow, opts: { trigger: ResumeTrigger; note?: string | null; to?: string }): Promise<TicketRow | null> {
   const current = await optionById(ctx.tx, ticket.statusId);
   if (!current || !isWait(current)) return null;
   if (opts.trigger === 'customer_reply' && (ticket.pendingWaitingOn !== 'customer' || ticket.approvalStatus === 'pending')) return null;
-  const key = opts.trigger === 'approval' ? AFTER_APPROVAL_KEY[ticket.type] : REOPEN_KEY[ticket.type];
+  // `to` overrides the working status for one case: a rejected change returning to Draft to be revised (REJECTED_RETURN_KEY).
+  const key = opts.to ?? (opts.trigger === 'approval' ? AFTER_APPROVAL_KEY[ticket.type] : REOPEN_KEY[ticket.type]);
   const to = await statusByKey(ctx, key, ticket.type);
+  // With `to` the ticket is not back with the desk but back at the start (a change returning to Draft), whatever ended the wait.
+  const back = opts.to ? `back to ${to.label} to be revised` : `back with the service desk as ${to.label}`;
   const summary =
     opts.trigger === 'customer_reply'
-      ? `Customer replied · back with the service desk as ${to.label}`
+      ? `Customer replied · ${back}`
       : opts.trigger === 'approval'
-        ? `Approved by ${ctx.user.name} · back with the service desk as ${to.label}`
+        ? `Approved by ${ctx.user.name} · ${back}`
         : opts.trigger === 'rejection'
-          ? `Rejected by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · back with the service desk as ${to.label}`
+          ? `Rejected by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · ${back}`
           : opts.trigger === 'withdrawal'
-            ? `Approval request withdrawn by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · back with the service desk as ${to.label}`
+            ? `Approval request withdrawn by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · ${back}`
             : opts.trigger === 'expiry'
-              ? `Approval expired without a decision · back with the service desk as ${to.label}`
-              : `Resumed by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · back with the service desk as ${to.label}`;
+              ? `Approval expired without a decision · ${back}`
+              : `Resumed by ${ctx.user.name}${opts.note ? `: ${opts.note}` : ''} · ${back}`;
   const action = opts.trigger === 'customer_reply' ? 'customer_reply' : opts.trigger === 'manual' ? 'status' : 'approval';
   // A rejection (by a person or by expiry under the reject policy) posts its note as the reply the requester reads and a
   // manual resume posts the reason; a withdrawal's reason stays on the approval rows, the activity and the approvers'
   // notification (the desk's reason is not a reply to the customer). Only a manual resume queues ticket.resumed: the
-  // approvals service sends its own event for the other triggers (one message per person).
+  // approvals service sends its own event for the other triggers (one message per person). Every resume but the manual
+  // one is the approvals service's or the customer's own move, exempt from the transition profile.
   return changeStatusCore(ctx, ticket, to, {
     action,
     silent: opts.trigger !== 'manual',
     summary,
     trigger: opts.trigger,
+    flowSet: opts.trigger !== 'manual',
     comment: opts.trigger === 'rejection' || opts.trigger === 'manual' || opts.trigger === 'expiry' ? (opts.note ?? undefined) : undefined,
   });
 }

@@ -3,6 +3,11 @@ import { sql } from 'drizzle-orm';
 import { buildApp } from '../src/core/app';
 import { closeDb, withSystem, schema } from '../src/db/client';
 import { purgeConversations } from '../src/jobs/processors/ai';
+import { runAs } from '../src/core/context';
+import { loadPrincipal, invalidatePrincipal } from '../src/core/principal';
+import { toolByName } from '../src/modules/ai/tools';
+import { getPolicy } from '../src/modules/sla/policies';
+import { withPolicyPause } from './_settings';
 
 /** The administrator's control surface: settings round trip with validation, the usage report, the retention job. */
 
@@ -71,6 +76,36 @@ describe('AI administration', () => {
     expect(Array.isArray(u.byTool)).toBe(true);
     expect(typeof u.guardrails.tenantFence).toBe('number');
     expect((await app.inject({ method: 'GET', url: '/api/ai/admin/usage?days=9999', headers: { authorization: `Bearer ${admin}` } })).statusCode).toBe(400);
+  });
+
+  it('upsert_config on sla-policies accepts the clocks and the waits that pause and refuses an unknown value', async () => {
+    const [u] = await withSystem((tx) => tx.select({ id: schema.users.id }).from(schema.users).where(sql`${schema.users.email} = 'admin@msp.local'`).limit(1));
+    invalidatePrincipal(u!.id);
+    const principal = (await loadPrincipal(u!.id))!;
+    const [policy] = await withSystem((tx) => tx.select({ id: schema.slaPolicies.id, name: schema.slaPolicies.name }).from(schema.slaPolicies).where(sql`${schema.slaPolicies.isDefault} = true`).limit(1));
+    const tool = toolByName('upsert_config')!;
+    const meta = { requestId: 'test-ai-admin' };
+    await withPolicyPause(policy!.id, {}, async () => {
+      const preview = await runAs(principal, meta, (ctx) => tool.preview!(ctx, { kind: 'sla-policies', record: policy!.name, fields: { pauseMetrics: ['resolution'], pauseWaitingOn: ['customer', 'internal'] } }));
+      expect(typeof preview === 'string' ? preview : preview.text).toContain('pauseMetrics');
+      await runAs(principal, meta, (ctx) => tool.run(ctx, { kind: 'sla-policies', record: policy!.name, fields: { pauseMetrics: ['resolution'], pauseWaitingOn: ['customer', 'internal'] } }));
+      const after = await runAs(principal, meta, (ctx) => getPolicy(ctx, policy!.id));
+      expect(after.pauseMetrics).toEqual(['resolution']);
+      expect(after.pauseWaitingOn).toEqual(['customer', 'internal']);
+      await expect(runAs(principal, meta, (ctx) => tool.run(ctx, { kind: 'sla-policies', record: policy!.name, fields: { pauseMetrics: ['speed'] } }))).rejects.toThrow(/Unknown clock/);
+      await expect(runAs(principal, meta, (ctx) => tool.preview!(ctx, { kind: 'sla-policies', record: policy!.name, fields: { pauseSomething: ['x'] } }))).rejects.toThrow(/Unknown or protected field/);
+    });
+    const restored = await runAs(principal, meta, (ctx) => getPolicy(ctx, policy!.id));
+    expect(restored.pauseMetrics).toEqual(['resolution', 'restoration']);
+    // The six lifecycle settings are validated for the assistant.
+    const setting = toolByName('update_setting')!;
+    await expect(runAs(principal, meta, (ctx) => setting.preview!(ctx, { key: 'tickets.transition_rules', value: 'anything' }))).rejects.toThrow(/must be strict, standard or loose/);
+    await expect(runAs(principal, meta, (ctx) => setting.preview!(ctx, { key: 'tickets.pending_reason_required', value: 'sometimes' }))).rejects.toThrow(/must be customer, always or never/);
+    await expect(runAs(principal, meta, (ctx) => setting.preview!(ctx, { key: 'tickets.cancel_comment_required', value: 'yes' }))).rejects.toThrow(/must be true or false/);
+    await expect(runAs(principal, meta, (ctx) => setting.preview!(ctx, { key: 'tickets.reopen_comment_required', value: 1 }))).rejects.toThrow(/must be true or false/);
+    await expect(runAs(principal, meta, (ctx) => setting.preview!(ctx, { key: 'approvals.rejected_change', value: 'draft' }))).rejects.toThrow(/must be return or rejected/);
+    await expect(runAs(principal, meta, (ctx) => setting.preview!(ctx, { key: 'approvals.rejection_note_required', value: 'staff' }))).rejects.toThrow(/must be none, portal or all/);
+    expect(await runAs(principal, meta, (ctx) => setting.preview!(ctx, { key: 'tickets.transition_rules', value: 'strict' }))).toMatch(/from "standard" to "strict"/);
   });
 
   it('the retention job deletes conversations older than the setting, keeps everything at 0, and never goes below 7 days', async () => {

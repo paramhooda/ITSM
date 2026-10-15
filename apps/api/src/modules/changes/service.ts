@@ -8,7 +8,8 @@ import { logger } from '@/core/logger';
 import { getSetting } from '@/modules/config/service';
 import { loadTicket, requireRead, addActivity, reloadTicket, systemCtx } from '@/modules/tickets/common';
 import { decide as decideApproval } from '@/modules/tickets/approvals';
-import { changeStatusCore, statusByKey } from '@/modules/tickets/status';
+import { REJECTED_RETURN_KEY, afterRejection, changeStatusCore, statusByKey } from '@/modules/tickets/status';
+import { loadLifecycleSettings } from '@/modules/tickets/settings';
 import { notifyTicketEvent } from '@/modules/tickets/notify';
 import { buildImpact } from '@/modules/cmdb/graph';
 import { scoreChange, parseThresholds, type RiskQuestion, type RiskResult, type RiskThresholds } from './risk';
@@ -846,17 +847,22 @@ export async function decideItem(ctx: Ctx, meetingId: string, itemId: string, bo
     const pending = await pendingApprovalFor(ctx.tx, t.id);
     if (!pending) {
       approval = { applied: false, note: 'No approval step was pending on the change' };
-      // A rejection with nothing pending (pre-approved template, no workflow) still ends the change: it moves to Rejected.
+      // A rejection with nothing pending (pre-approved template, no workflow) still applies `approvals.rejected_change`: the change returns to
+      // Draft to be revised (the default) or moves to Rejected. The board's move is flow-set (exempt from the transition profile); a missing
+      // status fails loudly.
       if (body.decision === 'rejected') {
         const current = await reloadTicket(ctx.tx, t.id);
         const [fromStatus] = await ctx.tx.select({ category: schema.configOptions.statusCategory }).from(schema.configOptions).where(eq(schema.configOptions.id, current.statusId)).limit(1);
-        const rejected = await statusByKey(ctx, 'rejected', 'change').catch(() => null);
-        if (rejected && current.statusId !== rejected.id && (OPEN as readonly string[]).includes(fromStatus?.category ?? 'open')) {
+        const settings = await loadLifecycleSettings(ctx.tx);
+        const returns = afterRejection('change', settings) === 'return';
+        const target = await statusByKey(ctx, returns ? REJECTED_RETURN_KEY.change! : 'rejected', 'change');
+        if ((OPEN as readonly string[]).includes(fromStatus?.category ?? 'open')) {
           await ctx.tx.update(schema.tickets).set({ approvalStatus: 'rejected', updatedAt: now }).where(eq(schema.tickets.id, t.id));
+          // A change already in Draft (a second rejection) is not moved again, but the board's decision still marks it: the approval status, the audit entry and the note.
           // No `comment`: the board's notes are internal (the cab activity, cab_notes and the audit entry carry them); a comment here would be customer-visible.
-          await changeStatusCore(ctx, await reloadTicket(ctx.tx, t.id), rejected, { action: 'cab', summary: `Rejected by the CAB at ${meetingLabel(m)}; the change is closed as rejected` });
-          await ctx.audit({ entityType: 'ticket', entityId: t.id, entityLabel: t.number, action: 'cab.rejected_change', customerId: t.customerId, metadata: { meetingId: m.id, notes: body.notes ?? null } });
-          approval = { applied: false, note: 'No approval step was pending; the change was moved to Rejected' };
+          if (current.statusId !== target.id) await changeStatusCore(ctx, await reloadTicket(ctx.tx, t.id), target, { action: 'cab', flowSet: true, settings, summary: returns ? `Rejected by the CAB at ${meetingLabel(m)}; the change returns to Draft to be revised` : `Rejected by the CAB at ${meetingLabel(m)}; the change is closed as rejected` });
+          await ctx.audit({ entityType: 'ticket', entityId: t.id, entityLabel: t.number, action: 'cab.rejected_change', customerId: t.customerId, metadata: { meetingId: m.id, notes: body.notes ?? null, outcome: returns ? 'return' : 'rejected', moved: current.statusId !== target.id } });
+          approval = { applied: false, note: returns ? (current.statusId !== target.id ? 'No approval step was pending; the change was returned to Draft' : 'No approval step was pending; the change stays in Draft, marked rejected') : 'No approval step was pending; the change was moved to Rejected' };
         }
       }
     } else {

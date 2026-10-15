@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { getTableColumns } from 'drizzle-orm';
-import { TICKET_TYPES } from '@itsm/shared';
+import { PENDING_REASON_MODES, REJECTED_CHANGE_MODES, REJECTION_NOTE_MODES, TICKET_TYPES, TRANSITION_PROFILE_KEYS } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { ValidationError, NotFoundError } from '@/core/errors';
 import { listOptions, createOption, updateOption, listConfig, createConfig, updateConfig, updateSettings, getSetting, CONFIG_TABLES } from '@/modules/config/service';
@@ -37,6 +37,12 @@ function validateSetting(key: string, value: unknown) {
     case 'approvals.reminder_hours': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 2160, 'must be between 0 and 2160 hours (0 = never)');
     case 'approvals.expiry_days': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 365, 'must be between 0 and 365 days');
     case 'approvals.expiry_policy': return expect(value === 'return' || value === 'reject' || value === 'none', 'must be return, reject or none');
+    case 'tickets.transition_rules': return expect((TRANSITION_PROFILE_KEYS as readonly string[]).includes(String(value)), `must be ${TRANSITION_PROFILE_KEYS.join(', ').replace(/, (\w+)$/, ' or $1')}`);
+    case 'tickets.pending_reason_required': return expect((PENDING_REASON_MODES as readonly string[]).includes(String(value)), `must be ${PENDING_REASON_MODES.join(', ').replace(/, (\w+)$/, ' or $1')}`);
+    case 'tickets.cancel_comment_required': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'tickets.reopen_comment_required': return expect(typeof value === 'boolean', 'must be true or false');
+    case 'approvals.rejected_change': return expect((REJECTED_CHANGE_MODES as readonly string[]).includes(String(value)), `must be ${REJECTED_CHANGE_MODES.join(' or ')}`);
+    case 'approvals.rejection_note_required': return expect((REJECTION_NOTE_MODES as readonly string[]).includes(String(value)), `must be ${REJECTION_NOTE_MODES.join(', ').replace(/, (\w+)$/, ' or $1')}`);
     case 'changes.reminder_hours': return expect(typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 168, 'must be between 1 and 168 hours');
     case 'changes.conflict_warnings': return expect(typeof value === 'boolean', 'must be true or false');
     case 'changes.block_blackout_scheduling': return expect(typeof value === 'boolean', 'must be true or false');
@@ -124,7 +130,7 @@ async function configTarget(ctx: Ctx, kind: string, ref?: string) {
 
 /** Only real, non-protected columns of the table reach the database. */
 function allowedFields(kind: string, fields: Record<string, unknown>) {
-  const columns = kind === 'sla-policies' ? ['name', 'description', 'calendarId', 'holidayCalendarId', 'isDefault', 'isActive'] : Object.keys(getTableColumns(CONFIG_TABLES[kind]!.table as never));
+  const columns = kind === 'sla-policies' ? ['name', 'description', 'calendarId', 'holidayCalendarId', 'isDefault', 'isActive', 'pauseMetrics', 'pauseWaitingOn'] : Object.keys(getTableColumns(CONFIG_TABLES[kind]!.table as never));
   const out: Record<string, unknown> = {};
   const rejected: string[] = [];
   for (const [k, v] of Object.entries(fields)) {
@@ -197,7 +203,7 @@ export const ADMIN: ReturnType<typeof define>[] = [
   define({
     name: 'upsert_config',
     toolset: 'admin',
-    description: 'Create or change a configuration record: assignment-rules, escalation-rules, notification-rules, notification-templates, notification-categories (the notification defaults and locks per channel, by category key such as approvals), approval-workflows, calendars, holiday-calendars, custom-fields, ci-types, relationship-types, or the attributes of sla-policies (name, description, calendars, default, active). Fields are the record\'s columns; read list_rules first to copy the shape.',
+    description: 'Create or change a configuration record: assignment-rules, escalation-rules, notification-rules, notification-templates, notification-categories (the notification defaults and locks per channel, by category key such as approvals), approval-workflows, calendars, holiday-calendars, custom-fields, ci-types, relationship-types, or the attributes of sla-policies (name, description, calendars, default, active, the clocks and the waits that pause: pauseMetrics and pauseWaitingOn). Fields are the record\'s columns; read list_rules first to copy the shape.',
     inputSchema: z.object({ kind: z.enum(CONFIG_KIND_KEYS), record: z.string().max(200).optional().describe('Existing record name or id (omit to create)'), fields: z.record(z.string().max(60), z.unknown()).refine((f) => Object.keys(f).length > 0, 'At least one field') }),
     requires: ['admin:config'],
     portal: null,

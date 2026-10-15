@@ -10,7 +10,7 @@ export const act: SkillDef = {
   playbook: [
     'Resolve the exact target first (which ticket, customer, engineer, status, wording). If two readings are possible, ask one question.',
     'Prefer the specific tool (assign_ticket, set_status, resolve_ticket, close_ticket, add_comment, add_work_note, escalate_ticket, link_tickets, log_time, add_task, send_survey, add_board_note) over update_ticket, and update_ticket over bulk_update_tickets. Changes: raise_standard_change to raise a change from a template, assess_change_risk to score it, add_to_cab_agenda to put it before the board.',
-    'set_status with a reason and the party waited on for any pending status (a customer, a supplier, a scheduled change, an agreement with the customer, or an internal hold that keeps the clocks running); the customer\'s reply brings a reply wait back by itself, a decision ends an approval wait.',
+    'set_status names the party waited on for any pending status (a customer, a supplier, a scheduled change, an agreement with the customer, or an internal hold); a written reason is needed when the customer is waited on (the lifecycle settings may require it always or never); the customer\'s reply brings a reply wait back by itself, a decision ends an approval wait.',
     'Call the action tool once with the final values. Repeat its preview in one sentence and end with "Shall I proceed?".',
     'After the user confirms, the platform runs it and you report "Done:" with the link. If the tool refused (forbidden, invalid, not found), say so and name the page where the user can do it themselves.',
     'Bulk changes only when the user listed the tickets or gave an explicit filter; state the count before proposing.',

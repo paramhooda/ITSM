@@ -1,5 +1,5 @@
 import { eq, and, asc, sql, inArray, gte, lte, desc } from 'drizzle-orm';
-import { SLA_METRICS, TICKET_TYPES, type SlaMetric, type TicketType } from '@itsm/shared';
+import { SLA_METRICS, TICKET_TYPES, WAITING_ON, type SlaMetric, type TicketType, type WaitingOn } from '@itsm/shared';
 import type { Ctx } from '@/core/context';
 import { schema } from '@/db/client';
 import { NotFoundError, ValidationError, ConflictError, ForbiddenError } from '@/core/errors';
@@ -32,6 +32,10 @@ export interface PolicyInput {
   holidayCalendarId?: string | null;
   isDefault?: boolean;
   isActive?: boolean;
+  /** The clocks a wait stops (a subset of SLA_METRICS; the default is resolution and restoration). */
+  pauseMetrics?: SlaMetric[];
+  /** The parties whose wait stops them (a subset of WAITING_ON; the default is every party but an internal hold). */
+  pauseWaitingOn?: WaitingOn[];
   targets?: TargetInput[];
 }
 
@@ -56,6 +60,17 @@ export function validateTargets(targets: TargetInput[]) {
     if (seen.has(key)) throw new ValidationError(`Duplicate target for ${t.ticketType} / ${t.priorityId ? 'priority ' + t.priorityId : 'any priority'} / ${t.metric}`);
     seen.add(key);
   }
+}
+
+/** The two pause fields: each a list of known values, deduplicated in the order given; a bad value is named. */
+function validatePauseRule(input: Pick<PolicyInput, 'pauseMetrics' | 'pauseWaitingOn'>) {
+  const check = <T extends string>(values: readonly string[] | undefined, allowed: readonly T[], field: string, one: string): T[] | undefined => {
+    if (values === undefined) return undefined;
+    if (!Array.isArray(values)) throw new ValidationError(`${field} must be a list of ${allowed.join(', ')}`);
+    for (const v of values) if (!(allowed as readonly string[]).includes(String(v))) throw new ValidationError(`Unknown ${one} in ${field}: ${String(v)} (one of ${allowed.join(', ')})`);
+    return [...new Set(values as T[])];
+  };
+  return { pauseMetrics: check(input.pauseMetrics, SLA_METRICS, 'Clocks that pause', 'clock'), pauseWaitingOn: check(input.pauseWaitingOn, WAITING_ON, 'Waits that pause', 'party') };
 }
 
 async function assertPriorityIds(ctx: Ctx, targets: TargetInput[]) {
@@ -127,6 +142,8 @@ function policySelect() {
     holidayCalendarName: schema.holidayCalendars.name,
     isDefault: schema.slaPolicies.isDefault,
     isActive: schema.slaPolicies.isActive,
+    pauseMetrics: schema.slaPolicies.pauseMetrics,
+    pauseWaitingOn: schema.slaPolicies.pauseWaitingOn,
     createdAt: schema.slaPolicies.createdAt,
     updatedAt: schema.slaPolicies.updatedAt,
   };
@@ -216,10 +233,11 @@ export async function createPolicy(ctx: Ctx, input: PolicyInput) {
   validateTargets(targets);
   await assertPriorityIds(ctx, targets);
   await assertCalendars(ctx, input.calendarId, input.holidayCalendarId);
+  const pause = validatePauseRule(input);
   if (input.isDefault) await ctx.tx.update(schema.slaPolicies).set({ isDefault: false, updatedAt: new Date() }).where(eq(schema.slaPolicies.isDefault, true));
   const [row] = await ctx.tx
     .insert(schema.slaPolicies)
-    .values({ name: input.name, description: input.description ?? null, calendarId: input.calendarId ?? null, holidayCalendarId: input.holidayCalendarId ?? null, isDefault: input.isDefault ?? false, isActive: input.isActive ?? true })
+    .values({ name: input.name, description: input.description ?? null, calendarId: input.calendarId ?? null, holidayCalendarId: input.holidayCalendarId ?? null, isDefault: input.isDefault ?? false, isActive: input.isActive ?? true, ...(pause.pauseMetrics ? { pauseMetrics: pause.pauseMetrics } : {}), ...(pause.pauseWaitingOn ? { pauseWaitingOn: pause.pauseWaitingOn } : {}) })
     .returning();
   await insertTargets(ctx, row.id, targets);
   await ctx.audit({ entityType: 'sla_policy', entityId: row.id, entityLabel: row.name, action: 'create', metadata: { targets: targets.length, isDefault: row.isDefault } });
@@ -240,6 +258,9 @@ export async function updatePolicy(ctx: Ctx, id: string, patch: Partial<Omit<Pol
   if (patch.holidayCalendarId !== undefined) values.holidayCalendarId = patch.holidayCalendarId;
   if (patch.isDefault !== undefined) values.isDefault = patch.isDefault;
   if (patch.isActive !== undefined) values.isActive = patch.isActive;
+  const pause = validatePauseRule(patch);
+  if (pause.pauseMetrics) values.pauseMetrics = pause.pauseMetrics;
+  if (pause.pauseWaitingOn) values.pauseWaitingOn = pause.pauseWaitingOn;
   const [after] = await ctx.tx.update(schema.slaPolicies).set(values).where(eq(schema.slaPolicies.id, id)).returning();
   await ctx.audit({ entityType: 'sla_policy', entityId: id, entityLabel: after.name, action: 'update', changes: diffChanges(before as Record<string, unknown>, values as Record<string, unknown>) });
   return getPolicy(ctx, id);
@@ -298,7 +319,7 @@ export async function clonePolicy(ctx: Ctx, id: string, name?: string) {
   const pauses = await ctx.tx.select().from(schema.slaPauseStatuses).where(eq(schema.slaPauseStatuses.policyId, id));
   const [row] = await ctx.tx
     .insert(schema.slaPolicies)
-    .values({ name: name?.trim() || `Copy of ${policy.name}`, description: policy.description, calendarId: policy.calendarId, holidayCalendarId: policy.holidayCalendarId, isDefault: false, isActive: true })
+    .values({ name: name?.trim() || `Copy of ${policy.name}`, description: policy.description, calendarId: policy.calendarId, holidayCalendarId: policy.holidayCalendarId, isDefault: false, isActive: true, pauseMetrics: policy.pauseMetrics, pauseWaitingOn: policy.pauseWaitingOn })
     .returning();
   await insertTargets(ctx, row.id, targets.map((t) => ({ ticketType: t.ticketType, priorityId: t.priorityId, metric: t.metric, minutes: t.minutes, warnPct: t.warnPct, calendarTime: t.calendarTime })));
   if (pauses.length) await ctx.tx.insert(schema.slaPauseStatuses).values(pauses.map((p) => ({ policyId: row.id, statusId: p.statusId })));

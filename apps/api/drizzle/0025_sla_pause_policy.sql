@@ -1,0 +1,2 @@
+ALTER TABLE "sla_policies" ADD COLUMN "pause_metrics" text[] DEFAULT '{"resolution","restoration"}' NOT NULL;--> statement-breakpoint
+ALTER TABLE "sla_policies" ADD COLUMN "pause_waiting_on" text[] DEFAULT '{"customer","vendor","change","agreement"}' NOT NULL;

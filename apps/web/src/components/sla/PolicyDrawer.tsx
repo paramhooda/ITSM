@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Save, Copy, Trash2, Star, Plus, Unlink, Search, FileSignature, BarChart3 } from 'lucide-react';
-import { SLA_METRICS, TICKET_TYPES } from '@itsm/shared';
+import { SLA_METRICS, TICKET_TYPES, WAITING_ON } from '@itsm/shared';
 import { get, post, patch, put, del } from '@/api/client';
 import { Button, Badge, Card, Input, Textarea, Select, Toggle, Field, Drawer, Tabs, LoadingBlock, ErrorBlock, Dialog, ConfirmDialog, EmptyState, Checkbox, ProgressBar } from '@/components/ui';
 import { useLookups } from '@/hooks/useLookups';
@@ -30,6 +30,32 @@ interface CellValue {
 }
 
 const cellKey = (t: string, p: string | null, m: string) => `${t}|${p ?? 'any'}|${m}`;
+
+/** The shipped clock rule, the default of every new policy: resolution and restoration pause for every wait outside the desk's control. */
+const DEFAULT_PAUSE_METRICS = ['resolution', 'restoration'];
+const DEFAULT_PAUSE_WAITING_ON = ['customer', 'vendor', 'change', 'agreement'];
+const CLOCK_ORDER = ['resolution', 'restoration', 'response', 'acknowledgement'];
+const CLOCK_WORD: Record<string, string> = { acknowledgement: 'acknowledgement', response: 'response', restoration: 'restoration', resolution: 'resolution' };
+const WAIT_OPTION: Record<string, { label: string; hint: string; words: string }> = {
+  customer: { label: 'The customer', hint: 'a reply or an approval', words: 'the customer' },
+  vendor: { label: 'A supplier or third party', hint: 'pending_vendor', words: 'a supplier' },
+  change: { label: 'A scheduled change', hint: 'pending_change', words: 'a scheduled change' },
+  agreement: { label: 'A hold agreed with the customer', hint: 'on_hold · agreed', words: 'by agreement' },
+  internal: { label: 'An internal hold', hint: 'on_hold · internal, an internal approver', words: 'an internal hold' },
+};
+const listWords = (words: string[]) => (words.length <= 1 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
+/** The hint under the pause controls, built from the policy's two fields. */
+export function pauseHint(metrics: string[], waitingOn: string[]): string {
+  const clocks = CLOCK_ORDER.filter((m) => metrics.includes(m)).map((m) => CLOCK_WORD[m]);
+  const waits = WAITING_ON.filter((w) => waitingOn.includes(w));
+  const kept = WAITING_ON.filter((w) => !waitingOn.includes(w));
+  if (!clocks.length) return 'No clock pauses while a ticket waits: every wait keeps the clocks running.';
+  if (!waits.length) return `No wait pauses the ${listWords(clocks)} ${clocks.length > 1 ? 'clocks' : 'clock'}: add the parties whose waits should stop them.`;
+  const head = `${listWords(clocks)} ${clocks.length > 1 ? 'clocks pause' : 'clock pauses'} while a ticket waits on ${listWords(waits.map((w) => WAIT_OPTION[w]!.words))}`;
+  const tail = kept.length ? `; ${listWords(kept.map((w) => WAIT_OPTION[w]!.words))} ${kept.length > 1 ? 'keep them running unless you add them' : 'keeps them running unless you add it'}` : '';
+  const s = `${head}${tail}.`;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 export interface PolicyDrawerProps {
   open: boolean;
@@ -70,6 +96,8 @@ function PolicyDrawerInner({ policyId, initialTab, onClose, onSaved }: Omit<Poli
   const [isActive, setIsActive] = useState(true);
   const [cells, setCells] = useState<Record<string, CellValue>>({});
   const [pauseStatusIds, setPauseStatusIds] = useState<string[]>([]);
+  const [pauseMetrics, setPauseMetrics] = useState<string[]>(DEFAULT_PAUSE_METRICS);
+  const [pauseWaitingOn, setPauseWaitingOn] = useState<string[]>(DEFAULT_PAUSE_WAITING_ON);
   const [ticketType, setTicketType] = useState<TicketType>('incident');
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -87,6 +115,8 @@ function PolicyDrawerInner({ policyId, initialTab, onClose, onSaved }: Omit<Poli
     setIsActive(p.isActive);
     setCells(Object.fromEntries(p.targets.map((t) => [cellKey(t.ticketType, t.priorityId, t.metric), { minutes: t.minutes, warnPct: t.warnPct, calendarTime: t.calendarTime }])));
     setPauseStatusIds(p.pauseStatusIds);
+    setPauseMetrics(p.pauseMetrics ?? DEFAULT_PAUSE_METRICS);
+    setPauseWaitingOn(p.pauseWaitingOn ?? DEFAULT_PAUSE_WAITING_ON);
     setDirty(false);
   }, [policyQ.data]);
 
@@ -124,7 +154,7 @@ function PolicyDrawerInner({ policyId, initialTab, onClose, onSaved }: Omit<Poli
     }
     setSaving(true);
     try {
-      const base = { name: name.trim(), description: description.trim() || null, calendarId, holidayCalendarId, isDefault, isActive };
+      const base = { name: name.trim(), description: description.trim() || null, calendarId, holidayCalendarId, isDefault, isActive, pauseMetrics, pauseWaitingOn };
       if (isNew) {
         const created = await post<SlaPolicy>('/sla/policies', { ...base, targets: toTargets() });
         if (pauseStatusIds.length) await put(`/sla/policies/${created.id}/pause-statuses`, { statusIds: pauseStatusIds });
@@ -242,9 +272,22 @@ function PolicyDrawerInner({ policyId, initialTab, onClose, onSaved }: Omit<Poli
         </div>
       </div>
 
-      <Field label="Pause statuses" hint="SLA clocks also pause while a ticket is in these statuses, in addition to statuses that pause SLA by default">
+      <div>
+        <div className="mb-2">
+          <div className="text-[13px] font-semibold">Pause statuses</div>
+          <div className="text-[12px] text-muted">SLA clocks also pause while a ticket is in these statuses, in addition to statuses that pause SLA by default</div>
+        </div>
         <MultiSelect value={pauseStatusIds} disabled={ro} onChange={(v) => { setPauseStatusIds(v); setDirty(true); }} options={statuses.map((s) => ({ value: s.id, label: s.label, hint: s.pausesSla ? 'pauses by default' : titleCase(s.statusCategory ?? '') }))} maxHeight="max-h-40" />
-      </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 mt-3">
+          <Field label="Clocks that pause" hint="The clocks a wait stops. The response and acknowledgement clocks measure the first reply and the first assignment and run through a wait unless you add them.">
+            <div data-testid="policy-pause-metrics"><MultiSelect value={pauseMetrics} disabled={ro} onChange={(v) => { setPauseMetrics(v); setDirty(true); }} options={SLA_METRICS.map((m) => ({ value: m, label: METRIC_LABEL[m] ?? titleCase(m), hint: DEFAULT_PAUSE_METRICS.includes(m) ? 'pauses by default' : 'runs by default' }))} maxHeight="max-h-40" /></div>
+          </Field>
+          <Field label="Waits that pause" hint="The parties whose wait stops them: time outside the desk's control. An internal hold keeps the clocks running unless you add it.">
+            <div data-testid="policy-pause-waits"><MultiSelect value={pauseWaitingOn} disabled={ro} onChange={(v) => { setPauseWaitingOn(v); setDirty(true); }} options={WAITING_ON.map((w) => ({ value: w, label: WAIT_OPTION[w]!.label, hint: WAIT_OPTION[w]!.hint }))} maxHeight="max-h-40" /></div>
+          </Field>
+        </div>
+        <p className="mt-2 text-[12.5px] text-muted" data-testid="policy-pause-hint">{pauseHint(pauseMetrics, pauseWaitingOn)}</p>
+      </div>
     </div>
   );
 

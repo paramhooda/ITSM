@@ -12,6 +12,10 @@ export const slaPolicies = pgTable('sla_policies', {
   holidayCalendarId: uuid('holiday_calendar_id').references(() => holidayCalendars.id, { onDelete: 'set null' }),
   isDefault: boolean('is_default').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
+  /** The clocks a wait stops (values from SLA_METRICS); the shipped rule, resolution and restoration, is the default. */
+  pauseMetrics: text('pause_metrics').array().notNull().default(['resolution', 'restoration']),
+  /** The parties whose wait stops them (values from WAITING_ON); `internal` absent means an internal hold keeps every clock running. */
+  pauseWaitingOn: text('pause_waiting_on').array().notNull().default(['customer', 'vendor', 'change', 'agreement']),
   ...timestamps,
 });
 

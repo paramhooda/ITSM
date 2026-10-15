@@ -5,9 +5,10 @@ import type { Ctx } from '@/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { logger } from '@/core/logger';
 import { waitingOnLabels, type WaitingOn } from '@itsm/shared';
-import { type TicketRow, addActivity, isCustomerUser, isWait, loadTicket, optionById, reloadTicket, requireAction, systemCtx, userIdOf, optionMap, toLabel } from './common';
+import { type OptionRow, type TicketRow, addActivity, isCustomerUser, isWait, loadTicket, optionById, reloadTicket, requireAction, systemCtx, userIdOf, optionMap, toLabel } from './common';
 import { notifyTicketEvent, resolveRecipients } from './notify';
-import { AFTER_APPROVAL_KEY, AFTER_REJECTION, REOPEN_KEY, changeStatusCore, resumeFromPending, statusByKey, type ResumeTrigger } from './status';
+import { AFTER_APPROVAL_KEY, REJECTED_RETURN_KEY, REOPEN_KEY, afterRejection, changeStatusCore, resumeFromPending, statusByKey, type ResumeTrigger } from './status';
+import { loadLifecycleSettings, rejectionNoteRequired, type LifecycleSettings } from './settings';
 import type { RequestApprovalInput } from './schemas';
 
 export type ApprovalRow = typeof schema.approvals.$inferSelect;
@@ -204,16 +205,23 @@ export interface ApprovalPlan {
   /** The first step's addressee and the party it makes the ticket wait on. */
   who: string;
   party: WaitingOn;
+  /** The ticket was rejected and the request resubmits it: reopened first (a change to Draft, a request to its working status), then requested. */
+  resubmits: boolean;
 }
+
+/** A ticket that was rejected (the Rejected status, or any ended status reached by a rejection): a new request resubmits it. */
+const isRejected = (status: OptionRow | null, ticket: Pick<TicketRow, 'approvalStatus'>) => !!status && status.statusCategory === 'cancelled' && (status.key === 'rejected' || ticket.approvalStatus === 'rejected');
 
 /**
  * Validates a request without writing anything (the assistant's preview and the request share it): the ticket must be
- * open, a change must be assessed, the approver or the workflow must resolve, and the purpose defaults to the title.
+ * open or rejected (a rejected ticket is resubmitted: reopened, then requested), a change must be assessed, the
+ * approver or the workflow must resolve, and the purpose defaults to the title.
  */
 export async function planApproval(ctx: Ctx, ticket: TicketRow, input: RequestApprovalInput = {}): Promise<ApprovalPlan> {
   requireAction(ctx, ticket, ticket.type === 'change' ? 'changes:manage' : 'tickets:update');
   const status = await optionById(ctx.tx, ticket.statusId);
-  if (status && ENDED.includes(status.statusCategory ?? '')) throw new ValidationError(`${ticket.number} is ${status.label.toLowerCase()}; reopen it before requesting an approval`);
+  const resubmits = isRejected(status, ticket);
+  if (!resubmits && status && ENDED.includes(status.statusCategory ?? '')) throw new ValidationError(`${ticket.number} is ${status.label.toLowerCase()}; reopen it before requesting an approval`);
   // One approval at a time: the approvers of the open steps would lose their inbox row without a word. Withdraw first (they are told), then ask again.
   if (ticket.approvalStatus === 'pending') throw new ValidationError(`An approval is already pending on ${ticket.number}; withdraw it before requesting another`);
   if (input.approvalWorkflowId && input.approver) throw new ValidationError('Name either a workflow or an approver, not both');
@@ -254,8 +262,11 @@ export async function planApproval(ctx: Ctx, ticket: TicketRow, input: RequestAp
   }
   const [customer] = await ctx.tx.select({ accountManagerId: schema.customers.accountManagerId }).from(schema.customers).where(eq(schema.customers.id, ticket.customerId)).limit(1);
   const first = { customerId: ticket.customerId, approverRoleKey: null, approverUserId: null, approverTeamId: null, ...addressee(steps[0]!, customer?.accountManagerId ?? null) };
-  return { source, name, steps, purpose, dueAt, who: await approverLabel(ctx, first), party: await partyOf(ctx, first) };
+  return { source, name, steps, purpose, dueAt, who: await approverLabel(ctx, first), party: await partyOf(ctx, first), resubmits };
 }
+
+/** Where a resubmitted ticket reopens to: a change to Draft (its approval is not got yet), the other types to their working status. */
+export const resubmitKey = (type: TicketRow['type']) => REJECTED_RETURN_KEY[type] ?? REOPEN_KEY[type];
 
 // ---------------------------------------------------------------- start
 
@@ -315,7 +326,7 @@ export async function startApproval(ctx: Ctx, ticket: TicketRow, source: Approva
   });
   await ctx.audit({ entityType: 'ticket', entityId: ticket.id, entityLabel: ticket.number, action: 'approval.request', customerId: ticket.customerId, metadata: { workflowId, workflowName: name, steps: rows.length, purpose, dueAt } });
   // The purpose is shown to a customer approver by design (the reason reads in the portal); no comment is posted for it, and an internal party keeps it with the desk.
-  current = await changeStatusCore(ctx, current, awaiting, { action: 'approval', silent: true, pendingReason: purpose, waitingOn: party, expectedAt: dueAt, tellCustomer: party === 'customer', postReason: false });
+  current = await changeStatusCore(ctx, current, awaiting, { action: 'approval', silent: true, flowSet: true, pendingReason: purpose, waitingOn: party, expectedAt: dueAt, tellCustomer: party === 'customer', postReason: false });
   if (!opts.silent) await notifyStepRequested(ctx, current, first, party);
   return rows;
 }
@@ -339,11 +350,17 @@ async function notifyStepRequested(ctx: Ctx, ticket: TicketRow, step: ApprovalRo
 
 /**
  * Requests an approval on any open ticket: a catalog workflow, the one named, or an approver named on the request
- * (an administrator of the organisation, a user, a role or a team), with the purpose and a due date.
+ * (an administrator of the organisation, a user, a role or a team), with the purpose and a due date. A rejected
+ * ticket is resubmitted: reopened first (a change to Draft, never to its working status; a request to In Fulfilment)
+ * with the comment "Resubmitted for approval", the approvals service's own move, then requested.
  */
 export async function requestApproval(ctx: Ctx, ticketId: string, input: RequestApprovalInput = {}) {
-  const ticket = await loadTicket(ctx, ticketId);
+  let ticket = await loadTicket(ctx, ticketId);
   const plan = await planApproval(ctx, ticket, input);
+  if (plan.resubmits) {
+    const back = await statusByKey(ctx, resubmitKey(ticket.type), ticket.type);
+    ticket = await changeStatusCore(ctx, ticket, back, { action: 'reopen', comment: `Resubmitted for approval: ${plan.purpose}`, silent: true, flowSet: true });
+  }
   const rows = await startApproval(ctx, ticket, plan.source, { purpose: plan.purpose, dueAt: plan.dueAt });
   return { items: await decorate(ctx, rows), ticket: await reloadTicket(ctx.tx, ticket.id) };
 }
@@ -441,27 +458,31 @@ async function assertOpen(ctx: Ctx, ticket: TicketRow, what: string) {
   if (status && ENDED.includes(status.statusCategory ?? '')) throw new ValidationError(`${ticket.number} is ${status.label.toLowerCase()}; ${what}`);
 }
 
-/**
- * The rejection path by type: a request or change ends as Rejected with the note posted as a customer-visible comment;
- * an incident or problem returns to the engineer with the note posted. `approval_status` is set before the status
- * moves, so ending the wait never trips the auto-cancel. Shared by a decision and the expiry policy `reject`.
- */
 /** Is the ticket in the approval wait? Another wait entered by hand while the approval ran (a supplier, a change) is left as it is. */
 async function inApprovalWait(ctx: Ctx, ticket: TicketRow) {
   const status = await optionById(ctx.tx, ticket.statusId);
   return status?.key === 'awaiting_approval';
 }
 
-async function applyRejection(ctx: Ctx, ticket: TicketRow, note: string | null, now: Date, trigger: Extract<ResumeTrigger, 'rejection' | 'expiry'> = 'rejection'): Promise<TicketRow> {
+/**
+ * The rejection path by type and setting (`afterRejection`): a request ends as Rejected with the note posted as a
+ * customer-visible comment (a change too under `approvals.rejected_change = rejected`); a change returns to Draft
+ * with the note posted under `return` (the default); an incident or problem returns to the engineer with the note
+ * posted. `approval_status` is set before the status moves, so ending the wait never trips the auto-cancel. Every
+ * move is the service's own (`flowSet`). Shared by a decision and the expiry policy `reject`.
+ */
+async function applyRejection(ctx: Ctx, ticket: TicketRow, note: string | null, now: Date, trigger: Extract<ResumeTrigger, 'rejection' | 'expiry'>, settings: LifecycleSettings): Promise<TicketRow> {
   await ctx.tx.update(schema.approvals).set({ status: 'skipped', decidedAt: now }).where(and(eq(schema.approvals.ticketId, ticket.id), inArray(schema.approvals.status, ['pending', 'waiting'])));
   await ctx.tx.update(schema.tickets).set({ approvalStatus: 'rejected', updatedAt: now }).where(eq(schema.tickets.id, ticket.id));
   let current = await reloadTicket(ctx.tx, ticket.id);
-  if (AFTER_REJECTION[ticket.type] === 'rejected') {
+  const outcome = afterRejection(ticket.type, settings);
+  if (outcome === 'rejected') {
     const rejected = await statusByKey(ctx, 'rejected', ticket.type);
-    if (current.statusId !== rejected.id) current = await changeStatusCore(ctx, current, rejected, { action: 'approval', silent: true, comment: note ?? undefined });
+    if (current.statusId !== rejected.id) current = await changeStatusCore(ctx, current, rejected, { action: 'approval', silent: true, flowSet: true, comment: note ?? undefined });
   } else {
-    // Only the approval wait is resumed; the note is posted as the reply the requester reads (an expiry says so in the system's words).
-    const resumed = (await inApprovalWait(ctx, current)) ? await resumeFromPending(ctx, current, { trigger, note }) : null;
+    // Only the approval wait is resumed (to the working status, or to Draft for a change under `return`); the note is
+    // posted as the reply the requester reads (an expiry says so in the system's words).
+    const resumed = (await inApprovalWait(ctx, current)) ? await resumeFromPending(ctx, current, { trigger, note, ...(outcome === 'return' ? { to: REJECTED_RETURN_KEY[ticket.type] } : {}) }) : null;
     if (resumed) current = resumed;
     else if (note) {
       // Not in the approval wait (moved by hand while the approval ran): the note still reaches the conversation.
@@ -481,18 +502,19 @@ async function applyApproval(ctx: Ctx, ticket: TicketRow, note: string | null, n
   // Another wait entered by hand while the approval ran (a supplier, a change) is left as it is; a working status moves to the type's after-approval status when it differs.
   if (status && isWait(status)) return current;
   const next = await statusByKey(ctx, AFTER_APPROVAL_KEY[ticket.type], ticket.type);
-  if (next.id !== current.statusId) current = await changeStatusCore(ctx, current, next, { action: 'approval', silent: true });
+  if (next.id !== current.statusId) current = await changeStatusCore(ctx, current, next, { action: 'approval', silent: true, flowSet: true });
   return current;
 }
 
 /**
  * Whether the outcome of a decision stays with the desk: an internal step (the CAB, a role, a team) is no wait the
  * customer ever saw, so a return to the working status is told to staff only; an outcome the customer can see on the
- * ticket (a request or change ending as Rejected, a change moving to Approved) is told to the requester as well.
+ * ticket (a request or change ending as Rejected, a change returning to Draft, a change moving to Approved) is told
+ * to the requester as well.
  */
-function outcomeStaysInternal(ticket: TicketRow, party: WaitingOn, decision: 'approved' | 'rejected') {
+function outcomeStaysInternal(ticket: TicketRow, party: WaitingOn, decision: 'approved' | 'rejected', settings: LifecycleSettings) {
   if (party === 'customer') return false;
-  return decision === 'rejected' ? AFTER_REJECTION[ticket.type] === 'working' : AFTER_APPROVAL_KEY[ticket.type] === REOPEN_KEY[ticket.type];
+  return decision === 'rejected' ? afterRejection(ticket.type, settings) === 'working' : AFTER_APPROVAL_KEY[ticket.type] === REOPEN_KEY[ticket.type];
 }
 
 export async function decide(ctx: Ctx, ticketId: string, approvalId: string, decision: 'approved' | 'rejected', comment?: string | null) {
@@ -506,27 +528,28 @@ export async function decide(ctx: Ctx, ticketId: string, approvalId: string, dec
   }
   if (a.status !== 'pending') throw new ValidationError('This approval step has already been decided');
   await assertOpen(ctx, ticket, 'the approval can no longer be decided');
+  const settings = await loadLifecycleSettings(ctx.tx);
   if (isCustomerUser(ctx)) {
     if (!ctx.can('portal:approve', ticket.customerId) || ctx.user.customerId !== ticket.customerId) throw new ForbiddenError('Missing permission: portal:approve');
     const addressedToCustomer = (a.approverRoleKey && CUSTOMER_ROLE_KEYS.includes(a.approverRoleKey)) || a.approverUserId === ctx.user.id;
     if (!addressedToCustomer || !isEligible(ctx, a)) throw new ForbiddenError('This approval step is not addressed to you');
-    // The reason of a rejection reaches the requester: a customer's rejection needs a note.
-    if (decision === 'rejected' && !comment?.trim()) throw new ValidationError('Say why you are rejecting the request; the note is shown to the requester');
   } else {
     ctx.require(ticket.type === 'change' ? 'changes:approve' : 'requests:approve', ticket.customerId);
   }
+  // The reason of a rejection reaches the requester: a customer's rejection needs a note by default (`approvals.rejection_note_required`: none, portal, all).
+  if (decision === 'rejected' && rejectionNoteRequired(settings, isCustomerUser(ctx)) && !comment?.trim()) throw new ValidationError('Say why you are rejecting the request; the note is shown to the requester');
   const note = comment?.trim() || null;
   const now = new Date();
   // An internal step is the desk's business: its decision row never reaches a customer user, and its outcome only when the ticket's status shows it.
   const party = await partyOf(ctx, a);
-  const staffOnly = outcomeStaysInternal(ticket, party, decision);
+  const staffOnly = outcomeStaysInternal(ticket, party, decision, settings);
   await ctx.tx.update(schema.approvals).set({ status: decision, decidedBy: userIdOf(ctx), decidedAt: now, comment: note }).where(eq(schema.approvals.id, a.id));
   await addActivity(ctx, ticket, { type: 'approval', summary: `${a.stepName ?? `Step ${a.step}`} ${decision} by ${ctx.user.name}${note ? `: ${note}` : ''}`, data: { approvalId: a.id, step: a.step, decision, comment: note }, customerVisible: party === 'customer' });
   await ctx.audit({ entityType: 'ticket', entityId: ticket.id, entityLabel: ticket.number, action: `approval.${decision}`, customerId: ticket.customerId, metadata: { approvalId: a.id, step: a.step, comment: note } });
 
   let current = await reloadTicket(ctx.tx, ticket.id);
   if (decision === 'rejected') {
-    current = await applyRejection(ctx, current, note, now);
+    current = await applyRejection(ctx, current, note, now, 'rejection', settings);
     await notifyTicketEvent(ctx, 'approval.rejected', current, { comment: note, recipientFallback: { requester: true, assignee: true }, channels: CHANNELS, purpose: a.purpose, dueAt: a.dueAt, approver: ctx.user.name, staffOnly });
   } else {
     // Release the next waiting step, if any; otherwise the workflow is complete.
@@ -538,7 +561,7 @@ export async function decide(ctx: Ctx, ticketId: string, approvalId: string, dec
       await addActivity(ctx, ticket, { type: 'approval', summary: `${nextStep.stepName ?? `Step ${nextStep.step}`} is now awaiting approval from ${who}`, data: { approvalId: nextStep.id, step: nextStep.step, purpose: nextStep.purpose, dueAt: nextStep.dueAt }, customerVisible: party === 'customer' });
       // The party is re-derived on every step: the clocks pause when the step moves to the customer and resume when it moves inside.
       const awaiting = await statusByKey(ctx, 'awaiting_approval', ticket.type);
-      if (current.statusId === awaiting.id) current = await changeStatusCore(ctx, current, awaiting, { action: 'approval', silent: true, pendingReason: nextStep.purpose ?? current.pendingReason ?? `Approval requested (${nextStep.stepName ?? `step ${nextStep.step}`})`, waitingOn: party, expectedAt: nextStep.dueAt, tellCustomer: party === 'customer', postReason: false });
+      if (current.statusId === awaiting.id) current = await changeStatusCore(ctx, current, awaiting, { action: 'approval', silent: true, flowSet: true, pendingReason: nextStep.purpose ?? current.pendingReason ?? `Approval requested (${nextStep.stepName ?? `step ${nextStep.step}`})`, waitingOn: party, expectedAt: nextStep.dueAt, tellCustomer: party === 'customer', postReason: false });
       await notifyStepRequested(ctx, current, released!, party);
     } else {
       current = await applyApproval(ctx, current, note, now);
@@ -672,15 +695,17 @@ async function expireTicket(ctx: Ctx, ticket: TicketRow, pending: ApprovalRow[],
   const first = pending[0]!;
   const who = await approverLabel(ctx, first);
   const due = fmtDay(first.dueAt);
-  const outcome = policy === 'reject' ? (AFTER_REJECTION[ticket.type] === 'rejected' ? 'the request is rejected' : 'the ticket returns to the service desk') : 'the ticket returns to the service desk';
+  const settings = await loadLifecycleSettings(ctx.tx);
+  const path = policy === 'reject' ? afterRejection(ticket.type, settings) : 'working';
+  const outcome = path === 'rejected' ? 'the request is rejected' : path === 'return' ? 'the change returns to Draft' : 'the ticket returns to the service desk';
   const note = `No decision by ${due}: ${outcome}`;
   const party = await partyOf(ctx, first);
-  await notifyTicketEvent(ctx, 'approval.expired', ticket, { reason: note, comment: note, recipientFallback: { approvers: true, requester: true, assignee: true }, channels: CHANNELS, purpose: first.purpose, dueAt: first.dueAt, approver: who, staffOnly: policy === 'reject' ? outcomeStaysInternal(ticket, party, 'rejected') : party !== 'customer' });
+  await notifyTicketEvent(ctx, 'approval.expired', ticket, { reason: note, comment: note, recipientFallback: { approvers: true, requester: true, assignee: true }, channels: CHANNELS, purpose: first.purpose, dueAt: first.dueAt, approver: who, staffOnly: policy === 'reject' ? outcomeStaysInternal(ticket, party, 'rejected', settings) : party !== 'customer' });
   await ctx.tx.update(schema.approvals).set({ status: 'expired', decidedAt: now, comment: note }).where(inArray(schema.approvals.id, pending.map((p) => p.id)));
   await addActivity(ctx, ticket, { type: 'approval', summary: `Approval expired without a decision from ${who} (due ${due}): ${outcome}`, data: { approvalIds: pending.map((p) => p.id), policy, dueAt: first.dueAt }, customerVisible: ticket.pendingWaitingOn === 'customer' });
   await ctx.audit({ entityType: 'ticket', entityId: ticket.id, entityLabel: ticket.number, action: 'approval.expire', customerId: ticket.customerId, metadata: { policy, steps: pending.length, dueAt: first.dueAt } });
   if (policy === 'reject') {
-    await applyRejection(ctx, ticket, note, now, 'expiry');
+    await applyRejection(ctx, ticket, note, now, 'expiry', settings);
     return;
   }
   // `return`: the waiting steps are over too; the approval status says it expired before the status moves (only the approval wait is resumed).

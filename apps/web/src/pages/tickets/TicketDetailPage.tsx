@@ -9,9 +9,9 @@ import { RecordLayout, RecordHeader, RecordRibbon, RecordForm, RecordAttention, 
 import { ticketAttention } from '@/components/record/attention';
 import { useUiStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
-import { useLookups, useEngineers } from '@/hooks/useLookups';
+import { useLookups, useEngineers, useLifecycleSettings } from '@/hooks/useLookups';
 import { fmtDuration, relativeTime, fmtDateTime } from '@/lib/format';
-import { TICKET_TRANSITIONS } from '@itsm/shared';
+import { transitionsFor } from '@itsm/shared';
 import { ticketsApi, qk, type StatusBody } from '@/components/tickets/api';
 import { TicketStatusBadge, TypeBadge } from '@/components/tickets/TicketStatusBadge';
 import { PriorityBadge } from '@/components/tickets/PriorityBadge';
@@ -89,6 +89,7 @@ export default function TicketDetailPage() {
   const aiFeature = (f: string) => aiOn && aiFeatures.includes(f);
   const setAssistantContext = useUiStore((s) => s.setAssistantContext);
   const { options, lookups } = useLookups();
+  const lifecycle = useLifecycleSettings();
   const engineers = useEngineers();
 
   const ticketQ = useQuery({ queryKey: qk.detail(id), queryFn: () => ticketsApi.get(id), enabled: !!id, refetchInterval: 60_000 });
@@ -172,8 +173,8 @@ export default function TicketDetailPage() {
   const closureCodes = options('closure_code').map((c) => ({ id: c.id, label: c.label }));
   const resolveLabel = ticket.type === 'request' ? 'Fulfil' : ticket.type === 'change' ? 'Implemented' : 'Resolve';
   // Awaiting Approval is reached through Request approval (the Approvals tab), never picked by hand.
-  // The menu offers only the moves the lifecycle allows from the current category (one table, applied by the API on every path).
-  const allowedNext = TICKET_TRANSITIONS[cat as keyof typeof TICKET_TRANSITIONS] ?? [];
+  // The menu offers only the moves the transition profile allows from the current category (the tickets.transition_rules setting; applied by the API on every path).
+  const allowedNext = transitionsFor(lifecycle.transitionRules)[cat as keyof ReturnType<typeof transitionsFor>] ?? [];
   const statusChoices = ticket.statuses.filter((s) => s.id !== ticket.statusId && s.key !== 'awaiting_approval' && (!s.category || (allowedNext as string[]).includes(s.category)) && (p.update || (p.resolve && ['resolved', 'closed', 'cancelled'].includes(s.category ?? '')) || (isCustomer && p.reopen && (isResolved || isClosed) && ['open', 'new'].includes(s.category ?? ''))));
   const pickStatus = (s: (typeof statusChoices)[number]) => {
     if (s.category === 'resolved' && p.resolve) return setDialog('resolve');
@@ -455,9 +456,9 @@ export default function TicketDetailPage() {
       <ResolveDialog open={dialog === 'resolve'} onClose={() => setDialog(null)} ticket={ticket} busy={resolve.isPending} onSubmit={(v) => resolve.mutateAsync(v).then(() => setDialog(null))} onDraftNotes={aiFeature('draft') ? () => aiApi.draftResolution(id) : undefined} />
       {aiOn && <HandoverSummaryDialog open={dialog === 'handover'} onClose={() => setDialog(null)} ticketId={ticket.id} ticketNumber={ticket.number} />}
       <CommentDialog open={dialog === 'close'} onClose={() => setDialog(null)} title={`Close ${ticket.number}`} confirmLabel="Close ticket" busy={close.isPending} codes={closureCodes} label="Closing comment" onSubmit={(v) => close.mutateAsync(v).then(() => setDialog(null))} />
-      <CommentDialog open={dialog === 'reopen'} onClose={() => { setDialog(null); setReopenTo(null); }} title={`Reopen ${ticket.number}`} confirmLabel="Reopen" busy={reopen.isPending || status.isPending} label="Why is this being reopened?" required onSubmit={(v) => (reopenTo ? status.mutateAsync({ statusId: reopenTo, comment: v.comment }) : reopen.mutateAsync({ comment: v.comment })).then(() => { setDialog(null); setReopenTo(null); })} />
-      <PendingDialog open={dialog === 'pending'} onClose={() => setDialog(null)} ticketNumber={ticket.number} status={pendingTarget} busy={status.isPending} onSubmit={(body) => status.mutateAsync(body).then(() => setDialog(null))} />
-      <CommentDialog open={dialog === 'cancel'} onClose={() => setDialog(null)} title={`Cancel ${ticket.number}`} confirmLabel="Cancel ticket" danger busy={cancel.isPending} codes={isCustomer ? undefined : closureCodes} label="Reason" required onSubmit={(v) => cancel.mutateAsync(v).then(() => setDialog(null))} />
+      <CommentDialog open={dialog === 'reopen'} onClose={() => { setDialog(null); setReopenTo(null); }} title={`Reopen ${ticket.number}`} confirmLabel="Reopen" busy={reopen.isPending || status.isPending} label="Why is this being reopened?" required={isCustomer || lifecycle.reopenCommentRequired} onSubmit={(v) => (reopenTo ? status.mutateAsync({ statusId: reopenTo, comment: v.comment }) : reopen.mutateAsync({ comment: v.comment })).then(() => { setDialog(null); setReopenTo(null); })} />
+      <PendingDialog open={dialog === 'pending'} onClose={() => setDialog(null)} ticketNumber={ticket.number} status={pendingTarget} pauseRule={ticket.pauseRule} busy={status.isPending} onSubmit={(body) => status.mutateAsync(body).then(() => setDialog(null))} />
+      <CommentDialog open={dialog === 'cancel'} onClose={() => setDialog(null)} title={`Cancel ${ticket.number}`} confirmLabel="Cancel ticket" danger busy={cancel.isPending} codes={isCustomer ? undefined : closureCodes} label="Reason" required={isCustomer || lifecycle.cancelCommentRequired} onSubmit={(v) => cancel.mutateAsync(v).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'escalate'} onClose={() => setDialog(null)} title={`Escalate ${ticket.number} to level ${ticket.escalationLevel + 1}`} confirmLabel="Escalate" busy={escalate.isPending} label="Reason" required onSubmit={(v) => escalate.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'major-declare'} onClose={() => setDialog(null)} title={`Declare ${ticket.number} a major incident`} confirmLabel="Declare major incident" danger busy={declareMajor.isPending} label="Why is this a major incident? (sent to the response team)" onSubmit={(v) => declareMajor.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
       <CommentDialog open={dialog === 'major-demote'} onClose={() => setDialog(null)} title={`${ticket.number} is not a major incident`} confirmLabel="Demote" busy={demoteMajor.isPending} label="Reason" required onSubmit={(v) => demoteMajor.mutateAsync({ comment: v.comment }).then(() => setDialog(null))} />
