@@ -512,7 +512,30 @@ export interface PortalUser {
   createdAt: string;
   role: PortalRole | null;
   roleName: string | null;
+  /** May approve on behalf of the organisation: every administrator by role, a user given the approval right (the customer approver role). */
+  canApprove: boolean;
   isSelf: boolean;
+}
+
+/** The body of an invitation; the approval right travels beside the base role and is ignored for an administrator, who approves by role. */
+export interface PortalUserInvite {
+  name: string;
+  email: string;
+  phone: string | null;
+  title: string | null;
+  role: PortalRole;
+  canApprove?: boolean;
+}
+
+/** A partial update; `role` and `canApprove` may travel together or alone, the server writes the full role list either way so a role edit keeps the approval right. */
+export interface PortalUserPatch {
+  name?: string;
+  phone?: string | null;
+  title?: string | null;
+  status?: 'active' | 'disabled';
+  whatsappOptIn?: boolean;
+  role?: PortalRole;
+  canApprove?: boolean;
 }
 
 export const ROLE_LABELS: Record<PortalRole, string> = { customer_user: 'User', customer_admin: 'Administrator' };
@@ -719,8 +742,8 @@ export const portalApi = {
   changes: (params: PortalChangesParams = {}) => get<PortalChanges>('/portal/changes', params as Record<string, unknown>),
   acknowledge: (visitId: string, body: { name: string; title?: string | null; notes?: string | null; rating?: number | null }) => post<PortalVisit>(`/portal/visits/${visitId}/acknowledge`, body),
   users: (params: Record<string, unknown>) => get<Paginated<PortalUser>>('/portal/users', params),
-  createUser: (body: Record<string, unknown>) => post<{ user: PortalUser; temporaryPassword: string | null }>('/portal/users', body),
-  updateUser: (id: string, body: Record<string, unknown>) => patch<PortalUser>(`/portal/users/${id}`, body),
+  createUser: (body: PortalUserInvite) => post<{ user: PortalUser; temporaryPassword: string | null }>('/portal/users', body),
+  updateUser: (id: string, body: PortalUserPatch) => patch<PortalUser>(`/portal/users/${id}`, body),
   resetPassword: (id: string) => post<{ temporaryPassword: string | null }>(`/portal/users/${id}/reset-password`),
   /** Published known errors of the organisation (customer wording only). */
   knownErrors: (params: Record<string, unknown>) => get<PortalKnownErrorList>('/portal/known-errors', params),

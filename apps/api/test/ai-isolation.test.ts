@@ -38,7 +38,7 @@ let admin: Principal;
 let alphaUser: Principal;
 /** Beta's portal user: the stored brief row of Alpha's user is fenced from them by row-level security. */
 let betaUser: Principal;
-const ids = { a: '', b: '', siteA: '', siteB: '', service: '', userA: '', userB: '', contractA: '', contractB: '' };
+const ids = { a: '', b: '', siteA: '', siteB: '', service: '', userA: '', userB: '', approverB: '', contractA: '', contractB: '' };
 const ticketIds: string[] = [];
 const articleIds: string[] = [];
 const numbers: Record<string, string> = {};
@@ -77,6 +77,14 @@ beforeAll(async () => {
     const [ub] = await tx.insert(schema.users).values({ email: `iso-beta-${S}@test.local`, name: 'Beta Portal User', userType: 'customer', customerId: cb!.id, status: 'active' }).returning({ id: schema.users.id });
     ids.userB = ub!.id;
     await tx.insert(schema.userRoles).values({ userId: ub!.id, roleId: role!.id, customerId: cb!.id });
+    // A customer approver of Beta (the approval right beside the base role, scoped to Beta).
+    const [approverRole] = await tx.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'customer_approver')).limit(1);
+    const [uab] = await tx.insert(schema.users).values({ email: `iso-beta-approver-${S}@test.local`, name: 'Beta Approver', userType: 'customer', customerId: cb!.id, status: 'active' }).returning({ id: schema.users.id });
+    ids.approverB = uab!.id;
+    await tx.insert(schema.userRoles).values([
+      { userId: uab!.id, roleId: role!.id, customerId: cb!.id },
+      { userId: uab!.id, roleId: approverRole!.id, customerId: cb!.id },
+    ]);
     // Contracts and entitlements for both organisations.
     const [ka] = await tx.insert(schema.contracts).values({ customerId: ca!.id, number: `ISO-A-${S}`, name: `Alpha support ${S}`, status: 'active', startDate: day(-30), endDate: day(40), slaPolicyId: policy?.id ?? null, escalationMatrix: [] }).returning();
     const [kbc] = await tx.insert(schema.contracts).values({ customerId: cb!.id, number: `ISO-B-${S}`, name: `Beta support ${S}`, status: 'active', startDate: day(-30), endDate: day(20), slaPolicyId: policy?.id ?? null, escalationMatrix: [] }).returning();
@@ -135,7 +143,7 @@ afterAll(async () => {
     if (articleIds.length) await tx.delete(schema.kbArticles).where(inArray(schema.kbArticles.id, articleIds));
     await tx.delete(schema.kbArticles).where(like(schema.kbArticles.title, `%${S}%`));
     await tx.delete(schema.tickets).where(inArray(schema.tickets.customerId, [ids.a, ids.b]));
-    await tx.delete(schema.users).where(inArray(schema.users.id, [ids.userA, ids.userB]));
+    await tx.delete(schema.users).where(inArray(schema.users.id, [ids.userA, ids.userB, ids.approverB]));
     await tx.delete(schema.customers).where(inArray(schema.customers.id, [ids.a, ids.b]));
     await tx.delete(schema.services).where(eq(schema.services.id, ids.service));
   });
@@ -244,14 +252,21 @@ describe('every portal-reachable tool answers for the user’s own organisation 
     expect(articles.hits.some((h) => h.title.includes('HA runbook'))).toBe(false);
   });
 
-  it('request_approval naming a customer user of Beta as the approver of Alpha\'s ticket is refused, as staff, by name and by id', async () => {
+  it('request_approval naming a customer user or a customer approver of Beta as the approver of Alpha\'s ticket is refused, as staff, by name and by id', async () => {
     const tool = toolByName('request_approval')!;
     expect(tool.portal).toBeNull();
-    for (const ref of [`iso-beta-${S}@test.local`, 'Beta Portal User', ids.userB]) {
+    for (const ref of [`iso-beta-${S}@test.local`, 'Beta Portal User', ids.userB, `iso-beta-approver-${S}@test.local`, 'Beta Approver', ids.approverB]) {
       const run = asAdmin((ctx) => tool.preview!(ctx, { ticket: numbers.a1, approver: { kind: 'user', ref }, purpose: 'Approve the probe' } as never));
-      await expect(run, ref).rejects.toThrow(/is not an administrator of|No user matching|No administrator/);
+      await expect(run, ref).rejects.toThrow(/cannot approve for|No user matching|No approver/);
     }
-    await expect(asAdmin((ctx) => tool.preview!(ctx, { ticket: numbers.a1, approver: { kind: 'customer_admin', ref: 'Beta Portal User' }, purpose: 'Approve the probe' } as never))).rejects.toThrow(/No administrator of the ticket's organisation/);
+    // The organisation's approvers are searched among the ticket organisation's own users (users.customer_id): a customer approver of Beta is not found on Alpha's ticket, by the alias and by the kind.
+    await expect(asAdmin((ctx) => tool.preview!(ctx, { ticket: numbers.a1, approver: { kind: 'customer_admin', ref: 'Beta Portal User' }, purpose: 'Approve the probe' } as never))).rejects.toThrow(/No approver of the ticket's organisation/);
+    await expect(asAdmin((ctx) => tool.preview!(ctx, { ticket: numbers.a1, approver: { kind: 'customer', ref: 'Beta Approver' }, purpose: 'Approve the probe' } as never))).rejects.toThrow(/No approver of the ticket's organisation/);
+    await expect(asAdmin((ctx) => tool.preview!(ctx, { ticket: numbers.a1, approver: { kind: 'customer', ref: `iso-beta-approver-${S}@test.local` }, purpose: 'Approve the probe' } as never))).rejects.toThrow(/No approver of the ticket's organisation/);
+    // The same approver is found by name on Beta's own ticket (the fence is the organisation, not the role).
+    const ok = await asAdmin((ctx) => tool.preview!(ctx, { ticket: numbers.b1, approver: { kind: 'customer', ref: 'Beta Approver' }, purpose: 'Approve the probe' } as never));
+    const okText = typeof ok === 'string' ? ok : [ok.text, ...(ok.lines ?? [])].join('\n');
+    expect(okText).toMatch(/Ask Beta Approver \(customer approver, /);
     const [t] = await withSystem((tx) => tx.select({ approvalStatus: schema.tickets.approvalStatus }).from(schema.tickets).where(eq(schema.tickets.id, ticketIds[0]!)));
     expect(t!.approvalStatus).not.toBe('pending');
   });

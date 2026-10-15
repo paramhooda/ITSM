@@ -168,6 +168,14 @@ export async function addActivity(ctx: Ctx, ticket: Pick<TicketRow, 'id' | 'cust
   return row;
 }
 
+/**
+ * The portal role keys an approval step may be addressed to, and the one key stored on the organisation step.
+ * `customer_admin` on `approvals.approver_role_key` means "the holders of `portal:approve` for the ticket's organisation"
+ * (administrators by their role, other portal users through the `customer_approver` role): one spelling for old and new rows.
+ */
+export const ORG_APPROVERS_KEY = 'customer_admin';
+export const CUSTOMER_ROLE_KEYS = [ORG_APPROVERS_KEY, 'customer_user', 'customer_approver'];
+
 export const TYPE_LABEL: Record<TicketType, string> = { incident: 'Incident', request: 'Service Request', problem: 'Problem', change: 'Change' };
 
 export const csv = (v: string | undefined | null) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : []);

@@ -245,11 +245,15 @@ async function seedEscalationRules(tx: Tx) {
   ]);
 }
 
+const CUSTOMER_APPROVAL_DESCRIPTION = 'Approved by an approver of the customer organisation (an administrator, or a user given the approval right).';
+
 async function seedApprovalWorkflows(tx: Tx) {
+  // Approver eligibility became a permission: the seeded description still carrying the administrator-only wording is reworded once (an edited one is left alone).
+  await tx.update(schema.approvalWorkflows).set({ description: CUSTOMER_APPROVAL_DESCRIPTION }).where(and(eq(schema.approvalWorkflows.name, 'Customer approval'), eq(schema.approvalWorkflows.description, 'Approved by a customer administrator or escalation contact.')));
   const [existing] = await tx.select({ id: schema.approvalWorkflows.id }).from(schema.approvalWorkflows).limit(1);
   if (existing) return;
   await tx.insert(schema.approvalWorkflows).values([
-    { name: 'Customer approval', description: 'Approved by a customer administrator or escalation contact.', steps: [{ name: 'Customer approval', approverType: 'customer_admin', required: 'any' }] },
+    { name: 'Customer approval', description: CUSTOMER_APPROVAL_DESCRIPTION, steps: [{ name: 'Customer approval', approverType: 'customer_admin', required: 'any' }] },
     { name: 'Service manager approval', description: 'Approved by an MSP service manager.', steps: [{ name: 'Service manager', approverType: 'role', approverRef: 'service_manager', required: 'any' }] },
     { name: 'CAB approval', description: 'Change Advisory Board: NOC manager and service manager.', steps: [{ name: 'CAB', approverType: 'role', approverRef: 'noc_manager', required: 'any' }, { name: 'Service management', approverType: 'role', approverRef: 'service_manager', required: 'any' }] },
   ]);

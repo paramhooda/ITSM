@@ -386,11 +386,88 @@ describe('customer portal', () => {
     const updated = await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { role: 'customer_admin', title: 'Lead' }));
     expect(updated.role).toBe('customer_admin');
     expect(updated.title).toBe('Lead');
+    expect(updated.canApprove).toBe(true);
     await expect(asA((ctx) => portal.updatePortalUser(ctx, ids.userB, { name: 'Hacked' }))).rejects.toThrow(/not found/i);
     await expect(asA((ctx) => portal.updatePortalUser(ctx, ids.userA, { role: 'customer_user' }))).rejects.toThrow(/own role/);
     const reset = await asA((ctx) => portal.resetPortalUserPassword(ctx, created.user.id));
     expect(reset.temporaryPassword).toBeTruthy();
     await expect(asB((ctx) => portal.listPortalUsers(ctx, { page: 1, pageSize: 50 }))).rejects.toThrow(/portal:manage_users/);
+  });
+
+  it('gives and takes the approval right as one full role list, keeps it through a role edit, ignores it on an administrator and fences the write', async () => {
+    const rolesOf = (userId: string) => withSystem(async (tx) => (await tx.select({ key: schema.roles.key, customerId: schema.userRoles.customerId }).from(schema.userRoles).innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId)).where(eq(schema.userRoles.userId, userId))).sort((x, y) => x.key.localeCompare(y.key)));
+    // Created with the right: the base role and the approver role, both scoped to the organisation; the inbox shows the pending step.
+    const created = await asA((ctx) => portal.createPortalUser(ctx, { email: `approver.${suffix}@example.test`, name: 'Carla Approver', role: 'customer_user', canApprove: true }));
+    expect(created.user).toMatchObject({ role: 'customer_user', canApprove: true });
+    expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_approver', customerId: ids.customerA }, { key: 'customer_user', customerId: ids.customerA }]);
+    const listed = (await asA((ctx) => portal.listPortalUsers(ctx, { page: 1, pageSize: 50 }))).items.find((u) => u.id === created.user.id)!;
+    expect(listed.canApprove).toBe(true);
+    const approvalTicket = await asAdmin((ctx) => createTicket(ctx, { type: 'request', customerId: ids.customerA, title: `A second request needing approval ${suffix}`, catalogItemId: ids.catalogApproval, formData: {} }));
+    createdTickets.push(approvalTicket.id);
+    invalidatePrincipal(created.user.id);
+    const approver = (await loadPrincipal(created.user.id))!;
+    const meta = { requestId: `portal-test-${suffix}` };
+    const asApprover = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(approver, meta, fn);
+    const mine = await asApprover((ctx) => portal.getPortalTicket(ctx, approvalTicket.id));
+    expect(mine.pendingForMe.length).toBe(1);
+    expect(mine.pending?.waitingOnLabel).toBe('Your approval is needed');
+    expect((await asApprover((ctx) => portal.listPortalApprovals(ctx))).items.some((a) => a.ticket.id === approvalTicket.id)).toBe(true);
+
+    // A role edit that says nothing about the right keeps it (one full list, never the base role alone).
+    const edited = await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { title: 'Senior', role: 'customer_user' }));
+    expect(edited).toMatchObject({ title: 'Senior', role: 'customer_user', canApprove: true });
+    expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_approver', customerId: ids.customerA }, { key: 'customer_user', customerId: ids.customerA }]);
+
+    // Toggled off: the one row goes; the step is no longer theirs.
+    const off = await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { canApprove: false }));
+    expect(off.canApprove).toBe(false);
+    expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_user', customerId: ids.customerA }]);
+    invalidatePrincipal(created.user.id);
+    const plain = (await loadPrincipal(created.user.id))!;
+    await expect(runAs(plain, meta, (ctx) => portal.listPortalApprovals(ctx))).rejects.toThrow(/portal:approve/);
+    expect((await runAs(plain, meta, (ctx) => portal.getPortalTicket(ctx, approvalTicket.id))).pendingForMe).toEqual([]);
+
+    // Toggled on again without touching the role; then made an administrator: the right comes from the role and the flag is a no-op either way.
+    expect((await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { canApprove: true }))).canApprove).toBe(true);
+    const admin2 = await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { role: 'customer_admin' }));
+    expect(admin2).toMatchObject({ role: 'customer_admin', canApprove: true });
+    expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_admin', customerId: ids.customerA }]);
+    expect((await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { canApprove: false }))).canApprove).toBe(true);
+    expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_admin', customerId: ids.customerA }]);
+    // Demoted by role alone: the right they held as an administrator is kept as the approver role; demoted with the switch off, it goes; promoted again, one row.
+    expect(await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { role: 'customer_user' }))).toMatchObject({ role: 'customer_user', canApprove: true });
+    expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_approver', customerId: ids.customerA }, { key: 'customer_user', customerId: ids.customerA }]);
+    expect(await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { role: 'customer_admin' }))).toMatchObject({ role: 'customer_admin', canApprove: true });
+    expect(await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { role: 'customer_user', canApprove: false }))).toMatchObject({ role: 'customer_user', canApprove: false });
+    expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_user', customerId: ids.customerA }]);
+    expect(await rolesOf((await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { role: 'customer_admin' }))).id)).toEqual([{ key: 'customer_admin', customerId: ids.customerA }]);
+    // A user without a portal role (staff gave the approver role alone) is not silently given one by a switch.
+    const [adminRole] = await withSystem((tx) => tx.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'customer_admin')).limit(1));
+    const [approverRole] = await withSystem((tx) => tx.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'customer_approver')).limit(1));
+    await withSystem((tx) => tx.update(schema.userRoles).set({ roleId: approverRole!.id }).where(eq(schema.userRoles.userId, created.user.id)));
+    await expect(asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { canApprove: false }))).rejects.toThrow(/no portal role/);
+    expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_approver', customerId: ids.customerA }]);
+    expect(await rolesOf((await asA((ctx) => portal.updatePortalUser(ctx, created.user.id, { role: 'customer_admin' }))).id)).toEqual([{ key: 'customer_admin', customerId: ids.customerA }]);
+    const adminCreated = await asA((ctx) => portal.createPortalUser(ctx, { email: `admin2.${suffix}@example.test`, name: 'Dana Admin', role: 'customer_admin', canApprove: true }));
+    expect(await rolesOf(adminCreated.user.id)).toEqual([{ key: 'customer_admin', customerId: ids.customerA }]);
+
+    // Refused on oneself; B's administrator does not find A's user whatever the patch.
+    await expect(asA((ctx) => portal.updatePortalUser(ctx, ids.userA, { canApprove: false }))).rejects.toThrow(/own role/);
+    invalidatePrincipal(ids.userB);
+    await withSystem((tx) => tx.update(schema.userRoles).set({ roleId: adminRole!.id }).where(eq(schema.userRoles.userId, ids.userB)));
+    try {
+      const adminB = (await loadPrincipal(ids.userB))!;
+      expect(adminB.customerPermissions.get(ids.customerB)?.has('portal:manage_users')).toBe(true);
+      await expect(runAs(adminB, meta, (ctx) => portal.updatePortalUser(ctx, created.user.id, { canApprove: true }))).rejects.toThrow(/not found/i);
+      await expect(runAs(adminB, meta, (ctx) => portal.updatePortalUser(ctx, created.user.id, { role: 'customer_user', canApprove: false }))).rejects.toThrow(/not found/i);
+      expect(await rolesOf(created.user.id)).toEqual([{ key: 'customer_admin', customerId: ids.customerA }]);
+    } finally {
+      const [userRole] = await withSystem((tx) => tx.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'customer_user')).limit(1));
+      await withSystem((tx) => tx.update(schema.userRoles).set({ roleId: userRole!.id }).where(eq(schema.userRoles.userId, ids.userB)));
+      invalidatePrincipal(ids.userB);
+      // The case's own open request goes: the list-vocabulary cases below count A's tickets.
+      await withSystem((tx) => tx.delete(schema.tickets).where(eq(schema.tickets.id, approvalTicket.id)));
+    }
   });
 
   it('shows maintenance rows of the own customer only and lets the customer acknowledge a completed visit', async () => {

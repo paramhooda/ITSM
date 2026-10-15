@@ -238,12 +238,14 @@ export const watcherSchema = z.object({ userId: uuid.optional() });
 
 export const decideSchema = z.object({ decision: z.enum(['approved', 'rejected']), comment: z.string().max(5000).nullable().optional() });
 /**
- * Who is asked to approve when no catalog workflow applies: an administrator of the ticket's organisation (any of them,
- * or one by user id), a staff user, an internal role by key, or a team. At most one of `approver` and
- * `approvalWorkflowId` (the service refuses both); neither falls back to the catalog item's workflow, then the
- * "CAB approval" / "Customer approval" workflow, then the first active one.
+ * Who is asked to approve when no catalog workflow applies: `customer` is anyone who may approve for the ticket's
+ * organisation (the holders of `portal:approve`: its administrators and its customer approvers), or one of them by user
+ * id (`customer_admin` is kept as an alias of `customer`); `user` a staff user or an approver of the organisation by id;
+ * `role` an internal role by key (a customer role key is the organisation step); `team` a team by id. At most one of
+ * `approver` and `approvalWorkflowId` (the service refuses both); neither falls back to the catalog item's workflow,
+ * then the "CAB approval" / "Customer approval" workflow, then the first active one.
  */
-export const approverSchema = z.object({ kind: z.enum(['customer_admin', 'user', 'role', 'team']), ref: z.string().max(200).nullable().optional() });
+export const approverSchema = z.object({ kind: z.enum(['customer', 'customer_admin', 'user', 'role', 'team']), ref: z.string().max(200).nullable().optional() });
 export const requestApprovalSchema = z.object({
   approvalWorkflowId: nullableUuid,
   approver: approverSchema.nullable().optional(),

@@ -33,6 +33,8 @@ interface ContactSeed {
   isPrimary?: boolean;
   escalationLevel?: number;
   portal?: 'customer_admin' | 'customer_user';
+  /** A plain portal user given the approval right (the customer approver role beside the base role). */
+  approver?: boolean;
   siteKey?: string;
 }
 
@@ -75,7 +77,7 @@ export const CUSTOMER_SEEDS: CustomerSeed[] = [
       { name: 'Manish Agarwal', title: 'IT Manager', department: 'Information Technology', isPrimary: true, escalationLevel: 1, portal: 'customer_admin', siteKey: 'hq' },
       { name: 'Ritu Saxena', title: 'Head of IT Infrastructure', department: 'Information Technology', escalationLevel: 2, portal: 'customer_user', siteKey: 'hq' },
       { name: 'Sanjay Bhatt', title: 'Plant Head', department: 'Operations', siteKey: 'gur' },
-      { name: 'Pooja Deshmukh', title: 'IT Executive', department: 'Information Technology', portal: 'customer_user', siteKey: 'pun' },
+      { name: 'Pooja Deshmukh', title: 'IT Executive', department: 'Information Technology', portal: 'customer_user', approver: true, siteKey: 'pun' },
       { name: 'Harish Menon', title: 'Finance Controller', department: 'Finance', siteKey: 'hq' },
     ],
     fieldEngineerKeys: ['suresh', 'neha'], teamKeys: ['noc', 'service_desk', 'field'],
@@ -319,6 +321,8 @@ export async function seedCustomers(state: DemoState, tx: Tx, passwordHash: stri
           .returning({ id: schema.users.id });
         userId = u!.id;
         await tx.insert(schema.userRoles).values({ userId, roleId: refs.role(c.portal), customerId: cust.id, createdBy: state.admin.id });
+        // The approval right as a second assignment scoped to the organisation (an administrator holds it by role).
+        if (c.approver && c.portal !== 'customer_admin') await tx.insert(schema.userRoles).values({ userId, roleId: refs.role('customer_approver'), customerId: cust.id, createdBy: state.admin.id });
         await tx.update(schema.contacts).set({ userId }).where(eq(schema.contacts.id, row.id));
         cust.portalUsers.push({ id: userId, name: c.name, email, roleKey: c.portal, contactId: row.id });
         // The ABC Manufacturing administrator opted in to WhatsApp and verified the number, with one category switched off.

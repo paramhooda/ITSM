@@ -10,7 +10,7 @@ import type { StatsQuery } from '@/modules/tickets/schemas';
 import { addComment, timeline } from '@/modules/tickets/activity';
 import * as approvalsSvc from '@/modules/tickets/approvals';
 import { changeStatusCore, statusByKey, REOPEN_KEY } from '@/modules/tickets/status';
-import { loadTicket, optionById, optionByKey, optionsOfType, requireAction, toLabel } from '@/modules/tickets/common';
+import { ORG_APPROVERS_KEY, loadTicket, optionById, optionByKey, optionsOfType, requireAction, toLabel } from '@/modules/tickets/common';
 import { visibleAnnouncements, majorIncidentBanners } from '@/modules/status/announcements';
 import { listItems as listCatalogItems } from '@/modules/catalog/service';
 import { listAttachments } from '@/modules/attachments/service';
@@ -34,7 +34,7 @@ import { plannedChangeBuckets, upcomingVisitCond, upcomingOccurrenceCond, visitW
 import type { PortalKnownError } from '@/modules/known-errors/service';
 import { surveyRowFor, surveyView } from '@/modules/surveys/service';
 import { effectivePolicy, voluntaryRatingOpen } from '@/modules/surveys/policy';
-import { PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalInstallationQuery, type PortalLicenceQuery, type PortalRoleKey, type PortalTicketStatsQuery, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
+import { APPROVER_ROLE_KEY, PORTAL_ROLE_KEYS, type AcknowledgeBody, type AssetListQuery, type CiListQuery, type CreateTicketBody, type CreateUserBody, type PlannedChangesQuery, type PortalInstallationQuery, type PortalLicenceQuery, type PortalRoleKey, type PortalTicketStatsQuery, type TicketListQuery, type UpdateUserBody, type UserListQuery } from './schemas';
 
 /**
  * Customer portal: a thin, customer-safe facade over the module services.
@@ -538,7 +538,7 @@ export async function listPortalApprovals(ctx: Ctx, requested?: string | null) {
       .select({ approval: schema.approvals, ticket: { id: T.id, number: T.number, title: T.title, type: T.type, priorityId: T.priorityId, statusId: T.statusId, createdAt: T.createdAt, requesterUserId: T.requesterUserId, description: T.description, catalogItemId: T.catalogItemId, formData: T.formData, pendingWaitingOn: T.pendingWaitingOn } })
       .from(schema.approvals)
       .innerJoin(T, eq(T.id, schema.approvals.ticketId))
-      .where(and(eq(schema.approvals.customerId, cid), eq(schema.approvals.status, 'pending'), inArray(schema.approvals.approverRoleKey, [...PORTAL_ROLE_KEYS])))
+      .where(and(eq(schema.approvals.customerId, cid), eq(schema.approvals.status, 'pending'), eq(schema.approvals.approverRoleKey, ORG_APPROVERS_KEY)))
       .orderBy(asc(schema.approvals.createdAt));
   } else {
     const mine = await approvalsSvc.listMine(ctx);
@@ -1049,8 +1049,11 @@ function portalRoleOf(roles: { key: string }[]): PortalRoleKey | null {
   return null;
 }
 
+/** May approve on behalf of the organisation: an administrator by role, any other user through the customer approver role. */
+const canApproveOf = (roles: { key: string }[]) => roles.some((r) => r.key === 'customer_admin' || r.key === APPROVER_ROLE_KEY);
+
 function safeUser(ctx: Ctx, u: IamUser | IamListUser) {
-  return { id: u.id, email: u.email, name: u.name, phone: u.phone, whatsappOptIn: u.whatsappOptIn, whatsappVerifiedAt: u.whatsappVerifiedAt, assistantOn: u.assistantOn === true, title: u.title, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, role: portalRoleOf(u.roles), roleName: u.roles.find((r) => r.key === portalRoleOf(u.roles))?.name ?? null, isSelf: u.id === ctx.user.id };
+  return { id: u.id, email: u.email, name: u.name, phone: u.phone, whatsappOptIn: u.whatsappOptIn, whatsappVerifiedAt: u.whatsappVerifiedAt, assistantOn: u.assistantOn === true, title: u.title, status: u.status, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt, role: portalRoleOf(u.roles), roleName: u.roles.find((r) => r.key === portalRoleOf(u.roles))?.name ?? null, canApprove: canApproveOf(u.roles), isSelf: u.id === ctx.user.id };
 }
 
 async function portalRole(ctx: Ctx, key: string) {
@@ -1058,6 +1061,22 @@ async function portalRole(ctx: Ctx, key: string) {
   const [role] = await ctx.tx.select({ id: schema.roles.id, key: schema.roles.key, userType: schema.roles.userType }).from(schema.roles).where(eq(schema.roles.key, key)).limit(1);
   if (!role || role.userType !== 'customer') throw new ValidationError('Portal role is not configured');
   return role;
+}
+
+/**
+ * The full role list of a portal user, written in one `setUserRoles` call (it deletes and re-inserts): the base role,
+ * plus the customer approver role when the right is wanted and the base role does not already hold it (an administrator
+ * approves by role, so `canApprove` is a no-op for one). Every assignment is scoped to the user's own organisation.
+ */
+async function portalRoleList(ctx: Ctx, customerId: string, baseKey: string, approver: boolean) {
+  const base = await portalRole(ctx, baseKey);
+  const list = [{ roleId: base.id, customerId }];
+  if (approver && base.key !== 'customer_admin') {
+    const [role] = await ctx.tx.select({ id: schema.roles.id, userType: schema.roles.userType }).from(schema.roles).where(eq(schema.roles.key, APPROVER_ROLE_KEY)).limit(1);
+    if (!role || role.userType !== 'customer') throw new ValidationError('The customer approver role is not configured');
+    list.push({ roleId: role.id, customerId });
+  }
+  return list;
 }
 
 async function loadOwnUser(ctx: Ctx, customerId: string, id: string) {
@@ -1074,7 +1093,6 @@ export async function listPortalUsers(ctx: Ctx, q: UserListQuery) {
 
 export async function createPortalUser(ctx: Ctx, input: CreateUserBody) {
   const scope = resolvePortalCustomer(ctx, 'portal:manage_users', null, { mutation: true });
-  const role = await portalRole(ctx, input.role);
   const res = await iam.createUser(ctx, {
     email: input.email,
     name: input.name,
@@ -1082,7 +1100,7 @@ export async function createPortalUser(ctx: Ctx, input: CreateUserBody) {
     title: input.title ?? undefined,
     userType: 'customer',
     customerId: scope.customerId,
-    roleIds: [{ roleId: role.id, customerId: scope.customerId }],
+    roleIds: await portalRoleList(ctx, scope.customerId, input.role, input.canApprove === true),
     teamIds: [],
     customerAccess: [],
     sendWelcome: true,
@@ -1090,6 +1108,11 @@ export async function createPortalUser(ctx: Ctx, input: CreateUserBody) {
   return { user: safeUser(ctx, res.user), temporaryPassword: res.temporaryPassword ?? null };
 }
 
+/**
+ * Edits a user of the administrator's own organisation (`loadOwnUser`: a user of another organisation is not found, whatever
+ * the patch). A role or approval-right change is refused on oneself and written as one full role list (the base role, kept
+ * or changed, plus the approver role when the right is kept or granted), so a role edit never drops the approval right.
+ */
 export async function updatePortalUser(ctx: Ctx, id: string, patch: UpdateUserBody) {
   const scope = resolvePortalCustomer(ctx, 'portal:manage_users', null, { mutation: true });
   await loadOwnUser(ctx, scope.customerId, id);
@@ -1100,10 +1123,15 @@ export async function updatePortalUser(ctx: Ctx, id: string, patch: UpdateUserBo
   if (patch.status !== undefined) fields.status = patch.status;
   if (patch.whatsappOptIn !== undefined) fields.whatsappOptIn = patch.whatsappOptIn;
   if (Object.keys(fields).length) await iam.updateUser(ctx, id, fields);
-  if (patch.role !== undefined) {
+  if (patch.role !== undefined || patch.canApprove !== undefined) {
     if (id === ctx.user.id) throw new ValidationError('You cannot change your own role');
-    const role = await portalRole(ctx, patch.role);
-    await iam.setUserRoles(ctx, id, [{ roleId: role.id, customerId: scope.customerId }]);
+    const current = await iam.getUser(ctx, id);
+    // The base role is kept unless the patch names one; a user without a portal role (staff gave them the approver role alone) is not silently given one.
+    const baseKey = patch.role ?? portalRoleOf(current.roles);
+    if (!baseKey) throw new ValidationError('The user has no portal role; set the role first');
+    // The right is kept unless the patch says: an administrator demoted to User by role alone keeps it as the approver role.
+    const approver = patch.canApprove ?? canApproveOf(current.roles);
+    await iam.setUserRoles(ctx, id, await portalRoleList(ctx, scope.customerId, baseKey, approver));
   }
   return safeUser(ctx, await iam.getUser(ctx, id));
 }

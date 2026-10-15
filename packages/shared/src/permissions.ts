@@ -258,4 +258,10 @@ export const SYSTEM_ROLES: Record<string, { name: string; description: string; u
     userType: 'customer',
     permissions: ['portal:access', 'portal:tickets', 'portal:contracts', 'portal:assets', 'ai:use', 'ai:act', 'portal:status', 'portal:kedb'],
   },
+  customer_approver: {
+    name: 'Customer approver',
+    description: 'May approve requests on behalf of their organisation, in addition to their portal role.',
+    userType: 'customer',
+    permissions: ['portal:access', 'portal:approve'],
+  },
 };

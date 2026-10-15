@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { UserPlus, KeyRound, Pencil, UserX, UserCheck, Copy, Users, Unlink } from 'lucide-react';
-import { PageHeader, Button, DataTable, Pagination, Badge, Dialog, Drawer, ConfirmDialog, Field, Input, Select, EmptyState, ErrorBlock, ListShell, FilterGroup, FilterOptions, type Column, type AppliedFilter, Checkbox } from '@/components/ui';
+import { PageHeader, Button, DataTable, Pagination, Badge, Dialog, Drawer, ConfirmDialog, Field, Input, Select, Toggle, EmptyState, ErrorBlock, ListShell, FilterGroup, FilterOptions, type Column, type AppliedFilter, Checkbox } from '@/components/ui';
 import { fmtNumber } from '@/lib/format';
 import { useListState } from '@/hooks/useListState';
 import { fmtDateTime, relativeTime } from '@/lib/format';
@@ -14,6 +14,24 @@ const ROLE_OPTIONS = [
   { value: 'customer_admin', label: 'Administrator — also approves requests, sees assets and reports, manages users' },
 ];
 const PAGE = 50;
+
+/** The approval right beside the base role: a switch for a User, a sentence for an Administrator (who approves by role). */
+function ApproverField({ role, checked, onChange, disabled }: { role: PortalRole; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  if (role === 'customer_admin') {
+    return (
+      <Field label="Customer approver">
+        <div className="text-[12.5px] text-muted" data-testid="portal-approver-hint">Administrators approve by their role.</div>
+      </Field>
+    );
+  }
+  return (
+    <Field label="Customer approver" hint="May approve requests and changes on behalf of the organisation, in addition to raising and tracking tickets.">
+      <div data-testid="portal-approver-toggle">
+        <Toggle checked={checked} onChange={onChange} disabled={disabled} label={checked ? 'May approve on behalf of the organisation' : 'Not an approver'} />
+      </div>
+    </Field>
+  );
+}
 
 function TempPasswordDialog({ open, onClose, email, password }: { open: boolean; onClose: () => void; email: string; password: string }) {
   async function copy() {
@@ -47,31 +65,44 @@ export default function PortalUsersPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['portal', 'users'] });
 
   const [invite, setInvite] = useState(false);
-  const [inv, setInv] = useState({ name: '', email: '', phone: '', title: '', role: 'customer_user' as PortalRole });
+  const [inv, setInv] = useState({ name: '', email: '', phone: '', title: '', role: 'customer_user' as PortalRole, canApprove: false });
   const [edit, setEdit] = useState<PortalUser | null>(null);
-  const [ed, setEd] = useState({ name: '', phone: '', title: '', role: 'customer_user' as PortalRole, whatsappOptIn: false });
+  const [ed, setEd] = useState({ name: '', phone: '', title: '', role: 'customer_user' as PortalRole, canApprove: false, whatsappOptIn: false });
   const [resetTarget, setResetTarget] = useState<PortalUser | null>(null);
   const [toggleTarget, setToggleTarget] = useState<PortalUser | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<PortalUser | null>(null);
   const [temp, setTemp] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
-    if (edit) setEd({ name: edit.name, phone: edit.phone ?? '', title: edit.title ?? '', role: edit.role ?? 'customer_user', whatsappOptIn: edit.whatsappOptIn ?? false });
+    // An administrator's right comes from the role, so the switch starts off when they are demoted to User; anyone else keeps what they hold.
+    if (edit) setEd({ name: edit.name, phone: edit.phone ?? '', title: edit.title ?? '', role: edit.role ?? 'customer_user', canApprove: edit.role !== 'customer_admin' && edit.canApprove, whatsappOptIn: edit.whatsappOptIn ?? false });
   }, [edit]);
 
   const create = useMutation({
-    mutationFn: () => portalApi.createUser({ name: inv.name.trim(), email: inv.email.trim(), phone: inv.phone.trim() || null, title: inv.title.trim() || null, role: inv.role }),
+    mutationFn: () => portalApi.createUser({ name: inv.name.trim(), email: inv.email.trim(), phone: inv.phone.trim() || null, title: inv.title.trim() || null, role: inv.role, canApprove: inv.role === 'customer_user' && inv.canApprove }),
     onSuccess: (res) => {
       toast.success(`${res.user.name} invited`, { description: 'A welcome e-mail with sign-in details has been sent.' });
       setInvite(false);
-      setInv({ name: '', email: '', phone: '', title: '', role: 'customer_user' });
+      setInv({ name: '', email: '', phone: '', title: '', role: 'customer_user', canApprove: false });
       if (res.temporaryPassword) setTemp({ email: res.user.email, password: res.temporaryPassword });
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
   });
   const update = useMutation({
-    mutationFn: () => portalApi.updateUser(edit!.id, { name: ed.name.trim(), phone: ed.phone.trim() || null, title: ed.title.trim() || null, whatsappOptIn: ed.whatsappOptIn && !!ed.phone.trim(), ...(edit!.isSelf || ed.role === edit!.role ? {} : { role: ed.role }) }),
+    mutationFn: () => {
+      // The role and the approval right travel together: the server writes the full role list in one go, so a role edit never drops the right.
+      const roleChanged = !edit!.isSelf && ed.role !== edit!.role;
+      const approverChanged = !edit!.isSelf && ed.role === 'customer_user' && ed.canApprove !== (edit!.role !== 'customer_admin' && edit!.canApprove);
+      return portalApi.updateUser(edit!.id, {
+        name: ed.name.trim(),
+        phone: ed.phone.trim() || null,
+        title: ed.title.trim() || null,
+        whatsappOptIn: ed.whatsappOptIn && !!ed.phone.trim(),
+        ...(roleChanged ? { role: ed.role } : {}),
+        ...(roleChanged || approverChanged ? { canApprove: ed.role === 'customer_user' && ed.canApprove } : {}),
+      });
+    },
     onSuccess: () => {
       toast.success('User updated');
       setEdit(null);
@@ -112,7 +143,12 @@ export default function PortalUsersPage() {
   const columns: Column<PortalUser>[] = [
     { key: 'name', header: 'Name', render: (u) => <div><div className="font-medium">{u.name}{u.isSelf && <span className="text-subtle font-normal"> (you)</span>}</div>{u.title && <div className="text-[11.5px] text-muted">{u.title}</div>}</div> },
     { key: 'email', header: 'E-mail', render: (u) => <span className="text-[12.5px]">{u.email}</span> },
-    { key: 'role', header: 'Role', render: (u) => <Badge color={u.role === 'customer_admin' ? 'purple' : 'blue'}>{u.role ? ROLE_LABELS[u.role] : u.roleName ?? '—'}</Badge> },
+    { key: 'role', header: 'Role', render: (u) => (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <Badge color={u.role === 'customer_admin' ? 'purple' : 'blue'}>{u.role ? ROLE_LABELS[u.role] : u.roleName ?? '—'}</Badge>
+        {u.role === 'customer_user' && u.canApprove && <Badge color="amber" title="May approve requests and changes on behalf of the organisation" data-testid="portal-approver-badge">Approver</Badge>}
+      </span>
+    ) },
     { key: 'status', header: 'Status', render: (u) => (
       <span className="inline-flex flex-wrap items-center gap-1.5">
         <Badge color={u.status === 'active' ? 'green' : 'gray'} dot>{u.status === 'active' ? 'Active' : 'Disabled'}</Badge>
@@ -212,6 +248,7 @@ export default function PortalUsersPage() {
           <Field label="Role" hint="Administrators can approve requests on behalf of your organisation and manage these users.">
             <Select value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value as PortalRole })} options={ROLE_OPTIONS} />
           </Field>
+          <ApproverField role={inv.role} checked={inv.canApprove} onChange={(v) => setInv({ ...inv, canApprove: v })} />
         </div>
       </Dialog>
 
@@ -267,6 +304,7 @@ export default function PortalUsersPage() {
             <Field label="Role" hint={edit.isSelf ? 'You cannot change your own role.' : undefined}>
               <Select value={ed.role} onChange={(e) => setEd({ ...ed, role: e.target.value as PortalRole })} options={ROLE_OPTIONS} disabled={edit.isSelf} />
             </Field>
+            <ApproverField role={ed.role} checked={ed.canApprove} onChange={(v) => setEd({ ...ed, canApprove: v })} disabled={edit.isSelf} />
             <div className="text-[12px] text-muted">
               Status: <Badge color={edit.status === 'active' ? 'green' : 'gray'}>{edit.status === 'active' ? 'Active' : 'Disabled'}</Badge>
               {edit.lastLoginAt ? ` · last signed in ${relativeTime(edit.lastLoginAt)}` : ' · never signed in'}

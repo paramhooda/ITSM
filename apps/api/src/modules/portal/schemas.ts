@@ -141,8 +141,10 @@ export const acknowledgeBody = z.object({
 });
 export type AcknowledgeBody = z.infer<typeof acknowledgeBody>;
 
+/** The base portal roles (one per user). The approval right travels beside the base role as `canApprove` (the `customer_approver` role). */
 export const PORTAL_ROLE_KEYS = ['customer_user', 'customer_admin'] as const;
 export type PortalRoleKey = (typeof PORTAL_ROLE_KEYS)[number];
+export const APPROVER_ROLE_KEY = 'customer_approver';
 
 export const userListQuery = paginationSchema.extend({ customerId: uuid.optional(), q: z.string().max(200).optional(), status: z.enum(['active', 'disabled']).optional() });
 export type UserListQuery = z.infer<typeof userListQuery>;
@@ -153,6 +155,8 @@ export const createUserBody = z.object({
   phone: z.string().trim().max(50).nullable().optional(),
   title: z.string().trim().max(100).nullable().optional(),
   role: z.enum(PORTAL_ROLE_KEYS).default('customer_user'),
+  /** May approve on behalf of the organisation (an administrator holds the right by role; the flag is a no-op for one). */
+  canApprove: z.boolean().optional(),
 });
 export type CreateUserBody = z.infer<typeof createUserBody>;
 
@@ -162,6 +166,8 @@ export const updateUserBody = z.object({
   title: z.string().trim().max(100).nullable().optional(),
   status: z.enum(['active', 'disabled']).optional(),
   role: z.enum(PORTAL_ROLE_KEYS).optional(),
+  /** Grant or remove the approval right (written with the base role as one full role list). */
+  canApprove: z.boolean().optional(),
   whatsappOptIn: z.boolean().optional(),
 });
 export type UpdateUserBody = z.infer<typeof updateUserBody>;

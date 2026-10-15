@@ -12,7 +12,8 @@ import { useConfigKind, useConfigMutations } from '@/components/admin/api';
 
 interface Step {
   name: string;
-  approverType: 'customer_admin' | 'role' | 'user' | 'team' | 'account_manager';
+  /** `customer_admin` is the organisation step (the API also accepts `customer`): the holders of the approval right for the customer. */
+  approverType: 'customer' | 'customer_admin' | 'role' | 'user' | 'team' | 'account_manager';
   approverRef?: string | null;
   required: 'all' | 'any';
 }
@@ -25,7 +26,7 @@ interface Workflow {
 }
 
 const APPROVER_TYPES = [
-  { value: 'customer_admin', label: 'Customer administrator' },
+  { value: 'customer_admin', label: 'Customer approvers (the organisation)' },
   { value: 'account_manager', label: 'Account manager' },
   { value: 'role', label: 'Users with role' },
   { value: 'team', label: 'Team' },
@@ -47,7 +48,8 @@ export default function ApprovalsPage() {
     if (s.approverType === 'role') return roles.data?.find((r) => r.key === s.approverRef)?.name ?? s.approverRef;
     if (s.approverType === 'team') return lookups.team(s.approverRef)?.name ?? 'team';
     if (s.approverType === 'user') return engineers.data?.find((e) => e.id === s.approverRef)?.name ?? 'user';
-    return APPROVER_TYPES.find((t) => t.value === s.approverType)?.label ?? s.approverType;
+    const type = s.approverType === 'customer' ? 'customer_admin' : s.approverType;
+    return APPROVER_TYPES.find((t) => t.value === type)?.label ?? s.approverType;
   };
   const all = useMemo(() => q.data ?? [], [q.data]);
   const f = useConfigFilter(all, {
@@ -65,7 +67,7 @@ export default function ApprovalsPage() {
   ];
 
   async function submit(v: Values) {
-    const steps = ((v.steps as Step[]) ?? []).map((s) => ({ name: s.name?.trim() || APPROVER_TYPES.find((t) => t.value === s.approverType)?.label || 'Approval', approverType: s.approverType, approverRef: ['role', 'team', 'user'].includes(s.approverType) ? s.approverRef || null : null, required: s.required ?? 'any' }));
+    const steps = ((v.steps as Step[]) ?? []).map((s) => ({ name: s.name?.trim() || (['customer', 'customer_admin'].includes(s.approverType) ? 'Customer approval' : APPROVER_TYPES.find((t) => t.value === s.approverType)?.label) || 'Approval', approverType: s.approverType, approverRef: ['role', 'team', 'user'].includes(s.approverType) ? s.approverRef || null : null, required: s.required ?? 'any' }));
     if (!steps.length) throw new Error('Add at least one approval step');
     if (steps.some((s) => ['role', 'team', 'user'].includes(s.approverType) && !s.approverRef)) throw new Error('Each role/team/user step needs an approver');
     const body = { name: v.name, description: v.description || null, steps, isActive: !!v.isActive };

@@ -277,6 +277,37 @@ describe('demo dataset', () => {
     expect(page.items.every((t) => (principal!.customerScope as string[]).includes(t.customerId))).toBe(true);
   });
 
+  it('gives ABC Manufacturing one customer approver beside the administrator (Pooja with the right, Ritu without, Manish the administrator)', async () => {
+    const rolesOf = (email: string) =>
+      withSystem(async (tx) =>
+        (
+          await tx
+            .select({ key: schema.roles.key, customerId: schema.userRoles.customerId, userCustomerId: schema.users.customerId })
+            .from(schema.users)
+            .innerJoin(schema.userRoles, eq(schema.userRoles.userId, schema.users.id))
+            .innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId))
+            .where(and(eq(schema.users.email, email), eq(schema.users.userType, 'customer')))
+        ).sort((x, y) => x.key.localeCompare(y.key)),
+      );
+    const pooja = await rolesOf('pooja.deshmukh@abc-manufacturing.example');
+    expect(pooja.map((r) => r.key)).toEqual(['customer_approver', 'customer_user']);
+    // Both assignments scoped to her own organisation (the fence every approver read applies).
+    for (const r of pooja) expect(r.customerId).toBe(r.userCustomerId);
+    expect((await rolesOf('ritu.saxena@abc-manufacturing.example')).map((r) => r.key)).toEqual(['customer_user']);
+    expect((await rolesOf('manish.agarwal@abc-manufacturing.example')).map((r) => r.key)).toEqual(['customer_admin']);
+    // The right is what the eligibility reads: Pooja holds portal:approve for ABC, Ritu does not.
+    const principalOf = async (email: string) => {
+      const [u] = await withSystem((tx) => tx.select({ id: schema.users.id }).from(schema.users).where(and(eq(schema.users.email, email), eq(schema.users.userType, 'customer'))));
+      invalidatePrincipal(u!.id);
+      return (await loadPrincipal(u!.id))!;
+    };
+    const pp = await principalOf('pooja.deshmukh@abc-manufacturing.example');
+    expect(pp.customerPermissions.get(pp.customerId!)?.has('portal:approve')).toBe(true);
+    expect(pp.customerPermissions.get(pp.customerId!)?.has('portal:manage_users')).toBe(false);
+    const rp = await principalOf('ritu.saxena@abc-manufacturing.example');
+    expect(rp.customerPermissions.get(rp.customerId!)?.has('portal:approve')).toBe(false);
+  });
+
   it('reports whether this run performed the load', () => {
     expect(typeof seeded).toBe('boolean');
   });

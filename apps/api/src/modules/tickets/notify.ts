@@ -1,12 +1,12 @@
 import { eq, and, inArray, or, isNull } from 'drizzle-orm';
-import type { NotificationEvent } from '@itsm/shared';
+import type { NotificationEvent, Permission } from '@itsm/shared';
 import type { Tx } from '@/db/client';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { config } from '@/config';
 import { queueNotification, type Recipient, type NotificationChannel } from '@/modules/notifications/dispatch';
 import { logger } from '@/core/logger';
-import { TYPE_LABEL, type TicketRow, isSystemCtx } from './common';
+import { ORG_APPROVERS_KEY, TYPE_LABEL, type TicketRow, isSystemCtx } from './common';
 
 /** Recipient flags as stored in `notification_rules.recipients`. */
 export interface RecipientFlags {
@@ -91,6 +91,31 @@ async function usersWithRoles(tx: Tx, roleKeys: string[], customerId: string): P
   return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
 }
 
+/**
+ * The active customer users of one organisation who hold a permission for it: `users × user_roles × roles × role_permissions`
+ * fenced on `users.user_type = 'customer'` and `users.customer_id = customerId` (never on the assignment alone), with the
+ * assignment unscoped or scoped to that customer. The organisation step's approvers (`portal:approve`) are resolved here.
+ */
+export async function usersWithPermission(tx: Tx, permission: Permission, customerId: string): Promise<UserLite[]> {
+  const rows = await tx
+    .select(USER_LITE)
+    .from(schema.users)
+    .innerJoin(schema.userRoles, eq(schema.userRoles.userId, schema.users.id))
+    .innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId))
+    .innerJoin(schema.rolePermissions, eq(schema.rolePermissions.roleId, schema.roles.id))
+    .where(
+      and(
+        eq(schema.rolePermissions.permission, permission),
+        eq(schema.users.userType, 'customer'),
+        eq(schema.users.customerId, customerId),
+        eq(schema.users.status, 'active'),
+        or(isNull(schema.userRoles.customerId), eq(schema.userRoles.customerId, customerId)),
+      ),
+    );
+  const seen = new Set<string>();
+  return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+}
+
 async function usersInTeams(tx: Tx, teamIds: string[]): Promise<UserLite[]> {
   const clean = [...new Set(teamIds.filter(Boolean))];
   if (!clean.length) return [];
@@ -155,7 +180,10 @@ export async function resolveRecipients(tx: Tx, ticket: TicketRow, flags: Recipi
     const roleKeys = pending.map((a) => a.approverRoleKey).filter((x): x is string => !!x);
     const teamIds = pending.map((a) => a.approverTeamId).filter((x): x is string => !!x);
     pending.forEach((a) => a.approverUserId && userIds.add(a.approverUserId));
-    if (roleKeys.length) users.push(...(await usersWithRoles(tx, roleKeys, ticket.customerId)));
+    // The organisation step reaches the holders of portal:approve of the ticket's organisation; any other role key its holders.
+    if (roleKeys.includes(ORG_APPROVERS_KEY)) users.push(...(await usersWithPermission(tx, 'portal:approve', ticket.customerId)));
+    const otherKeys = roleKeys.filter((k) => k !== ORG_APPROVERS_KEY);
+    if (otherKeys.length) users.push(...(await usersWithRoles(tx, otherKeys, ticket.customerId)));
     if (teamIds.length) users.push(...(await usersInTeams(tx, teamIds)));
   }
   users.push(...(await usersByIds(tx, [...userIds])));

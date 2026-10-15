@@ -5,7 +5,7 @@ import type { Ctx } from '@/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { logger } from '@/core/logger';
 import { waitingOnLabels, type WaitingOn } from '@itsm/shared';
-import { type OptionRow, type TicketRow, addActivity, isCustomerUser, isWait, loadTicket, optionById, reloadTicket, requireAction, systemCtx, userIdOf, optionMap, toLabel } from './common';
+import { type OptionRow, type TicketRow, CUSTOMER_ROLE_KEYS, ORG_APPROVERS_KEY, addActivity, isCustomerUser, isWait, loadTicket, optionById, reloadTicket, requireAction, systemCtx, userIdOf, optionMap, toLabel } from './common';
 import { notifyTicketEvent, resolveRecipients } from './notify';
 import { AFTER_APPROVAL_KEY, REJECTED_RETURN_KEY, REOPEN_KEY, afterRejection, changeStatusCore, resumeFromPending, statusByKey, type ResumeTrigger } from './status';
 import { loadLifecycleSettings, rejectionNoteRequired, type LifecycleSettings } from './settings';
@@ -15,7 +15,7 @@ export type ApprovalRow = typeof schema.approvals.$inferSelect;
 
 export interface WorkflowStep {
   name?: string;
-  approverType?: 'customer_admin' | 'customer_contact' | 'role' | 'user' | 'team' | 'account_manager' | string;
+  approverType?: 'customer' | 'customer_admin' | 'customer_contact' | 'role' | 'user' | 'team' | 'account_manager' | string;
   approverRef?: string | null;
   required?: 'all' | 'any';
 }
@@ -34,7 +34,8 @@ export interface StartApprovalOptions {
   requestedBy?: string | null;
 }
 
-const CUSTOMER_ROLE_KEYS = ['customer_admin', 'customer_user'];
+/** The organisation step's stored key and the portal role keys a step may be addressed to (defined beside the fence helpers). */
+export { CUSTOMER_ROLE_KEYS, ORG_APPROVERS_KEY };
 const CHANNELS: ('email' | 'in_app' | 'whatsapp')[] = ['email', 'in_app', 'whatsapp'];
 const ENDED = ['resolved', 'closed', 'cancelled'];
 const fmtDay = (d: Date | null | undefined) => (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : null);
@@ -86,7 +87,7 @@ export async function partyOf(ctx: Ctx, step: Pick<ApprovalRow, 'approverRoleKey
   return 'internal';
 }
 
-/** "Manish Agarwal", "the administrators of ABC Manufacturing", "the Service Manager role", "team NOC". */
+/** "Manish Agarwal", "the approvers of ABC Manufacturing", "the Service Manager role", "team NOC". */
 export async function approverLabel(ctx: Ctx, step: Pick<ApprovalRow, 'approverRoleKey' | 'approverUserId' | 'approverTeamId' | 'customerId'>): Promise<string> {
   if (step.approverUserId) {
     const [u] = await ctx.tx.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, step.approverUserId)).limit(1);
@@ -99,7 +100,7 @@ export async function approverLabel(ctx: Ctx, step: Pick<ApprovalRow, 'approverR
   if (step.approverRoleKey) {
     if (CUSTOMER_ROLE_KEYS.includes(step.approverRoleKey)) {
       const [c] = await ctx.tx.select({ name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, step.customerId)).limit(1);
-      return `the administrators of ${c?.name ?? 'the customer'}`;
+      return `the approvers of ${c?.name ?? 'the customer'}`;
     }
     const [r] = await ctx.tx.select({ name: schema.roles.name }).from(schema.roles).where(eq(schema.roles.key, step.approverRoleKey)).limit(1);
     return `the ${r?.name ?? step.approverRoleKey} role`;
@@ -117,7 +118,9 @@ async function approverUserIds(tx: Tx, ticket: TicketRow): Promise<string[]> {
 
 /**
  * Turns the approver named on a request into one workflow step, validated: a user must be active and either staff or an
- * administrator of the ticket's organisation (the role that holds `portal:approve`); a role key and a team id must exist.
+ * approver of the ticket's organisation (a customer user of that organisation holding `portal:approve`); a role key and
+ * a team id must exist. The kind `customer` is the organisation step (any approver) or one approver by id; `customer_admin`
+ * is kept as its alias.
  */
 async function adHocStep(ctx: Ctx, ticket: TicketRow, approver: NonNullable<RequestApprovalInput['approver']>): Promise<{ step: WorkflowStep; name: string }> {
   const [customer] = await ctx.tx.select({ name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, ticket.customerId)).limit(1);
@@ -129,25 +132,28 @@ async function adHocStep(ctx: Ctx, ticket: TicketRow, approver: NonNullable<Requ
     return ref;
   };
   switch (approver.kind) {
+    case 'customer':
     case 'customer_admin': {
-      if (!ref) return { step: { name: 'Customer approval', approverType: 'customer_admin' }, name: 'Customer approval' };
-      const u = await requireCustomerAdmin(ctx, ticket, idRef('administrator'), customer?.name ?? 'the customer');
+      if (!ref) return { step: { name: 'Customer approval', approverType: 'customer' }, name: 'Customer approval' };
+      const u = await requireCustomerApprover(ctx, ticket, idRef('approver'), customer?.name ?? 'the customer');
       return { step: { name: `Approval by ${u.name}`, approverType: 'user', approverRef: u.id }, name: `Approval by ${u.name}` };
     }
     case 'user': {
       const [u] = await ctx.tx.select({ id: schema.users.id, name: schema.users.name, userType: schema.users.userType, status: schema.users.status }).from(schema.users).where(eq(schema.users.id, idRef('user'))).limit(1);
       if (!u) throw new NotFoundError('User');
       if (u.status !== 'active') throw new ValidationError(`${u.name} is not an active user and cannot approve`);
-      if (u.userType === 'customer') await requireCustomerAdmin(ctx, ticket, u.id, customer?.name ?? 'the customer');
+      if (u.userType === 'customer') await requireCustomerApprover(ctx, ticket, u.id, customer?.name ?? 'the customer');
       return { step: { name: `Approval by ${u.name}`, approverType: 'user', approverRef: u.id }, name: `Approval by ${u.name}` };
     }
     case 'role': {
       if (!ref) throw new ValidationError('Name the role that should approve');
       const [r] = await ctx.tx.select({ key: schema.roles.key, name: schema.roles.name, userType: schema.roles.userType }).from(schema.roles).where(eq(schema.roles.key, ref)).limit(1);
       if (!r) throw new NotFoundError('Role', `No role "${ref}"`);
-      if (r.userType === 'customer' && r.key !== 'customer_admin') throw new ValidationError(`The ${r.name} role cannot approve; ask the organisation's administrators`);
-      const name = r.key === 'customer_admin' ? 'Customer approval' : `${r.name} approval`;
-      return { step: { name, approverType: r.key === 'customer_admin' ? 'customer_admin' : 'role', approverRef: r.key }, name };
+      // A customer role is the organisation step: its administrators and its approvers are both "the approvers of the organisation".
+      const orgStep = r.userType === 'customer' && (r.key === ORG_APPROVERS_KEY || r.key === 'customer_approver');
+      if (r.userType === 'customer' && !orgStep) throw new ValidationError(`The ${r.name} role cannot approve; ask the organisation's approvers`);
+      const name = orgStep ? 'Customer approval' : `${r.name} approval`;
+      return { step: { name, approverType: orgStep ? 'customer' : 'role', approverRef: orgStep ? ORG_APPROVERS_KEY : r.key }, name };
     }
     case 'team': {
       const [t] = await ctx.tx.select({ id: schema.teams.id, name: schema.teams.name }).from(schema.teams).where(eq(schema.teams.id, idRef('team'))).limit(1);
@@ -159,31 +165,38 @@ async function adHocStep(ctx: Ctx, ticket: TicketRow, approver: NonNullable<Requ
   }
 }
 
-/** A customer user may be named as an approver only as an administrator of the ticket's organisation. */
-async function requireCustomerAdmin(ctx: Ctx, ticket: TicketRow, userId: string, customerName: string) {
+/**
+ * A customer user may be named as an approver only when they are an active customer user **of the ticket's organisation**
+ * (`users.user_type = 'customer'` and `users.customer_id = ticket.customerId`, the fence) holding `portal:approve` for it:
+ * a role (scoped to that customer or unscoped) whose permissions include it, an administrator or a customer approver.
+ * One message for every refusal: it never says which organisation the person belongs to.
+ */
+export async function requireCustomerApprover(ctx: Ctx, ticket: TicketRow, userId: string, customerName: string) {
   const [u] = await ctx.tx.select({ id: schema.users.id, name: schema.users.name, userType: schema.users.userType, customerId: schema.users.customerId, status: schema.users.status }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
   if (!u) throw new NotFoundError('User');
   if (u.status !== 'active') throw new ValidationError(`${u.name} is not an active user and cannot approve`);
-  const [admin] = u.userType === 'customer' && u.customerId === ticket.customerId
+  const [holder] = u.userType === 'customer' && u.customerId === ticket.customerId
     ? await ctx.tx
         .select({ id: schema.userRoles.id })
         .from(schema.userRoles)
-        .innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId))
-        .where(and(eq(schema.userRoles.userId, u.id), eq(schema.roles.key, 'customer_admin'), or(isNull(schema.userRoles.customerId), eq(schema.userRoles.customerId, ticket.customerId))))
+        .innerJoin(schema.rolePermissions, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
+        .where(and(eq(schema.userRoles.userId, u.id), eq(schema.rolePermissions.permission, 'portal:approve'), or(isNull(schema.userRoles.customerId), eq(schema.userRoles.customerId, ticket.customerId))))
         .limit(1)
     : [];
-  if (!admin) throw new ValidationError(`${u.name} is not an administrator of ${customerName} and cannot approve`);
+  if (!holder) throw new ValidationError(`${u.name} cannot approve for ${customerName}: give them the approval right first`);
   return u;
 }
 
 /** The addressee columns of one workflow step. */
 function addressee(step: WorkflowStep, accountManagerId: string | null): Pick<typeof schema.approvals.$inferInsert, 'approverRoleKey' | 'approverUserId' | 'approverTeamId'> {
   switch (step.approverType) {
+    case 'customer':
     case 'customer_admin':
     case 'customer_contact':
-      return { approverRoleKey: 'customer_admin' };
+      return { approverRoleKey: ORG_APPROVERS_KEY };
     case 'role':
-      return { approverRoleKey: step.approverRef ?? 'service_manager' };
+      // A workflow step on a customer role (an administrator's or an approver's) is the organisation step, one stored key.
+      return { approverRoleKey: step.approverRef && CUSTOMER_ROLE_KEYS.includes(step.approverRef) ? ORG_APPROVERS_KEY : step.approverRef ?? 'service_manager' };
     case 'user':
       return { approverUserId: step.approverRef ?? null };
     case 'team':
@@ -350,7 +363,7 @@ async function notifyStepRequested(ctx: Ctx, ticket: TicketRow, step: ApprovalRo
 
 /**
  * Requests an approval on any open ticket: a catalog workflow, the one named, or an approver named on the request
- * (an administrator of the organisation, a user, a role or a team), with the purpose and a due date. A rejected
+ * (an approver of the organisation, a user, a role or a team), with the purpose and a due date. A rejected
  * ticket is resubmitted: reopened first (a change to Draft, never to its working status; a request to In Fulfilment)
  * with the comment "Resubmitted for approval", the approvals service's own move, then requested.
  */
@@ -397,9 +410,14 @@ async function decorate(ctx: Ctx, rows: ApprovalRow[]) {
 const isCustomerParty = (r: Pick<ApprovalRow, 'approverRoleKey' | 'approverUserId'>, approverUserType: string | null) => (!!r.approverRoleKey && CUSTOMER_ROLE_KEYS.includes(r.approverRoleKey)) || (!!r.approverUserId && approverUserType === 'customer');
 export type ApprovalView = Awaited<ReturnType<typeof decorate>>[number];
 
-/** Is the caller one of the addressees of this step? */
+/**
+ * Is the caller one of the addressees of this step? The organisation step (`ORG_APPROVERS_KEY`) is addressed to every
+ * customer user of the step's organisation (`users.customer_id`, the principal's `customerId`) who holds `portal:approve`
+ * for it, whatever role grants the right; any other role key is matched by the role itself.
+ */
 export function isEligible(ctx: Ctx, a: ApprovalRow): boolean {
   if (a.approverUserId && a.approverUserId === ctx.user.id) return true;
+  if (a.approverRoleKey === ORG_APPROVERS_KEY && isCustomerUser(ctx)) return ctx.user.customerId === a.customerId && ctx.can('portal:approve', a.customerId);
   if (a.approverRoleKey) {
     const hit = ctx.user.roles.some((r) => r.key === a.approverRoleKey && (r.customerId === null || r.customerId === a.customerId));
     if (hit) {
@@ -417,17 +435,25 @@ export async function listForTicket(ctx: Ctx, ticketId: string) {
   return { items: await decorate(ctx, rows), approvalStatus: ticket.approvalStatus };
 }
 
-/** Pending approvals addressed to the caller (user, role for the customer, or team), with the purpose, the due date and who asked. */
+/**
+ * Pending approvals addressed to the caller (user, role for the customer, or team), with the purpose, the due date and
+ * who asked. A customer user sees the organisation step only for their own organisation (`users.customer_id`) and only
+ * when they hold `portal:approve` for it; a customer role of theirs never reaches another organisation's rows.
+ */
 export async function listMine(ctx: Ctx) {
   const roleKeys = [...new Set(ctx.user.roles.map((r) => r.key))];
   const teamIds = ctx.user.teams.map((t) => t.id);
   const conds = [eq(schema.approvals.approverUserId, ctx.user.id)];
-  if (roleKeys.length) {
+  if (isCustomerUser(ctx)) {
+    const own = ctx.user.customerId;
+    if (own && ctx.can('portal:approve', own)) conds.push(and(eq(schema.approvals.approverRoleKey, ORG_APPROVERS_KEY), eq(schema.approvals.customerId, own))!);
+    const otherKeys = roleKeys.filter((k) => !CUSTOMER_ROLE_KEYS.includes(k));
+    if (own && otherKeys.length) conds.push(and(inArray(schema.approvals.approverRoleKey, otherKeys), eq(schema.approvals.customerId, own))!);
+  } else if (roleKeys.length) {
     const scopedRoles = ctx.user.roles.filter((r) => r.customerId);
     const globalKeys = ctx.user.roles.filter((r) => !r.customerId).map((r) => r.key);
-    if (globalKeys.length && !isCustomerUser(ctx)) conds.push(inArray(schema.approvals.approverRoleKey, globalKeys));
+    if (globalKeys.length) conds.push(inArray(schema.approvals.approverRoleKey, globalKeys));
     for (const r of scopedRoles) conds.push(and(eq(schema.approvals.approverRoleKey, r.key), eq(schema.approvals.customerId, r.customerId!))!);
-    if (isCustomerUser(ctx) && ctx.user.customerId) conds.push(and(inArray(schema.approvals.approverRoleKey, roleKeys), eq(schema.approvals.customerId, ctx.user.customerId))!);
   }
   if (teamIds.length) conds.push(inArray(schema.approvals.approverTeamId, teamIds));
   const rows = await ctx.tx

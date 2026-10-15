@@ -406,7 +406,11 @@ export async function customerUsers(ctx: Ctx, id: string) {
   const roles = ids.length
     ? await ctx.tx.select({ userId: schema.userRoles.userId, key: schema.roles.key, name: schema.roles.name }).from(schema.userRoles).innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId)).where(inArray(schema.userRoles.userId, ids))
     : [];
-  return rows.map((u) => ({ ...u, roles: roles.filter((r) => r.userId === u.id).map((r) => ({ key: r.key, name: r.name })) }));
+  // `canApprove`: may approve on behalf of the organisation (an administrator by role, any other user through the customer approver role).
+  return rows.map((u) => {
+    const mine = roles.filter((r) => r.userId === u.id).map((r) => ({ key: r.key, name: r.name }));
+    return { ...u, roles: mine, canApprove: mine.some((r) => r.key === 'customer_admin' || r.key === 'customer_approver') };
+  });
 }
 
 export async function customerDocuments(ctx: Ctx, id: string) {

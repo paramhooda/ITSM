@@ -68,7 +68,7 @@ export async function applyOptionUpgrades(tx: Tx) {
 }
 
 const LEGACY_REASON = 'Set before reasons were recorded';
-const CUSTOMER_ROLE_KEYS = ['customer_admin', 'customer_user'];
+const CUSTOMER_ROLE_KEYS = ['customer_admin', 'customer_user', 'customer_approver'];
 const PARTY_BY_KEY: Record<string, WaitingOn> = { pending_customer: 'customer', pending_vendor: 'vendor', pending_change: 'change', on_hold: 'agreement' };
 
 /**

@@ -27,14 +27,18 @@ let admin: Principal;
 let portalAdmin: Principal;
 let portalUser: Principal;
 let portalAdminB: Principal;
+let portalApprover: Principal;
+let portalApproverB: Principal;
 let manager: Principal;
-const ids = { customer: '', customerB: '', site: '', service: '', contract: '', cab: '', mixed: '', adminUser: '', portalAdmin: '', portalUser: '', portalAdminB: '', manager: '' };
+const ids = { customer: '', customerB: '', site: '', service: '', contract: '', cab: '', mixed: '', adminUser: '', portalAdmin: '', portalUser: '', portalAdminB: '', portalApprover: '', portalApproverB: '', manager: '' };
 const st: Record<string, string> = {};
 const ticketIds: string[] = [];
 const asAdmin = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(admin, meta, fn);
 const asPortalAdmin = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(portalAdmin, meta, fn);
 const asPortalUser = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(portalUser, meta, fn);
 const asPortalAdminB = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(portalAdminB, meta, fn);
+const asPortalApprover = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(portalApprover, meta, fn);
+const asPortalApproverB = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(portalApproverB, meta, fn);
 const asManager = <T>(fn: (ctx: Ctx) => Promise<T>) => runAs(manager, meta, fn);
 
 /** The clocks the default policy pauses, read from its `pause_metrics` in beforeAll (the shipped rule is the column default). */
@@ -119,14 +123,24 @@ beforeAll(async () => {
     const [pa] = await tx.insert(schema.users).values({ email: `apr.admin.${S}@example.test`, name: 'Manish Approver', userType: 'customer', customerId: c!.id, status: 'active' }).returning();
     const [pb] = await tx.insert(schema.users).values({ email: `apr.adminb.${S}@example.test`, name: 'Bela Other', userType: 'customer', customerId: cb!.id, status: 'active' }).returning();
     const [mgr] = await tx.insert(schema.users).values({ email: `apr.manager.${S}@example.test`, name: 'Sana Manager', userType: 'msp', status: 'active' }).returning();
+    // A plain user of A given the approval right (customer_user + customer_approver, both scoped), and a customer approver of B
+    // whose assignment is unscoped (hand-written: setUserRoles always pins a customer user's rows to their own organisation).
+    const [pp] = await tx.insert(schema.users).values({ email: `apr.approver.${S}@example.test`, name: 'Pooja Approver', userType: 'customer', customerId: c!.id, status: 'active' }).returning();
+    const [ppb] = await tx.insert(schema.users).values({ email: `apr.approverb.${S}@example.test`, name: 'Bina Unscoped', userType: 'customer', customerId: cb!.id, status: 'active' }).returning();
     ids.portalUser = pu!.id;
     ids.portalAdmin = pa!.id;
     ids.portalAdminB = pb!.id;
+    ids.portalApprover = pp!.id;
+    ids.portalApproverB = ppb!.id;
     ids.manager = mgr!.id;
     await tx.insert(schema.userRoles).values([
       { userId: pu!.id, roleId: await roleId(tx, 'customer_user'), customerId: c!.id },
       { userId: pa!.id, roleId: await roleId(tx, 'customer_admin'), customerId: c!.id },
       { userId: pb!.id, roleId: await roleId(tx, 'customer_admin'), customerId: cb!.id },
+      { userId: pp!.id, roleId: await roleId(tx, 'customer_user'), customerId: c!.id },
+      { userId: pp!.id, roleId: await roleId(tx, 'customer_approver'), customerId: c!.id },
+      { userId: ppb!.id, roleId: await roleId(tx, 'customer_user'), customerId: cb!.id },
+      { userId: ppb!.id, roleId: await roleId(tx, 'customer_approver'), customerId: null },
       { userId: mgr!.id, roleId: await roleId(tx, 'service_manager') },
     ]);
   });
@@ -135,6 +149,8 @@ beforeAll(async () => {
   portalAdmin = (await loadPrincipal(ids.portalAdmin))!;
   portalUser = (await loadPrincipal(ids.portalUser))!;
   portalAdminB = (await loadPrincipal(ids.portalAdminB))!;
+  portalApprover = (await loadPrincipal(ids.portalApprover))!;
+  portalApproverB = (await loadPrincipal(ids.portalApproverB))!;
   manager = (await loadPrincipal(ids.manager))!;
 });
 
@@ -143,7 +159,7 @@ afterAll(async () => {
   await withSystem(async (tx) => {
     if (ticketIds.length) await tx.delete(schema.tickets).where(inArray(schema.tickets.id, ticketIds));
     await tx.delete(schema.approvalWorkflows).where(eq(schema.approvalWorkflows.id, ids.mixed));
-    await tx.delete(schema.users).where(inArray(schema.users.id, [ids.portalUser, ids.portalAdmin, ids.portalAdminB, ids.manager]));
+    await tx.delete(schema.users).where(inArray(schema.users.id, [ids.portalUser, ids.portalAdmin, ids.portalAdminB, ids.portalApprover, ids.portalApproverB, ids.manager]));
     await tx.delete(schema.customers).where(inArray(schema.customers.id, [ids.customer, ids.customerB]));
     await tx.delete(schema.services).where(eq(schema.services.id, ids.service));
   });
@@ -276,7 +292,7 @@ describe('an approval on an incident, decided by the customer administrator in t
     // The timeline: the request is customer-visible (a customer party) and names the approver, the purpose and the due date.
     const act = (await activities(t.id, 'approval'))[0]!;
     expect(act.customerVisible).toBe(true);
-    expect(act.summary).toMatch(/^Approval requested from the administrators of Approvals Customer/);
+    expect(act.summary).toMatch(/^Approval requested from the approvers of Approvals Customer/);
     expect(act.summary).toMatch(/Approve the replacement of the failed UPS batteries \(chargeable\) · by \d+ \w+ \d{4}$/);
     // The staff record carries the wait with the staff label; the customer reads it in their own words.
     const detail = await asAdmin((ctx) => getTicket(ctx, t.id));
@@ -469,10 +485,14 @@ describe('internal approvers and refusals', () => {
     expect(JSON.stringify(await asPortalUser((ctx) => portal.getPortalTicket(ctx, t.id)))).not.toMatch(/Overtime approved|Approve the overtime/);
   });
 
-  it('refuses a user who is not an administrator of the customer, a request on an ended ticket, both a workflow and an approver, and a decision on a resolved ticket', async () => {
+  it('refuses a customer user without the approval right (one message, B\'s administrator included), a request on an ended ticket, both a workflow and an approver, and a decision on a resolved ticket', async () => {
     const t = await newTicket('incident', 'Refusals');
-    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'user', ref: ids.portalUser }, purpose: 'Approve this' }))).rejects.toThrow(/Ritu Requester is not an administrator of Approvals Customer .* and cannot approve/);
-    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'user', ref: ids.portalAdminB }, purpose: 'Approve this' }))).rejects.toThrow(/is not an administrator of Approvals Customer/);
+    // A plain user of the organisation: not an approver. B's administrator named on A's ticket: the same words (the message never says which organisation they belong to).
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'user', ref: ids.portalUser }, purpose: 'Approve this' }))).rejects.toThrow(/^Ritu Requester cannot approve for Approvals Customer \w+: give them the approval right first$/);
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer', ref: ids.portalUser }, purpose: 'Approve this' }))).rejects.toThrow(/cannot approve for Approvals Customer .*: give them the approval right first/);
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'user', ref: ids.portalAdminB }, purpose: 'Approve this' }))).rejects.toThrow(/^Bela Other cannot approve for Approvals Customer \w+: give them the approval right first$/);
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer_admin', ref: ids.portalAdminB }, purpose: 'Approve this' }))).rejects.toThrow(/cannot approve for Approvals Customer .*: give them the approval right first/);
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'role', ref: 'customer_user' }, purpose: 'Approve this' }))).rejects.toThrow(/cannot approve; ask the organisation's approvers/);
     await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approvalWorkflowId: ids.mixed, approver: { kind: 'customer_admin' }, purpose: 'Approve this' }))).rejects.toThrow(/either a workflow or an approver/);
     await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'role', ref: 'no_such_role' }, purpose: 'Approve this' }))).rejects.toThrow(/No role/);
     const started = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer_admin' }, purpose: 'Approve this' }));
@@ -612,6 +632,102 @@ describe('the reminder and expiry job', () => {
   });
 });
 
+describe('eligibility is a permission, fenced to the organisation', () => {
+  it('a customer approver (a plain user given the right) is named by id, listed, notified and decides in the portal; an administrator still can', async () => {
+    const t = await newTicket('incident', 'Customer approver');
+    // Named by id through the customer kind and through the alias; the step is addressed to the person.
+    const started = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer', ref: ids.portalApprover }, purpose: 'Approve the chargeable replacement' }));
+    const step = firstStep(started.items);
+    expect(started.items[0]!.approverUser?.id).toBe(ids.portalApprover);
+    expect(started.items[0]!.customerParty).toBe(true);
+    expect((await row(t.id)).pendingWaitingOn).toBe('customer');
+    await expectPaused(t.id, 'customer approver');
+    expect((await outbox(t.id, 'approval.requested')).map((o) => o.recipient)).toContain(`apr.approver.${S}@example.test`);
+    // Listed for the approver (staff inbox and portal inbox), eligible, deciding through the portal.
+    expect((await asPortalApprover((ctx) => approvals.listMine(ctx))).items.some((a) => a.id === step.id)).toBe(true);
+    expect((await asPortalApprover((ctx) => portal.listPortalApprovals(ctx))).items.some((a) => a.id === step.id)).toBe(true);
+    expect((await asPortalApprover((ctx) => portal.getPortalTicket(ctx, t.id))).pendingForMe.map((a) => a.id)).toEqual([step.id]);
+    const res = await asPortalApprover((ctx) => portal.decidePortalApproval(ctx, t.id, step.id, 'approved', 'Go ahead'));
+    expect(res.approvalStatus).toBe('approved');
+    expect((await row(t.id)).statusId).toBe(st.in_progress);
+    await expectRunning(t.id, 'after the approver decided');
+
+    // The organisation step reaches the holders of the right (the administrator and the approver), never the plain user; both may decide.
+    const u = await newTicket('request', 'Organisation step');
+    const begun = await asAdmin((ctx) => approvals.requestApproval(ctx, u.id, { approver: { kind: 'customer' }, purpose: 'Approve the licence' }));
+    const orgStep = firstStep(begun.items);
+    expect(begun.items[0]!.approverRole?.key).toBe(approvals.ORG_APPROVERS_KEY);
+    const recipients = (await outbox(u.id, 'approval.requested')).map((o) => o.recipient).sort();
+    expect(recipients).toContain(`apr.admin.${S}@example.test`);
+    expect(recipients).toContain(`apr.approver.${S}@example.test`);
+    expect(recipients).not.toContain(`apr.user.${S}@example.test`);
+    expect((await asPortalApprover((ctx) => portal.listPortalApprovals(ctx))).items.some((a) => a.id === orgStep.id)).toBe(true);
+    expect((await asPortalAdmin((ctx) => portal.listPortalApprovals(ctx))).items.some((a) => a.id === orgStep.id)).toBe(true);
+    await expect(asPortalUser((ctx) => portal.decidePortalApproval(ctx, u.id, orgStep.id, 'approved', 'mine'))).rejects.toThrow(/portal:approve/);
+    await asPortalAdmin((ctx) => portal.decidePortalApproval(ctx, u.id, orgStep.id, 'approved', 'Approved by the administrator'));
+    expect((await row(u.id)).approvalStatus).toBe('approved');
+    // The alias and the role kind on either customer key are the same organisation step.
+    const v = await newTicket('request', 'Alias step');
+    const viaAlias = await asAdmin((ctx) => approvals.requestApproval(ctx, v.id, { approver: { kind: 'customer_admin' }, purpose: 'Approve the alias' }));
+    expect(viaAlias.items[0]!.approverRole?.key).toBe(approvals.ORG_APPROVERS_KEY);
+    await asAdmin((ctx) => approvals.withdraw(ctx, v.id, 'test'));
+    const viaRole = await asAdmin((ctx) => approvals.requestApproval(ctx, v.id, { approver: { kind: 'role', ref: 'customer_approver' }, purpose: 'Approve the role step' }));
+    expect(viaRole.items[0]!.approverRole?.key).toBe(approvals.ORG_APPROVERS_KEY);
+    expect(viaRole.items[0]!.stepName).toBe('Customer approval');
+  });
+
+  it('a catalog workflow step on a customer role is the organisation step: stored under the one key, reaching the administrator and the approver, never the plain user', async () => {
+    const wf = await withSystem(async (tx) => (await tx.insert(schema.approvalWorkflows).values({ name: `Approver role step ${S}`, steps: [{ name: 'Approver sign-off', approverType: 'role', approverRef: 'customer_approver', required: 'any' }], isActive: true }).returning())[0]!);
+    try {
+      const t = await newTicket('request', 'Workflow on the approver role');
+      const started = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approvalWorkflowId: wf.id, purpose: 'Approve through the workflow' }));
+      const step = firstStep(started.items);
+      expect(started.items[0]!.approverRole?.key).toBe(approvals.ORG_APPROVERS_KEY);
+      expect(started.items[0]!.stepName).toBe('Approver sign-off');
+      expect(started.items[0]!.customerParty).toBe(true);
+      const [stepRow] = await steps(t.id);
+      expect(await asPortalAdmin(async (ctx) => approvals.isEligible(ctx, stepRow!))).toBe(true);
+      expect(await asPortalApprover(async (ctx) => approvals.isEligible(ctx, stepRow!))).toBe(true);
+      expect(await asPortalUser(async (ctx) => approvals.isEligible(ctx, stepRow!))).toBe(false);
+      expect((await asPortalAdmin((ctx) => approvals.listMine(ctx))).items.some((a) => a.id === step.id)).toBe(true);
+      expect((await asPortalApprover((ctx) => portal.listPortalApprovals(ctx))).items.some((a) => a.id === step.id)).toBe(true);
+      expect((await asPortalUser((ctx) => portal.getPortalTicket(ctx, t.id))).pendingForMe).toEqual([]);
+      const recipients = (await outbox(t.id, 'approval.requested')).map((o) => o.recipient);
+      expect(recipients).toContain(`apr.admin.${S}@example.test`);
+      expect(recipients).toContain(`apr.approver.${S}@example.test`);
+      expect(recipients).not.toContain(`apr.user.${S}@example.test`);
+      await asPortalAdmin((ctx) => portal.decidePortalApproval(ctx, t.id, step.id, 'approved', 'Approved by the administrator'));
+      expect((await row(t.id)).approvalStatus).toBe('approved');
+    } finally {
+      await withSystem((tx) => tx.delete(schema.approvalWorkflows).where(eq(schema.approvalWorkflows.id, wf.id)));
+    }
+  });
+
+  it('a customer approver of another organisation with an unscoped assignment is neither eligible, nor listed, nor notified on the organisation step', async () => {
+    const t = await newTicket('incident', 'Unscoped approver of B');
+    const started = await asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer' }, purpose: 'Approve the isolation case' }));
+    const step = firstStep(started.items);
+    // The principal holds portal:approve globally (the hand-written unscoped row), yet belongs to B: the fence is users.customer_id.
+    expect(portalApproverB.globalPermissions.has('portal:approve')).toBe(true);
+    expect(portalApproverB.customerId).toBe(ids.customerB);
+    const [stepRow] = await steps(t.id);
+    expect(await asPortalApproverB(async (ctx) => approvals.isEligible(ctx, stepRow!))).toBe(false);
+    expect((await asPortalApproverB((ctx) => approvals.listMine(ctx))).items.some((a) => a.id === step.id)).toBe(false);
+    // The portal inbox is fenced to B (the principal's own organisation): A's step is not in it.
+    expect((await asPortalApproverB((ctx) => portal.listPortalApprovals(ctx))).items.some((a) => a.id === step.id)).toBe(false);
+    await expect(asPortalApproverB((ctx) => approvals.decide(ctx, t.id, step.id, 'approved', 'mine'))).rejects.toThrow(/not found|Forbidden|permission|not addressed/i);
+    await expect(asPortalApproverB((ctx) => portal.decidePortalApproval(ctx, t.id, step.id, 'approved', 'mine'))).rejects.toThrow(/not found|Forbidden|permission|not addressed/i);
+    expect((await steps(t.id))[0]!.status).toBe('pending');
+    const recipients = (await outbox(t.id, 'approval.requested')).map((o) => o.recipient);
+    expect(recipients).not.toContain(`apr.approverb.${S}@example.test`);
+    expect(recipients).toContain(`apr.admin.${S}@example.test`);
+    // Named by id on A's ticket: refused with the one message.
+    const u = await newTicket('incident', 'Unscoped approver named');
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, u.id, { approver: { kind: 'customer', ref: ids.portalApproverB }, purpose: 'Approve this' }))).rejects.toThrow(/^Bina Unscoped cannot approve for Approvals Customer \w+: give them the approval right first$/);
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, u.id, { approver: { kind: 'user', ref: ids.portalApproverB }, purpose: 'Approve this' }))).rejects.toThrow(/cannot approve for Approvals Customer/);
+  });
+});
+
 describe('inboxes and isolation', () => {
   it('the staff inbox and the portal inbox carry the purpose, the due date and who asked; another organisation never sees or decides the step', async () => {
     const t = await newTicket('incident', 'Inbox');
@@ -681,7 +797,8 @@ describe('the outcome reaches the customer when the ticket shows it; the desk ke
 
   it('an approver named by anything but an id, and a second request while one is pending, are request errors', async () => {
     const t = await newTicket('incident', 'Bad refs');
-    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer_admin', ref: 'manish' }, purpose: 'Approve this' }))).rejects.toThrow(/Name the administrator by id/);
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer_admin', ref: 'manish' }, purpose: 'Approve this' }))).rejects.toThrow(/Name the approver by id/);
+    await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'customer', ref: 'pooja' }, purpose: 'Approve this' }))).rejects.toThrow(/Name the approver by id/);
     await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'user', ref: 'manish@example.test' }, purpose: 'Approve this' }))).rejects.toThrow(/Name the user by id/);
     await expect(asAdmin((ctx) => approvals.requestApproval(ctx, t.id, { approver: { kind: 'team', ref: 'NOC' }, purpose: 'Approve this' }))).rejects.toThrow(/Name the team by id/);
     expect((await steps(t.id)).length).toBe(0);

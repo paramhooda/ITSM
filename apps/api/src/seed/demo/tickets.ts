@@ -1023,7 +1023,7 @@ export async function seedIncidentApprovals(state: DemoState, tx: Tx) {
   const purposes = ['Approve the replacement of the failed UPS batteries (chargeable)', 'Approve the paid firmware upgrade of the core switch pair outside the contract scope'];
   let n = 0;
   for (const [i, t] of (await open(abc.id, 2)).entries()) {
-    await requestApproval(ctxFor(state, tx, principalOf(state, 'priya')), t.id, { approver: { kind: 'customer_admin' }, purpose: purposes[i]!, dueAt });
+    await requestApproval(ctxFor(state, tx, principalOf(state, 'priya')), t.id, { approver: { kind: 'customer' }, purpose: purposes[i]!, dueAt });
     n++;
   }
   for (const t of await open(null, 1)) {

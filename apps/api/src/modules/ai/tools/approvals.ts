@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, eq, ilike, or } from 'drizzle-orm';
+import { and, eq, ilike, isNull, or } from 'drizzle-orm';
 import { schema } from '@/db/client';
 import type { Ctx } from '@/core/context';
 import { ValidationError, NotFoundError } from '@/core/errors';
@@ -37,13 +37,14 @@ async function pendingStep(ctx: Ctx, t: TicketRow, step?: string | number) {
 }
 
 const approverInput = z.object({
-  kind: z.enum(['customer_admin', 'user', 'role', 'team', 'workflow']).describe('customer_admin: an administrator of the ticket\'s organisation (any of them, or one by name); user: a staff user by name or email; role: an internal role by key or name; team: a team by name; workflow: a configured approval workflow by name'),
-  ref: z.string().max(200).optional().describe('The name, email, key or workflow name; omit for "any administrator of the organisation"'),
+  kind: z.enum(['customer', 'customer_admin', 'user', 'role', 'team', 'workflow']).describe('customer: anyone who may approve for the ticket\'s organisation (its administrators and the users given the approval right), or one of them by name (customer_admin is an alias); user: a staff user by name or email; role: an internal role by key or name; team: a team by name; workflow: a configured approval workflow by name'),
+  ref: z.string().max(200).optional().describe('The name, email, key or workflow name; omit for "anyone who may approve for the organisation"'),
 });
 
 /**
  * Turns the approver the model named into the request's shape: names are resolved here (the service takes ids and keys),
- * a customer administrator only among the ticket organisation's own portal users.
+ * a customer approver only among the ticket organisation's own active portal users (`users.customer_id = ticket.customerId`)
+ * who hold `portal:approve` for it, whatever role grants the right.
  */
 async function resolveApprover(ctx: Ctx, t: TicketRow, approver: z.infer<typeof approverInput> | undefined): Promise<RequestApprovalInput> {
   if (!approver) return {};
@@ -53,20 +54,30 @@ async function resolveApprover(ctx: Ctx, t: TicketRow, approver: z.infer<typeof 
       const wf = await workflowByName(ctx, ref);
       return { approvalWorkflowId: wf?.id ?? null };
     }
+    case 'customer':
     case 'customer_admin': {
-      if (!ref) return { approver: { kind: 'customer_admin' } };
+      if (!ref) return { approver: { kind: 'customer' } };
       const rows = await ctx.tx
-        .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+        .selectDistinct({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
         .from(schema.users)
         .innerJoin(schema.userRoles, eq(schema.userRoles.userId, schema.users.id))
-        .innerJoin(schema.roles, eq(schema.roles.id, schema.userRoles.roleId))
-        .where(and(eq(schema.users.userType, 'customer'), eq(schema.users.customerId, t.customerId), eq(schema.users.status, 'active'), eq(schema.roles.key, 'customer_admin'), or(ilike(schema.users.name, like(ref)), ilike(schema.users.email, ref))))
+        .innerJoin(schema.rolePermissions, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
+        .where(
+          and(
+            eq(schema.users.userType, 'customer'),
+            eq(schema.users.customerId, t.customerId),
+            eq(schema.users.status, 'active'),
+            eq(schema.rolePermissions.permission, 'portal:approve'),
+            or(isNull(schema.userRoles.customerId), eq(schema.userRoles.customerId, t.customerId)),
+            or(ilike(schema.users.name, like(ref)), ilike(schema.users.email, ref)),
+          ),
+        )
         .limit(6);
       const exact = rows.filter((u) => u.name.toLowerCase() === ref.toLowerCase() || u.email.toLowerCase() === ref.toLowerCase());
       const pick = exact.length === 1 ? exact : rows;
-      if (!pick.length) throw new NotFoundError('Administrator', `No administrator of the ticket's organisation matching "${ref}"`);
-      if (pick.length > 1) throw new ValidationError(`"${ref}" is ambiguous among the organisation's administrators: ${pick.map((u) => u.name).join(', ')}`);
-      return { approver: { kind: 'customer_admin', ref: pick[0]!.id } };
+      if (!pick.length) throw new NotFoundError('Approver', `No approver of the ticket's organisation matching "${ref}"`);
+      if (pick.length > 1) throw new ValidationError(`"${ref}" is ambiguous among the organisation's approvers: ${pick.map((u) => u.name).join(', ')}`);
+      return { approver: { kind: 'customer', ref: pick[0]!.id } };
     }
     case 'user': {
       const u = await resolveUser(ctx, ref);
@@ -132,7 +143,7 @@ export const APPROVALS: ReturnType<typeof define>[] = [
     toolset: 'approvals',
     tier: 'write',
     description:
-      'Request an approval on any open ticket (incident, request, problem or change) naming who decides: an administrator of the customer organisation (any, or one by name), a staff user, a role, a team or a configured workflow; with the purpose and a due date. The ticket waits in Awaiting Approval; the clocks the SLA policy names pause while a customer decides (resolution and restoration by default) and keep running for an internal approver. A request on a rejected ticket resubmits it (a change returns to Draft first). The approvers are notified and the requester is told when the wait is on their organisation.',
+      'Request an approval on any open ticket (incident, request, problem or change) naming who decides: an approver of the customer organisation (anyone who may approve for it, or one by name), a staff user, a role, a team or a configured workflow; with the purpose and a due date. The ticket waits in Awaiting Approval; the clocks the SLA policy names pause while a customer decides (resolution and restoration by default) and keep running for an internal approver. A request on a rejected ticket resubmits it (a change returns to Draft first). The approvers are notified and the requester is told when the wait is on their organisation.',
     inputSchema: requestInput,
     requires: ['tickets:update'],
     portal: null,
@@ -148,7 +159,7 @@ export const APPROVALS: ReturnType<typeof define>[] = [
       const { t, plan } = await describeRequest(ctx, input);
       const lines: string[] = [];
       const [customer] = await ctx.tx.select({ name: schema.customers.name }).from(schema.customers).where(eq(schema.customers.id, t.customerId)).limit(1);
-      const who = plan.party === 'customer' && !plan.who.startsWith('the administrators') ? `${plan.who} (customer administrator, ${customer?.name ?? 'the customer'})` : plan.who;
+      const who = plan.party === 'customer' && !plan.who.startsWith('the approvers') ? `${plan.who} (customer approver, ${customer?.name ?? 'the customer'})` : plan.who;
       lines.push(plan.steps.length > 1 ? `Start the "${plan.name}" workflow (${plan.steps.map((s) => s.name ?? 'step').join(' → ')}), first asking ${who} to approve: ${plan.purpose}` : `Ask ${who} to approve: ${plan.purpose}`);
       lines.push(plan.dueAt ? `Due ${fmtDay(plan.dueAt)}` : 'Due by the default (approvals.default_due_days)');
       const awaiting = await statusByKey(ctx, 'awaiting_approval', t.type);
